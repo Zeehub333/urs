@@ -375,7 +375,12 @@ def _resolve_expression(expr_text: str, fields: Optional[List[Any]],
                 if key not in field_map:
                     known = ", ".join(sorted(field_map.values())) or "—"
                     raise ValueError(f"Unknown field '[{inner}]' — defined fields: {known}")
-                return _emit(key)
+                # Qualify unambiguous fields (same as [table.field]): a bare
+                # name is only valid when its table needs no alias. Multi-table
+                # queries otherwise fail with "could not be bound".
+                _cands = by_name.get(key, [])
+                _f1 = _cands[0] if len(_cands) == 1 else None
+                return _emit(key, _f1)
             if len(parts) == 2:
                 head, member = parts
                 # Known namespace wins (backward compat for [ns.member])
