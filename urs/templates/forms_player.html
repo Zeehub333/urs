@@ -2364,7 +2364,9 @@
             updateSelectedCount();
             const isList = viewMode === 'list';
             document.getElementById('dataTable').style.display = isList ? '' : 'none';
-            document.getElementById('cardsView').style.display = isList ? 'none' : '';
+            const cv = document.getElementById('cardsView');
+            cv.classList.toggle('hidden', isList);
+            cv.style.display = isList ? 'none' : '';
             if (isList) renderTable(cols, paged, start);
             else renderCards(cols, paged, start);
         }
