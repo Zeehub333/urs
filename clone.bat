@@ -75,7 +75,19 @@ rmdir /s /q "%TEMP_DIR%" >nul 2>&1
 pause >nul
 exit /b 1
 :sync_go
-"%SystemRoot%\System32\robocopy.exe" "%TEMP_DIR%" "%BASE%" /E /NJH /NJS /NDL /NP /R:2 /W:2 /XD .git .urs-temp /XF app.config
+REM /XJ skips junctions/symlinks (classic end-of-run ERROR 123); full log kept for diagnosis.
+set SYNCLOG=%TEMP%\urs-clone-sync.log
+if exist "%SYNCLOG%" del "%SYNCLOG%" >nul 2>&1
+"%SystemRoot%\System32\robocopy.exe" "%TEMP_DIR%" "%BASE%" /E /NJH /NJS /NDL /NP /R:2 /W:2 /XJ /XD .git .urs-temp /XF app.config /LOG:"%SYNCLOG%"
+REM robocopy exit 0-7 = success; 8+ = failure
+if not errorlevel 8 goto sync_ok
+echo [X] sync failed - first errors:
+findstr /I /C:" ERROR " "%SYNCLOG%" 2>nul
+echo [i] full log: %SYNCLOG%
+rmdir /s /q "%TEMP_DIR%" >nul 2>&1
+pause >nul
+exit /b 1
+:sync_ok
 REM robocopy exit 0-7 = success (1=new files, 3=some updates); 8+ = failure
 if errorlevel 8 (
   echo [X] sync failed.
