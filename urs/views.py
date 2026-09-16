@@ -4078,7 +4078,7 @@ def api_rml_fetch_query(request, app_name):
             return JsonResponse({"error": err or "bad app"}, status=400)
         target.write_text(pretty, encoding="utf-8")
         pipe = _rml_get_pipeline(fname, app_name)
-        sql = pipe.preview_sql({"page": 1, "pageSize": 50})
+        sql = pipe.rml_engine.preview_real_sql({"page": 1, "pageSize": 50})
         return JsonResponse({"ok": True, "sql": sql}, json_dumps_params={"ensure_ascii": False})
     except ValueError as e:
         return JsonResponse({"error": str(e)}, status=400)

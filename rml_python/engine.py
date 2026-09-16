@@ -4631,6 +4631,108 @@ class RMLReportEngine:
                     _lines.append(f"--   {_t.lower()} → {_v.get('temp')}")
             _lines.append("-- ملاحظة: المعاينة تعرض الخطة فقط — نفّذ التقرير لعرض الصفوف.")
             return "\n".join(_lines)
+        return self._preview_compile(payload)
+
+    def _ensure_stage_names_only(self):
+        """Populate _api_stage/_api_union with deterministic TEMP names — zero I/O.
+
+        Same names _ensure_api_staged would create (same coldefs → same hash),
+        so the compiled SQL is byte-identical to what execute() runs. Never
+        touches source devices and never creates tables. Leaves
+        _api_staged_done False so a later execute() still stages for real.
+        """
+        self._api_stage = {}
+        self._api_union = {}
+        self._api_warnings = []
+        try:
+            _api_tables = self._api_involved_tables()
+        except Exception:
+            _api_tables = {}
+        try:
+            _umap = self._union_partitions()
+        except Exception:
+            _umap = {}
+        _api_tables = {t: i for t, i in _api_tables.items() if t not in _umap}
+        if not _api_tables and not _umap:
+            return
+        _db = getattr(self, "db", None)
+        if _db is None:
+            raise ValueError(
+                "تعذر ترحيل البيانات مؤقتاً: لا توجد قاعدة SQL أساسية — "
+                "وجّه التقرير لاتصال قاعدة بيانات (postgres/oracle).")
+        _eng = self._stage_engine_of(_db)
+        try:
+            _ident = self._db_identity(_db)
+        except Exception:
+            _ident = "?"
+
+        def _remember(_temp, _cols):
+            try:
+                _ckey = f"{_ident}|.{_temp.upper()}"
+                self._cols_cache[_ckey] = {_n.upper(): (_t or "TEXT").upper() for _n, _t in _cols}
+                if not hasattr(self, "_cols_orig") or self._cols_orig is None:
+                    self._cols_orig = {}
+                self._cols_orig[_ckey] = {_n.upper(): _n for _n, _t in _cols}
+            except Exception:
+                pass
+
+        _staged = {}
+        for _norm, _info in _api_tables.items():
+            _flds = [f for f in (getattr(self, "fields", []) or [])
+                     if self._norm_table(getattr(f, "table_source", None) or "") == _norm]
+            if not _flds:
+                raise ValueError(f"لا توجد حقول معرفة للجدول '{str(_norm).lower()}' في التقرير.")
+            _coldefs = [(str(getattr(_f, "name", "")),
+                         self._stage_col_type(getattr(_f, "data_type", None), _eng))
+                        for _f in _flds]
+            _cols = [(str(getattr(_f, "name", "")), str(getattr(_f, "data_type", None) or ""))
+                     for _f in _flds]
+            _gid = str((_info or {}).get("gid") or "x")
+            _temp = re.sub(r"[^a-z0-9_]", "_", f"rml_api_{_gid}_{_norm}".lower())
+            if _eng == "oracle":
+                import hashlib as _hl
+                _hs = _hl.md5(",".join(str(_n).lower() for _n, _t in _coldefs).encode()).hexdigest()[:6]
+                _phy = (re.sub(r"[^a-z0-9_]", "_", str(_temp).lower()) + "_" + _hs)[:100]
+            else:
+                _phy = self._stage_phy_name(_temp, _coldefs)
+            _staged[_norm] = {"temp": _phy, "cols": _cols, "info": _info}
+            _remember(_phy, _cols)
+        self._api_stage = _staged
+        _unions = {}
+        for _norm, _parts in _umap.items():
+            _cols = []
+            _seen = set()
+            for _part in (_parts or []):
+                for _f, _gid in (_part or []):
+                    _n = str(getattr(_f, "name", "") or "")
+                    if _n and _n.lower() not in _seen:
+                        _seen.add(_n.lower())
+                        _cols.append((_n, getattr(_f, "data_type", None)))
+            if not _cols:
+                raise ValueError(f"لا توجد حقول معرفة للجدول '{str(_norm).lower()}' في التقرير.")
+            _temp = re.sub(r"[^a-z0-9_]", "_", f"rml_union_{_norm}".lower())
+            _coldefs = [(_n, self._stage_col_type(_t, _eng)) for _n, _t in _cols]
+            _cols2 = [(str(_n), str(_t or "")) for _n, _t in _cols]
+            if _eng == "oracle":
+                import hashlib as _hl2
+                _hs2 = _hl2.md5(",".join(str(_n).lower() for _n, _t in _coldefs).encode()).hexdigest()[:6]
+                _phy = (re.sub(r"[^a-z0-9_]", "_", str(_temp).lower()) + "_" + _hs2)[:100]
+            else:
+                _phy = self._stage_phy_name(_temp, _coldefs)
+            _unions[_norm] = {"temp": _phy, "cols": _cols2, "parts": len(_parts or [])}
+            _remember(_phy, _cols2)
+        self._api_union = _unions
+
+    def preview_real_sql(self, payload: Dict[str, Any]) -> str:
+        """The exact SQL execute() would run (stage TEMP names) — without staging or executing.
+
+        Safe for huge tables: only deterministic names are computed, no rows move.
+        """
+        self._validate_no_exact_dupes()
+        self._ensure_stage_names_only()
+        return self._preview_compile(payload)
+
+    def _preview_compile(self, payload: Dict[str, Any]) -> str:
         filters = payload.get("filters") or payload.get("activeFilters") or []
         # Handle columnFilters from Excel-like grid: {col: [values]} -> convert to IN
         column_filters = payload.get("columnFilters") or {}
