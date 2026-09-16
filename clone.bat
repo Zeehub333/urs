@@ -8,7 +8,7 @@ setlocal EnableDelayedExpansion
 
 set BASE=%CD%
 REM normalize trailing backslash: a drive-root base (e.g. H:\) would otherwise
-REM merge the backslash with the closing quote in "%BASE%" and corrupt robocopy args
+REM quoted paths need this (see :sync_go)
 if "%BASE:~-1%"=="\" set "BASE=%BASE%."
 set TEMP_DIR=%BASE%\.urs-temp
 set REPO=https://github.com/Zeehub333/urs.git
@@ -75,10 +75,19 @@ rmdir /s /q "%TEMP_DIR%" >nul 2>&1
 pause >nul
 exit /b 1
 :sync_go
-REM /XJ skips junctions/symlinks (classic end-of-run ERROR 123); full log kept for diagnosis.
+REM /XJ skips junctions (end-of-run ERROR 123).
+REM Flags built in short lines: no line here
+REM is long enough for any tool to wrap.
+set RCOPY_FLAGS=/E /NJH /NJS /NDL
+set RCOPY_FLAGS=%RCOPY_FLAGS% /NP /R:2
+set RCOPY_FLAGS=%RCOPY_FLAGS% /W:2 /XJ
+set RCOPY_FLAGS=%RCOPY_FLAGS% /XD .git
+set RCOPY_FLAGS=%RCOPY_FLAGS% /XD .urs-temp
+set RCOPY_FLAGS=%RCOPY_FLAGS% /XF app.config
 set SYNCLOG=%TEMP%\urs-clone-sync.log
 if exist "%SYNCLOG%" del "%SYNCLOG%" >nul 2>&1
-"%SystemRoot%\System32\robocopy.exe" "%TEMP_DIR%" "%BASE%" /E /NJH /NJS /NDL /NP /R:2 /W:2 /XJ /XD .git .urs-temp /XF app.config /LOG:"%SYNCLOG%"
+set ROBOEXE=%SystemRoot%\System32\robocopy.exe
+"%ROBOEXE%" "%TEMP_DIR%" "%BASE%" %RCOPY_FLAGS% /LOG:"%SYNCLOG%"
 REM robocopy exit 0-7 = success; 8+ = failure
 if not errorlevel 8 goto sync_ok
 echo [X] sync failed - first errors:
@@ -99,7 +108,7 @@ if errorlevel 8 (
 REM ---- [4] rmdir .urs-temp ----
 echo [4/6] cleaning temp ...
 rmdir /s /q "%TEMP_DIR%"
-if errorlevel 1 echo [--] warning: could not remove .urs-temp - delete it manually.
+if errorlevel 1 echo [--] warning: .urs-temp locked.
 
 REM ---- [5] install.bat ----
 echo [5/6] running install.bat ...
