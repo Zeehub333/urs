@@ -1249,7 +1249,7 @@ def api_fmlk_sql_functions(request):
         return JsonResponse({"error": str(e)}, status=400)
 
 
-DATA_TYPE_CHOICES = ["VARCHAR", "TEXT", "INTEGER", "BIGINT", "NUMERIC", "BOOLEAN", "DATE", "TIME", "TIMESTAMP"]
+DATA_TYPE_CHOICES = ["VARCHAR", "TEXT", "INTEGER", "BIGINT", "NUMERIC", "BOOLEAN", "DATE", "TIME", "TIMESTAMP", "IMAGE", "MEDIA"]
 
 
 def api_fmlk_data_types(request):

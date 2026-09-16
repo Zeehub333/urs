@@ -2246,7 +2246,7 @@ list.innerHTML = wizardDetail.columns.map((col, idx)=>`
             const moveBtn = (i, dir)=>'<button onclick="moveWizardColumn('+i+','+dir+')" class="wb-mini shrink-0" title="'+(dir<0?'تحريك لأعلى':'تحريك لأسفل')+'"><i class="fa-solid fa-arrow-'+(dir<0?'up':'down')+' text-[10px]"></i></button>';
             const del = (fn)=>'<button onclick="'+fn+'" class="wb-del" title="حذف"><i class="fa-solid fa-trash-can"></i></button>';
             const connsOpts = (sel)=> (wizardConnections.length?wizardConnections:Object.keys(wizardConnNames)).map(cid=>'<option value="'+cid+'" '+(String(sel)===String(cid)?'selected':'')+'>'+wbEsc(connLabel(cid))+'</option>').join('');
-            const typOpts = (sel)=>['','INTEGER','NUMERIC','VARCHAR','TEXT','DATE','TIME','TIMESTAMP','BOOLEAN'].map(v=>'<option value="'+v+'" '+(String(sel||'')===v?'selected':'')+'>'+(v||'—')+'</option>').join('');
+            const typOpts = (sel)=>['','INTEGER','NUMERIC','VARCHAR','TEXT','DATE','TIME','TIMESTAMP','BOOLEAN','IMAGE','MEDIA'].map(v=>'<option value="'+v+'" '+(String(sel||'')===v?'selected':'')+'>'+(v||'—')+'</option>').join('');
             let html = '';
             let foot = '';
             if(wbSheet==='fields'){

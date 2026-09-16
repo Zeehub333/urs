@@ -1196,6 +1196,17 @@
         function fmtCell(v, isAmt, col){
             try{
                 const dt = String((col && (col.dataType || col.data_type)) || '').toLowerCase();
+                if(dt === 'image' || dt === 'media'){
+                    const s = String(v ?? '').trim();
+                    if(!s) return '';
+                    const _e = (x)=>String(x ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+                    const b = s.split('?')[0].split('#')[0].toLowerCase();
+                    const isImg = dt === 'image' || /^data:image\//i.test(s) || /\.(png|jpe?g|gif|webp|svg|bmp|ico)$/.test(b);
+                    if(isImg) return `<img src="${_e(s)}" loading="lazy" class="rounded-lg object-cover" style="max-width:120px;max-height:60px" alt="">`;
+                    if(/^data:video\//i.test(s) || /\.(mp4|webm|ogv|mov|m4v)$/.test(b)) return `<video src="${_e(s)}" controls preload="none" class="rounded-lg" style="max-width:180px;max-height:90px"></video>`;
+                    if(/^data:audio\//i.test(s) || /\.(mp3|wav|og[ga]|m4a|flac)$/.test(b)) return `<audio src="${_e(s)}" controls preload="none" style="max-width:180px"></audio>`;
+                    return s;
+                }
                 if(dt === 'date' || dt === 'datetime' || dt === 'time'){
                     const fmt = String((col && (col.dateFormat || col.date_format)) || '').trim();
                     if(fmt) return fmtDateFmt(v, fmt);
