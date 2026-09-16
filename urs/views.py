@@ -2039,6 +2039,34 @@ def api_fmlk_record(request):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=400)
 
+def _rml_is_live_sql(dj):
+    """RML-only: connection can be queried live (pg/oracle always; sqlserver
+    when flagged queryable — direct mode, no staging). FML paths intentionally
+    keep the stricter _conn_is_sql_queryable."""
+    try:
+        if _conn_is_sql_queryable(dj):
+            return True
+        try:
+            _fl = getattr(dj, "is_queryable", True)
+            _ok = False if _fl is False or str(_fl).strip().lower() in ("0", "false", "no", "none") else True
+        except Exception:
+            _ok = True
+        return bool(_ok) and str(getattr(dj, "engine", "") or "").lower() == "sqlserver"
+    except Exception:
+        return False
+
+
+def _rml_build_db_engine(dj, connect=True):
+    """RML-only engine builder: pg/oracle via _build_db_engine, sqlserver direct."""
+    if str(getattr(dj, "engine", "") or "").lower() == "sqlserver":
+        from rml_python.engine import SqlServerDirect
+        db = SqlServerDirect(dj)
+        if connect:
+            db.connect()
+        return db
+    return _build_db_engine(dj, connect=connect)
+
+
 # ── RML API proxied into Django ──────────────────────────────────────────────
 def _build_db_engine(dj, connect=True):
     """Build a live DB engine (postgres/oracle) from a Connection row."""
@@ -2150,14 +2178,14 @@ def _rml_get_pipeline(rml_name, app_name=None):
                 _dj = DjangoConn.objects.filter(id=int(_cid)).first()
             except Exception:
                 _dj = None
-            if _dj is not None and _conn_is_sql_queryable(_dj):
+            if _dj is not None and _rml_is_live_sql(_dj):
                 conns[str(_cid)] = _dj
         if not conns and conn_id:
             try:
                 _dj0 = DjangoConn.objects.filter(id=int(conn_id)).first()
             except Exception:
                 _dj0 = None
-            if _dj0 is not None and _conn_is_sql_queryable(_dj0):
+            if _dj0 is not None and _rml_is_live_sql(_dj0):
                 conns[str(conn_id)] = _dj0
         # Primary = base table's connection (else first linked, else urs default)
         primary_id = None
@@ -2210,11 +2238,13 @@ def _rml_get_pipeline(rml_name, app_name=None):
                     meta_obj.schema = dj.schema.strip()
             except Exception:
                 pass
-        db = _build_db_engine(dj)
+        db = _rml_build_db_engine(dj)
         pipe.oracle = db
         # Detect actual schema (for Postgres: query current_schema; for Oracle: use connection schema)
         actual_schema = None
-        if conn_engine != "oracle":
+        if conn_engine == "sqlserver":
+            actual_schema = (dj.schema or "").strip() or "dbo"
+        elif conn_engine != "oracle":
             try:
                 cur = db._exec("SELECT current_schema()")
                 actual_schema = cur.fetchone()[0]
@@ -2255,7 +2285,7 @@ def _rml_get_pipeline(rml_name, app_name=None):
             if _cid == primary_id:
                 continue
             try:
-                extras[str(_cid)] = _build_db_engine(_dj)
+                extras[str(_cid)] = _rml_build_db_engine(_dj)
             except Exception:
                 pass
         pipe.rml_engine = RMLReportEngine(pipe.compiler, db, databases=extras)
@@ -2266,7 +2296,7 @@ def _rml_get_pipeline(rml_name, app_name=None):
         except Exception:
             final_schema = actual_schema or ""
         # If engine has no default table, detect first available table from the schema
-        if not pipe.rml_engine._default_table and final_schema and conn_engine != "oracle":
+        if not pipe.rml_engine._default_table and final_schema and conn_engine == "postgres":
             try:
                 cur = db._exec(
                     "SELECT table_name FROM information_schema.tables "

@@ -39,6 +39,12 @@ def _fmt_cell(v: Any) -> Any:
             return v.strftime("%Y-%m-%d")
         if isinstance(v, _dt.time):
             return v.strftime("%H:%M:%S")
+        try:
+            import decimal as _dec2
+            if isinstance(v, _dec2.Decimal):
+                return int(v) if v == int(v) else float(v)
+        except Exception:
+            pass
     except Exception:
         pass
     return v
@@ -911,6 +917,10 @@ def _build_select(columns: List[RMLColumn], fields: Optional[List] = None,
                 if str(dialect or "").lower().startswith("pg"):
                     base_sql = (f"(SELECT STRING_AGG({_q(ref_display)}::TEXT, ', ' ORDER BY {_q(ref_display)}::TEXT) "
                                 f"FROM {ref_from} WHERE {_q(ref_fk)} = {key_sql})")
+                elif str(dialect or "").lower().startswith("mssql"):
+                    base_sql = (f"(SELECT STRING_AGG(CAST({_q(ref_display)} AS NVARCHAR(MAX)), ', ') "
+                                f"WITHIN GROUP (ORDER BY {_q(ref_display)}) "
+                                f"FROM {ref_from} WHERE {_q(ref_fk)} = {key_sql})")
                 else:
                     base_sql = (f"(SELECT LISTAGG({_q(ref_display)}, ', ') WITHIN GROUP (ORDER BY {_q(ref_display)}) "
                                 f"FROM {ref_from} WHERE {_q(ref_fk)} = {key_sql})")
@@ -938,6 +948,162 @@ def _build_select(columns: List[RMLColumn], fields: Optional[List] = None,
         base_sql = _apply_column_where(base_sql, wc)
         parts.append(f"{base_sql} AS {alias_q}")
     return ", ".join(parts) if parts else "*"
+
+def _is_mssql_db(db) -> bool:
+    """True when the live engine is a direct SQL Server connection."""
+    try:
+        return "sqlserverdirect" in type(db).__name__.lower()
+    except Exception:
+        return False
+
+
+def _mssql_transpile_sql(sql: str, convert_binds: bool = True) -> str:
+    """Transpile builder (Oracle-flavored) SQL to T-SQL.
+
+    convert_binds=True rewrites :name/%s placeholders to pyodbc positional ?.
+    convert_binds=False keeps :name (readable preview + binds list).
+    String literals are never touched.
+    """
+    if not sql:
+        return sql
+    _parts = re.split(r"('(?:[^']|'')*'|\"(?:[^\"]|\"\")*\")", str(sql))
+    for _i in range(0, len(_parts), 2):
+        _seg = _parts[_i]
+        # TO_DATE binds → CAST (DATETIME2 keeps time part)
+        _seg = re.sub(r"(?i)\bTO_DATE\s*\(\s*(:[A-Za-z_][A-Za-z0-9_]*)\s*,\s*'YYYY-MM-DD HH24:MI:SS'\s*\)",
+                      r"CAST(\1 AS DATETIME2)", _seg)
+        # whole-day range: TO_DATE + 1 → DATEADD (T-SQL forbids date + int)
+        _seg = re.sub(r"(?i)\bTO_DATE\s*\(\s*(:[A-Za-z_][A-Za-z0-9_]*)\s*,\s*'YYYY-MM-DD'\s*\)\s*\+\s*1",
+                      r"DATEADD(day, 1, CAST(\1 AS DATE))", _seg)
+        _seg = re.sub(r"(?i)\bTO_DATE\s*\(\s*(:[A-Za-z_][A-Za-z0-9_]*)\s*,\s*'YYYY-MM-DD'\s*\)",
+                      r"CAST(\1 AS DATE)", _seg)
+        # CAST targets unknown to SQL Server
+        _seg = re.sub(r"(?i)\bAS\s+TIMESTAMP\b", "AS DATETIME2", _seg)
+        # Oracle NVL → ISNULL
+        _seg = re.sub(r"(?i)\bNVL\s*\(", "ISNULL(", _seg)
+        # date-bucket formatters (specific → generic order matters)
+        _seg = re.sub(r"(?i)\bTO_CHAR\s*\(\s*DATE_TRUNC\s*\(\s*'month'\s*,(.+?)\)::date\s*,\s*'YYYY-MM-DD'\s*\)",
+                      r"LEFT(CONVERT(varchar(10), \1, 23), 7)", _seg)
+        _seg = re.sub(r"(?i)\bTO_CHAR\s*\(\s*DATE_TRUNC\s*\(\s*'year'\s*,(.+?)\)::date\s*,\s*'YYYY'\s*\)",
+                      r"CAST(YEAR(\1) AS varchar(4))", _seg)
+        _seg = re.sub(r"(?i)\bTO_CHAR\s*\(\s*TRUNC\s*\((.+?)\s*,\s*'MM'\s*\)\s*,\s*'YYYY-MM-DD'\s*\)",
+                      r"LEFT(CONVERT(varchar(10), \1, 23), 7)", _seg)
+        _seg = re.sub(r"(?i)\bTO_CHAR\s*\(\s*TRUNC\s*\((.+?)\s*,\s*'YYYY'\s*\)\s*,\s*'YYYY'\s*\)",
+                      r"CAST(YEAR(\1) AS varchar(4))", _seg)
+        _seg = re.sub(r"(?i)\bTO_CHAR\s*\(\s*TRUNC\s*\((.+?)\)\s*,\s*'YYYY-MM-DD'\s*\)",
+                      r"CONVERT(varchar(10), \1, 23)", _seg)
+        _seg = re.sub(r"(?i)\bTO_CHAR\s*\(\s*(.+?)::date\s*,\s*'YYYY-MM-DD'\s*\)",
+                      r"CONVERT(varchar(10), \1, 23)", _seg)
+        if convert_binds:
+            # :name binds → positional ? (skip :: casts); %s → ? (views style)
+            _seg = re.sub(r"(?<!:):([A-Za-z_][A-Za-z0-9_]*)", "?", _seg)
+            _seg = _seg.replace("%s", "?")
+        _parts[_i] = _seg
+    return "".join(_parts)
+
+
+def _mssql_bind_values(sql: str, params) -> list:
+    """Ordered values matching _mssql_transpile_sql(convert_binds=True) placeholders."""
+    if params is None:
+        return []
+    if isinstance(params, (list, tuple)):
+        return list(params)
+    if not isinstance(params, dict):
+        return []
+    _parts = re.split(r"('(?:[^']|'')*'|\"(?:[^\"]|\"\")*\")", str(sql))
+    out = []
+    for _i in range(0, len(_parts), 2):
+        for _m in re.finditer(r"(?<!:):([A-Za-z_][A-Za-z0-9_]*)", _parts[_i]):
+            out.append(params.get(_m.group(1)))
+        out.extend([None] * _parts[_i].count("%s"))
+    return out
+
+
+class SqlServerDirect:
+    """Live SQL Server engine for direct (staging-free) report execution.
+
+    Used only when EVERY involved table lives on ONE queryable sqlserver
+    connection — the compiled query runs on the source itself via pyodbc.
+    Interface mirrors OracleEngine/PostgresEngine (connect/_exec/disconnect).
+    """
+
+    def __init__(self, row):
+        self.row = row
+        self.conn = None
+        try:
+            self.gid = str(getattr(row, "id", "") or "")
+        except Exception:
+            self.gid = ""
+
+    @staticmethod
+    def _esc(v) -> str:
+        return "{" + str(v or "").replace("}", "}}") + "}"
+
+    def connect(self):
+        import pyodbc
+        if self.conn is not None:
+            try:
+                self.conn.rollback()
+                return self.conn
+            except Exception:
+                try:
+                    self.conn.close()
+                except Exception:
+                    pass
+                self.conn = None
+        from rml_python.engine import RMLReportEngine as _RML
+        row = self.row
+        user = str(getattr(row, "user", "") or "")
+        pwd = str(getattr(row, "password", "") or "")
+        last = None
+        for _srv, _dbn in _RML._sqlserver_targets(row):
+            for _drv, _modern in _RML._sqlserver_drivers():
+                try:
+                    _parts = [f"DRIVER={{{_drv}}}", f"SERVER={_srv}", f"DATABASE={_dbn}",
+                              f"UID={self._esc(user)}", f"PWD={self._esc(pwd)}"]
+                    if _modern:
+                        _parts += ["TrustServerCertificate=yes", "Connect Timeout=15"]
+                    cn = pyodbc.connect(";".join(_parts) + ";", timeout=15)
+                    try:
+                        cur = cn.cursor()
+                        cur.execute("SET QUOTED_IDENTIFIER ON")
+                        cur.close()
+                    except Exception:
+                        pass
+                    self.conn = cn
+                    return cn
+                except Exception as e:
+                    last = e
+                    continue
+        raise ValueError(f"تعذر الاتصال المباشر بـ SQL Server: {str(last)[:200]}")
+
+    def disconnect(self):
+        if self.conn is not None:
+            try:
+                self.conn.close()
+            except Exception:
+                pass
+            self.conn = None
+
+    def _exec(self, sql: str, params=None, commit=False):
+        if not getattr(self, "conn", None):
+            self.connect()
+        assert self.conn is not None
+        exec_sql = _mssql_transpile_sql(sql, convert_binds=True)
+        values = _mssql_bind_values(sql, params)
+        cur = self.conn.cursor()
+        try:
+            cur.execute(exec_sql, values)
+            if commit:
+                self.conn.commit()
+            return cur
+        except Exception:
+            try:
+                cur.close()
+            except Exception:
+                pass
+            raise
+
 
 # ── Main Engine ──────────────────────────────────────────────────────────────
 
@@ -1068,6 +1234,13 @@ class RMLReportEngine:
             if "postgres" in name:
                 return ("pg", str(getattr(db, "host", "")), str(getattr(db, "port", "")),
                         str(getattr(db, "dbname", "")))
+            if "sqlserverdirect" in name:
+                try:
+                    _r = getattr(db, "row", None)
+                    return ("ms", str(getattr(_r, "host", "")), str(getattr(_r, "port", "")),
+                            str(getattr(_r, "instance", "")), str(getattr(_r, "user", "")))
+                except Exception:
+                    return ("ms", str(getattr(db, "gid", "")))
             return ("ora", str(getattr(db, "dsn", "")))
         except Exception:
             return ("unknown", str(id(db)))
@@ -1130,6 +1303,88 @@ class RMLReportEngine:
             return None
         return sorted(counts.items(), key=lambda kv: -kv[1])[0][0]
 
+    def _get_direct_gid(self) -> Optional[str]:
+        """sqlserver gid when EVERY involved table lives on ONE queryable
+        sqlserver connection (else None → normal staged execution).
+
+        Pure metadata (cached Django lookups only) — safe to call anywhere.
+        Opt-out per report: <rpt_metadata direct="0"> forces staging.
+        """
+        try:
+            try:
+                _ra = (getattr(self, "metadata", None) or {}).get("raw_attrs") or {}
+                for _k, _v in _ra.items():
+                    if str(_k).lower() == "direct" and str(_v).strip().lower() in ("0", "false", "no"):
+                        return None
+            except Exception:
+                pass
+            try:
+                if self._union_partitions():
+                    return None
+            except Exception:
+                return None
+            _norms = []
+            for f in (getattr(self, "fields", []) or []):
+                try:
+                    t = self._norm_table(getattr(f, "table_source", None) or "")
+                except Exception:
+                    t = ""
+                if t and t not in _norms:
+                    _norms.append(t)
+            try:
+                _det = self.compiler.detail() if hasattr(self.compiler, "detail") else None
+                _det = _det.to_dict() if _det is not None and not isinstance(_det, dict) else _det
+                if _det and _det.get("table"):
+                    t = self._norm_table(_det.get("table"))
+                    if t and t not in _norms:
+                        _norms.append(t)
+            except Exception:
+                pass
+            if not _norms:
+                return None
+            _gids = set()
+            for t in _norms:
+                try:
+                    info = self._api_table_info(t)
+                except Exception:
+                    info = None
+                if not info:
+                    return None
+                if str((info or {}).get("engine") or "").lower() != "sqlserver":
+                    return None
+                try:
+                    _fl = getattr((info or {}).get("row"), "is_queryable", True)
+                    _ok = False if _fl is False or str(_fl).strip().lower() in ("0", "false", "no", "none") else True
+                except Exception:
+                    _ok = True
+                if not _ok:
+                    return None
+                _gids.add(str((info or {}).get("gid") or ""))
+            if len(_gids) == 1:
+                return next(iter(_gids))
+        except Exception:
+            pass
+        return None
+
+    def _mssql_db_for(self, gid: str):
+        """Cached live SqlServerDirect wrapper for a global connection id."""
+        try:
+            _c = getattr(self, "_mssql_direct", None)
+            if _c is None:
+                self._mssql_direct = _c = {}
+            if gid in _c and _c[gid] is not None:
+                return _c[gid]
+            row = self._dj_conn(gid)
+            if row is None:
+                raise ValueError(f"الاتصال ({gid}) غير موجود")
+            w = SqlServerDirect(row)
+            _c[gid] = w
+            return w
+        except ValueError:
+            raise
+        except Exception as e:
+            raise ValueError(f"تعذر تهيئة الاتصال المباشر ({gid}): {e}")
+
     def _db_for_conn(self, conn_key: Optional[str]):
         """Live engine for a connection key (primary db when None/unknown)."""
         if not conn_key:
@@ -1144,6 +1399,13 @@ class RMLReportEngine:
                 gid = str(getattr(conn, "connection_id", "") or "")
                 if gid and gid in (self.databases or {}):
                     return self.databases[gid]
+        # Direct live mode: every table on one queryable sqlserver connection —
+        # query the source itself, never stage.
+        try:
+            if conn_key and str(conn_key) == str(self._get_direct_gid()):
+                return self._mssql_db_for(conn_key)
+        except Exception:
+            pass
         # API-backed connection (e.g. ZK — is_queryable=False): its tables are
         # staged as TEMP tables on the primary SQL DB, so route there.
         try:
@@ -1178,6 +1440,16 @@ class RMLReportEngine:
         try:
             if self._staged_temp_of(table_norm):
                 return None  # جدول مؤقت مرحّل — ظاهر في الجلسة دون مخطط
+        except Exception:
+            pass
+        try:
+            # Direct sqlserver mode: source schema only (never the PG report schema)
+            if conn_key and str(conn_key) == str(self._get_direct_gid()):
+                dj = self._dj_conn(conn_key)
+                _ds = str(getattr(dj, "schema", "") or "").strip() if dj is not None else ""
+                if _ds:
+                    return _ds
+                return "dbo"
         except Exception:
             pass
         dj = self._dj_conn(conn_key)
@@ -1632,6 +1904,51 @@ class RMLReportEngine:
             _api = self._api_table_info(norm)
         except Exception:
             _api = None
+        if _api and str((_api or {}).get("engine") or "").lower() == "sqlserver":
+            # Direct live mode: introspect the source itself (no staging).
+            try:
+                if str((_api or {}).get("gid") or "") == str(self._get_direct_gid()):
+                    _w = self._mssql_db_for(str((_api or {}).get("gid")))
+                    _cur = _w._exec(
+                        "SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS "
+                        "WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?",
+                        [schema, norm])
+                    try:
+                        _rows = list(_cur.fetchall() or [])
+                    finally:
+                        try:
+                            _cur.close()
+                        except Exception:
+                            pass
+                    _lc = {str(r[0]).upper(): str(r[1]).upper() for r in _rows}
+                    _lo = {str(r[0]).upper(): str(r[0]) for r in _rows}
+                    if _lc:
+                        self._cols_cache[key] = dict(_lc)
+                        try:
+                            if not hasattr(self, "_cols_orig") or self._cols_orig is None:
+                                self._cols_orig = {}
+                            self._cols_orig[key] = dict(_lo)
+                        except Exception:
+                            pass
+                        return dict(_lc)
+            except Exception:
+                pass
+            # fall through to report-fields fallback below when introspection fails
+            try:
+                _fm = {}
+                for _f in (getattr(self, "fields", []) or []):
+                    try:
+                        if self._norm_table(getattr(_f, "table_source", None) or "") == norm:
+                            _fn = str(getattr(_f, "name", "") or "")
+                            if _fn:
+                                _fm[_fn.upper()] = str(getattr(_f, "data_type", None) or "TEXT").upper()
+                    except Exception:
+                        continue
+                if _fm:
+                    self._cols_cache[key] = dict(_fm)
+                    return dict(_fm)
+            except Exception:
+                pass
         if _api:
             # جدول API (مثل البصمة) قبل الترحيل: أعمدة منطقية ثابتة بدون وصول للجهاز
             _static = self._api_static_columns()
@@ -3148,7 +3465,18 @@ class RMLReportEngine:
         - Single-source API tables -> rml_api_<gid>_<table> (existing path).
         - One table on 2+ physical sources -> ONE rml_union_<table> with rows
           from every connection completely (UNION ALL semantics).
+        - Direct live mode (every table on one queryable sqlserver conn):
+          no staging at all — names stay source, query runs on the source.
         """
+        try:
+            if self._get_direct_gid():
+                self._api_staged_done = True
+                self._api_stage = {}
+                self._api_union = {}
+                self._api_warnings = []
+                return
+        except Exception:
+            pass
         if getattr(self, "_api_staged_done", False) and not refresh:
             return
         self._api_staged_done = True
@@ -4373,6 +4701,13 @@ class RMLReportEngine:
         params = dict(params)
         params.update(outer_params)
         pag, params = self._paginate_clause(page, page_size, params, plan["base_db"])
+        try:
+            _ms_outer = _is_mssql_db(plan.get("base_db")) and bool((pag or "").strip())
+        except Exception:
+            _ms_outer = False
+        if _ms_outer:
+            # outer OFFSET needs its own ORDER BY on T-SQL
+            return f"SELECT * FROM ({sql}) t WHERE {outer_where[len(' WHERE '):]} ORDER BY 1" + pag, params, strip_extra
         return f"SELECT * FROM ({sql}) t WHERE {outer_where[len(' WHERE '):]}" + pag, params, strip_extra
 
     def _report_distinct(self) -> bool:
@@ -4493,7 +4828,8 @@ class RMLReportEngine:
         table_map = plan["table_map"]
         _abt_plan = self._plan_alias_map(plan)
         select_clause = _build_select(columns, getattr(self, "fields", []), table_map=table_map,
-                                        dialect="pg" if _is_pg_db(plan.get("base_db")) else "oracle",
+                                        dialect=("pg" if _is_pg_db(plan.get("base_db"))
+                                                 else ("mssql" if _is_mssql_db(plan.get("base_db")) else "oracle")),
                                         conn_map=self._conn_map(),
                                         rules=getattr(self, "rules", []),
                                         alias_by_table=_abt_plan)
@@ -4509,6 +4845,14 @@ class RMLReportEngine:
         if group_by:
             group_clause = f" GROUP BY {_resolve_filter_field(group_by, columns, getattr(self, 'fields', []), table_map, self._conn_map(), getattr(self, 'rules', []))}"
         order_clause = _build_order_by(sort, columns=columns)
+        try:
+            _ms_base = _is_mssql_db(plan.get("base_db"))
+        except Exception:
+            _ms_base = False
+        if _ms_base and page_size != "all" and not (order_clause or "").strip():
+            # T-SQL forbids OFFSET without ORDER BY (unlike Postgres);
+            # DISTINCT ON never applies to mssql so ORDER BY 1 is always safe.
+            order_clause = " ORDER BY 1"
         paginate_clause, params = self._paginate_clause(page, page_size, dict(where_params), plan["base_db"])
         _sel_kw = "SELECT DISTINCT" if self._report_distinct() else "SELECT"
         _don = []
@@ -4727,10 +5071,23 @@ class RMLReportEngine:
         """The exact SQL execute() would run (stage TEMP names) — without staging or executing.
 
         Safe for huge tables: only deterministic names are computed, no rows move.
+        In direct live mode the query targets the source itself (transpiled, binds kept).
         """
         self._validate_no_exact_dupes()
-        self._ensure_stage_names_only()
-        return self._preview_compile(payload)
+        _dg = None
+        try:
+            _dg = self._get_direct_gid()
+        except Exception:
+            _dg = None
+        if not _dg:
+            self._ensure_stage_names_only()
+        sql = self._preview_compile(payload)
+        if _dg:
+            try:
+                sql = _mssql_transpile_sql(sql, convert_binds=False)
+            except Exception:
+                pass
+        return sql
 
     def _preview_compile(self, payload: Dict[str, Any]) -> str:
         filters = payload.get("filters") or payload.get("activeFilters") or []
@@ -4991,7 +5348,7 @@ class RMLReportEngine:
             target = _RC(id="__fld", name=str(fld.name), alias=str(fld.name),
                          expr=f"[{fld.name}]", col_type="direct")
         select_clause = _build_select([target], getattr(self, "fields", []), table_map=table_map,
-                                      dialect="pg" if _is_pg else "oracle",
+                                      dialect=("pg" if _is_pg else ("mssql" if _is_mssql_db(plan.get("base_db")) else "oracle")),
                                       conn_map=self._conn_map(),
                                       rules=getattr(self, "rules", []),
                                       alias_by_table=self._plan_alias_map(plan))
@@ -5174,7 +5531,7 @@ class RMLReportEngine:
             base_cols.append(col)
         # Build select clause for base columns only (fk_lookup handled in Python)
         select_clause = _build_select(base_cols, fields,
-                                        dialect="pg" if _is_pg_db(_ddb) else "oracle",
+                                        dialect=("pg" if _is_pg_db(_ddb) else ("mssql" if _is_mssql_db(_ddb) else "oracle")),
                                         conn_map=self._conn_map(),
                                         rules=getattr(self, "rules", []),
                                         outer_table=table,
@@ -5351,7 +5708,14 @@ class RMLReportEngine:
             else:
                 col_kinds.append((_al, "text"))
         # ── conditions on output aliases ──
+        try:
+            _ms_txt = _is_mssql_db(_ddb)
+        except Exception:
+            _ms_txt = False
+
         def _txt(_al):
+            if _ms_txt:
+                return f"CAST({_q(_al)} AS NVARCHAR(MAX))"
             return f"CAST({_q(_al)} AS TEXT)" if is_pg else f"TO_CHAR({_q(_al)})"
         conds, params = [], {}
         if kind == "number" and qnum is not None:
@@ -5383,7 +5747,13 @@ class RMLReportEngine:
             return {"master_values": [], "count": 0, "truncated": False, "sql": ""}
         inner = f"SELECT {_q(dkey)} AS \"__mkey\", {select_clause} FROM {from_q}"
         where = " OR ".join(f"({c})" for c in conds)
-        if is_pg:
+        try:
+            _ms_ddb = _is_mssql_db(_ddb)
+        except Exception:
+            _ms_ddb = False
+        if _ms_ddb:
+            sql = f"SELECT DISTINCT TOP {int(limit_keys) + 1} \"__mkey\" FROM ({inner}) t WHERE {where}"
+        elif is_pg:
             sql = f"SELECT DISTINCT \"__mkey\" FROM ({inner}) t WHERE {where} LIMIT {int(limit_keys) + 1}"
         else:
             sql = f"SELECT DISTINCT \"__mkey\" FROM ({inner}) WHERE {where} AND ROWNUM <= {int(limit_keys) + 1}"
