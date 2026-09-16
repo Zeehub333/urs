@@ -32,10 +32,11 @@ if not defined PY call :try_candidate "python3.11" python3.11
 if not defined PY call :try_candidate "python3.10" python3.10
 
 if not defined PY (
-  echo [--] no Python 3.10+ on PATH - trying winget ...
+  echo [--] no python - trying winget ...
   where winget >nul 2>&1
   if not errorlevel 1 (
-    winget install -e --id Python.Python.3.13 --silent --accept-package-agreements --accept-source-agreements
+    set WG=--silent --accept-package-agreements
+    winget install -e --id Python.Python.3.13 %WG% --accept-source-agreements
     call :try_candidate "py -3" py -3
     if not defined PY call :try_candidate "python" python
   )
@@ -62,7 +63,7 @@ echo.
 echo [2/5] interpreter locations (first path = default execution) ...
 where "%PYBASE%" 2>nul
 if errorlevel 1 (
-  echo [--] "where %PYBASE%" returned nothing - using "%PY%" from PATH search order.
+  echo [--] where found nothing - using "%PY%".
 ) 
 set PYFULL=
 for /f "delims=" %%p in ('where "%PYBASE%" 2^>nul') do (
@@ -70,8 +71,10 @@ for /f "delims=" %%p in ('where "%PYBASE%" 2^>nul') do (
 )
 if defined PYFULL (
   echo [*] default execution: %PYFULL% %PYARGS%
-  if defined PYARGS ( set "PYRUN="%PYFULL%" %PYARGS%" ) else ( set "PYRUN="%PYFULL%"" )
-  REM guard: first PATH hit can be a stub (e.g. WindowsApps alias) - fall back to bare command
+  if defined PYARGS set "PYRUN="%PYFULL%" %PYARGS%"
+  if not defined PYARGS set "PYRUN="%PYFULL%""
+  REM guard: first PATH hit can be a stub
+  REM (e.g. WindowsApps alias) - fall back then.
   %PYRUN% --version >nul 2>&1
   if errorlevel 1 (
     echo [--] pinned path does not run - falling back to PATH-ordered "%PY%".
@@ -86,35 +89,27 @@ REM ---- STEP 3: pip-freeze check, drop broken venv ----
 set VPY=%ROOT%odex\venv\Scripts\python.exe
 echo.
 echo [3/5] checking existing venv ...
-if not exist "%VPY%" (
-  echo [--] no venv yet at odex\venv.
-) else (
-  "%VPY%" --version >nul 2>&1
-  if errorlevel 1 (
-    echo [--] venv interpreter dead - removing odex\venv ...
-    rmdir /s /q "%ROOT%odex\venv"
-    if errorlevel 1 (
-      echo [X] cannot remove venv - close programs using it, then re-run.
-      call :maybe_pause
-      exit /b 1
-    )
-  ) else (
-    "%VPY%" -m pip freeze >nul 2>&1
-    if errorlevel 1 (
-      echo [--] venv pip broken (freeze failed) - removing odex\venv ...
-      rmdir /s /q "%ROOT%odex\venv"
-      if errorlevel 1 (
-        echo [X] cannot remove venv - close programs using it, then re-run.
-        call :maybe_pause
-        exit /b 1
-      )
-    ) else (
-      set NFREEZE=0
-      for /f %%n in ('"%VPY%" -m pip freeze 2^>nul') do set /a NFREEZE+=1
-      echo [ok] existing venv runs - !NFREEZE! packages frozen.
-    )
-  )
+if not exist "%VPY%" goto novenv
+"%VPY%" --version >nul 2>&1
+if errorlevel 1 goto venv_dead
+"%VPY%" -m pip freeze >nul 2>&1
+if errorlevel 1 goto venv_dead
+set NFREEZE=0
+for /f %%n in ('"%VPY%" -m pip freeze 2^>nul') do set /a NFREEZE+=1
+echo [ok] venv ok - !NFREEZE! packages.
+goto venv_done
+:novenv
+echo [--] no venv yet at odex\venv.
+goto venv_done
+:venv_dead
+echo [--] venv broken - removing odex\venv ...
+rmdir /s /q "%ROOT%odex\venv"
+if errorlevel 1 (
+  echo [X] cannot remove venv - close it first.
+  call :maybe_pause
+  exit /b 1
 )
+:venv_done
 
 REM ---- STEP 4: create venv if missing ----
 echo.
@@ -125,7 +120,7 @@ if not exist "%VPY%" (
     echo [--] standard venv failed - retrying without pip + ensurepip ...
     %PYRUN% -m venv --without-pip "%ROOT%odex\venv"
     if errorlevel 1 (
-      echo [X] venv creation failed. On some systems install the venv package first.
+      echo [X] venv creation failed - no venv pkg?
       call :maybe_pause
       exit /b 1
     )
@@ -152,16 +147,16 @@ if errorlevel 1 (
 )
 
 echo.
-echo [5/5] installing requirements (takes a few minutes) ...
+echo [5/5] installing requirements ...
 set REQS=
-if exist "%ROOT%odex\requirements.txt" set REQS=%REQS% -r "%ROOT%odex\requirements.txt"
-if exist "%ROOT%rml_python\requirements.txt" set REQS=%REQS% -r "%ROOT%rml_python\requirements.txt"
-if exist "%ROOT%fmlk_engine\requirements.txt" set REQS=%REQS% -r "%ROOT%fmlk_engine\requirements.txt"
-if exist "%ROOT%permissions_engine\requirements.txt" set REQS=%REQS% -r "%ROOT%permissions_engine\requirements.txt"
-if "%REQS%"=="" (
-  echo [--] no requirements files found - installing runtime extras only.
-)
-"%VPY%" -m pip install %REQS% cryptography openpyxl reportlab arabic-reshaper python-bidi
+call :add_req odex
+call :add_req rml_python
+call :add_req fmlk_engine
+call :add_req permissions_engine
+if "%REQS%"=="" echo [--] no requirements files found.
+set PKGS=cryptography openpyxl reportlab
+set PKGS=%PKGS% arabic-reshaper python-bidi
+"%VPY%" -m pip install %REQS% %PKGS%
 if errorlevel 1 (
   echo [X] pip install failed - check network and retry install.bat.
   call :maybe_pause
@@ -170,7 +165,10 @@ if errorlevel 1 (
 
 echo.
 echo [5/5] verifying ...
-"%VPY%" -c "import django, psycopg2, oracledb, pyodbc, fastapi, lxml, reportlab, openpyxl, cryptography; from zk import ZK; print('venv ok, django', django.__version__)"
+set VFY=import django, psycopg2, oracledb
+set VFY=%VFY%, pyodbc, fastapi, lxml
+set VFY=%VFY%, reportlab, openpyxl, cryptography
+"%VPY%" -c "%VFY%; from zk import ZK; print('venv ok')"
 if errorlevel 1 (
   echo [X] verify failed - a required package did not import.
   call :maybe_pause
@@ -180,7 +178,14 @@ if errorlevel 1 (
 echo.
 echo [5/5] wiring app.config ...
 set SEEDROOT=%ROOT%
-"%VPY%" manage.py shell --settings=config.settings_local -c "import pathlib,os; from config.dbconf import write_appconf; print('app.config:', write_appconf({'PYTHON': str(pathlib.Path(os.environ.get('SEEDROOT','')) / 'odex' / 'venv' / 'Scripts' / 'python.exe')}))"
+set WIREF=%TEMP%\urs_wire.py
+>"%WIREF%" echo import pathlib,os
+>>"%WIREF%" echo from config.dbconf import write_appconf
+>>"%WIREF%" echo _p=pathlib.Path(os.environ.get('SEEDROOT',''))
+>>"%WIREF%" echo _p=_p/'odex'/'venv'/'Scripts'/'python.exe'
+>>"%WIREF%" echo print('app.config:',write_appconf({'PYTHON':str(_p)}))
+"%VPY%" manage.py shell --settings=config.settings_local < "%WIREF%"
+del "%WIREF%" >nul 2>&1
 if errorlevel 1 (
   echo [--] app.config wiring skipped - non-fatal - set PYTHON manually.
 )
@@ -217,7 +222,7 @@ for /f "tokens=1,2 delims=." %%a in ("%_V%") do (
   set "_MAJ=%%a"
   set "_MIN=%%b"
 )
-REM numeric major check without delayed-expansion pitfalls: major must be exactly 3
+REM numeric major must be exactly 3
 if not "%_MAJ%"=="3" goto :eof
 REM minor must be numeric and ^= 10
 set "_MIN=!_MIN!"
@@ -231,4 +236,9 @@ goto :eof
 
 :maybe_pause
 if "%NOPAUSE%"=="0" pause >nul
+goto :eof
+
+:add_req
+REM append -r dir/requirements.txt when present
+if exist %1\requirements.txt set REQS=%REQS% -r %1\requirements.txt
 goto :eof
