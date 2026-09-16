@@ -204,7 +204,7 @@
                     </div>
                     <div class="px-3 py-1.5 border-t border-slate-100 bg-slate-50 text-center text-[11px] text-slate-500">عدد الصفحات: <strong id="printPageCount">—</strong></div>
                 </aside>
-                <aside id="blankPanel" class="hidden w-96 shrink-0 bg-white border-r border-slate-200 flex-col overflow-hidden">
+                <aside id="blankPanel" class="w-96 shrink-0 bg-white border-r border-slate-200 flex-col overflow-hidden flex">
                     <div class="p-3 border-b border-slate-100 flex items-center justify-between bg-slate-50">
                         <h3 class="text-xs font-bold text-slate-700">لوحة المعلومات</h3>
                         <button onclick="toggleBlankPanel()" class="text-slate-400 hover:text-slate-600 text-xs"><i class="fa-solid fa-xmark"></i></button>
@@ -1864,6 +1864,30 @@
             document.getElementById('formPanelTitle').textContent = 'سجل جديد';
         }
         function toggleBlankPanel(){ const p = document.getElementById('blankPanel'); if(!p) return; const show = p.classList.contains('hidden'); p.classList.toggle('hidden', !show); p.classList.toggle('flex', show); }
+        function paintBlankPanel(){
+            const box = document.getElementById('blankPanelBody');
+            if(!box) return;
+            try{
+                let rec = null;
+                if(currentRecordId) rec = allRows.find((r, i) => String(rowId(r, i)) === String(currentRecordId));
+                if(!rec && selectedIds.size === 1){
+                    const id = [...selectedIds][0];
+                    rec = allRows.find((r, i) => String(rowId(r, i)) === id);
+                }
+                if(!rec){
+                    const tbl = ((fmlMeta.metadata || {}).table) || '';
+                    box.innerHTML = `<div class="py-6"><div class="text-3xl mb-2 text-slate-200"><i class="fa-solid fa-circle-info"></i></div><div class="font-bold text-slate-600 mb-1">${escHtml((fmlMeta.metadata || {}).displayName || currentFml || '')}</div><div class="text-slate-400 font-mono" dir="ltr">${escHtml(tbl)}</div><div class="mt-2">${allRows.length} سجل</div><div class="mt-1">اختر سجلاً لعرض تفاصيله هنا</div></div>`;
+                    return;
+                }
+                const fields = visibleFields();
+                box.innerHTML = `<div class="space-y-1 text-right">` + fields.map(f => {
+                    const v = cellVal(rec, f.name);
+                    const s = String(v ?? '').trim();
+                    if(s === '') return '';
+                    return `<div class="bg-slate-50 border border-slate-100 rounded-lg px-2 py-1.5"><div class="text-[10px] text-slate-400 font-bold">${escHtml(f.alias)}</div><div class="text-xs font-semibold text-slate-700 break-words">${escHtml(s.slice(0, 200))}</div></div>`;
+                }).join('') + `</div>`;
+            }catch(e){ box.innerHTML = '<div class="py-6">—</div>'; }
+        }
         async function saveAndClose() {
             const ok = await saveForm();
             if (ok === false) return;
@@ -2372,6 +2396,7 @@
             cv.style.display = isList ? 'none' : '';
             if (isList) renderTable(cols, paged, start);
             else renderCards(cols, paged, start);
+            try{ paintBlankPanel(); }catch(e){}
         }
         function renderTable(cols, paged, start) {
             const allChecked = paged.length > 0 && paged.every((r, i) => selectedIds.has(String(rowId(r, allRows.indexOf(r)))));
