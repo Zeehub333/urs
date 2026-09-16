@@ -2330,6 +2330,35 @@ def api_rml_parse_sql(request):
                 dj = None
         schema = (data.get("schema") or "").strip()
 
+        # fetch-query output references STAGE tables (rml_api_<gid>_<table>_<hash>)
+        # which don't exist in the source DB — map them back to source tables so
+        # the query imports directly. Unanimous gid ⇒ introspect that connection.
+        import re as _re_stage
+        _stage_re = _re_stage.compile(r"\brml_api_(\d+)_([A-Za-z_][\w$#]*)_[0-9a-f]{8}\b",
+                                      _re_stage.IGNORECASE)
+        _union_re = _re_stage.compile(r"\brml_union_([A-Za-z_][\w$#]*)_[0-9a-f]{8}\b",
+                                      _re_stage.IGNORECASE)
+        try:
+            _stage_hits = _stage_re.findall(sql)
+        except Exception:
+            _stage_hits = []
+        _stage_gids = {g for g, _t in (_stage_hits or [])}
+        if _stage_hits and len(_stage_gids) == 1:
+            _g0 = next(iter(_stage_gids))
+            try:
+                _dj0 = _effective_or_row(int(_g0)) if _g0.isdigit() else None
+            except Exception:
+                _dj0 = None
+            if _dj0 is not None:
+                dj = _dj0
+                try:
+                    cid = str(_dj0.id)
+                except Exception:
+                    pass
+        if _stage_hits or _union_re.search(sql):
+            sql = _stage_re.sub(lambda _m: _m.group(2), sql)
+            sql = _union_re.sub(lambda _m: _m.group(1), sql)
+
         def _expand(sch, tbl):
             if dj is None:
                 return []
@@ -2356,6 +2385,12 @@ def api_rml_parse_sql(request):
         res = parse_sql(sql, conn_id=(str(dj.id) if dj is not None else cid),
                         default_schema=schema or (_default_schema_for(dj) if dj is not None else ""),
                         expand_star=_expand, describe=_describe, fk_of=_fk_of)
+        if _stage_hits:
+            try:
+                res.setdefault("warnings", []).insert(
+                    0, "حُلت جداول الترحيل (rml_api_*) إلى جداول المصدر — الاستعلام المجلوب يُستورد مباشرة")
+            except Exception:
+                pass
         # FK verification: mark links matching a declared DB foreign key (either direction)
         if dj is not None:
             try:
