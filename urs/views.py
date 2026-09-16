@@ -2915,6 +2915,54 @@ _RML_JOBS_LOCK = _th.Lock()
 _RML_JOB_TTL = 1800  # keep finished results 30 min
 
 
+def _log_rml_failure(rml, app, payload, err_text):
+    """Write the FULL failure (SQL + report state) to rml_last_error.txt.
+
+    The UI truncates long errors — this file keeps everything for diagnosis:
+    report, payload keys, draft connections/tables (draft file still exists
+    at job-failure time), and the complete SQL. Overwritten on each failure.
+    """
+    try:
+        import datetime as _dtm
+        _lines = ["TIME: %s" % _dtm.datetime.now().isoformat(timespec="seconds"),
+                  "RML: %s | APP: %s" % (rml, app)]
+        try:
+            _pl = payload or {}
+            _lines.append("PAYLOAD keys: %s" % sorted(_pl.keys()))
+            for _k in ("activeTable", "table", "page", "pageSize", "groupBy", "group_by"):
+                if _k in _pl:
+                    _lines.append("PAYLOAD %s: %s" % (_k, str(_pl[_k])[:120]))
+            _fl = _pl.get("filters") or _pl.get("activeFilters") or []
+            _lines.append("FILTERS: %d" % len(_fl))
+            try:
+                _sort = _pl.get("sort")
+                if _sort:
+                    _lines.append("SORT: %s" % str(_sort)[:120])
+            except Exception:
+                pass
+        except Exception:
+            pass
+        if str(rml or "").startswith("__draft_"):
+            try:
+                _dp = _find_rml_path(rml, app)
+                if _dp and _dp.exists():
+                    import xml.etree.ElementTree as _ET
+                    _root = _ET.parse(str(_dp)).getroot()
+                    _conns = [(c.get("id"), c.get("connection_id")) for c in _root.iter("connection")]
+                    _lines.append("DRAFT connections: %s" % (_conns,))
+                    _tbls = [(t.get("name"), t.get("conn")) for t in _root.iter("table")]
+                    _lines.append("DRAFT table_opts: %s" % (_tbls,))
+                    _flds = [(f.get("name"), f.get("table_source"), f.get("conn_id")) for f in _root.iter("field")]
+                    _lines.append("DRAFT fields: %d e.g. %s" % (len(_flds), _flds[:8]))
+            except Exception as _e2:
+                _lines.append("DRAFT parse: %s" % str(_e2)[:120])
+        _lines.append("ERROR FULL:")
+        _lines.append(str(err_text or ""))
+        (BASE_DIR / "rml_last_error.txt").write_text("\n".join(_lines), encoding="utf-8")
+    except Exception:
+        pass
+
+
 def _rml_job_progress(job_id, info):
     try:
         with _RML_JOBS_LOCK:
@@ -2968,6 +3016,10 @@ def _rml_job_run(job_id, rml, app, payload):
                 if rec is not None:
                     rec["status"] = "error"
                     rec["error"] = str(e)[:2000]
+        except Exception:
+            pass
+        try:
+            _log_rml_failure(rml, app, payload, str(e))
         except Exception:
             pass
     finally:
@@ -3033,6 +3085,11 @@ def api_rml_execute(request):
         return JsonResponse(result, json_dumps_params={"ensure_ascii": False})
     except Exception as e:
         msg = str(e)
+        try:
+            _d = data if "data" in locals() else {}
+            _log_rml_failure(_d.get("rml"), _d.get("app"), _d.get("payload", {}), msg)
+        except Exception:
+            pass
         import re as _re_missing
         # Handle column does not exist
         m = _re_missing.search(r'column "([A-Za-z_][A-Za-z0-9_]*)" does not exist', msg)

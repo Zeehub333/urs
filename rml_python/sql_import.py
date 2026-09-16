@@ -49,6 +49,7 @@ TYPES = {
     "INT", "INTEGER", "BIGINT", "SMALLINT", "TINYINT", "DECIMAL", "NUMERIC",
     "FLOAT", "REAL", "MONEY", "SMALLMONEY", "CHAR", "VARCHAR", "NCHAR",
     "NVARCHAR", "TEXT", "NTEXT", "DATE", "TIME", "DATETIME", "DATETIME2",
+    "TIMESTAMP", "TIMESTAMPTZ",
     "SMALLDATETIME", "DATETIMEOFFSET", "BIT", "UNIQUEIDENTIFIER", "BINARY",
     "VARBINARY", "IMAGE", "SQL_VARIANT", "XML",
 }
@@ -301,8 +302,44 @@ def extract_col_refs(expr: str) -> List[str]:
             i = j + 1
             continue
         if ch in ('"', "`"):
-            j = expr.find(ch, i + 1)
-            i = n if j < 0 else j + 1
+            # Quoted span: skip UNLESS it opens a dotted identifier chain
+            # ("T"."col", "T".col, T."col" is handled in the bare branch).
+            # Stale fetch-query aliases ("T4"."Name") must resolve via the
+            # current FROM map instead of persisting as dead literals.
+            q = ch
+            k = expr.find(q, i + 1)
+            if k < 0:
+                i = n
+                continue
+            _chain = [expr[i + 1:k]]
+            _kk = k + 1
+            while True:
+                while _kk < n and expr[_kk] in (" ", "\t"):
+                    _kk += 1
+                if _kk >= n or expr[_kk] != ".":
+                    break
+                _kk += 1
+                while _kk < n and expr[_kk] in (" ", "\t"):
+                    _kk += 1
+                if _kk < n and expr[_kk] in ('"', "`"):
+                    _q2 = expr[_kk]
+                    _k2 = expr.find(_q2, _kk + 1)
+                    if _k2 < 0:
+                        break
+                    _chain.append(expr[_kk + 1:_k2])
+                    _kk = _k2 + 1
+                else:
+                    _m2 = _IDENT_RE.match(expr[_kk:])
+                    if not _m2:
+                        break
+                    _chain.append(_m2.group(0))
+                    _kk += len(_m2.group(0))
+            if len(_chain) >= 2 and all(
+                    _p and not re.fullmatch(r"\d+(\.\d+)?", _p) for _p in _chain):
+                refs.append(".".join(_chain))
+                i = _kk
+                continue
+            i = k + 1
             continue
         if ch == "[":
             j = expr.find("]", i + 1)
@@ -337,6 +374,14 @@ def extract_col_refs(expr: str) -> List[str]:
                 kk += 1
                 while kk < n and expr[kk] in (" ", "\t"):
                     kk += 1
+                if kk < n and expr[kk] in ('"', "`"):
+                    _q3 = expr[kk]
+                    _k3 = expr.find(_q3, kk + 1)
+                    if _k3 >= 0 and expr[kk + 1:_k3]:
+                        chain.append(expr[kk + 1:_k3])
+                        k = _k3 + 1
+                        continue
+                    break
                 m2 = _IDENT_RE.match(expr[kk:])
                 if m2:
                     chain.append(m2.group(0))
@@ -686,8 +731,11 @@ def _rewrite_refs(expr: str, field_of: Callable[[str, str], Optional[str]],
 
     def _rep(m: re.Match) -> str:
         full = m.group(0)
-        dots = [p.strip() for p in full.split(".")]
-        dots = [unquote_ident(p) for p in dots]
+        # Already-bracketed output of a previous pass — leave untouched
+        # (idempotent; otherwise pass 2 would warn on every rewritten ref).
+        if full.startswith("[") and full.endswith("]"):
+            return full
+        dots = [p.strip() for p in split_dotted(full)]
         if len(dots) == 1 and (dots[0].upper() in KEYWORDS or dots[0].upper() in TYPES):
             return full
         if len(dots) == 1 and dots[0].upper() in _func_names:
@@ -717,8 +765,12 @@ def _rewrite_refs(expr: str, field_of: Callable[[str, str], Optional[str]],
     # ARGUMENTS still are, so only the name itself is skipped here.
     _func_names = {m.group(1).upper()
                    for m in re.finditer(r"\b([A-Za-z_][\w$#]*)\s*\(", tmp)}
-    tmp = re.sub(r"\b([A-Za-z_][\w$#]*\s*\.\s*)*(?:[A-Za-z_][\w$#]*|\"[^\"]+\"|`[^`]+`|\[[^\]]+\])", _rep, tmp)
-    tmp = re.sub(r"\b([A-Za-z_][\w$#]*\s*\.\s*)*(?:[A-Za-z_][\w$#]*|\"[^\"]+\"|`[^`]+`|\[[^\]]+\])", _rep, tmp)
+    # Dotted chains with bare or quoted ("..", `..`, [..]) parts. The lookbehind
+    # keeps digit-prefixed tokens (e.g. 23abc) from matching mid-word.
+    _qpart = r"(?:[A-Za-z_][\w$#]*|\"[^\"]+\"|`[^`]+`|\[[^\]]+\])"
+    _qchain = r"(?<![\w$#])" + _qpart + r"(?:\s*\.\s*" + _qpart + r")*"
+    tmp = re.sub(_qchain, _rep, tmp)
+    tmp = re.sub(_qchain, _rep, tmp)
 
     def _unstash(m: re.Match) -> str:
         return lits[int(m.group(1))]
