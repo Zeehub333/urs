@@ -12,6 +12,10 @@ REM merge the backslash with the closing quote in "%BASE%" and corrupt robocopy 
 if "%BASE:~-1%"=="\" set "BASE=%BASE%."
 set TEMP_DIR=%BASE%\.urs-temp
 set REPO=https://github.com/Zeehub333/urs.git
+REM drive-agnostic Git locations (no hardcoded drive; x86 var captured here -
+REM %ProgramFiles(x86)% must never appear inside a paren block)
+set GITDIR=%ProgramFiles%\Git\bin
+set GITDIRX86=%ProgramFiles(x86)%\Git\bin
 
 echo === Odex clone + sync ===
 echo BASE: %BASE%
@@ -21,8 +25,10 @@ echo.
 REM ---- git must exist ----
 git --version >nul 2>&1
 if errorlevel 1 (
-  if exist "C:\Program Files\Git\bin\git.exe" (
-    set "PATH=C:\Program Files\Git\bin;!PATH!"
+  if exist "%GITDIR%\git.exe" (
+    set "PATH=%GITDIR%;!PATH!"
+  ) else if exist "%GITDIRX86%\git.exe" (
+    set "PATH=%GITDIRX86%;!PATH!"
   ) else (
     echo [X] git not found - install it first: winget install -e --id Git.Git
     pause >nul

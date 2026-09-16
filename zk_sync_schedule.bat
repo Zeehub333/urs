@@ -1,7 +1,7 @@
 @echo off
 REM ============================================================
 REM  تسجيل مهمة المزامنة التلقائية في Task Scheduler (تشغيل كمسؤول)
-REM  المهمة: "URS ZK Sync" — كل 30 دقيقة — C:\urs2\zk_sync.bat
+REM  المهمة: "URS ZK Sync" — كل 30 دقيقة — zk_sync.bat بجانب هذا الملف
 REM  للإزالة: schtasks /delete /tn "URS ZK Sync" /f
 REM ============================================================
 setlocal

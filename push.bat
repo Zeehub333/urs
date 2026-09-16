@@ -7,6 +7,10 @@ setlocal EnableDelayedExpansion
 
 set ROOT=%~dp0
 pushd "%ROOT%" 2>nul || (echo [X] cannot enter %ROOT% & exit /b 1)
+REM drive-agnostic Git locations (no hardcoded drive; x86 var captured here -
+REM %ProgramFiles(x86)% must never appear inside a paren block)
+set GITDIR=%ProgramFiles%\Git\bin
+set GITDIRX86=%ProgramFiles(x86)%\Git\bin
 set NOPAUSE=0
 set MSG=
 for %%a in (%*) do (
@@ -20,8 +24,10 @@ REM ---- find git ----
 set GIT=git
 git --version >nul 2>&1
 if errorlevel 1 (
-  if exist "C:\Program Files\Git\bin\git.exe" (
-    set GIT="C:\Program Files\Git\bin\git.exe"
+  if exist "%GITDIR%\git.exe" (
+    set GIT="%GITDIR%\git.exe"
+  ) else if exist "%GITDIRX86%\git.exe" (
+    set GIT="%GITDIRX86%\git.exe"
   ) else (
     echo [X] git not found - install it first: winget install -e --id Git.Git
     if "%NOPAUSE%"=="0" pause >nul
