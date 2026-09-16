@@ -277,6 +277,10 @@ def home(request):
         connections_count = 0
 
     # Also pass system apps for debugging
+    try:
+        deploy_version = (BASE_DIR / "VERSION.txt").read_text(encoding="utf-8").strip()[:16] or "dev"
+    except Exception:
+        deploy_version = "dev"
     return render(request, "home.html", {
         "apps": apps,
         "apps_count": len(apps),
@@ -286,6 +290,7 @@ def home(request):
         "reports_with_charts": reports_with_charts,
         "shared_count": shared_count,
         "connections_count": connections_count,
+        "deploy_version": deploy_version,
     })
 
 def my_reports(request):
