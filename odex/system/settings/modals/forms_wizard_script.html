@@ -1222,6 +1222,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             return {
                 file: (fwEditMode ? fwEditMode.file : file),
                 table_ar: disp, table_en: prog, model_type: 'form',
+                table: fwBareTbl(fwMainTable),
                 schema: fwSchema || '', connection: fwConnName || 'urs_local',
                 category: document.getElementById('fmlCategory').value.trim() || 'عام',
                 description: document.getElementById('fmlDescription').value.trim(),

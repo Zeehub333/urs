@@ -1272,7 +1272,7 @@ def _resolve_app_dir(app_name):
 def api_models_design_save(request, app_name):
     """POST /api/apps/<app>/models/design/ — حفظ مصمم الموديل كـ .fmlk.
 
-    Body: {file?, table_ar, table_en, model_type(form|rule), schema?, category?, description?,
+    Body: {file?, table_ar, table_en, table?, model_type(form|rule), schema?, category?, description?,
            connection?, icon?, tabs?[{id,name,alias,sort_order,visibleIf}],
            fields: [{name, alias, data_type, inputType?, primary_key?, required?, nullable?, editable?,
                       default_mode(fixed|formula|empty)?, default_value?, formula?, validation?,
@@ -1281,12 +1281,20 @@ def api_models_design_save(request, app_name):
                       config?{parent_field,sync_source,...}}],
            details?[{table,alias,master,detail,rel_type,columns:[{name,alias,data_type,input_type}]}],
            overwrite?}
+
+    table_en = اسم النموذج البرمجي (للملف)؛ table = جدول القاعدة الفعلي
+    (مجرّد من السكيما/القاعدة) ويُحفظ في <fml_metadata table>.
     """
     if request.method != "POST":
         return JsonResponse({"error": "POST required"}, status=405)
     try:
         data = json.loads(request.body.decode() or "{}")
-        table_en = (data.get("table_en") or data.get("table") or "").strip()
+        table_en = (data.get("table_en") or "").strip()
+        real_table = (data.get("table") or "").strip()
+        if real_table and "." in real_table:
+            real_table = real_table.split(".")[-1].strip()
+        if not table_en:
+            table_en = real_table
         table_ar = (data.get("table_ar") or data.get("displayName") or table_en).strip()
         model_type = (data.get("model_type") or data.get("modelType") or "form").strip().lower()
         if model_type not in ("form", "rule"):
@@ -1342,7 +1350,7 @@ def api_models_design_save(request, app_name):
         md = ET.SubElement(fml, "fml_metadata")
         md.set("name", table_en)
         md.set("displayName", table_ar or table_en)
-        md.set("table", table_en)
+        md.set("table", real_table or table_en)
         md.set("model_type", model_type)
         md.set("schema", schema)
         md.set("connection", (data.get("connection") or "urs_local").strip() or "urs_local")
