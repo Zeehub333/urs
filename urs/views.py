@@ -1079,18 +1079,12 @@ def _wizard_effective_conn():
 
 
 def _fmlk_resolve_db(comp):
-    """Primary routing: ALWAYS connection #1 (urs_local) when present & SQL-queryable.
+    """Routing: the file's declared <fml_metadata connection> wins when it
+    resolves to a SQL-queryable row; else connection #1 (urs_local); else legacy.
 
     Built lazy (no connect here) so a down DB surfaces the row's real params via
-    MockDB in _fmlk_get_engine — never the legacy hardcoded host. The file's declared
-    <fml_metadata connection> is fallback; legacy 172.16.10.101/urs is last resort.
+    MockDB in _fmlk_get_engine — never the legacy hardcoded host.
     """
-    try:
-        eff = _wizard_effective_conn()
-        if eff is not None and _conn_is_sql_queryable(eff):
-            return _build_db_engine(eff, connect=False)
-    except Exception:
-        pass
     try:
         from .models import Connection
         cname = (comp.fml_metadata().get("connection") or "").strip()
@@ -1107,6 +1101,12 @@ def _fmlk_resolve_db(comp):
                 return _build_db_engine(dj, connect=False)
         except Exception:
             pass
+    try:
+        eff = _wizard_effective_conn()
+        if eff is not None and _conn_is_sql_queryable(eff):
+            return _build_db_engine(eff, connect=False)
+    except Exception:
+        pass
     return PostgresEngine(host="172.16.10.101", dbname="urs", user="postgres", password="postgres")
 
 
