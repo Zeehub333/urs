@@ -1,0 +1,25 @@
+# Python / Django
+__pycache__/
+*.py[cod]
+*$py.class
+odex/venv/
+venv/
+.env
+db_local.sqlite3
+*.sqlite3
+
+# Logs / temp / local probes
+*.log
+*.tmp
+*_tmp.py
+pgcheck_tmp.py
+C:\Users\admin\AppData\Local\Temp\opencode\
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Secrets (uncomment if app.config holds real credentials)
+# app.config
