@@ -2267,6 +2267,7 @@ list.innerHTML = wizardDetail.columns.map((col, idx)=>`
                     + '<button onclick="openFieldModal(-1)" class="wb-add w-full"><i class="fa-solid fa-plus"></i> إضافة حقل</button>'
                     + '<button onclick="openImportFields()" class="wb-add wb-add2 w-full"><i class="fa-solid fa-file-import"></i> استيراد من جدول</button>'
                     + '<button onclick="openSqlImport()" class="wb-add w-full"><i class="fa-solid fa-file-code"></i> استيراد من SQL</button>'
+                    + '<button onclick="openFetchQuery()" class="wb-add w-full"><i class="fa-solid fa-terminal"></i> fetch query</button>'
                     + '<div class="wb-dside-title">الجداول ('+_tkeys.length+')</div>'
                     + (_tkeys.map(k=>'<div class="wb-dside-tbl"><span class="font-mono" dir="ltr">'+wbEsc(_groups[k].table)+'</span><span class="text-slate-400">'+_groups[k].rows.length+'</span></div>').join('') || '<p class="text-slate-400 text-[11px]">استورد حقولاً أولاً</p>')
                     + '<div class="wb-dside-title">الروابط ('+(wizardLinks||[]).length+')</div>'
@@ -2683,6 +2684,63 @@ list.innerHTML = wizardDetail.columns.map((col, idx)=>`
         function closeSqlImport(){
             document.getElementById('sqlImportModal').classList.add('hidden');
             if(typeof unlockScroll === 'function') unlockScroll();
+        }
+        let _fetchQuerySql = '';
+        function openFetchQuery(){
+            if(!wizardConnections.length) return notify('اختر اتصالاً أولاً', 'info');
+            if(!wizardFields.length) return notify('أضف حقلاً أولاً', 'info');
+            if(!wizardColumns.length) return notify('أضف عموداً أولاً', 'info');
+            let m = document.getElementById('fetchQueryModal');
+            if(!m){
+                m = document.createElement('div');
+                m.id = 'fetchQueryModal';
+                m.className = 'hidden fixed inset-0 z-[70] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4';
+                m.setAttribute('onclick', 'if(event.target===this)closeFetchQuery()');
+                m.innerHTML = '<div class="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[88vh] overflow-hidden flex flex-col">'
+                    + '<div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-emerald-50 shrink-0"><h3 class="text-sm font-bold text-slate-800"><i class="fa-solid fa-terminal text-emerald-600"></i> fetch query — استعلام الجلب</h3><button onclick="closeFetchQuery()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button></div>'
+                    + '<div class="p-4 overflow-y-auto custom-scroll"><div id="fetchQueryOut" class="text-xs text-slate-500"></div></div>'
+                    + '<div class="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2 shrink-0"><button onclick="closeFetchQuery()" class="px-4 py-1.5 bg-slate-100 rounded-xl text-xs">إغلاق</button><button onclick="copyFetchQuery()" class="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold"><i class="fa-solid fa-copy"></i> نسخ</button></div>'
+                    + '</div>';
+                document.body.appendChild(m);
+            }
+            const box = document.getElementById('fetchQueryOut');
+            box.innerHTML = '<span class="text-slate-400">جارٍ توليد الاستعلام...</span>';
+            m.classList.remove('hidden');
+            if(typeof lockScroll === 'function') lockScroll();
+            const payload = {
+                connections: wizardConnections,
+                fields: wizardFields,
+                columns: wizardColumns,
+                links: wizardLinks,
+                table_opts: Object.keys(wizardTableOpts || {}).map(k=>{
+                    const parts = String(k).split('||');
+                    const o = wizardTableOpts[k] || {};
+                    return {name: parts.slice(1).join('||'), conn: parts[0], is_default: !!o.is_default, is_sub: !!o.is_sub};
+                }),
+                general_where: wizardGeneralWhere || '',
+                detail: wizardDetail,
+                rules: wizardRules,
+                groups: wizardGroups,
+                report_type: ((document.getElementById('rmlReportType') || {}).value || 'master')
+            };
+            fetch(`/api/apps/${wizApp()}/rml/fetch-query/`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)})
+                .then(r=>r.json().then(j=>({ok:r.ok, j})))
+                .then(({ok, j})=>{
+                    if(!ok) throw new Error(j.error || 'فشل التوليد');
+                    _fetchQuerySql = j.sql || '';
+                    box.innerHTML = '<pre dir="ltr" class="bg-slate-900 text-emerald-100 rounded-xl p-3 overflow-auto font-mono whitespace-pre-wrap" style="max-height:50vh">' + wbEsc(_fetchQuerySql) + '</pre>';
+                })
+                .catch(e=>{ box.innerHTML = '<span class="text-rose-500">تعذر التوليد: ' + wbEsc(String((e && e.message) || e)).slice(0, 500) + '</span>'; });
+        }
+        function closeFetchQuery(){
+            const m = document.getElementById('fetchQueryModal');
+            if(m) m.classList.add('hidden');
+            if(typeof unlockScroll === 'function') unlockScroll();
+        }
+        function copyFetchQuery(){
+            const t = _fetchQuerySql || '';
+            if(!t) return;
+            try{ (navigator.clipboard.writeText(t) || Promise.resolve()).then(()=>{ try{notify('تم نسخ الاستعلام ✓','success');}catch(e){} }).catch(()=>{}); }catch(e){}
         }
         async function runSqlParse(){
             const box = document.getElementById('sqlImportOut');

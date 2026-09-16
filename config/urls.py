@@ -124,6 +124,7 @@ urlpatterns = [
     path('api/apps/<str:app_name>/rml/draft/', urs_views.api_rml_draft, name='api_rml_draft'),
     path('api/apps/<str:app_name>/rml/draft/finalize/', urs_views.api_rml_draft_finalize, name='api_rml_draft_finalize'),
     path('api/apps/<str:app_name>/rml/draft/discard/', urs_views.api_rml_draft_discard, name='api_rml_draft_discard'),
+    path('api/apps/<str:app_name>/rml/fetch-query/', urs_views.api_rml_fetch_query, name='api_rml_fetch_query'),
     path('api/rml/detail', urs_views.api_rml_detail, name='api_rml_detail'),
     path('api/rml/detail-search', urs_views.api_rml_detail_search, name='api_rml_detail_search'),
     path('api/rml/distinct', urs_views.api_rml_distinct, name='api_rml_distinct'),

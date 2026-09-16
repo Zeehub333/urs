@@ -4035,6 +4035,64 @@ def api_rml_draft_discard(request, app_name):
 
 
 @csrf_exempt
+def api_rml_fetch_query(request, app_name):
+    """POST /api/apps/<app>/rml/fetch-query/ — wizard state → compiled executable SQL.
+
+    Body: same shape as draft (connections, fields, columns, links, table_opts,
+    general_where, detail, rules, groups, ...). Renders to a temp __fetchq_*.rml,
+    compiles through the normal pipeline (same DB routing as execute, no staging
+    and no execution — safe for huge tables), returns {sql}. Temp file deleted.
+    """
+    if request.method != "POST":
+        return JsonResponse({"error": "POST required"}, status=405)
+    target = None
+    try:
+        data = json.loads(request.body.decode() or "{}")
+        data, derr = _rml_normalize_payload(data)
+        if derr:
+            return JsonResponse({"error": derr}, status=400)
+        if not data.get("connections"):
+            return JsonResponse({"error": "اختر اتصالاً واحداً على الأقل"}, status=400)
+        if not data.get("fields"):
+            return JsonResponse({"error": "أضف حقلاً واحداً على الأقل"}, status=400)
+        if not data.get("columns"):
+            return JsonResponse({"error": "أضف عموداً واحداً على الأقل"}, status=400)
+        prog_name = (data.get("name", "") or "").strip() or ("fetchq_" + _uuid.uuid4().hex[:8])
+        pretty = _render_rml_xml(
+            prog_name, data.get("displayName", "").strip() or prog_name,
+            data.get("icon", "").strip() or "fa-chart-bar",
+            data.get("category", "").strip() or "HR", data.get("_schema") or "HR_SYS",
+            data.get("description", "").strip(), data.get("namespace", "").strip() or None,
+            data.get("connections", []), data.get("fields", []), data.get("columns", []),
+            data.get("charts", []), data.get("rules", []),
+            (data.get("report_type", data.get("type", "master")) or "master"),
+            data.get("detail"), data.get("links", []),
+            data.get("doc_template", data.get("docTemplate", "")),
+            data.get("groups", []), bool(data.get("distinct")),
+            data.get("table_opts", data.get("tableOpts", [])),
+            data.get("group_levels", data.get("groupLevels", 1)),
+            data.get("general_where", data.get("generalWhere", "")), {})
+        fname = "__fetchq_%s.rml" % _uuid.uuid4().hex[:12]
+        _ad, target, err = _resolve_rml_target(app_name, fname)
+        if err or target is None:
+            return JsonResponse({"error": err or "bad app"}, status=400)
+        target.write_text(pretty, encoding="utf-8")
+        pipe = _rml_get_pipeline(fname, app_name)
+        sql = pipe.preview_sql({"page": 1, "pageSize": 50})
+        return JsonResponse({"ok": True, "sql": sql}, json_dumps_params={"ensure_ascii": False})
+    except ValueError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+    finally:
+        try:
+            if target is not None and target.exists():
+                target.unlink()
+        except Exception:
+            pass
+
+
+@csrf_exempt
 def api_update_rml(request, app_name):
     """POST /api/apps/<app>/rml/update/ — overwrite an existing .rml file (report edit flow)."""
     if request.method != "POST":
