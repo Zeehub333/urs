@@ -288,8 +288,50 @@ def extract_col_refs(expr: str) -> List[str]:
     """Dotted/plain column refs in an expression (skips strings, keywords, func names)."""
     refs: List[str] = []
     i, n = 0, len(expr)
+
+    def _read_atom(pos):
+        """(text, new_pos) of a quoted/bracket/bare identifier atom, else (None, pos)."""
+        if pos < n and expr[pos] in ('"', "`"):
+            q = expr[pos]
+            k = expr.find(q, pos + 1)
+            if k < 0:
+                return None, n
+            return expr[pos + 1:k], k + 1
+        if pos < n and expr[pos] == "[":
+            k = expr.find("]", pos + 1)
+            if k < 0:
+                return None, n
+            return expr[pos + 1:k], k + 1
+        m2 = _IDENT_RE.match(expr[pos:])
+        if m2:
+            return m2.group(0), pos + len(m2.group(0))
+        return None, pos
+
+    def _chain_from(pos):
+        """Identifier chain starting at pos (atom (. atom)*), else None."""
+        first, pos = _read_atom(pos)
+        if first is None or not first:
+            return None, pos
+        chain = [first]
+        while True:
+            kk = pos
+            while kk < n and expr[kk] in (" ", "\t"):
+                kk += 1
+            if kk >= n or expr[kk] != ".":
+                break
+            nxt, npos = _read_atom(kk + 1)
+            if nxt is None or not nxt:
+                break
+            chain.append(nxt)
+            pos = npos
+        return chain, pos
+
     while i < n:
         ch = expr[i]
+        if ch == "@":
+            # T-SQL variable (@Offset/@Limit) — never a column ref
+            _, i = _read_atom(i + 1)
+            continue
         if ch == "'":
             j = i + 1
             while j < n:
@@ -301,48 +343,21 @@ def extract_col_refs(expr: str) -> List[str]:
                 j += 1
             i = j + 1
             continue
-        if ch in ('"', "`"):
-            # Quoted span: skip UNLESS it opens a dotted identifier chain
-            # ("T"."col", "T".col, T."col" is handled in the bare branch).
-            # Stale fetch-query aliases ("T4"."Name") must resolve via the
-            # current FROM map instead of persisting as dead literals.
-            q = ch
-            k = expr.find(q, i + 1)
-            if k < 0:
-                i = n
+        if ch in ('"', "`", "["):
+            # Quoted/bracket span: a dotted identifier chain ("T"."col",
+            # t.[col عربي], [col]) — a lone span keeps the old skip behavior.
+            started = ch
+            chain, npos = _chain_from(i)
+            if chain is not None and len(chain) >= 2 and all(
+                    _p and not re.fullmatch(r"\d+(\.\d+)?", _p) for _p in chain):
+                refs.append(".".join(chain))
+                i = npos
                 continue
-            _chain = [expr[i + 1:k]]
-            _kk = k + 1
-            while True:
-                while _kk < n and expr[_kk] in (" ", "\t"):
-                    _kk += 1
-                if _kk >= n or expr[_kk] != ".":
-                    break
-                _kk += 1
-                while _kk < n and expr[_kk] in (" ", "\t"):
-                    _kk += 1
-                if _kk < n and expr[_kk] in ('"', "`"):
-                    _q2 = expr[_kk]
-                    _k2 = expr.find(_q2, _kk + 1)
-                    if _k2 < 0:
-                        break
-                    _chain.append(expr[_kk + 1:_k2])
-                    _kk = _k2 + 1
-                else:
-                    _m2 = _IDENT_RE.match(expr[_kk:])
-                    if not _m2:
-                        break
-                    _chain.append(_m2.group(0))
-                    _kk += len(_m2.group(0))
-            if len(_chain) >= 2 and all(
-                    _p and not re.fullmatch(r"\d+(\.\d+)?", _p) for _p in _chain):
-                refs.append(".".join(_chain))
-                i = _kk
-                continue
-            i = k + 1
-            continue
-        if ch == "[":
-            j = expr.find("]", i + 1)
+            # lone span (alias remnant, quoted literal) — skip as before
+            if started == "[":
+                j = expr.find("]", i + 1)
+            else:
+                j = expr.find(started, i + 1)
             i = n if j < 0 else j + 1
             continue
         m = _IDENT_RE.match(expr[i:])
@@ -363,7 +378,7 @@ def extract_col_refs(expr: str) -> List[str]:
                 k += 1
             i = k + 1
             continue
-        # dotted chain
+        # dotted chain (bare, quoted and bracket atoms mix freely)
         chain = [word]
         k = j
         while True:
@@ -371,22 +386,12 @@ def extract_col_refs(expr: str) -> List[str]:
             while kk < n and expr[kk] in (" ", "\t"):
                 kk += 1
             if kk < n and expr[kk] == ".":
-                kk += 1
-                while kk < n and expr[kk] in (" ", "\t"):
-                    kk += 1
-                if kk < n and expr[kk] in ('"', "`"):
-                    _q3 = expr[kk]
-                    _k3 = expr.find(_q3, kk + 1)
-                    if _k3 >= 0 and expr[kk + 1:_k3]:
-                        chain.append(expr[kk + 1:_k3])
-                        k = _k3 + 1
-                        continue
+                nxt, npos = _read_atom(kk + 1)
+                if nxt is None or not nxt:
                     break
-                m2 = _IDENT_RE.match(expr[kk:])
-                if m2:
-                    chain.append(m2.group(0))
-                    k = kk + len(m2.group(0))
-                    continue
+                chain.append(nxt)
+                k = npos
+                continue
             break
         # function call? word followed by '('
         kk = k
@@ -452,6 +457,8 @@ _TABLE_FACTOR_RE = re.compile(
 
 def parse_table_factor(text: str) -> Optional[Dict[str, Any]]:
     """Parse one FROM/JOIN table factor (not subqueries — caller handles those)."""
+    # T-SQL table hints (WITH (NOLOCK/READPAST/UPDLOCK...)) carry no structure
+    text = re.sub(r"\s*\bWITH\s*\([^)]*\)\s*$", "", (text or "").strip(), flags=re.IGNORECASE)
     m = _TABLE_FACTOR_RE.match(text.strip())
     if not m:
         return None
@@ -768,7 +775,7 @@ def _rewrite_refs(expr: str, field_of: Callable[[str, str], Optional[str]],
     # Dotted chains with bare or quoted ("..", `..`, [..]) parts. The lookbehind
     # keeps digit-prefixed tokens (e.g. 23abc) from matching mid-word.
     _qpart = r"(?:[A-Za-z_][\w$#]*|\"[^\"]+\"|`[^`]+`|\[[^\]]+\])"
-    _qchain = r"(?<![\w$#])" + _qpart + r"(?:\s*\.\s*" + _qpart + r")*"
+    _qchain = r"(?<![\w$#@])" + _qpart + r"(?:\s*\.\s*" + _qpart + r")*"
     tmp = re.sub(_qchain, _rep, tmp)
     tmp = re.sub(_qchain, _rep, tmp)
 

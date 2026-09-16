@@ -1,10 +1,10 @@
-TIME: 2026-09-16T12:28:29
+TIME: 2026-09-16T12:36:51
 RML: __draft_confirmed_tr_report.rml | APP: transaction_reports
 PAYLOAD keys: ['page', 'pageSize']
 PAYLOAD page: 1
 PAYLOAD pageSize: 5
 FILTERS: 0
-DRAFT connections: [('1', '2')]
+DRAFT connections: [('1', '1'), ('2', '2')]
 DRAFT table_opts: [('tblincomingtransfers', '2')]
 DRAFT fields: 165 e.g. [('PublicNumber', 'tblincomingtransfers', '2'), ('SenderPhone', 'tblincomingtransfers', '2'), ('ReceiverPhone', 'tblincomingtransfers', '2'), ('Notes', 'tblincomingtransfers', '2'), ('TransferReceiving', 'tblincomingtransfers', '2'), ('Name', 'tbllscashchequeaccount', '2'), ('AccountName', 'tblaccounts', '2'), ('CurrencyName', 'tblcurrencies', '2')]
 ERROR FULL:
