@@ -16,7 +16,7 @@ from typing import Dict, List, Optional, Tuple, Any
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
-FIELD_REF_RE = re.compile(r"\[([A-Za-z0-9_][A-Za-z0-9_.]*)\]")
+FIELD_REF_RE = re.compile(r"\[([A-Za-z0-9_][A-Za-z0-9_.]*)\]|\{([A-Za-z0-9_][A-Za-z0-9_.]*)\}")
 NS_REF_RE = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)\b")
 
 
@@ -323,13 +323,15 @@ def _resolve_expression(expr_text: str, fields: Optional[List[Any]],
         # bracket holding quotes or non-Latin (pure [1] subscripts untouched).
         seg = re.sub(r'\["([^"]+)"\."([^"]+)"\]', r'[\1.\2]', seg)
         seg = re.sub(r'\[([A-Za-z_][\w$#]*)\."([^"]+)"\]', r'[\1.\2]', seg)
+        seg = re.sub(r'\{"([^"]+)"\."([^"]+)"\}', r'{\1.\2}', seg)
+        seg = re.sub(r'\{([A-Za-z_][\w$#]*)\."([^"]+)"\}', r'{\1.\2}', seg)
         while '[[' in seg:
             seg = seg.replace('[[', '[')
         while ']]' in seg:
             seg = seg.replace(']]', ']')
 
-        def _left_sub(m: re.Match) -> str:
-            inner = m.group(1).strip()
+        def _left_do(inner, _o, _c):
+            inner = inner.strip()
             pts = [p.strip().strip('"') for p in inner.split(".")]
             if len(pts) == 1:
                 key = pts[0].lower()
@@ -338,18 +340,18 @@ def _resolve_expression(expr_text: str, fields: Optional[List[Any]],
                     return _emit(str(getattr(cands[0], "name", pts[0])).strip().lower(), cands[0])
                 if not cands:
                     raise ValueError(
-                        f"مرجع غير معروف '[{inner}]' — استورد الحقل من تبويب الحقول أولاً")
+                        f"مرجع غير معروف '{_o}{inner}{_c}' — استورد الحقل من تبويب الحقول أولاً")
                 actual = sorted({_norm_tname(getattr(x, "table_source", None) or "") or "؟"
                                  for x in cands})
                 raise ValueError(
-                    f"المرجع '[{inner}]' ملتبس — موجود في ({'، '.join(actual)}): "
-                    f"استخدم [الجدول.{inner}] صراحة")
+                    f"المرجع '{_o}{inner}{_c}' ملتبس — موجود في ({'، '.join(actual)}): "
+                    f"استخدم {_o}الجدول.{inner}{_c} صراحة")
             if len(pts) == 2:
                 head, member = pts
                 if head.lower() in (registry or {}):
                     resolved = resolve_ns_member(head, member, registry, visited)
                     if resolved is None:
-                        raise ValueError(f"Unknown namespace '{head}' in [{inner}]")
+                        raise ValueError(f"Unknown namespace '{head}' in {_o}{inner}{_c}")
                     return f"({resolved})"
                 f = _find_in_table(member, head)
                 if f is not None:
@@ -358,17 +360,24 @@ def _resolve_expression(expr_text: str, fields: Optional[List[Any]],
                     actual = sorted({_norm_tname(getattr(x, "table_source", None) or "") or "؟"
                                      for x in by_name[member.strip().lower()]})
                     raise ValueError(
-                        f"الحقل '[{member}]' موجود في ({'، '.join(actual)}) وليس في '{head}' — "
-                        f"استخدم [{actual[0]}.{member}] أو استورد الحقل من '{head}'")
+                        f"الحقل '{_o}{member}{_c}' موجود في ({'، '.join(actual)}) وليس في '{head}' — "
+                        f"استخدم {_o}{actual[0]}.{member}{_c} أو استورد الحقل من '{head}'")
                 raise ValueError(
-                    f"مرجع غير معروف '[{inner}]' — للجداول استورد الحقل من '{head}' "
+                    f"مرجع غير معروف '{_o}{inner}{_c}' — للجداول استورد الحقل من '{head}' "
                     f"(تبويب الحقول ← استيراد من جدول)")
             raise ValueError(
-                f"صيغة مرجع غير مدعومة '[{inner}]' — الصيغ: [الحقل] أو [الجدول.الحقل]")
+                f"صيغة مرجع غير مدعومة '{_o}{inner}{_c}' — الصيغ: {_o}الحقل{_c} أو {_o}الجدول.الحقل{_c}")
+
+        def _left_sub(m: re.Match) -> str:
+            return _left_do(m.group(1), "[", "]")
+
+        def _left_sub_b(m: re.Match) -> str:
+            return _left_do(m.group(1), "{", "}")
         seg = re.sub(r"\[([^\]]*(?:\"|[^\x00-\x7F])[^\]]*)\]", _left_sub, seg)
-        # [field] or [table.field] or [conn.table.field] or [ns.member]
+        seg = re.sub(r"\{([^\}]*(?:\"|[^\x00-\x7F])[^\}]*)\}", _left_sub_b, seg)
+        # {field} / {table.field} / {conn.table.field} — same as [...] collision-free
         def _field_sub(m: re.Match) -> str:
-            inner = m.group(1).strip()
+            inner = (m.group(1) if m.group(1) is not None else m.group(2)).strip()
             parts = [p.strip() for p in inner.split(".")]
             if len(parts) == 1:
                 key = inner.lower()
@@ -422,7 +431,7 @@ def _resolve_expression(expr_text: str, fields: Optional[List[Any]],
                 return _emit(str(getattr(f, "name", member)).strip().lower(), f)
             raise ValueError(
                 f"صيغة مرجع غير مدعومة '[{inner}]' — الصيغ: [الحقل] أو [الجدول.الحقل] "
-                f"أو [الاتصال.الجدول.الحقل]")
+                f"أو [الاتصال.الجدول.الحقل] (وكذلك بـ {{}} بدل [])")
         seg = FIELD_REF_RE.sub(_field_sub, seg)
 
         def _ns_sub(m: re.Match) -> str:

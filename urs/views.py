@@ -3631,8 +3631,8 @@ def _render_rml_xml(prog_name, displayName, icon, category, schema, description,
     return "\n".join([l for l in pretty.split("\n") if l.strip()])
 
 
-_RML_REF3_RE = _re_pg.compile(r"\[([A-Za-z0-9_]+)\.([A-Za-z0-9_]+)\.([A-Za-z0-9_]+)\]")
-_RML_REF2_RE = _re_pg.compile(r"\[([A-Za-z0-9_]+)\.([A-Za-z0-9_]+)\]")
+_RML_REF3_RE = _re_pg.compile(r"\[([A-Za-z0-9_]+)\.([A-Za-z0-9_]+)\.([A-Za-z0-9_]+)\]|\{([A-Za-z0-9_]+)\.([A-Za-z0-9_]+)\.([A-Za-z0-9_]+)\}")
+_RML_REF2_RE = _re_pg.compile(r"\[([A-Za-z0-9_]+)\.([A-Za-z0-9_]+)\]|\{([A-Za-z0-9_]+)\.([A-Za-z0-9_]+)\}")
 
 
 def _sync_rml_table_refs(fields, columns, detail=None, general_where=""):
@@ -3656,21 +3656,29 @@ def _sync_rml_table_refs(fields, columns, detail=None, general_where=""):
         table_of.setdefault(nm, short)
 
     def fix(expr):
-        if not isinstance(expr, str) or "[" not in expr:
+        if not isinstance(expr, str) or ("[" not in expr and "{" not in expr):
             return expr
 
         def r3(m):
-            conn, tbl, fld = m.group(1), m.group(2), m.group(3)
+            g = m.groups()
+            if g[0] is not None:
+                conn, tbl, fld, _o, _c = g[0], g[1], g[2], "[", "]"
+            else:
+                conn, tbl, fld, _o, _c = g[3], g[4], g[5], "{", "}"
             want = table_of.get(fld.lower())
             if want and fld.lower() not in multi and want.lower() != tbl.lower():
-                return f"[{conn}.{want}.{fld}]"
+                return f"{_o}{conn}.{want}.{fld}{_c}"
             return m.group(0)
 
         def r2(m):
-            tbl, fld = m.group(1), m.group(2)
+            g = m.groups()
+            if g[0] is not None:
+                tbl, fld, _o, _c = g[0], g[1], "[", "]"
+            else:
+                tbl, fld, _o, _c = g[2], g[3], "{", "}"
             want = table_of.get(fld.lower())
             if want and fld.lower() not in multi and want.lower() != tbl.lower():
-                return f"[{want}.{fld}]"
+                return f"{_o}{want}.{fld}{_c}"
             return m.group(0)
 
         expr = _RML_REF3_RE.sub(r3, expr)

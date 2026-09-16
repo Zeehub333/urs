@@ -1,22 +1,13 @@
-TIME: 2026-09-16T12:36:51
-RML: __draft_confirmed_tr_report.rml | APP: transaction_reports
+TIME: 2026-09-16T13:13:30
+RML: __draft___bracetest.rml | APP: transaction_reports
 PAYLOAD keys: ['page', 'pageSize']
 PAYLOAD page: 1
 PAYLOAD pageSize: 5
 FILTERS: 0
-DRAFT connections: [('1', '1'), ('2', '2')]
-DRAFT table_opts: [('tblincomingtransfers', '2')]
-DRAFT fields: 165 e.g. [('PublicNumber', 'tblincomingtransfers', '2'), ('SenderPhone', 'tblincomingtransfers', '2'), ('ReceiverPhone', 'tblincomingtransfers', '2'), ('Notes', 'tblincomingtransfers', '2'), ('TransferReceiving', 'tblincomingtransfers', '2'), ('Name', 'tbllscashchequeaccount', '2'), ('AccountName', 'tblaccounts', '2'), ('CurrencyName', 'tblcurrencies', '2')]
+DRAFT connections: [('1', '2')]
+DRAFT table_opts: [('vewOutgoingTransfersDeliveringReport', '2'), ('tblIncomingTransfers', '2')]
+DRAFT fields: 148 e.g. [('AAA', 'vewOutgoingTransfersDeliveringReport', '2'), ('BBB', 'vewOutgoingTransfersDeliveringReport', '2'), ('CCC', 'vewOutgoingTransfersDeliveringReport', '2'), ('ReferenceExpress', 'tblIncomingTransfers', '2'), ('OutgoingTargetNetwork', 'tblIncomingTransfers', '2'), ('EnterTimeNetwork', 'tblIncomingTransfers', '2'), ('DebitingMethod', 'vewOutgoingTransfersDeliveringReport', '2'), ('DDD', 'vewOutgoingTransfersDeliveringReport', '2')]
 ERROR FULL:
-Report execution failed: ('42S22', "[42S22] [Microsoft][ODBC SQL Server Driver][SQL Server]Invalid column name 'رقم الهوية'. (207) (SQLExecDirectW); [42S22] [Microsoft][ODBC SQL Server Driver][SQL Server]Invalid column name 'رقم الهوية'. (207); [42S22] [Microsoft][ODBC SQL Server Driver][SQL Server]Statement(s) could not be prepared. (8180)")
-SQL: SELECT "T0"."PublicNumber" AS "رقم الاكسبرس", "T0"."SenderPhone" AS "تلفون المرسل", "T0"."ReceiverPhone" AS "تلفون المستلم", "T0"."Notes" AS "ملاحظات الحوالة", CASE
-        WHEN "T0"."TransferReceiving" = 0 THEN N'وارد'
-        ELSE N'صادر'
-    END AS "نوع العملية", "T3"."Name" AS "نوع الحوالة", "T1"."AccountName" AS "عميل الارسال", "T1"."AccountName" AS "عميل الصرف", "T2"."CurrencyName" AS "عملة الحوالة", "T0"."Amount" AS "مبلغ الحوالة", "T0"."ReceiverName" AS "المستلم", "T0"."SenderName" AS "المرسل", CAST("T0"."TheDate" AS TIMESTAMP) AS "تاريخ الحوالة", COALESCE("T4"."ProvinceName", "T4"."ProvinceName") AS "المحافظة", "T0"."PublicNumber" AS "رقم الاكسبرس", "رقم الهوية" AS "رقم البطاقة", "T0"."SenderPhone" AS "تلفون المرسل", "T0"."ReceiverPhone" AS "تلفون المستلم", "T0"."Notes" AS "ملاحظات الحوالة", CASE
-        WHEN "T0"."TransferReceiving" = 0 THEN N'وارد'
-        ELSE N'صادر'
-    END AS "نوع العملية", "T3"."Name" AS "نوع الحوالة", "T1"."AccountName" AS "عميل الارسال", "T1"."AccountName" AS "عميل الصرف", "T2"."CurrencyName" AS "عملة الحوالة", "T0"."Amount" AS "مبلغ الحوالة", "T0"."ReceiverName" AS "المستلم", "T0"."SenderName" AS "المرسل", "T0"."OutgoingTargetNetwork" AS "جهة الصرف لدى الشبكة", "T0"."EnterTimeNetwork" AS "وقت الصرف لدى الشبكة", CAST("T0"."TheDate" AS TIMESTAMP) AS "تاريخ الحوالة", COALESCE("T4"."ProvinceName", "T4"."ProvinceName") AS "المحافظة", "T0"."PublicNumber" AS "رقم الاكسبرس", "رقم الهوية" AS "رقم البطاقة", "T0"."SenderPhone" AS "تلفون المرسل", "T0"."ReceiverPhone" AS "تلفون المستلم", "T0"."Notes" AS "ملاحظات الحوالة", CASE
-        WHEN "T0"."TransferReceiving" = 0 THEN N'وارد'
-        ELSE N'صادر'
-    END AS "نوع العملية", "T3"."Name" AS "نوع الحوالة", "T1"."AccountName" AS "عميل الارسال", "T1"."AccountName" AS "عميل الصرف", "T2"."CurrencyName" AS "عملة الحوالة", "T0"."Amount" AS "مبلغ الحوالة", "T0"."ReceiverName" AS "المستلم", "T0"."SenderName" AS "المرسل", "T0"."OutgoingTargetNetwork" AS "جهة الصرف لدى الشبكة", "T0"."EnterTimeNetwork" AS "وقت الصرف لدى الشبكة", CAST("T0"."TheDate" AS TIMESTAMP) AS "تاريخ الحوالة" FROM "dbo"."tblincomingtransfers" "T0" LEFT JOIN "dbo"."tblaccounts" "T1" ON "T1"."ID" = "T0"."ExchangeAccountID" LEFT JOIN "dbo"."tblcurrencies" "T2" ON "T2"."ID" = "T0"."CommissionCurrencyID" LEFT JOIN "dbo"."tbllscashchequeaccount" "T3" ON "T3"."ID" = "T0"."MethodID" LEFT JOIN "dbo"."tblprovinces" "T4" ON "T4"."ID" = "T0"."ProvinceID" WHERE (((("T0"."Delivered" = 1) AND ("T0"."Delivered" = 1)) AND ("T0"."Delivered" = 1))) ORDER BY 1 OFFSET :off ROWS FETCH NEXT :lim ROWS ONLY
+Report execution failed: ('42S22', "[42S22] [Microsoft][ODBC SQL Server Driver][SQL Server]Invalid column name 'AAA'. (207) (SQLExecDirectW); [42S22] [Microsoft][ODBC SQL Server Driver][SQL Server]Invalid column name 'BBB'. (207); [42S22] [Microsoft][ODBC SQL Server Driver][SQL Server]Invalid column name 'CCC'. (207); [42S22] [Microsoft][ODBC SQL Server Driver][SQL Server]Invalid column name 'DDD'. (207); [42S22] [Microsoft][ODBC SQL Server Driver][SQL Server]Statement(s) could not be prepared. (8180)")
+SQL: SELECT "T0"."AAA" AS "AAA", "T0"."BBB" AS "BBB", "T0"."CCC" AS "CCC", "T1"."ReferenceExpress" AS "ReferenceExpress", "T1"."OutgoingTargetNetwork" AS "OutgoingTargetNetwork", "T1"."EnterTimeNetwork" AS "EnterTimeNetwork", "T0"."DebitingMethod" AS "DebitingMethod", "T0"."DDD" AS "DDD" FROM "dbo"."vewOutgoingTransfersDeliveringReport" "T0" LEFT JOIN "dbo"."tblIncomingTransfers" "T1" ON "T1"."ID" = "T0"."TransferID" ORDER BY 1 OFFSET :off ROWS FETCH NEXT :lim ROWS ONLY
 Params: {'off': 0, 'lim': 5}

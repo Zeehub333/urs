@@ -289,6 +289,14 @@ def extract_col_refs(expr: str) -> List[str]:
     refs: List[str] = []
     i, n = 0, len(expr)
 
+    def _skip_braced(pos):
+        """End pos past a {..} span (engine refs — never column refs here)."""
+        if pos < n and expr[pos] == "{":
+            k = expr.find("}", pos + 1)
+            if k >= 0:
+                return k + 1
+        return pos
+
     def _read_atom(pos):
         """(text, new_pos) of a quoted/bracket/bare identifier atom, else (None, pos)."""
         if pos < n and expr[pos] in ('"', "`"):
@@ -328,6 +336,11 @@ def extract_col_refs(expr: str) -> List[str]:
 
     while i < n:
         ch = expr[i]
+        if ch == "{":
+            # Engine {ref} spans (incl. ODBC {fn}/{d} escapes) — not refs here
+            ni = _skip_braced(i)
+            i = ni if ni > i else i + 1
+            continue
         if ch == "@":
             # T-SQL variable (@Offset/@Limit) — never a column ref
             _, i = _read_atom(i + 1)
@@ -730,17 +743,21 @@ def parse_from(from_clause: str) -> Tuple[List[Dict[str, Any]], List[Dict[str, A
 
 def _rewrite_refs(expr: str, field_of: Callable[[str, str], Optional[str]],
                   warn: List[str]) -> str:
-    """Replace table.col / col with [..] refs via field_of(table_or_None, col).
+    """Replace table.col / col with {..} refs via field_of(table_or_None, col).
 
-    field_of returns the bracket body (e.g. 'col' or 'table.col') or None to
+    field_of returns the ref body (e.g. 'col' or 'table.col') or None to
     leave the reference untouched (literals/keywords already excluded upstream).
+    Braces are the generated form (collision-free vs T-SQL [...] idents);
+    hand-written {..} refs pass through untouched (resolved at execution).
     """
 
     def _rep(m: re.Match) -> str:
         full = m.group(0)
-        # Already-bracketed output of a previous pass — leave untouched
+        # Already-bracketed/braced output of a previous pass — leave untouched
         # (idempotent; otherwise pass 2 would warn on every rewritten ref).
         if full.startswith("[") and full.endswith("]"):
+            return full
+        if full.startswith("{") and full.endswith("}"):
             return full
         dots = [p.strip() for p in split_dotted(full)]
         if len(dots) == 1 and (dots[0].upper() in KEYWORDS or dots[0].upper() in TYPES):
@@ -758,7 +775,7 @@ def _rewrite_refs(expr: str, field_of: Callable[[str, str], Optional[str]],
                 return full
         if body is None:
             return full
-        return f"[{body}]"
+        return "{" + body + "}"
 
     # strings protected by placeholder pass
     lits: List[str] = []
@@ -774,8 +791,9 @@ def _rewrite_refs(expr: str, field_of: Callable[[str, str], Optional[str]],
                    for m in re.finditer(r"\b([A-Za-z_][\w$#]*)\s*\(", tmp)}
     # Dotted chains with bare or quoted ("..", `..`, [..]) parts. The lookbehind
     # keeps digit-prefixed tokens (e.g. 23abc) from matching mid-word.
+    # Hand-written {..} refs are already resolved — consumed whole, kept as-is.
     _qpart = r"(?:[A-Za-z_][\w$#]*|\"[^\"]+\"|`[^`]+`|\[[^\]]+\])"
-    _qchain = r"(?<![\w$#@])" + _qpart + r"(?:\s*\.\s*" + _qpart + r")*"
+    _qchain = r"\{[^\}]+\}|(?<![\w$#@])" + _qpart + r"(?:\s*\.\s*" + _qpart + r")*"
     tmp = re.sub(_qchain, _rep, tmp)
     tmp = re.sub(_qchain, _rep, tmp)
 
@@ -1028,7 +1046,7 @@ def parse_sql(sql: str, conn_id: str = "", default_schema: str = "",
                         add_field(cn, t, ct)
                     auto_n += 1
                     columns.append({"name": f"col_{cn}", "alias": cn,
-                                    "expr": f"[{_et}.{cn}]",
+                                    "expr": "{" + _et + "." + cn + "}",
                                     "dataType": ct, "col_type": "direct"})
                     expanded += 1
             continue

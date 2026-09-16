@@ -3007,7 +3007,8 @@ list.innerHTML = wizardDetail.columns.map((col, idx)=>`
         function wbColSource(col){
             // مصدر قيم العمود: مباشر (الجدول الافتراضي) | عبر رابط | بلا رابط
             const refs = [];
-            String((col && col.expr) || '').replace(/\[([A-Za-z0-9_][A-Za-z0-9_.]*)\]/g, (m, inner)=>{
+            String((col && col.expr) || '').replace(/\[([A-Za-z0-9_][A-Za-z0-9_.]*)\]|\{([A-Za-z0-9_][A-Za-z0-9_.]*)\}/g, (m, a, b)=>{
+                const inner = a || b;
                 const parts = String(inner).split('.');
                 const f = wbFieldByName(parts[parts.length-1]);
                 if(f) refs.push(f);

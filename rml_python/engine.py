@@ -390,10 +390,10 @@ def _resolve_filter_field(field: str, columns: Optional[List] = None,
             if part.endswith(")"):
                 part = part[:-1]
             fmap = {getattr(f, "name", "").lower(): f for f in (fields or []) if getattr(f, "name", None)}
-            for r in re.findall(r"\[([^\].\[]+)\]", part):
+            for r in re.findall(r"[\[{]([^\].\[{}]+)[\]}]", part):
                 if r.strip().lower() in fmap:
                     refs.add(r.strip())
-            for _qm in re.finditer(r"\[([A-Za-z0-9_][A-Za-z0-9_.]*)\]", part):
+            for _qm in re.finditer(r"[\[{]([A-Za-z0-9_][A-Za-z0-9_.]*)[\]}]", part):
                 _qp = [p.strip() for p in _qm.group(1).split(".")]
                 if len(_qp) > 1 and _qp[-1].lower() in fmap:
                     refs.add(_qp[-1].strip())
@@ -466,9 +466,9 @@ def _build_where(filters: List[Dict[str, Any]], start_idx: int = 1, columns: Opt
                 parts = re.split(r"('(?:[^']|'')*')", str(txt))
                 for i in range(0, len(parts), 2):
                     seg = parts[i]
-                    cands = set(re.findall(r"\[([^\].\[]+)\]", seg))
+                    cands = set(re.findall(r"[\[{]([^\].\[{}]+)[\]}]", seg))
                     # qualified refs [table.col] / [conn.table.col] -> date check by column part
-                    for _qm in re.finditer(r"\[([A-Za-z0-9_][A-Za-z0-9_.]*)\]", seg):
+                    for _qm in re.finditer(r"[\[{]([A-Za-z0-9_][A-Za-z0-9_.]*)[\]}]", seg):
                         _qp = [p.strip() for p in _qm.group(1).split(".")]
                         if len(_qp) > 1 and _qp[-1]:
                             cands.add(_qp[-1])
@@ -1561,7 +1561,7 @@ class RMLReportEngine:
                 inlined = resolve_col(tgt, stack + [tid])
                 return "(" + self._strip_format_wrapper(inlined) + ")"
 
-            return re.sub(r"\[([^\].\[]+)\]", sub, raw)
+            return re.sub(r"[\[{]([^\].\[{}]+)[\]}]", sub, raw)
 
         out = []
         for c in (columns or []):
@@ -1592,11 +1592,11 @@ class RMLReportEngine:
 
     @staticmethod
     def _bracket_refs(text: str) -> List[str]:
-        """Field names referenced as [name] (skips [ns.member])."""
-        return re.findall(r"\[([^\].\[]+)\]", str(text or ""))
+        """Field names referenced as [name] or {name} (skips [ns.member])."""
+        return re.findall(r"[\[{]([^\].\[{}]+)[\]}]", str(text or ""))
 
     def _refs_in_text(self, text: str, field_table: Dict[str, str]) -> set:
-        """Field keys referenced in raw SQL: [refs] + bare/quoted identifiers.
+        """Field keys referenced in raw SQL: [refs]/{refs} + bare/quoted identifiers.
 
         Supports qualified refs [table.col] / [conn.table.col] (resolved to
         their field key). Single-quoted literals are ignored;
@@ -1606,7 +1606,7 @@ class RMLReportEngine:
         for r in self._bracket_refs(text):
             if r.strip().lower() in field_table:
                 found.add(r.strip().lower())
-        for m in re.finditer(r"\[([A-Za-z0-9_][A-Za-z0-9_.]*)\]", str(text or "")):
+        for m in re.finditer(r"[\[{]([A-Za-z0-9_][A-Za-z0-9_.]*)[\]}]", str(text or "")):
             inner = m.group(1).strip()
             if "." in inner:
                 key = self._match_qualified(inner, field_table)
@@ -1770,7 +1770,7 @@ class RMLReportEngine:
         fields = getattr(self, "fields", []) or []
         out: set = set()
         qkeys: set = set()
-        for m in re.finditer(r"\[([A-Za-z0-9_][A-Za-z0-9_.]*)\]", str(text or "")):
+        for m in re.finditer(r"[\[{]([A-Za-z0-9_][A-Za-z0-9_.]*)[\]}]", str(text or "")):
             inner = m.group(1).strip()
             if "." not in inner:
                 continue
@@ -2649,7 +2649,7 @@ class RMLReportEngine:
             c = cond.strip()
             if not c:
                 continue
-            refs = re.findall(r"\[([^\]]+)\]", c)
+            refs = re.findall(r"[\[{]([^\]}]+)[\]}]", c)
             ok = True
             for r in refs:
                 parts = [p.strip() for p in r.split(".")]
@@ -2667,7 +2667,7 @@ class RMLReportEngine:
             if not ok:
                 continue
             # bare identifiers must all be mine (or SQL noise)
-            _bare = re.findall(r"[A-Za-z_\u0600-\u06FF][\w$\u0600-\u06FF]*", re.sub(r"\[[^\]]*\]|'(?:''|[^'])*'", " ", c))
+            _bare = re.findall(r"[A-Za-z_\u0600-\u06FF][\w$\u0600-\u06FF]*", re.sub(r"\[[^\]]*\]|\{[^}]*\}|'(?:''|[^'])*'", " ", c))
             bad = False
             for w in _bare:
                 uw = w.upper()
@@ -2693,7 +2693,7 @@ class RMLReportEngine:
                 inner = m.group(1)
                 parts = [p.strip() for p in inner.split(".")]
                 return "[" + parts[-1] + "]"
-            keep.append(re.sub(r"\[([^\]]+)\]", _rw, c))
+            keep.append(re.sub(r"[\[{]([^\]}]+)[\]}]", _rw, c))
         return " AND ".join(keep)
 
     def _fetch_sqlserver_rows(self, table_norm, info, refresh=False):
@@ -4479,7 +4479,7 @@ class RMLReportEngine:
                         avals.append(v)
                 amap: Dict[Any, Any] = {}
                 if avals:
-                    inner_sql = re.sub(r"\[([^\].\[]+)\]", lambda m: _Q(m.group(1)), s["inner"])
+                    inner_sql = re.sub(r"[\[{]([^\].\[{}]+)[\]}]", lambda m: _Q(m.group(1)), s["inner"])
                     # bare tokens of remote fields -> quoted original case,
                     # OUTSIDE quoted spans only (never re-wrap "T"."COL")
                     fnames = [str(getattr(f, "name", "")) for f in (getattr(self, "fields", []) or [])
@@ -5685,8 +5685,8 @@ class RMLReportEngine:
                 continue
             # direct: field data type (prefer a field on the detail table)
             _raw = (getattr(_c, "expr", None) or getattr(_c, "name", None) or "")
-            _keys = set(re.findall(r"\[([^\].\[]+)\]", str(_raw)))
-            for _qm in re.finditer(r"\[([A-Za-z0-9_][A-Za-z0-9_.]*)\]", str(_raw)):
+            _keys = set(re.findall(r"[\[{]([^\].\[{}]+)[\]}]", str(_raw)))
+            for _qm in re.finditer(r"[\[{]([A-Za-z0-9_][A-Za-z0-9_.]*)[\]}]", str(_raw)):
                 _qp = [p.strip() for p in _qm.group(1).split(".") if p.strip()]
                 if _qp:
                     _keys.add(_qp[-1])
@@ -5989,8 +5989,8 @@ class RMLReportEngine:
         if col is not None:
             raw = str(getattr(col, "expr", None) or getattr(col, "name", None) or "")
         fmap = {str(getattr(f, "name", "")).lower(): f for f in (fields or []) if getattr(f, "name", None)}
-        refs = set(re.findall(r"\[([^\].\[]+)\]", raw or ""))
-        for _qm in re.finditer(r"\[([A-Za-z0-9_][A-Za-z0-9_.]*)\]", raw or ""):
+        refs = set(re.findall(r"[\[{]([^\].\[{}]+)[\]}]", raw or ""))
+        for _qm in re.finditer(r"[\[{]([A-Za-z0-9_][A-Za-z0-9_.]*)[\]}]", raw or ""):
             _qp = [p.strip() for p in _qm.group(1).split(".")]
             if len(_qp) > 1 and _qp[-1]:
                 refs.add(_qp[-1])
