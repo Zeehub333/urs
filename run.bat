@@ -3,7 +3,8 @@ REM Odex ERP - One-click launcher (Windows)
 REM Reads interpreter + bind address from app.config [KEY=VALUE].
 REM Offline-capable: SQLite fallback. For real Postgres, set HOST in config/settings.py
 REM and run db_init.py manually.
-REM First run with no main data -> opens the first-run wizard [db_checker.bat].
+REM First run with no app.config or no main data -> opens the setup wizard.
+REM The wizard creates app.config (DB_* step) when it is missing.
 setlocal
 
 set ROOT=%~dp0
@@ -14,7 +15,12 @@ set APP_HOST=127.0.0.1
 set APP_PORT=8004
 set APP_SETTINGS=config.settings_local
 
-REM ---- load app.config ----
+REM ---- load app.config (created by the setup wizard if missing) ----
+set NOCONF=
+if not exist "%ROOT%app.config" (
+  set NOCONF=1
+  echo [--] app.config missing - the setup wizard will create it on first run.
+)
 if exist "%ROOT%app.config" (
   for /f "usebackq eol=# tokens=1* delims==" %%a in ("%ROOT%app.config") do (
     if /i "%%a"=="PYTHON" set PY=%%b
@@ -80,9 +86,13 @@ goto seed_retry
 REM NOTE: ports 8003/8005 [uvicorn rml/fmlk api] are legacy - players are proxied
 REM inside Django now [MEMORY.md 2.3], so they are no longer started.
 
-REM ---- main-data gate: no company/connection/tables -> first-run wizard ----
+REM ---- main-data gate: no app.config / company / connection / tables -> setup wizard ----
 call "%ROOT%db_checker.bat"
-if errorlevel 1 (
+set DBCHECK=%errorlevel%
+if defined NOCONF (
+  set OPEN_URL=http://%APP_HOST%:%APP_PORT%/settings/setup/
+  set OPEN_NOTE=FIRST RUN (no app.config) - opening the setup wizard ...
+) else if %DBCHECK% neq 0 (
   set OPEN_URL=http://%APP_HOST%:%APP_PORT%/settings/setup/
   set OPEN_NOTE=FIRST RUN - opening the setup wizard ...
 ) else (

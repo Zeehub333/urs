@@ -11,7 +11,13 @@ from .models import App
 
 
 def _needs_onboarding() -> bool:
-    """بوابة الشركة الأولى: True إذا لا توجد شركة أو لا يوجد فرع."""
+    """بوابة الشركة الأولى: True إذا لا يوجد app.config أو لا توجد شركة أو لا يوجد فرع."""
+    try:
+        from config.dbconf import base_dir as _bd
+        if not (_bd() / "app.config").exists():
+            return True
+    except Exception:
+        pass
     try:
         from .models import Company, Branch
         if Company.objects.count() == 0:
