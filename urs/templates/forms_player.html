@@ -120,13 +120,13 @@
                     <span id="recordCount" class="text-slate-400 text-xs whitespace-nowrap">0 سجل</span>
                 </div>
                 <div class="flex items-center gap-1">
-                    <button onclick="openGridSettings()" id="viewListBtn" title="إعدادات الادخال" class="w-8 h-8 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 transition"><i class="fa-solid fa-list"></i></button>
-                    <button onclick="toggleView('grid')" id="viewGridBtn" title="عرض شبكة" class="w-8 h-8 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 transition"><i class="fa-solid fa-table-cells"></i></button>
+                    <button onclick="openGridSettings()" id="viewListBtn" title="إعدادات الأعمدة (عرض / إخفاء)" class="w-8 h-8 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 transition"><i class="fa-solid fa-list"></i></button>
+                    <button onclick="toggleView(viewMode === 'grid' ? 'list' : 'grid')" id="viewGridBtn" title="تبديل قائمة / شبكة" class="w-8 h-8 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 transition"><i class="fa-solid fa-table-cells"></i></button>
                     <span id="viewActionsBar" class="flex items-center gap-1"></span>
                     <button onclick="exportGrid()" title="تصدير" class="w-8 h-8 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-emerald-600 transition"><i class="fa-solid fa-file-excel"></i></button>
                     <button onclick="toggleDocPanel()" title="معاينة الطباعة (مستندات DML)" class="w-8 h-8 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-indigo-600 transition"><i class="fa-solid fa-print text-sm"></i></button>
                     <button onclick="shareGrid()" title="مشاركة" class="w-8 h-8 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-violet-600 transition"><i class="fa-solid fa-share-nodes"></i></button>
-                    <button onclick="toggleView('list')" id="viewListGoBtn" title="عرض قائمة" class="w-8 h-8 rounded-full flex items-center justify-center text-indigo-600 bg-indigo-50 transition"><i class="fa-solid fa-gear"></i></button>
+                    <button onclick="openDesigner()" id="viewListGoBtn" title="مصمم النماذج" class="w-8 h-8 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-indigo-600 transition"><i class="fa-solid fa-gear"></i></button>
                 </div>
             </div>
         </header>
@@ -2303,6 +2303,9 @@
         function changePage(d) {
             currentPage += d;
             renderGrid();
+        }
+        function openDesigner(){
+            location.href = `/app/${currentApp}/forms-designer/?file=` + encodeURIComponent(currentFml || '');
         }
         function toggleView(mode) {
             viewMode = mode;
