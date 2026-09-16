@@ -98,7 +98,6 @@
                         {% for f in fml_files %}<option value="{{ f.file }}" data-url="{% if f.virtual %}{{ f.url }}{% endif %}" {% if f.file == fml_file %}selected{% endif %}>{{ f.metadata.displayName }}</option>{% endfor %}
                         <option value="__designer__">+ مصمم موديل جديد</option>
                     </select>
-                    <button onclick="location.href=`/app/${currentApp}/?design=${encodeURIComponent(currentFml)}`" title="فتح في المصمم" class="w-8 h-8 rounded-full hidden md:flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-violet-600 transition"><i class="fa-solid fa-table-list"></i></button>
                     <button onclick="migrateCurrentModel()" title="ترحيل الجدول" class="w-8 h-8 rounded-full hidden md:flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-emerald-600 transition"><i class="fa-solid fa-database"></i></button>
                     <span class="w-px h-6 bg-slate-200 mx-1 hidden md:block"></span>
                     <span id="formActionsBar" class="flex items-center gap-1"></span>
