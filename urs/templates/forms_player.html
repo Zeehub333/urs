@@ -2419,9 +2419,11 @@
                     if(mf) cover = `<div class="flex justify-center mb-2 overflow-hidden rounded-xl bg-slate-50" style="max-height:130px">${mediaHtml(cellVal(r, mf.name), fieldMediaKind(fieldDef(mf.name)))}</div>`;
                 }catch(e){}
                 if(!cover) cover = `<div class="flex justify-center mb-2"><span class="w-14 h-14 rounded-full bg-indigo-50 text-indigo-500 flex items-center justify-center text-2xl"><i class="fa-solid fa-image"></i></span></div>`;
-                // الاسم: أول عمود غير مرئي-وسائط، ثم العمود الثالث من اليمين إن وجد
+                // الاسم: أول عمود غير مرئي-وسائط، ثم الثاني والثالث في سطر واحد بلا أسماء
                 const nameF = cols.find(f => !fieldMediaKind(fieldDef(f.name))) || cols[0];
-                const thirdF = cols.length > 2 ? cols[2] : null;
+                const _st = [cols[1], cols[2]].filter(f => f && f !== nameF);
+                const secondV = _st.length > 0 ? String(cellVal(r, _st[0].name) ?? '').trim() : '';
+                const thirdV = _st.length > 1 ? String(cellVal(r, _st[1].name) ?? '').trim() : '';
                 const nameV = nameF ? String(cellVal(r, nameF.name) ?? '').trim() : '';
                 html += `<div class="bg-white border ${String(currentRecordId) === id ? 'border-indigo-400 ring-1 ring-indigo-200' : 'border-slate-200'} rounded-xl p-3 shadow-sm hover:shadow-md transition cursor-pointer text-center" ondblclick="loadRecord('${id.replace(/'/g, "\\'")}')">
                     <div class="flex items-center justify-between mb-1">
@@ -2430,7 +2432,7 @@
                     </div>
                     ${cover}
                     <div class="font-bold text-slate-800 text-sm truncate" title="${escAttr(nameV)}">${escHtml(nameV) || '—'}</div>
-                    ${thirdF ? `<div class="mt-1 text-[11px] text-slate-500 truncate"><span>${escHtml(thirdF.alias)}: </span><span class="font-semibold text-slate-700">${escHtml(String(cellVal(r, thirdF.name) ?? ''))}</span></div>` : ''}
+                    ${(secondV !== '' || thirdV !== '') ? `<div class="mt-1 text-[11px] text-slate-600 truncate"><span class="font-semibold">${escHtml(secondV)}</span>${(secondV !== '' && thirdV !== '') ? '<span class="text-slate-300 mx-1">•</span>' : ''}<span>${escHtml(thirdV)}</span></div>` : ''}
                     ${recordActions.length ? `<div class="flex items-center justify-center gap-1.5 flex-wrap pt-2" onclick="event.stopPropagation()">${recordActions.map(a => actionBtn(a, id)).join('')}</div>` : ''}
                 </div>`;
             });
