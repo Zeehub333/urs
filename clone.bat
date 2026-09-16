@@ -97,6 +97,9 @@ rmdir /s /q "%TEMP_DIR%" >nul 2>&1
 pause >nul
 exit /b 1
 :sync_ok
+git -C "%TEMP_DIR%" rev-parse --short HEAD > "%BASE%\VERSION.txt" 2>nul
+echo [i] deployed commit:
+type "%BASE%\VERSION.txt" 2>nul
 REM robocopy exit 0-7 = success (1=new files, 3=some updates); 8+ = failure
 if errorlevel 8 (
   echo [X] sync failed.
