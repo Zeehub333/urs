@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<fml>
+  <fml_metadata name="users" displayName="المستخدمون" table="sys_users" model_type="form" schema="main_hq_2026" connection="urs_local" category="النظام" description="مستخدمو النظام — الحقول وقواعد العمل" icon="fa-users"/>
+  <tabs>
+    <tab id="main" name="المستخدمون" alias="المستخدمون" sort_order="1"/>
+  </tabs>
+  <fields>
+    <field id="1" name="username" alias="اسم المستخدم" dataType="VARCHAR" inputType="text" required="true" nullable="false" editable="true" primary_key="true" tab="main" category="الدخول" placeholder="مثال: ahmed.admin">
+      <validation pattern="^[a-z0-9_.]+$" min_length="3" max_length="30"/>
+    </field>
+    <field id="2" name="full_name" alias="الاسم الكامل" dataType="VARCHAR" inputType="text" required="true" nullable="false" editable="true" primary_key="false" tab="main" category="أساسية"/>
+    <field id="3" name="email" alias="البريد الإلكتروني" dataType="VARCHAR" inputType="email" required="true" nullable="false" editable="true" primary_key="false" tab="main" category="الاتصال"/>
+    <field id="4" name="phone" alias="الجوال" dataType="VARCHAR" inputType="phone" required="false" nullable="true" editable="true" primary_key="false" tab="main" category="الاتصال"/>
+    <field id="5" name="password" alias="كلمة المرور" dataType="VARCHAR" inputType="password" required="true" nullable="false" editable="true" primary_key="false" tab="main" category="الدخول">
+      <validation min_length="8" max_length="64"/>
+    </field>
+    <field id="6" name="company_code" alias="الشركة" dataType="VARCHAR" inputType="select" required="false" nullable="true" editable="true" primary_key="false" tab="main" category="الارتباط" refTable="sys_companies" refFk="company_code" refDisplay="company_name"/>
+    <field id="7" name="branch_code" alias="الفرع" dataType="VARCHAR" inputType="select" required="false" nullable="true" editable="true" primary_key="false" tab="main" category="الارتباط" refTable="sys_branches" refFk="branch_code" refDisplay="branch_name"/>
+    <field id="8" name="role" alias="الدور" dataType="VARCHAR" inputType="select" required="true" nullable="false" editable="true" primary_key="false" tab="main" category="الصلاحيات">
+      <options>
+        <option>مدير نظام</option>
+        <option>مدير</option>
+        <option>مشرف</option>
+        <option>مستخدم</option>
+        <option>ضيف</option>
+      </options>
+    </field>
+    <field id="9" name="is_active" alias="نشط" dataType="BOOLEAN" inputType="boolean" required="false" nullable="true" editable="true" primary_key="false" tab="main" category="الحالة" default="true"/>
+  </fields>
+</fml>

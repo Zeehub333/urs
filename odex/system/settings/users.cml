@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<cml>
+  <cml_metadata name="users" displayName="المستخدمون" category="النظام" icon="fa-users" description="مستخدمو النظام — الحقول وقواعد العمل" table="sys_users" schema="SYS" connection="ORCL_PROD" scope="system" app="settings"/>
+  <controls>
+    <control id="1" name="username" alias="اسم المستخدم" inputType="text" dataType="VARCHAR" required="true" category="الدخول" placeholder="مثال: ahmed.admin">
+      <validation regex="^[a-z0-9_.]+$" min_length="3" max_length="30"/>
+    </control>
+    <control id="2" name="full_name" alias="الاسم الكامل" inputType="text" dataType="VARCHAR" required="true" category="أساسية"/>
+    <control id="3" name="email" alias="البريد الإلكتروني" inputType="email" dataType="VARCHAR" required="true" category="الاتصال"/>
+    <control id="4" name="phone" alias="الجوال" inputType="phone" dataType="VARCHAR" category="الاتصال"/>
+    <control id="5" name="password" alias="كلمة المرور" inputType="password" dataType="VARCHAR" required="true" category="الدخول">
+      <validation min_length="8" max_length="64"/>
+    </control>
+    <control id="6" name="company_code" alias="الشركة" inputType="select" dataType="VARCHAR" category="الارتباط" refTable="sys_companies" refFk="company_code" refDisplay="company_name"/>
+    <control id="7" name="branch_code" alias="الفرع" inputType="select" dataType="VARCHAR" category="الارتباط" refTable="sys_branches" refFk="branch_code" refDisplay="branch_name"/>
+    <control id="8" name="role" alias="الدور" inputType="select" dataType="VARCHAR" required="true" category="الصلاحيات" options="مدير نظام,مدير,مشرف,مستخدم,ضيف"/>
+    <control id="9" name="is_active" alias="نشط" inputType="boolean" dataType="BOOLEAN" category="الحالة" default="true"/>
+  </controls>
+  <rules>
+    <rule id="1" name="username_unique" type="unique" target="username" message="اسم المستخدم يجب أن يكون فريداً"/>
+    <rule id="2" name="username_format" type="regex" target="username" value="^[a-z0-9_.]+$" message="اسم المستخدم: أحرف إنجليزية صغيرة وأرقام ونقاط فقط"/>
+    <rule id="3" name="password_length" type="min_length" target="password" value="8" message="كلمة المرور يجب ألا تقل عن 8 أحرف"/>
+    <rule id="4" name="role_required" type="required" target="role" message="يجب اختيار الدور"/>
+  </rules>
+</cml>

@@ -1,0 +1,135 @@
+"""config URL Configuration
+
+The `urlpatterns` list routes URLs to views. For more information please see:
+    https://docs.djangoproject.com/en/4.1/topics/http/urls/
+Examples:
+Function views
+    1. Add an import:  from my_app import views
+    2. Add a URL to urlpatterns:  path('', views.home, name='home')
+Class-based views
+    1. Add an import:  from other_app.views import Home
+    2. Add a URL to urlpatterns:  path('', Home.as_view(), name='home')
+Including another URLconf
+    1. Import the include() function: from django.urls import include, path
+    2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
+"""
+from django.contrib import admin
+from django.urls import path
+from urs import views as urs_views
+
+urlpatterns = [
+    path('admin/', admin.site.urls),
+    path('', urs_views.home, name='home'),
+    path('my-reports/', urs_views.my_reports, name='my_reports'),
+    path('dashboards/', urs_views.dashboards, name='dashboards'),
+    path('my-docs/', urs_views.my_docs, name='my_docs'),
+    path('api/my-docs/list/', urs_views.api_my_docs_list, name='api_my_docs_list'),
+    path('api/my-docs/save/', urs_views.api_my_docs_save, name='api_my_docs_save'),
+    path('api/my-docs/delete/', urs_views.api_my_docs_delete, name='api_my_docs_delete'),
+    path('api/my-docs/<str:doc_id>/thumb/', urs_views.api_my_docs_thumb, name='api_my_docs_thumb'),
+    path('api/my-docs/<str:doc_id>/', urs_views.api_my_docs_view, name='api_my_docs_view'),
+    # Players moved into urs/templates — keep sidebar navigation
+    path('app/<str:app_name>/form/<str:fml_file>/', urs_views.app_form_player, name='app_form_player'),
+    path('app/<str:app_name>/report/<str:rml_file>/', urs_views.app_report_player, name='app_report_player'),
+    path('app/<str:app_name>/report-designer/', urs_views.app_report_designer, name='app_report_designer'),
+    path('app/<str:app_name>/forms-designer/', urs_views.app_forms_designer, name='app_forms_designer'),
+    path('app/<str:app_name>/data-diagram/', urs_views.app_data_diagram, name='app_data_diagram'),
+    path('app/<str:app_name>/dml-designer/', urs_views.app_dml_designer, name='app_dml_designer'),
+    path('app/<str:app_name>/', urs_views.app_detail, name='app_detail'),
+    path('api/apps/', urs_views.api_apps, name='api_apps'),
+    path('api/apps/create/', urs_views.api_apps_create, name='api_apps_create'),
+    path('api/apps/icon/upload/', urs_views.api_apps_icon_upload, name='api_apps_icon_upload'),
+    path('api/apps/<str:app_name>/icon-file', urs_views.api_apps_icon_file, name='api_apps_icon_file'),
+    path('api/apps/<str:app_name>/files/', urs_views.api_app_files, name='api_app_files'),
+    path('api/apps/<str:app_name>/rules/', urs_views.api_app_rules, name='api_app_rules'),
+    path('api/apps/<str:app_name>/rules/policy/save/', urs_views.api_app_rule_policy_save, name='api_app_rule_policy_save'),
+    path('api/apps/<str:app_name>/rules/policy/delete/', urs_views.api_app_rule_policy_delete, name='api_app_rule_policy_delete'),
+    path('api/apps/sync/', urs_views.api_apps_sync, name='api_apps_sync'),
+    path('api/apps/<str:app_name>/fml/create/', urs_views.api_create_fml, name='api_create_fml'),
+    path('api/apps/<str:app_name>/rml/create/', urs_views.api_create_rml, name='api_create_rml'),
+    path('api/apps/<str:app_name>/rml/update/', urs_views.api_update_rml, name='api_update_rml'),
+    path('api/apps/<str:app_name>/dml/list/', urs_views.api_dml_list, name='api_dml_list'),
+    path('api/apps/<str:app_name>/dml/suggest/', urs_views.api_dml_suggest, name='api_dml_suggest'),
+    path('api/apps/<str:app_name>/dml/create/', urs_views.api_dml_create, name='api_dml_create'),
+    path('api/apps/<str:app_name>/dml/update/', urs_views.api_dml_update, name='api_dml_update'),
+    path('api/dml/metadata', urs_views.api_dml_metadata, name='api_dml_metadata'),
+    path('api/dml/render', urs_views.api_dml_render, name='api_dml_render'),
+    path('api/dml/xlsx', urs_views.api_dml_xlsx, name='api_dml_xlsx'),
+    path('api/dml/pdf', urs_views.api_dml_pdf, name='api_dml_pdf'),
+    path('api/dml/doc-pdf', urs_views.api_dml_doc_pdf, name='api_dml_doc_pdf'),
+    path('api/connections/<int:conn_id>/tables/', urs_views.api_connection_tables, name='api_connection_tables'),
+    path('api/connections/<int:conn_id>/tables/<str:table>/columns/', urs_views.api_connection_table_columns, name='api_connection_table_columns'),
+    path('api/connections/<int:conn_id>/tables/<str:table>/preview/', urs_views.api_connection_table_preview, name='api_connection_table_preview'),
+    path('api/connections/<int:conn_id>/tables/<str:table>/fks/', urs_views.api_connection_table_fks, name='api_connection_table_fks'),
+    path('api/connections/', urs_views.api_connections_list, name='api_connections_list'),
+    path('api/connections/create/', urs_views.api_connection_create, name='api_connection_create'),
+    path('api/connections/test/', urs_views.api_connection_test_record, name='api_connection_test_record'),
+    path('api/connections/stats/', urs_views.api_connection_stats, name='api_connection_stats'),
+    path('api/connections/<int:conn_id>/update/', urs_views.api_connection_update, name='api_connection_update'),
+    path('api/connections/<int:conn_id>/delete/', urs_views.api_connection_delete, name='api_connection_delete'),
+    path('api/connections/<int:conn_id>/test/', urs_views.api_connection_test, name='api_connection_test'),
+    # IoT mirrors (UNION ALL + background sync → iot_<engine>_<endpoint> tables)
+    path('api/iot/endpoints/', urs_views.api_iot_endpoints, name='api_iot_endpoints'),
+    path('api/iot/fetch/', urs_views.api_iot_fetch, name='api_iot_fetch'),
+    path('api/iot/mirror/', urs_views.api_iot_mirror, name='api_iot_mirror'),
+    path('api/iot/mirrors/', urs_views.api_iot_mirrors, name='api_iot_mirrors'),
+    path('api/iot/mirror/status/', urs_views.api_iot_mirror_status, name='api_iot_mirror_status'),
+    path('api/iot/mirror/sync/', urs_views.api_iot_mirror_sync, name='api_iot_mirror_sync'),
+    # CML Settings Engine (controls + business rules)
+    path('settings/', urs_views.settings_home, name='settings_home'),
+    path('settings/setup/', urs_views.settings_setup, name='settings_setup'),
+    path('settings/<str:scope>/<str:app>/<str:file>/', urs_views.settings_detail, name='settings_detail'),
+    path('api/setup/create/', urs_views.api_setup_create, name='api_setup_create'),
+    path('api/setup/wizard/status/', urs_views.api_setup_wizard_status, name='api_setup_wizard_status'),
+    path('api/setup/wizard/migrate/', urs_views.api_setup_wizard_migrate, name='api_setup_wizard_migrate'),
+    path('api/setup/wizard/connection/', urs_views.api_setup_wizard_connection, name='api_setup_wizard_connection'),
+    path('api/setup/wizard/connection/from-appconf/', urs_views.api_setup_wizard_connection_from_appconf, name='api_setup_wizard_connection_from_appconf'),
+    path('api/setup/wizard/fmlk/', urs_views.api_setup_wizard_fmlk, name='api_setup_wizard_fmlk'),
+    path('api/setup/wizard/retarget/', urs_views.api_setup_wizard_retarget, name='api_setup_wizard_retarget'),
+    path('api/setup/wizard/seed/', urs_views.api_setup_wizard_seed, name='api_setup_wizard_seed'),
+    path('api/settings/', urs_views.api_settings_list, name='api_settings_list'),
+    path('api/cml/metadata', urs_views.api_cml_metadata, name='api_cml_metadata'),
+    path('api/cml/validate/', urs_views.api_cml_validate, name='api_cml_validate'),
+    path('api/cml/save/', urs_views.api_cml_save, name='api_cml_save'),
+    path('api/cml/values', urs_views.api_cml_values, name='api_cml_values'),
+    # FMLK API (proxied from fmlk_engine for same-host players)
+    path('api/fmlk/metadata', urs_views.api_fmlk_metadata, name='api_fmlk_metadata'),
+    path('api/fmlk/lookup', urs_views.api_fmlk_lookup, name='api_fmlk_lookup'),
+    path('api/fmlk/options', urs_views.api_fmlk_options, name='api_fmlk_options'),
+    path('api/fmlk/lookups', urs_views.api_fmlk_lookups, name='api_fmlk_lookups'),
+    path('api/fmlk/field-types', urs_views.api_fmlk_field_types, name='api_fmlk_field_types'),
+    path('api/fmlk/preview_insert', urs_views.api_fmlk_preview_insert, name='api_fmlk_preview_insert'),
+    path('api/fmlk/create', urs_views.api_fmlk_create, name='api_fmlk_create'),
+    path('api/fmlk/update', urs_views.api_fmlk_update, name='api_fmlk_update'),
+    path('api/fmlk/delete', urs_views.api_fmlk_delete, name='api_fmlk_delete'),
+    path('api/fmlk/records', urs_views.api_fmlk_records, name='api_fmlk_records'),
+    path('api/fmlk/record', urs_views.api_fmlk_record, name='api_fmlk_record'),
+    path('api/fmlk/branch', urs_views.api_fmlk_branch, name='api_fmlk_branch'),
+    path('api/fmlk/action/test-connection', urs_views.api_fmlk_action_test_connection, name='api_fmlk_action_test_connection'),
+    path('api/fmlk/branch/save', urs_views.api_fmlk_branch_save, name='api_fmlk_branch_save'),
+    path('api/fmlk/sql-functions', urs_views.api_fmlk_sql_functions, name='api_fmlk_sql_functions'),
+    path('api/fmlk/data-types', urs_views.api_fmlk_data_types, name='api_fmlk_data_types'),
+    path('api/apps/<str:app_name>/models/design/', urs_views.api_models_design_save, name='api_models_design_save'),
+    path('api/apps/<str:app_name>/models/migrate/', urs_views.api_models_migrate, name='api_models_migrate'),
+    path('api/apps/<str:app_name>/models/convert-cml/', urs_views.api_models_convert_cml, name='api_models_convert_cml'),
+    path('api/apps/<str:app_name>/models/sync/', urs_views.api_models_sync, name='api_models_sync'),
+    path('api/apps/<str:app_name>/modals/<path:file>', urs_views.api_app_modal, name='api_app_modal'),
+    # RML API (proxied from rml_python)
+    path('api/rml/metadata', urs_views.api_rml_metadata, name='api_rml_metadata'),
+    path('api/rml/parse-sql/', urs_views.api_rml_parse_sql, name='api_rml_parse_sql'),
+    path('api/rml/preview', urs_views.api_rml_preview, name='api_rml_preview'),
+    path('api/rml/execute', urs_views.api_rml_execute, name='api_rml_execute'),
+    path('api/rml/execute-async', urs_views.api_rml_execute_async, name='api_rml_execute_async'),
+    path('api/rml/job/<str:job_id>', urs_views.api_rml_job, name='api_rml_job'),
+    path('api/apps/<str:app_name>/rml/draft/', urs_views.api_rml_draft, name='api_rml_draft'),
+    path('api/apps/<str:app_name>/rml/draft/finalize/', urs_views.api_rml_draft_finalize, name='api_rml_draft_finalize'),
+    path('api/apps/<str:app_name>/rml/draft/discard/', urs_views.api_rml_draft_discard, name='api_rml_draft_discard'),
+    path('api/rml/detail', urs_views.api_rml_detail, name='api_rml_detail'),
+    path('api/rml/detail-search', urs_views.api_rml_detail_search, name='api_rml_detail_search'),
+    path('api/rml/distinct', urs_views.api_rml_distinct, name='api_rml_distinct'),
+    path('api/rml/groups', urs_views.api_rml_groups, name='api_rml_groups'),
+    path('api/rml/joins', urs_views.api_rml_joins, name='api_rml_joins'),
+    path('api/presets/', urs_views.api_presets_list, name='api_presets_list'),
+    path('api/presets/create/', urs_views.api_presets_create, name='api_presets_create'),
+    path('api/presets/delete/', urs_views.api_presets_delete, name='api_presets_delete'),
+]

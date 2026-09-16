@@ -1,0 +1,18 @@
+<fml>
+  <fml_metadata name="hr_form" displayName="نموذج الموظف" category="HR" connection="ORCL_PROD" schema="HR_SYS" table="employees"/>
+  <tabs>
+    <tab id="basic" name="Basic information" alias="البيانات الأساسية" sort_order="1"/>
+    <tab id="work" name="Work" alias="العمل" sort_order="2"/>
+    <tab id="personal" name="Personal" alias="الشخصية" sort_order="3"/>
+  </tabs>
+  <fields>
+    <field id="1" name="first_name" alias="اسم First" inputType="text" tab="basic" category="Personal information" position="left" required="true"/>
+    <field id="2" name="last_name" alias="اسم" inputType="text" tab="basic" category="Personal information" position="right"/>
+    <field id="3" name="civility" alias="Civility" inputType="select" tab="basic" category="Personal information" options="السيد,السيدة"/>
+    <field id="4" name="email" alias="البريد الإلكتروني" inputType="email" tab="basic" category="Contact" position="full"/>
+    <field id="5" name="work_mobile" alias="Work mobile phone" inputType="phone" tab="basic" category="Work phones" position="left"/>
+    <field id="6" name="work_fixed" alias="Work fixed phone" inputType="phone" tab="basic" category="Work phones" position="right"/>
+    <field id="7" name="birth_date" alias="تاريخ Birth" inputType="date" tab="basic" category="Personal information"/>
+    <field id="8" name="nationality" alias="Citizenship" inputType="select" tab="basic" category="Personal information" refTable="countries" refFk="id" refDisplay="name"/>
+  </fields>
+</fml>

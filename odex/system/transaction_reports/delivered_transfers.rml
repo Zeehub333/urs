@@ -1,0 +1,396 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rml>
+  <rpt_metadata name="delivered_transfers" displayName="تقرير الحوالات المنصرفة" category="الحوالات" schema="dbo" icon="fa-chart-bar" connection="ORCL_PROD" namespace="tr" stage_max_rows="1000000"/>
+  <rml_connections>
+    <connection id="1" connection_id="2"/>
+  </rml_connections>
+  <fields>
+    <field id="1" name="ProvinceName" type="VARCHAR" conn_id="2" table_source="tblProvinces"/>
+    <field id="2" name="PublicNumber" type="VARCHAR" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="3" name="رقم الهوية" type="VARCHAR" conn_id="2" table_source="dbo.vewPersonalInformation"/>
+    <field id="4" name="SenderPhone" type="VARCHAR" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="5" name="ReceiverPhone" type="VARCHAR" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="6" name="Notes" type="VARCHAR" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="7" name="TransferReceiving" type="INTEGER" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="8" name="Name" type="VARCHAR" conn_id="2" table_source="tblLSTargetTypes"/>
+    <field id="9" name="AccountName" type="VARCHAR" conn_id="2" table_source="tblAccounts"/>
+    <field id="10" name="CurrencyName" type="VARCHAR" conn_id="2" table_source="tblCurrencies"/>
+    <field id="11" name="Amount" type="VARCHAR" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="12" name="ReceiverName" type="VARCHAR" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="13" name="SenderName" type="VARCHAR" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="14" name="OutgoingTargetNetwork" type="VARCHAR" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="15" name="EnterTimeNetwork" type="VARCHAR" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="16" name="TheDate" type="VARCHAR" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="17" name="Delivered" type="INTEGER" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="18" name="ID" type="INTEGER" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="19" name="RowVersion" type="TEXT" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="20" name="PrevRowVersion" type="INTEGER" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="21" name="TransferNumber" type="INTEGER" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="22" name="TransferNumberNullRepeater" type="INTEGER" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="23" name="BillNumber" type="INTEGER" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="24" name="BillNumberNullRepeater" type="INTEGER" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="25" name="MethodID" type="INTEGER" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="26" name="TargetID" type="INTEGER" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="27" name="CurrencyID" type="INTEGER" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="28" name="SourceID" type="INTEGER" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="29" name="Depended" type="BOOLEAN" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="30" name="State" type="VARCHAR" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="31" name="ExchangeAccountID" type="INTEGER" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="32" name="ExchangeAmount" type="NUMERIC" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="33" name="ExchangeCurrencyID" type="INTEGER" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="34" name="BranchCommission" type="NUMERIC" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="35" name="CenterCommission" type="NUMERIC" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="36" name="CommissionCurrencyID" type="INTEGER" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="37" name="CommissionMethod" type="INTEGER" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="38" name="CommissionTotalID" type="INTEGER" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="39" name="ChequeID" type="INTEGER" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="40" name="TransferPurpose" type="VARCHAR" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="41" name="EnterTime" type="TIMESTAMP" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="42" name="UserID" type="INTEGER" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="43" name="BranchID" type="INTEGER" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="44" name="Prints" type="INTEGER" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="45" name="DespatchID" type="INTEGER" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="46" name="TotalID" type="INTEGER" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="47" name="EntryID" type="INTEGER" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="48" name="DebitingMethod" type="INTEGER" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="49" name="CommissionDebitingMethod" type="INTEGER" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="50" name="TheYear" type="INTEGER" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="51" name="IsNetworkTarget" type="BOOLEAN" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="52" name="AgentID" type="INTEGER" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="53" name="SessionID" type="INTEGER" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="54" name="OutgoingNotes" type="VARCHAR" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="55" name="SenderCardID" type="INTEGER" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="56" name="ReceiverCardID" type="INTEGER" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="57" name="Intimated" type="BOOLEAN" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="58" name="Stopped" type="BOOLEAN" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="59" name="SearchOnlyByPublicNumber" type="BOOLEAN" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="60" name="IsQuery" type="BOOLEAN" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="61" name="BranchIDIsQuery" type="INTEGER" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="62" name="OriginalTransferID" type="INTEGER" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="63" name="Canceled" type="BOOLEAN" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="64" name="CS" type="INTEGER" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="65" name="EquivalentAmount" type="NUMERIC" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="66" name="IsMultiReceiving" type="BOOLEAN" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="67" name="ReferenceExpress" type="VARCHAR" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="68" name="PersonalNumber" type="VARCHAR" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="69" name="CostCenterID" type="INTEGER" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="70" name="FromAmalBank" type="BOOLEAN" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="71" name="IsHasty" type="BOOLEAN" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="72" name="DependUserID" type="INTEGER" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="73" name="MonySource" type="VARCHAR" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="74" name="KinShip" type="VARCHAR" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="75" name="OriginalSourceName" type="VARCHAR" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="76" name="IsReturned" type="BOOLEAN" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="77" name="MilitaryNumber" type="INTEGER" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="78" name="ProvinceID" type="INTEGER" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="79" name="IsSynced" type="BOOLEAN" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="80" name="SourceSystemID" type="INTEGER" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="81" name="CS2" type="VARCHAR" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="82" name="IdentifyNumber" type="VARCHAR" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="83" name="ExchangeBranchID" type="INTEGER" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="84" name="Stamp" type="NUMERIC" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="85" name="FromQPay" type="BOOLEAN" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="86" name="NetPointAccountID" type="INTEGER" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="87" name="FromYKB" type="BOOLEAN" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="88" name="ExternalTargetID" type="INTEGER" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="89" name="UserIDIsQuery" type="INTEGER" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="90" name="amblastseqNumber" type="INTEGER" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="91" name="RequestRef_CACBank" type="VARCHAR" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="92" name="ExternalTarget_RequestID" type="VARCHAR" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="93" name="AndroidRequestRefId" type="INTEGER" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="94" name="IsQueryNotes" type="VARCHAR" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="95" name="BillNumber1" type="INTEGER" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="96" name="CommissionForDelivering" type="NUMERIC" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="97" name="CurrencyIDCommissionForDelivering" type="INTEGER" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="98" name="NetworkCommission" type="NUMERIC" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="99" name="CurrencyIDNetworkCommission" type="INTEGER" conn_id="2" table_source="tblIncomingTransfers"/>
+    <field id="100" name="ID" type="INTEGER" conn_id="2" table_source="tblTargets"/>
+    <field id="101" name="RowVersion" type="TEXT" conn_id="2" table_source="tblTargets"/>
+    <field id="102" name="PrevRowVersion" type="INTEGER" conn_id="2" table_source="tblTargets"/>
+    <field id="103" name="TheNumber" type="INTEGER" conn_id="2" table_source="tblTargets"/>
+    <field id="104" name="RegionID" type="INTEGER" conn_id="2" table_source="tblTargets"/>
+    <field id="105" name="TargetName" type="VARCHAR" conn_id="2" table_source="tblTargets"/>
+    <field id="106" name="TargetDesc" type="VARCHAR" conn_id="2" table_source="tblTargets"/>
+    <field id="107" name="AccountID" type="INTEGER" conn_id="2" table_source="tblTargets"/>
+    <field id="108" name="TheClass" type="VARCHAR" conn_id="2" table_source="tblTargets"/>
+    <field id="109" name="TargetTypeID" type="INTEGER" conn_id="2" table_source="tblTargets"/>
+    <field id="110" name="DirectExchanger" type="VARCHAR" conn_id="2" table_source="tblTargets"/>
+    <field id="111" name="Phone" type="VARCHAR" conn_id="2" table_source="tblTargets"/>
+    <field id="112" name="Address" type="VARCHAR" conn_id="2" table_source="tblTargets"/>
+    <field id="113" name="Fax" type="VARCHAR" conn_id="2" table_source="tblTargets"/>
+    <field id="114" name="Notes" type="VARCHAR" conn_id="2" table_source="tblTargets"/>
+    <field id="115" name="AutoExport" type="BOOLEAN" conn_id="2" table_source="tblTargets"/>
+    <field id="116" name="UserID" type="INTEGER" conn_id="2" table_source="tblTargets"/>
+    <field id="117" name="BranchID" type="INTEGER" conn_id="2" table_source="tblTargets"/>
+    <field id="118" name="EnterTime" type="TIMESTAMP" conn_id="2" table_source="tblTargets"/>
+    <field id="119" name="IsStopped" type="BOOLEAN" conn_id="2" table_source="tblTargets"/>
+    <field id="120" name="SessionID" type="INTEGER" conn_id="2" table_source="tblTargets"/>
+    <field id="121" name="IsSpecialTarget" type="BOOLEAN" conn_id="2" table_source="tblTargets"/>
+    <field id="122" name="CBY_AgentIdentifier" type="INTEGER" conn_id="2" table_source="tblTargets"/>
+    <field id="123" name="ID" type="INTEGER" conn_id="2" table_source="tblAccounts"/>
+    <field id="124" name="RowVersion" type="TEXT" conn_id="2" table_source="tblAccounts"/>
+    <field id="125" name="PrevRowVersion" type="INTEGER" conn_id="2" table_source="tblAccounts"/>
+    <field id="126" name="FatherNumber" type="INTEGER" conn_id="2" table_source="tblAccounts"/>
+    <field id="127" name="AccountNumber" type="INTEGER" conn_id="2" table_source="tblAccounts"/>
+    <field id="128" name="AccountType" type="VARCHAR" conn_id="2" table_source="tblAccounts"/>
+    <field id="129" name="AccountReference" type="VARCHAR" conn_id="2" table_source="tblAccounts"/>
+    <field id="130" name="UserID" type="INTEGER" conn_id="2" table_source="tblAccounts"/>
+    <field id="131" name="BranchID" type="INTEGER" conn_id="2" table_source="tblAccounts"/>
+    <field id="132" name="EnterTime" type="TIMESTAMP" conn_id="2" table_source="tblAccounts"/>
+    <field id="133" name="SessionID" type="INTEGER" conn_id="2" table_source="tblAccounts"/>
+    <field id="134" name="TradeName" type="VARCHAR" conn_id="2" table_source="tblAccounts"/>
+    <field id="135" name="MilitaryNumber" type="INTEGER" conn_id="2" table_source="tblAccounts"/>
+    <field id="136" name="ID" type="INTEGER" conn_id="2" table_source="tblRegions"/>
+    <field id="137" name="RowVersion" type="TEXT" conn_id="2" table_source="tblRegions"/>
+    <field id="138" name="PrevRowVersion" type="INTEGER" conn_id="2" table_source="tblRegions"/>
+    <field id="139" name="TheNumber" type="INTEGER" conn_id="2" table_source="tblRegions"/>
+    <field id="140" name="RegionName" type="VARCHAR" conn_id="2" table_source="tblRegions"/>
+    <field id="141" name="CountryID" type="INTEGER" conn_id="2" table_source="tblRegions"/>
+    <field id="142" name="Notes" type="VARCHAR" conn_id="2" table_source="tblRegions"/>
+    <field id="143" name="UserID" type="INTEGER" conn_id="2" table_source="tblRegions"/>
+    <field id="144" name="BranchID" type="INTEGER" conn_id="2" table_source="tblRegions"/>
+    <field id="145" name="EnterTime" type="TIMESTAMP" conn_id="2" table_source="tblRegions"/>
+    <field id="146" name="SessionID" type="INTEGER" conn_id="2" table_source="tblRegions"/>
+    <field id="147" name="ProvinceID" type="INTEGER" conn_id="2" table_source="tblRegions"/>
+    <field id="148" name="DenyTransfersToRegion" type="BOOLEAN" conn_id="2" table_source="tblRegions"/>
+    <field id="149" name="ID" type="INTEGER" conn_id="2" table_source="tblProvinces"/>
+    <field id="150" name="RowVersion" type="TEXT" conn_id="2" table_source="tblProvinces"/>
+    <field id="151" name="PrevRowVersion" type="INTEGER" conn_id="2" table_source="tblProvinces"/>
+    <field id="152" name="TheNumber" type="INTEGER" conn_id="2" table_source="tblProvinces"/>
+    <field id="153" name="CountryID" type="INTEGER" conn_id="2" table_source="tblProvinces"/>
+    <field id="154" name="Notes" type="VARCHAR" conn_id="2" table_source="tblProvinces"/>
+    <field id="155" name="UserID" type="INTEGER" conn_id="2" table_source="tblProvinces"/>
+    <field id="156" name="BranchID" type="INTEGER" conn_id="2" table_source="tblProvinces"/>
+    <field id="157" name="EnterTime" type="TIMESTAMP" conn_id="2" table_source="tblProvinces"/>
+    <field id="158" name="SessionID" type="INTEGER" conn_id="2" table_source="tblProvinces"/>
+    <field id="159" name="ID" type="INTEGER" conn_id="2" table_source="tblCountries"/>
+    <field id="160" name="RowVersion" type="TEXT" conn_id="2" table_source="tblCountries"/>
+    <field id="161" name="PrevRowVersion" type="INTEGER" conn_id="2" table_source="tblCountries"/>
+    <field id="162" name="CountryName" type="VARCHAR" conn_id="2" table_source="tblCountries"/>
+    <field id="163" name="Notes" type="VARCHAR" conn_id="2" table_source="tblCountries"/>
+    <field id="164" name="UserID" type="INTEGER" conn_id="2" table_source="tblCountries"/>
+    <field id="165" name="BranchID" type="INTEGER" conn_id="2" table_source="tblCountries"/>
+    <field id="166" name="EnterTime" type="TIMESTAMP" conn_id="2" table_source="tblCountries"/>
+    <field id="167" name="SessionID" type="INTEGER" conn_id="2" table_source="tblCountries"/>
+    <field id="168" name="DenyTransfersToCountry" type="BOOLEAN" conn_id="2" table_source="tblCountries"/>
+    <field id="169" name="ID" type="INTEGER" conn_id="2" table_source="tblCurrencies"/>
+    <field id="170" name="RowVersion" type="TEXT" conn_id="2" table_source="tblCurrencies"/>
+    <field id="171" name="PrevRowVersion" type="INTEGER" conn_id="2" table_source="tblCurrencies"/>
+    <field id="172" name="TheNumber" type="INTEGER" conn_id="2" table_source="tblCurrencies"/>
+    <field id="173" name="ArabicCode" type="VARCHAR" conn_id="2" table_source="tblCurrencies"/>
+    <field id="174" name="EnglishCode" type="VARCHAR" conn_id="2" table_source="tblCurrencies"/>
+    <field id="175" name="Notes" type="VARCHAR" conn_id="2" table_source="tblCurrencies"/>
+    <field id="176" name="UserID" type="INTEGER" conn_id="2" table_source="tblCurrencies"/>
+    <field id="177" name="BranchID" type="INTEGER" conn_id="2" table_source="tblCurrencies"/>
+    <field id="178" name="EnterTime" type="TIMESTAMP" conn_id="2" table_source="tblCurrencies"/>
+    <field id="179" name="SessionID" type="INTEGER" conn_id="2" table_source="tblCurrencies"/>
+    <field id="180" name="ISO_Code" type="VARCHAR" conn_id="2" table_source="tblCurrencies"/>
+    <field id="181" name="ISOCodeID" type="INTEGER" conn_id="2" table_source="tblCurrencies"/>
+    <field id="182" name="ID" type="INTEGER" conn_id="2" table_source="tblUsers"/>
+    <field id="183" name="RowVersion" type="TEXT" conn_id="2" table_source="tblUsers"/>
+    <field id="184" name="PrevRowVersion" type="INTEGER" conn_id="2" table_source="tblUsers"/>
+    <field id="185" name="TheNumber" type="INTEGER" conn_id="2" table_source="tblUsers"/>
+    <field id="186" name="UserName" type="VARCHAR" conn_id="2" table_source="tblUsers"/>
+    <field id="187" name="UserGroupID" type="INTEGER" conn_id="2" table_source="tblUsers"/>
+    <field id="188" name="DefaultBranchID" type="INTEGER" conn_id="2" table_source="tblUsers"/>
+    <field id="189" name="IsDisabled" type="BOOLEAN" conn_id="2" table_source="tblUsers"/>
+    <field id="190" name="Notes" type="VARCHAR" conn_id="2" table_source="tblUsers"/>
+    <field id="191" name="UserPassword" type="VARCHAR" conn_id="2" table_source="tblUsers"/>
+    <field id="192" name="UserID" type="INTEGER" conn_id="2" table_source="tblUsers"/>
+    <field id="193" name="BranchID" type="INTEGER" conn_id="2" table_source="tblUsers"/>
+    <field id="194" name="EnterTime" type="TIMESTAMP" conn_id="2" table_source="tblUsers"/>
+    <field id="195" name="UserImage" type="TEXT" conn_id="2" table_source="tblUsers"/>
+    <field id="196" name="MustChangePwd" type="BOOLEAN" conn_id="2" table_source="tblUsers"/>
+    <field id="197" name="ExpiresInterval" type="INTEGER" conn_id="2" table_source="tblUsers"/>
+    <field id="198" name="LastChangeDate" type="DATE" conn_id="2" table_source="tblUsers"/>
+    <field id="199" name="SessionID" type="INTEGER" conn_id="2" table_source="tblUsers"/>
+    <field id="200" name="LimitIdleDays" type="INTEGER" conn_id="2" table_source="tblUsers"/>
+    <field id="201" name="LastLoginDate" type="TIMESTAMP" conn_id="2" table_source="tblUsers"/>
+    <field id="202" name="IsReadOnly" type="BOOLEAN" conn_id="2" table_source="tblUsers"/>
+    <field id="203" name="UserTypeID" type="INTEGER" conn_id="2" table_source="tblUsers"/>
+    <field id="204" name="UserDescription" type="VARCHAR" conn_id="2" table_source="tblUsers"/>
+    <field id="205" name="IsAgentUsrPwCplx" type="INTEGER" conn_id="2" table_source="tblUsers"/>
+    <field id="206" name="IsUserChangePassword" type="BOOLEAN" conn_id="2" table_source="tblUsers"/>
+    <field id="207" name="ID" type="INTEGER" conn_id="2" table_source="tblBranches"/>
+    <field id="208" name="RowVersion" type="TEXT" conn_id="2" table_source="tblBranches"/>
+    <field id="209" name="PrevRowVersion" type="INTEGER" conn_id="2" table_source="tblBranches"/>
+    <field id="210" name="TheNumber" type="INTEGER" conn_id="2" table_source="tblBranches"/>
+    <field id="211" name="BranchName" type="VARCHAR" conn_id="2" table_source="tblBranches"/>
+    <field id="212" name="AccountID" type="INTEGER" conn_id="2" table_source="tblBranches"/>
+    <field id="213" name="Notes" type="VARCHAR" conn_id="2" table_source="tblBranches"/>
+    <field id="214" name="EnglishName" type="VARCHAR" conn_id="2" table_source="tblBranches"/>
+    <field id="215" name="Phone" type="VARCHAR" conn_id="2" table_source="tblBranches"/>
+    <field id="216" name="Fax" type="VARCHAR" conn_id="2" table_source="tblBranches"/>
+    <field id="217" name="Address" type="VARCHAR" conn_id="2" table_source="tblBranches"/>
+    <field id="218" name="UserID" type="INTEGER" conn_id="2" table_source="tblBranches"/>
+    <field id="219" name="BranchID" type="INTEGER" conn_id="2" table_source="tblBranches"/>
+    <field id="220" name="EnterTime" type="TIMESTAMP" conn_id="2" table_source="tblBranches"/>
+    <field id="221" name="SessionID" type="INTEGER" conn_id="2" table_source="tblBranches"/>
+    <field id="222" name="ProvinceID" type="INTEGER" conn_id="2" table_source="tblBranches"/>
+    <field id="223" name="BranchCode" type="VARCHAR" conn_id="2" table_source="tblBranches"/>
+    <field id="224" name="TPGovernorateID" type="INTEGER" conn_id="2" table_source="tblBranches"/>
+    <field id="225" name="TPDistrictID" type="INTEGER" conn_id="2" table_source="tblBranches"/>
+    <field id="226" name="AreaType" type="INTEGER" conn_id="2" table_source="tblBranches"/>
+    <field id="227" name="ID" type="INTEGER" conn_id="2" table_source="tblLSTargetTypes"/>
+    <field id="228" name="SessionID" type="INTEGER" conn_id="2" table_source="tblLSTargetTypes"/>
+    <field id="229" name="ID" type="INTEGER" conn_id="2" table_source="tblLSCashChequeAccount"/>
+    <field id="230" name="Name" type="VARCHAR" conn_id="2" table_source="tblLSCashChequeAccount"/>
+    <field id="231" name="SessionID" type="INTEGER" conn_id="2" table_source="tblLSCashChequeAccount"/>
+    <field id="232" name="ID" type="INTEGER" conn_id="2" table_source="tblAgents"/>
+    <field id="233" name="RowVersion" type="TEXT" conn_id="2" table_source="tblAgents"/>
+    <field id="234" name="PrevRowVersion" type="INTEGER" conn_id="2" table_source="tblAgents"/>
+    <field id="235" name="TheNumber" type="INTEGER" conn_id="2" table_source="tblAgents"/>
+    <field id="236" name="AgentName" type="VARCHAR" conn_id="2" table_source="tblAgents"/>
+    <field id="237" name="AccountID" type="INTEGER" conn_id="2" table_source="tblAgents"/>
+    <field id="238" name="Notes" type="VARCHAR" conn_id="2" table_source="tblAgents"/>
+    <field id="239" name="UserID" type="INTEGER" conn_id="2" table_source="tblAgents"/>
+    <field id="240" name="BranchID" type="INTEGER" conn_id="2" table_source="tblAgents"/>
+    <field id="241" name="EnterTime" type="TIMESTAMP" conn_id="2" table_source="tblAgents"/>
+    <field id="242" name="Phone" type="VARCHAR" conn_id="2" table_source="tblAgents"/>
+    <field id="243" name="Address" type="VARCHAR" conn_id="2" table_source="tblAgents"/>
+    <field id="244" name="Fax" type="VARCHAR" conn_id="2" table_source="tblAgents"/>
+    <field id="245" name="EnglishName" type="VARCHAR" conn_id="2" table_source="tblAgents"/>
+    <field id="246" name="SessionID" type="INTEGER" conn_id="2" table_source="tblAgents"/>
+    <field id="247" name="AgentClassID" type="INTEGER" conn_id="2" table_source="tblAgents"/>
+    <field id="248" name="ID" type="INTEGER" conn_id="2" table_source="dbo.vewPersonalInformation"/>
+    <field id="249" name="RowVersion" type="INTEGER" conn_id="2" table_source="dbo.vewPersonalInformation"/>
+    <field id="250" name="النوع" type="VARCHAR" conn_id="2" table_source="dbo.vewPersonalInformation"/>
+    <field id="251" name="الاسم" type="VARCHAR" conn_id="2" table_source="dbo.vewPersonalInformation"/>
+    <field id="252" name="يمتلك بصمة" type="VARCHAR" conn_id="2" table_source="dbo.vewPersonalInformation"/>
+    <field id="253" name="الجوال" type="VARCHAR" conn_id="2" table_source="dbo.vewPersonalInformation"/>
+    <field id="254" name="الهاتف" type="VARCHAR" conn_id="2" table_source="dbo.vewPersonalInformation"/>
+    <field id="255" name="الفاكس" type="VARCHAR" conn_id="2" table_source="dbo.vewPersonalInformation"/>
+    <field id="256" name="العنوان" type="VARCHAR" conn_id="2" table_source="dbo.vewPersonalInformation"/>
+    <field id="257" name="جهة العمل" type="VARCHAR" conn_id="2" table_source="dbo.vewPersonalInformation"/>
+    <field id="258" name="البريد الإلكتروني" type="VARCHAR" conn_id="2" table_source="dbo.vewPersonalInformation"/>
+    <field id="259" name="الجنسية" type="VARCHAR" conn_id="2" table_source="dbo.vewPersonalInformation"/>
+    <field id="260" name="المعرف" type="VARCHAR" conn_id="2" table_source="dbo.vewPersonalInformation"/>
+    <field id="261" name="نوع الهوية" type="VARCHAR" conn_id="2" table_source="dbo.vewPersonalInformation"/>
+    <field id="262" name="جهة الإصدار" type="VARCHAR" conn_id="2" table_source="dbo.vewPersonalInformation"/>
+    <field id="263" name="تاريخ الإصدار" type="DATE" conn_id="2" table_source="dbo.vewPersonalInformation"/>
+    <field id="264" name="الرقم المميز" type="INTEGER" conn_id="2" table_source="dbo.vewPersonalInformation"/>
+    <field id="265" name="تاريخ الانتهاء" type="DATE" conn_id="2" table_source="dbo.vewPersonalInformation"/>
+    <field id="266" name="ملاحظات" type="VARCHAR" conn_id="2" table_source="dbo.vewPersonalInformation"/>
+    <field id="267" name="المؤهل الدراسي" type="VARCHAR" conn_id="2" table_source="dbo.vewPersonalInformation"/>
+    <field id="268" name="نوع الفرد" type="VARCHAR" conn_id="2" table_source="dbo.vewPersonalInformation"/>
+    <field id="269" name="المستخدم" type="VARCHAR" conn_id="2" table_source="dbo.vewPersonalInformation"/>
+    <field id="270" name="UserID" type="INTEGER" conn_id="2" table_source="dbo.vewPersonalInformation"/>
+    <field id="271" name="الفرع" type="VARCHAR" conn_id="2" table_source="dbo.vewPersonalInformation"/>
+    <field id="272" name="BranchID" type="INTEGER" conn_id="2" table_source="dbo.vewPersonalInformation"/>
+    <field id="273" name="وكيل الشبكة" type="VARCHAR" conn_id="2" table_source="dbo.vewPersonalInformation"/>
+    <field id="274" name="وقت الإدخال" type="TIMESTAMP" conn_id="2" table_source="dbo.vewPersonalInformation"/>
+    <field id="275" name="AgentID" type="INTEGER" conn_id="2" table_source="dbo.vewPersonalInformation"/>
+  </fields>
+  <columns>
+    <column id="1" name="col_ProvinceName" alias="المحافظة" expr="ISNULL([tblProvinces.ProvinceName], [tblProvinces.ProvinceName])" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="2" name="col_PublicNumber" alias="رقم الاكسبرس" expr="[tblIncomingTransfers.PublicNumber]" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="3" name="col_q" alias="رقم البطاقة" expr="q.[رقم الهوية]" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="4" name="col_SenderPhone" alias="تلفون المرسل" expr="[tblIncomingTransfers.SenderPhone]" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="5" name="col_ReceiverPhone" alias="تلفون المستلم" expr="[tblIncomingTransfers.ReceiverPhone]" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="6" name="col_Notes" alias="ملاحظات الحوالة" expr="[tblIncomingTransfers.Notes]" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="7" name="col_N" alias="نوع العملية" expr="CASE&#10;        WHEN [tblIncomingTransfers.TransferReceiving] = 0 THEN N'وارد'&#10;        ELSE N'صادر'&#10;    END" col_type="computed" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="8" name="col_Name" alias="نوع الحوالة" expr="[tblLSTargetTypes.Name]" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="9" name="col_AccountName" alias="عميل الارسال" expr="[tblAccounts.AccountName]" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="10" name="col_AccountName_2" alias="عميل الصرف" expr="[tblAccounts.AccountName]" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="11" name="col_CurrencyName" alias="عملة الحوالة" expr="[tblCurrencies.CurrencyName]" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="12" name="col_Amount" alias="مبلغ الحوالة" expr="[tblIncomingTransfers.Amount]" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="15" name="col_ReceiverName" alias="المستلم" expr="[tblIncomingTransfers.ReceiverName]" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="16" name="col_SenderName" alias="المرسل" expr="[tblIncomingTransfers.SenderName]" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="18" name="col_OutgoingTargetNetwork" alias="جهة الصرف لدى الشبكة" expr="[tblIncomingTransfers.OutgoingTargetNetwork]" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="19" name="col_EnterTimeNetwork" alias="وقت الصرف لدى الشبكة" expr="[tblIncomingTransfers.EnterTimeNetwork]" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="20" name="col_DATETIME" alias="تاريخ الحوالة" expr="CAST([tblIncomingTransfers.TheDate] AS DATETIME)" dataType="DATE" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="22" name="col_ProvinceName_2" alias="المحافظة" expr="ISNULL([[tblProvinces.ProvinceName]], [[tblProvinces.ProvinceName]])" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="23" name="col_PublicNumber_2" alias="رقم الاكسبرس" expr="[[tblIncomingTransfers.PublicNumber]]" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="24" name="col_q_2" alias="رقم البطاقة" expr="q.[رقم الهوية]" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="25" name="col_SenderPhone_2" alias="تلفون المرسل" expr="[[tblIncomingTransfers.SenderPhone]]" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="26" name="col_ReceiverPhone_2" alias="تلفون المستلم" expr="[[tblIncomingTransfers.ReceiverPhone]]" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="27" name="col_Notes_2_3" alias="ملاحظات الحوالة" expr="[[tblIncomingTransfers.Notes]]" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="28" name="col_TransferReceiving" alias="نوع العملية" expr="CASE&#10;        WHEN [[tblIncomingTransfers.TransferReceiving]] = 0 THEN N'وارد'&#10;        ELSE N'صادر'&#10;    END" col_type="computed" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="29" name="col_Name_2" alias="نوع الحوالة" expr="[[tblLSTargetTypes.Name]]" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="30" name="col_AccountName_2_3" alias="عميل الارسال" expr="[[tblAccounts.AccountName]]" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="31" name="col_AccountName_2_3_4" alias="عميل الصرف" expr="[[tblAccounts.AccountName]]" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="32" name="col_CurrencyName_2" alias="عملة الحوالة" expr="[[tblCurrencies.CurrencyName]]" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="33" name="col_Amount_2" alias="مبلغ الحوالة" expr="[[tblIncomingTransfers.Amount]]" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="36" name="col_ReceiverName_2" alias="المستلم" expr="[[tblIncomingTransfers.ReceiverName]]" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="37" name="col_SenderName_2" alias="المرسل" expr="[[tblIncomingTransfers.SenderName]]" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="39" name="col_OutgoingTargetNetwork_2" alias="جهة الصرف لدى الشبكة" expr="[[tblIncomingTransfers.OutgoingTargetNetwork]]" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="40" name="col_EnterTimeNetwork_2" alias="وقت الصرف لدى الشبكة" expr="[[tblIncomingTransfers.EnterTimeNetwork]]" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="41" name="col_TheDate" alias="تاريخ الحوالة" expr="CAST([[tblIncomingTransfers.TheDate]] AS DATETIME)" dataType="DATE" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="43" name="col_ProvinceName_2_3" alias="المحافظة" expr="ISNULL([[tblProvinces.ProvinceName]], [[tblProvinces.ProvinceName]])" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="44" name="col_PublicNumber_2_3" alias="رقم الاكسبرس" expr="[[tblIncomingTransfers.PublicNumber]]" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="45" name="col_q_2_3" alias="رقم البطاقة" expr="[vewPersonalInformation.رقم الهوية]" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="46" name="col_SenderPhone_2_3" alias="تلفون المرسل" expr="[[tblIncomingTransfers.SenderPhone]]" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="47" name="col_ReceiverPhone_2_3" alias="تلفون المستلم" expr="[[tblIncomingTransfers.ReceiverPhone]]" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="48" name="col_Notes_2_3_4_5" alias="ملاحظات الحوالة" expr="[[tblIncomingTransfers.Notes]]" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="49" name="col_TransferReceiving_2" alias="نوع العملية" expr="CASE&#10;        WHEN [[tblIncomingTransfers.TransferReceiving]] = 0 THEN N'وارد'&#10;        ELSE N'صادر'&#10;    END" col_type="computed" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="50" name="col_Name_2_3" alias="نوع الحوالة" expr="[[tblLSTargetTypes.Name]]" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="51" name="col_AccountName_2_3_4_5" alias="عميل الارسال" expr="[[tblAccounts.AccountName]]" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="52" name="col_AccountName_2_3_4_5_6" alias="عميل الصرف" expr="[[tblAccounts.AccountName]]" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="53" name="col_CurrencyName_2_3" alias="عملة الحوالة" expr="[[tblCurrencies.CurrencyName]]" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="54" name="col_Amount_2_3" alias="مبلغ الحوالة" expr="[[tblIncomingTransfers.Amount]]" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="57" name="col_ReceiverName_2_3" alias="المستلم" expr="[[tblIncomingTransfers.ReceiverName]]" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="58" name="col_SenderName_2_3" alias="المرسل" expr="[[tblIncomingTransfers.SenderName]]" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="60" name="col_OutgoingTargetNetwork_2_3" alias="جهة الصرف لدى الشبكة" expr="[[tblIncomingTransfers.OutgoingTargetNetwork]]" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="61" name="col_EnterTimeNetwork_2_3" alias="وقت الصرف لدى الشبكة" expr="[[tblIncomingTransfers.EnterTimeNetwork]]" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="62" name="col_TheDate_2" alias="تاريخ الحوالة" expr="CAST([[tblIncomingTransfers.TheDate]] AS DATETIME)" dataType="DATE" join_type="one_to_one" icon="fa-hashtag"/>
+  </columns>
+  <links>
+    <link id="1" from_table="tblIncomingTransfers" from_col="TargetID" to_table="tblTargets" to_col="ID" rel_type="one_to_one"/>
+    <link id="2" from_table="tblTargets" from_col="AccountID" to_table="tblAccounts" to_col="ID" rel_type="one_to_one"/>
+    <link id="3" from_table="tblIncomingTransfers" from_col="SourceID" to_table="tblTargets" to_col="ID" rel_type="one_to_one"/>
+    <link id="4" from_table="tblCountries" from_col="ID" to_table="tblProvinces" to_col="CountryID" rel_type="one_to_one"/>
+    <link id="5" from_table="tblProvinces" from_col="ID" to_table="tblIncomingTransfers" to_col="ProvinceID" rel_type="one_to_one"/>
+    <link id="6" from_table="tblIncomingTransfers" from_col="CommissionCurrencyID" to_table="tblCurrencies" to_col="ID" rel_type="one_to_one"/>
+    <link id="7" from_table="tblIncomingTransfers" from_col="UserID" to_table="tblUsers" to_col="ID" rel_type="one_to_one"/>
+    <link id="8" from_table="tblIncomingTransfers" from_col="BranchID" to_table="tblBranches" to_col="ID" rel_type="one_to_one"/>
+    <link id="9" from_table="tblIncomingTransfers" from_col="ExchangeCurrencyID" to_table="tblCurrencies" to_col="ID" rel_type="one_to_one"/>
+    <link id="10" from_table="tblIncomingTransfers" from_col="CurrencyID" to_table="tblCurrencies" to_col="ID" rel_type="one_to_one"/>
+    <link id="11" from_table="tblIncomingTransfers" from_col="ExchangeAccountID" to_table="tblAccounts" to_col="ID" rel_type="one_to_one"/>
+    <link id="12" from_table="tblTargets" from_col="TargetTypeID" to_table="tblLSTargetTypes" to_col="ID" rel_type="one_to_one"/>
+    <link id="13" from_table="tblOutgoingTransfers" from_col="BranchID" to_table="tblBranches" to_col="ID" rel_type="one_to_one"/>
+    <link id="14" from_table="tblOutgoingTransfers" from_col="UserID" to_table="tblUsers" to_col="ID" rel_type="one_to_one"/>
+    <link id="15" from_table="tblOutgoingTransfers" from_col="OutgoingTargetID" to_table="tblTargets" to_col="ID" rel_type="one_to_one"/>
+    <link id="16" from_table="tblOutgoingTransfers" from_col="ExchangeCurrencyID" to_table="tblCurrencies" to_col="ID" rel_type="one_to_one"/>
+    <link id="17" from_table="tblOutgoingTransfers" from_col="MethodID" to_table="tblOutgoingTransfers" to_col="TransferID" rel_type="one_to_one"/>
+    <link id="18" from_table="tblIncomingTransfers" from_col="AgentID" to_table="tblAgents" to_col="ID" rel_type="one_to_one"/>
+    <link id="19" from_table="tblIncomingTransfers" from_col="ReceiverName" to_table="vewPersonalInformation" to_col="الاسم" rel_type="one_to_one"/>
+    <link id="20" from_table="tblIncomingTransfers" from_col="MethodID" to_table="tblLSCashChequeAccount" to_col="ID" rel_type="one_to_one"/>
+    <link id="21" from_table="tblTargets" from_col="RegionID" to_table="tblRegions" to_col="ID" rel_type="one_to_one"/>
+    <link id="22" from_table="tblTargets" from_col="UserID" to_table="tblUsers" to_col="ID" rel_type="one_to_one"/>
+    <link id="23" from_table="tblTargets" from_col="BranchID" to_table="tblBranches" to_col="ID" rel_type="one_to_one"/>
+    <link id="24" from_table="tblBranches" from_col="AccountID" to_table="tblAccounts" to_col="ID" rel_type="one_to_one"/>
+    <link id="25" from_table="tblAgents" from_col="AccountID" to_table="tblAccounts" to_col="ID" rel_type="one_to_one"/>
+    <link id="26" from_table="tblRegions" from_col="ProvinceID" to_table="tblProvinces" to_col="ID" rel_type="one_to_one"/>
+    <link id="27" from_table="tblRegions" from_col="CountryID" to_table="tblCountries" to_col="ID" rel_type="one_to_one"/>
+    <link id="28" from_table="tblRegions" from_col="UserID" to_table="tblUsers" to_col="ID" rel_type="one_to_one"/>
+    <link id="29" from_table="tblRegions" from_col="BranchID" to_table="tblBranches" to_col="ID" rel_type="one_to_one"/>
+    <link id="30" from_table="tblProvinces" from_col="UserID" to_table="tblUsers" to_col="ID" rel_type="one_to_one"/>
+    <link id="31" from_table="tblProvinces" from_col="BranchID" to_table="tblBranches" to_col="ID" rel_type="one_to_one"/>
+    <link id="32" from_table="tblCountries" from_col="UserID" to_table="tblUsers" to_col="ID" rel_type="one_to_one"/>
+    <link id="33" from_table="tblCountries" from_col="BranchID" to_table="tblBranches" to_col="ID" rel_type="one_to_one"/>
+    <link id="34" from_table="tblCurrencies" from_col="UserID" to_table="tblUsers" to_col="ID" rel_type="one_to_one"/>
+    <link id="35" from_table="tblCurrencies" from_col="BranchID" to_table="tblBranches" to_col="ID" rel_type="one_to_one"/>
+    <link id="36" from_table="tblUsers" from_col="DefaultBranchID" to_table="tblBranches" to_col="ID" rel_type="one_to_one"/>
+    <link id="37" from_table="tblUsers" from_col="BranchID" to_table="tblBranches" to_col="ID" rel_type="one_to_one"/>
+    <link id="38" from_table="tblBranches" from_col="UserID" to_table="tblUsers" to_col="ID" rel_type="one_to_one"/>
+    <link id="39" from_table="tblAgents" from_col="UserID" to_table="tblUsers" to_col="ID" rel_type="one_to_one"/>
+    <link id="40" from_table="tblAgents" from_col="BranchID" to_table="tblBranches" to_col="ID" rel_type="one_to_one"/>
+  </links>
+  <table_opts>
+    <table name="tblProvinces" conn="2"/>
+    <table name="tblIncomingTransfers" conn="2" is_default="1"/>
+    <table name="tblLSTargetTypes" conn="2"/>
+    <table name="tblAccounts" conn="2"/>
+    <table name="tblCurrencies" conn="2"/>
+    <table name="vewPersonalInformation" conn="2"/>
+    <table name="tblTargets" conn="2"/>
+    <table name="tblRegions" conn="2"/>
+    <table name="tblCountries" conn="2"/>
+    <table name="tblUsers" conn="2"/>
+    <table name="tblBranches" conn="2"/>
+    <table name="tblLSCashChequeAccount" conn="2"/>
+    <table name="tblAgents" conn="2"/>
+    <table name="dbo.vewPersonalInformation" conn="2"/>
+  </table_opts>
+  <general_where>(([tblIncomingTransfers.Delivered] = 1) AND ([tblIncomingTransfers.Delivered] = 1)) AND ([[tblIncomingTransfers.Delivered]] = 1)</general_where>
+</rml>

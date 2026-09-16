@@ -1,0 +1,206 @@
+<!doctype html><html><head><meta charset='utf-8'><title>ODEX Inline Demo</title><style>
+        body{font-family:system-ui;padding:24px} .grid{display:grid;gap:12px} .view{border:1px solid #ddd;padding:12px;border-radius:8px} table{width:100%;border-collapse:collapse} th,td{border:1px solid #ddd;padding:6px} .search{display:flex;gap:8px}
+        </style></head><body><h1>ODEX Components — Inline Preview (file:// friendly)</h1>
+<h2>views</h2><div class='grid'>
+<div class='card'><h4>CalendarView1</h4><div id='c-CalendarView1' class='preview'>loading...</div><script type='module'>
+// views/CalendarView1 — dynamic component (class)
+// auto-generated 375 set — class v3
+export class CalendarView1 {
+  constructor(props){ this.props = props||{}; }
+  render(){ const p=this.props; return '<div class="view calendarview1" style="border:1px solid #e5e7eb;padding:12px;border-radius:8px;background:#fff"><h4 style="margin:0 0 6px">'+(p.title||'CalendarView1')+'</h4><p style="color:#666;margin:0">'+(p.description||'')+'</p><span style="font-size:12px;color:#888">count: '+(p.count||0)+'</span></div>'; }
+}
+try{document.getElementById('c-CalendarView1').innerHTML = CalendarView1({'title':'CalendarView1'});}catch(e){document.getElementById('c-CalendarView1').innerText='js error:'+e}
+</script></div>
+<div class='card'><h4>CalendarView2</h4><div id='c-CalendarView2' class='preview'>loading...</div><script type='module'>
+// views/CalendarView2 — dynamic component (class)
+// auto-generated 375 set — class v3
+export class CalendarView2 {
+  constructor(props){ this.props = props||{}; }
+  render(){ const p=this.props; return '<div class="view calendarview2" style="border:1px solid #e5e7eb;padding:12px;border-radius:8px;background:#fff"><h4 style="margin:0 0 6px">'+(p.title||'CalendarView2')+'</h4><p style="color:#666;margin:0">'+(p.description||'')+'</p><span style="font-size:12px;color:#888">count: '+(p.count||0)+'</span></div>'; }
+}
+try{document.getElementById('c-CalendarView2').innerHTML = CalendarView2({'title':'CalendarView2'});}catch(e){document.getElementById('c-CalendarView2').innerText='js error:'+e}
+</script></div>
+<div class='card'><h4>CalendarView3</h4><div id='c-CalendarView3' class='preview'>loading...</div><script type='module'>
+// views/CalendarView3 — dynamic component (class)
+// auto-generated 375 set — class v3
+export class CalendarView3 {
+  constructor(props){ this.props = props||{}; }
+  render(){ const p=this.props; return '<div class="view calendarview3" style="border:1px solid #e5e7eb;padding:12px;border-radius:8px;background:#fff"><h4 style="margin:0 0 6px">'+(p.title||'CalendarView3')+'</h4><p style="color:#666;margin:0">'+(p.description||'')+'</p><span style="font-size:12px;color:#888">count: '+(p.count||0)+'</span></div>'; }
+}
+try{document.getElementById('c-CalendarView3').innerHTML = CalendarView3({'title':'CalendarView3'});}catch(e){document.getElementById('c-CalendarView3').innerText='js error:'+e}
+</script></div>
+</div>
+<h2>charts</h2><div class='grid'>
+<div class='card'><h4>AreaChart1</h4><div id='c-AreaChart1' class='preview'>loading...</div><script type='module'>
+// charts/AreaChart1 — dynamic component (class)
+// auto-generated 375 set — class v3
+export class AreaChart1 {
+  constructor(props){ this.props = props||{}; }
+  render(){ const p=this.props; var data=p.data||[]; var opts=p.opts||{}; var bars=data.map(function(d){ var w=d.y||d.value||10; var label=d.x||d.label||''; return '<div style="background:steelblue;height:12px;margin:2px 0;width:'+w+'%;color:#fff;font-size:10px;padding:2px">'+label+'</div>'; }).join(''); return '<div class="chart areachart1" style="border:1px solid #e5e7eb;padding:12px;border-radius:8px"><strong>AreaChart1 '+(opts.title||'')+'</strong><div style="margin:8px 0">'+bars+'</div><small>'+data.length+' pts</small></div>'; }
+}
+try{document.getElementById('c-AreaChart1').innerHTML = AreaChart1({'title':'AreaChart1'});}catch(e){document.getElementById('c-AreaChart1').innerText='js error:'+e}
+</script></div>
+<div class='card'><h4>AreaChart2</h4><div id='c-AreaChart2' class='preview'>loading...</div><script type='module'>
+// charts/AreaChart2 — dynamic component (class)
+// auto-generated 375 set — class v3
+export class AreaChart2 {
+  constructor(props){ this.props = props||{}; }
+  render(){ const p=this.props; var data=p.data||[]; var opts=p.opts||{}; var bars=data.map(function(d){ var w=d.y||d.value||10; var label=d.x||d.label||''; return '<div style="background:steelblue;height:12px;margin:2px 0;width:'+w+'%;color:#fff;font-size:10px;padding:2px">'+label+'</div>'; }).join(''); return '<div class="chart areachart2" style="border:1px solid #e5e7eb;padding:12px;border-radius:8px"><strong>AreaChart2 '+(opts.title||'')+'</strong><div style="margin:8px 0">'+bars+'</div><small>'+data.length+' pts</small></div>'; }
+}
+try{document.getElementById('c-AreaChart2').innerHTML = AreaChart2({'title':'AreaChart2'});}catch(e){document.getElementById('c-AreaChart2').innerText='js error:'+e}
+</script></div>
+<div class='card'><h4>AreaChart3</h4><div id='c-AreaChart3' class='preview'>loading...</div><script type='module'>
+// charts/AreaChart3 — dynamic component (class)
+// auto-generated 375 set — class v3
+export class AreaChart3 {
+  constructor(props){ this.props = props||{}; }
+  render(){ const p=this.props; var data=p.data||[]; var opts=p.opts||{}; var bars=data.map(function(d){ var w=d.y||d.value||10; var label=d.x||d.label||''; return '<div style="background:steelblue;height:12px;margin:2px 0;width:'+w+'%;color:#fff;font-size:10px;padding:2px">'+label+'</div>'; }).join(''); return '<div class="chart areachart3" style="border:1px solid #e5e7eb;padding:12px;border-radius:8px"><strong>AreaChart3 '+(opts.title||'')+'</strong><div style="margin:8px 0">'+bars+'</div><small>'+data.length+' pts</small></div>'; }
+}
+try{document.getElementById('c-AreaChart3').innerHTML = AreaChart3({'title':'AreaChart3'});}catch(e){document.getElementById('c-AreaChart3').innerText='js error:'+e}
+</script></div>
+</div>
+<h2>buttons</h2><div class='grid'>
+<div class='card'><h4>ConfirmButton1</h4><div id='c-ConfirmButton1' class='preview'>loading...</div><script type='module'>
+// buttons/ConfirmButton1 — dynamic component (class)
+// auto-generated 375 set — class v3
+export class ConfirmButton1 {
+  constructor(props){ this.props = props||{}; }
+  render(){ const p=this.props; var label=p.label||'ConfirmButton1'; var onClick=p.onClick||p.on_click||''; return '<button class="btn confirmbutton1" style="padding:8px 14px;border-radius:6px;border:1px solid #ccc;background:#111;color:#fff;cursor:pointer" onclick="'+onClick+'">'+label+'</button>'; }
+}
+try{document.getElementById('c-ConfirmButton1').innerHTML = ConfirmButton1({'title':'ConfirmButton1'});}catch(e){document.getElementById('c-ConfirmButton1').innerText='js error:'+e}
+</script></div>
+<div class='card'><h4>ConfirmButton2</h4><div id='c-ConfirmButton2' class='preview'>loading...</div><script type='module'>
+// buttons/ConfirmButton2 — dynamic component (class)
+// auto-generated 375 set — class v3
+export class ConfirmButton2 {
+  constructor(props){ this.props = props||{}; }
+  render(){ const p=this.props; var label=p.label||'ConfirmButton2'; var onClick=p.onClick||p.on_click||''; return '<button class="btn confirmbutton2" style="padding:8px 14px;border-radius:6px;border:1px solid #ccc;background:#111;color:#fff;cursor:pointer" onclick="'+onClick+'">'+label+'</button>'; }
+}
+try{document.getElementById('c-ConfirmButton2').innerHTML = ConfirmButton2({'title':'ConfirmButton2'});}catch(e){document.getElementById('c-ConfirmButton2').innerText='js error:'+e}
+</script></div>
+<div class='card'><h4>ConfirmButton3</h4><div id='c-ConfirmButton3' class='preview'>loading...</div><script type='module'>
+// buttons/ConfirmButton3 — dynamic component (class)
+// auto-generated 375 set — class v3
+export class ConfirmButton3 {
+  constructor(props){ this.props = props||{}; }
+  render(){ const p=this.props; var label=p.label||'ConfirmButton3'; var onClick=p.onClick||p.on_click||''; return '<button class="btn confirmbutton3" style="padding:8px 14px;border-radius:6px;border:1px solid #ccc;background:#111;color:#fff;cursor:pointer" onclick="'+onClick+'">'+label+'</button>'; }
+}
+try{document.getElementById('c-ConfirmButton3').innerHTML = ConfirmButton3({'title':'ConfirmButton3'});}catch(e){document.getElementById('c-ConfirmButton3').innerText='js error:'+e}
+</script></div>
+</div>
+<h2>fields</h2><div class='grid'>
+<div class='card'><h4>CheckboxField1</h4><div id='c-CheckboxField1' class='preview'>loading...</div><script type='module'>
+// fields/CheckboxField1 — dynamic component (class)
+// auto-generated 375 set — class v3
+export class CheckboxField1 {
+  constructor(props){ this.props = props||{}; }
+  render(){ const p=this.props; var v=p.value||''; var cfg=p.cfg||{}; return '<label style="display:block;margin:4px 0;font-size:13px">'+(cfg.label||'CheckboxField1')+'<input class="field checkboxfield1" value="'+v+'" placeholder="'+(cfg.placeholder||'')+'" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;margin-top:4px" /></label>'; }
+}
+try{document.getElementById('c-CheckboxField1').innerHTML = CheckboxField1({'title':'CheckboxField1'});}catch(e){document.getElementById('c-CheckboxField1').innerText='js error:'+e}
+</script></div>
+<div class='card'><h4>CheckboxField2</h4><div id='c-CheckboxField2' class='preview'>loading...</div><script type='module'>
+// fields/CheckboxField2 — dynamic component (class)
+// auto-generated 375 set — class v3
+export class CheckboxField2 {
+  constructor(props){ this.props = props||{}; }
+  render(){ const p=this.props; var v=p.value||''; var cfg=p.cfg||{}; return '<label style="display:block;margin:4px 0;font-size:13px">'+(cfg.label||'CheckboxField2')+'<input class="field checkboxfield2" value="'+v+'" placeholder="'+(cfg.placeholder||'')+'" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;margin-top:4px" /></label>'; }
+}
+try{document.getElementById('c-CheckboxField2').innerHTML = CheckboxField2({'title':'CheckboxField2'});}catch(e){document.getElementById('c-CheckboxField2').innerText='js error:'+e}
+</script></div>
+<div class='card'><h4>CheckboxField3</h4><div id='c-CheckboxField3' class='preview'>loading...</div><script type='module'>
+// fields/CheckboxField3 — dynamic component (class)
+// auto-generated 375 set — class v3
+export class CheckboxField3 {
+  constructor(props){ this.props = props||{}; }
+  render(){ const p=this.props; var v=p.value||''; var cfg=p.cfg||{}; return '<label style="display:block;margin:4px 0;font-size:13px">'+(cfg.label||'CheckboxField3')+'<input class="field checkboxfield3" value="'+v+'" placeholder="'+(cfg.placeholder||'')+'" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;margin-top:4px" /></label>'; }
+}
+try{document.getElementById('c-CheckboxField3').innerHTML = CheckboxField3({'title':'CheckboxField3'});}catch(e){document.getElementById('c-CheckboxField3').innerText='js error:'+e}
+</script></div>
+</div>
+<h2>search</h2><div class='grid'>
+<div class='card'><h4>AdvancedSearch1</h4><div id='c-AdvancedSearch1' class='preview'>loading...</div><script type='module'>
+// search/AdvancedSearch1 — dynamic component (class)
+// auto-generated 375 set — class v3
+export class AdvancedSearch1 {
+  constructor(props){ this.props = props||{}; }
+  render(){ const p=this.props; var q=p.query||''; return '<div class="search advancedsearch1" style="display:flex;gap:6px;align-items:center;border:1px solid #e5e7eb;padding:8px;border-radius:999px;background:#fff"><input value="'+q+'" placeholder="Search..." style="flex:1;border:0;outline:none" oninput="this.nextElementSibling.nextElementSibling.textContent=this.value"/><button style="padding:6px 12px;border-radius:999px;border:1px solid #ddd">Search</button><span style="color:#888;font-size:12px">'+q+'</span></div>'; }
+}
+try{document.getElementById('c-AdvancedSearch1').innerHTML = AdvancedSearch1({'title':'AdvancedSearch1'});}catch(e){document.getElementById('c-AdvancedSearch1').innerText='js error:'+e}
+</script></div>
+<div class='card'><h4>AdvancedSearch2</h4><div id='c-AdvancedSearch2' class='preview'>loading...</div><script type='module'>
+// search/AdvancedSearch2 — dynamic component (class)
+// auto-generated 375 set — class v3
+export class AdvancedSearch2 {
+  constructor(props){ this.props = props||{}; }
+  render(){ const p=this.props; var q=p.query||''; return '<div class="search advancedsearch2" style="display:flex;gap:6px;align-items:center;border:1px solid #e5e7eb;padding:8px;border-radius:999px;background:#fff"><input value="'+q+'" placeholder="Search..." style="flex:1;border:0;outline:none" oninput="this.nextElementSibling.nextElementSibling.textContent=this.value"/><button style="padding:6px 12px;border-radius:999px;border:1px solid #ddd">Search</button><span style="color:#888;font-size:12px">'+q+'</span></div>'; }
+}
+try{document.getElementById('c-AdvancedSearch2').innerHTML = AdvancedSearch2({'title':'AdvancedSearch2'});}catch(e){document.getElementById('c-AdvancedSearch2').innerText='js error:'+e}
+</script></div>
+<div class='card'><h4>AdvancedSearch3</h4><div id='c-AdvancedSearch3' class='preview'>loading...</div><script type='module'>
+// search/AdvancedSearch3 — dynamic component (class)
+// auto-generated 375 set — class v3
+export class AdvancedSearch3 {
+  constructor(props){ this.props = props||{}; }
+  render(){ const p=this.props; var q=p.query||''; return '<div class="search advancedsearch3" style="display:flex;gap:6px;align-items:center;border:1px solid #e5e7eb;padding:8px;border-radius:999px;background:#fff"><input value="'+q+'" placeholder="Search..." style="flex:1;border:0;outline:none" oninput="this.nextElementSibling.nextElementSibling.textContent=this.value"/><button style="padding:6px 12px;border-radius:999px;border:1px solid #ddd">Search</button><span style="color:#888;font-size:12px">'+q+'</span></div>'; }
+}
+try{document.getElementById('c-AdvancedSearch3').innerHTML = AdvancedSearch3({'title':'AdvancedSearch3'});}catch(e){document.getElementById('c-AdvancedSearch3').innerText='js error:'+e}
+</script></div>
+</div>
+<h2>tables</h2><div class='grid'>
+<div class='card'><h4>DataTable1</h4><div id='c-DataTable1' class='preview'>loading...</div><script type='module'>
+// tables/DataTable1 — dynamic component (class)
+// auto-generated 375 set — class v3
+export class DataTable1 {
+  constructor(props){ this.props = props||{}; }
+  render(){ const p=this.props; var rows=p.rows||[]; var cols=p.cols|| (rows[0]?Object.keys(rows[0]):['id','name']); var h=cols.map(function(c){return '<th style="text-align:left;padding:6px;border-bottom:1px solid #ddd">'+c+'</th>';}).join(''); var b=rows.map(function(r){return '<tr>'+cols.map(function(c){return '<td style="padding:6px;border-bottom:1px solid #eee">'+(r[c]!=null?r[c]:'')+'</td>';}).join('')+'</tr>';}).join(''); return '<table class="datatable1" style="width:100%;border-collapse:collapse;background:#fff;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden"><thead style="background:#f5f5f5"><tr>'+h+'</tr></thead><tbody>'+b+'</tbody></table>'; }
+}
+try{document.getElementById('c-DataTable1').innerHTML = DataTable1({'title':'DataTable1'});}catch(e){document.getElementById('c-DataTable1').innerText='js error:'+e}
+</script></div>
+<div class='card'><h4>DataTable2</h4><div id='c-DataTable2' class='preview'>loading...</div><script type='module'>
+// tables/DataTable2 — dynamic component (class)
+// auto-generated 375 set — class v3
+export class DataTable2 {
+  constructor(props){ this.props = props||{}; }
+  render(){ const p=this.props; var rows=p.rows||[]; var cols=p.cols|| (rows[0]?Object.keys(rows[0]):['id','name']); var h=cols.map(function(c){return '<th style="text-align:left;padding:6px;border-bottom:1px solid #ddd">'+c+'</th>';}).join(''); var b=rows.map(function(r){return '<tr>'+cols.map(function(c){return '<td style="padding:6px;border-bottom:1px solid #eee">'+(r[c]!=null?r[c]:'')+'</td>';}).join('')+'</tr>';}).join(''); return '<table class="datatable2" style="width:100%;border-collapse:collapse;background:#fff;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden"><thead style="background:#f5f5f5"><tr>'+h+'</tr></thead><tbody>'+b+'</tbody></table>'; }
+}
+try{document.getElementById('c-DataTable2').innerHTML = DataTable2({'title':'DataTable2'});}catch(e){document.getElementById('c-DataTable2').innerText='js error:'+e}
+</script></div>
+<div class='card'><h4>DataTable3</h4><div id='c-DataTable3' class='preview'>loading...</div><script type='module'>
+// tables/DataTable3 — dynamic component (class)
+// auto-generated 375 set — class v3
+export class DataTable3 {
+  constructor(props){ this.props = props||{}; }
+  render(){ const p=this.props; var rows=p.rows||[]; var cols=p.cols|| (rows[0]?Object.keys(rows[0]):['id','name']); var h=cols.map(function(c){return '<th style="text-align:left;padding:6px;border-bottom:1px solid #ddd">'+c+'</th>';}).join(''); var b=rows.map(function(r){return '<tr>'+cols.map(function(c){return '<td style="padding:6px;border-bottom:1px solid #eee">'+(r[c]!=null?r[c]:'')+'</td>';}).join('')+'</tr>';}).join(''); return '<table class="datatable3" style="width:100%;border-collapse:collapse;background:#fff;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden"><thead style="background:#f5f5f5"><tr>'+h+'</tr></thead><tbody>'+b+'</tbody></table>'; }
+}
+try{document.getElementById('c-DataTable3').innerHTML = DataTable3({'title':'DataTable3'});}catch(e){document.getElementById('c-DataTable3').innerText='js error:'+e}
+</script></div>
+</div>
+<h2>grids</h2><div class='grid'>
+<div class='card'><h4>DataGrid1</h4><div id='c-DataGrid1' class='preview'>loading...</div><script type='module'>
+// grids/DataGrid1 — dynamic component (class)
+// auto-generated 375 set — class v3
+export class DataGrid1 {
+  constructor(props){ this.props = props||{}; }
+  render(){ const p=this.props; var items=p.items||[]; var cols=p.cols||3; var cells=items.map(function(i){return '<div class="cell" style="border:1px solid #e5e7eb;padding:8px;border-radius:6px;background:#fff">'+JSON.stringify(i)+'</div>';}).join(''); return '<div class="grid datagrid1" style="display:grid;grid-template-columns:repeat('+cols+',1fr);gap:8px">'+cells+'</div>'; }
+}
+try{document.getElementById('c-DataGrid1').innerHTML = DataGrid1({'title':'DataGrid1'});}catch(e){document.getElementById('c-DataGrid1').innerText='js error:'+e}
+</script></div>
+<div class='card'><h4>DataGrid2</h4><div id='c-DataGrid2' class='preview'>loading...</div><script type='module'>
+// grids/DataGrid2 — dynamic component (class)
+// auto-generated 375 set — class v3
+export class DataGrid2 {
+  constructor(props){ this.props = props||{}; }
+  render(){ const p=this.props; var items=p.items||[]; var cols=p.cols||3; var cells=items.map(function(i){return '<div class="cell" style="border:1px solid #e5e7eb;padding:8px;border-radius:6px;background:#fff">'+JSON.stringify(i)+'</div>';}).join(''); return '<div class="grid datagrid2" style="display:grid;grid-template-columns:repeat('+cols+',1fr);gap:8px">'+cells+'</div>'; }
+}
+try{document.getElementById('c-DataGrid2').innerHTML = DataGrid2({'title':'DataGrid2'});}catch(e){document.getElementById('c-DataGrid2').innerText='js error:'+e}
+</script></div>
+<div class='card'><h4>DataGrid3</h4><div id='c-DataGrid3' class='preview'>loading...</div><script type='module'>
+// grids/DataGrid3 — dynamic component (class)
+// auto-generated 375 set — class v3
+export class DataGrid3 {
+  constructor(props){ this.props = props||{}; }
+  render(){ const p=this.props; var items=p.items||[]; var cols=p.cols||3; var cells=items.map(function(i){return '<div class="cell" style="border:1px solid #e5e7eb;padding:8px;border-radius:6px;background:#fff">'+JSON.stringify(i)+'</div>';}).join(''); return '<div class="grid datagrid3" style="display:grid;grid-template-columns:repeat('+cols+',1fr);gap:8px">'+cells+'</div>'; }
+}
+try{document.getElementById('c-DataGrid3').innerHTML = DataGrid3({'title':'DataGrid3'});}catch(e){document.getElementById('c-DataGrid3').innerText='js error:'+e}
+</script></div>
+</div><script>function search(v){console.log('search',v)}</script></body></html>

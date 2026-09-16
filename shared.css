@@ -1,0 +1,97 @@
+/* ODEX Material — Integrated Package (User Provided + Material 3) — editable via /api/css */
+@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap');
+
+:root {
+  /* User Provided Material Theme */
+  --md-primary: #6200ee;
+  --md-primary-variant: #3700b3;
+  --md-secondary: #03dac6;
+  --md-background: #f5f5f5;
+  --md-surface: #ffffff;
+  --md-error: #b00020;
+  --md-on-primary: #ffffff;
+  --md-on-surface: #000000;
+  --md-radius: 4px;
+  --md-elevation-1: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24);
+  --md-elevation-2: 0 3px 6px rgba(0,0,0,0.16), 0 3px 6px rgba(0,0,0,0.23);
+  --md-elevation-3: 0 10px 20px rgba(0,0,0,0.19), 0 6px 6px rgba(0,0,0,0.23);
+  --transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  /* Material 3 aliases for 375 components compatibility */
+  --md-sys-color-primary: var(--md-primary);
+  --md-sys-color-on-primary: var(--md-on-primary);
+  --md-sys-color-primary-container: #EADDFF;
+  --md-sys-color-on-primary-container: #21005D;
+  --md-sys-color-secondary: var(--md-secondary);
+  --md-sys-color-surface: var(--md-surface);
+  --md-sys-color-surface-container: #F3EDF7;
+  --md-sys-color-outline: #79747E;
+  --md-sys-color-outline-variant: #CAC4D0;
+  --md-sys-color-error: var(--md-error);
+  --md-sys-color-background: var(--md-background);
+  --md-sys-elevation-1: var(--md-elevation-1);
+  --md-sys-elevation-2: var(--md-elevation-2);
+  --md-sys-shape-corner-medium: var(--md-radius);
+  --md-sys-shape-corner-large: 12px;
+  --md-sys-shape-corner-extra-large: 28px;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Roboto', sans-serif; }
+html, body { background-color: var(--md-background); color: var(--md-on-surface); }
+body { padding: 24px; }
+
+/* Provided container & card-section */
+.container { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px; max-width: 1400px; margin: 0 auto; }
+.card-section { background: var(--md-surface); padding: 20px; border-radius: var(--md-radius); box-shadow: var(--md-elevation-1); }
+.section-title { font-size: 1.1rem; font-weight: 500; margin-bottom: 16px; color: var(--md-primary); border-bottom: 2px solid var(--md-background); padding-bottom: 8px; }
+
+/* Demo grid (375 components) */
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+.card { background: var(--md-surface); border: 1px solid var(--md-background); border-radius: var(--md-radius); padding: 16px; box-shadow: var(--md-elevation-1); transition: var(--transition); }
+.card:hover { box-shadow: var(--md-elevation-2); }
+.card h4 { margin: 0 0 12px; font-size: 14px; font-weight: 500; color: var(--md-primary); display: flex; align-items: center; gap: 8px; }
+.card h4::before { content: 'widgets'; font-family: 'Material Symbols Outlined'; font-size: 20px; color: var(--md-primary); }
+.card .preview { border: 1px dashed var(--md-sys-color-outline-variant); padding: 16px; min-height: 88px; background: var(--md-background); border-radius: var(--md-radius); display: flex; align-items: center; justify-content: center; }
+.card .preview > * { width: 100%; }
+.card .meta { margin-top: 12px; font-size: 11px; color: #666; display: flex; justify-content: space-between; }
+.card .meta code { background: var(--md-sys-color-primary-container); color: var(--md-sys-color-on-primary-container); padding: 2px 6px; border-radius: 4px; }
+
+/* Provided Buttons */
+.md-btn { position: relative; display: inline-flex; align-items: center; justify-content: center; padding: 10px 20px; font-size: 0.875rem; font-weight: 500; text-transform: uppercase; border: none; border-radius: var(--md-radius); cursor: pointer; transition: var(--transition); outline: none; box-shadow: var(--md-elevation-1); }
+.md-btn-primary { background-color: var(--md-primary); color: var(--md-on-primary); }
+.md-btn-primary:hover { background-color: var(--md-primary-variant); box-shadow: var(--md-elevation-2); }
+.md-btn-outlined { background-color: transparent; color: var(--md-primary); border: 1px solid var(--md-primary); box-shadow: none; }
+.md-btn-outlined:hover { background-color: rgba(98, 0, 238, 0.04); }
+.md-btn-text { background-color: transparent; color: var(--md-primary); box-shadow: none; }
+.md-btn-text:hover { background-color: rgba(98, 0, 238, 0.04); }
+
+/* Provided Text Fields */
+.md-text-field { position: relative; margin-bottom: 20px; }
+.md-text-field input, .md-text-field select { width: 100%; padding: 12px 16px; font-size: 1rem; border: 1px solid rgba(0, 0, 0, 0.38); border-radius: var(--md-radius); background: transparent; outline: none; transition: var(--transition); }
+.md-text-field input:focus, .md-text-field select:focus { border-color: var(--md-primary); border-width: 2px; padding: 11px 15px; }
+.md-text-field label { position: absolute; top: -8px; right: 12px; background: var(--md-surface); padding: 0 4px; font-size: 0.75rem; color: var(--md-primary); font-weight: 500; }
+
+/* Provided Cards */
+.md-card { background: var(--md-surface); border-radius: var(--md-radius); box-shadow: var(--md-elevation-1); padding: 16px; transition: var(--transition); }
+.md-card:hover { box-shadow: var(--md-elevation-2); }
+.md-card-header { font-size: 1.2rem; font-weight: 500; margin-bottom: 8px; }
+.md-card-content { font-size: 0.9rem; color: rgba(0, 0, 0, 0.6); margin-bottom: 16px; }
+
+/* Provided Tables */
+.md-table-container { width: 100%; overflow-x: auto; border-radius: var(--md-radius); box-shadow: var(--md-elevation-1); background: var(--md-surface); }
+.md-table { width: 100%; border-collapse: collapse; text-align: right; font-size: 0.875rem; }
+.md-table th, .md-table td { padding: 12px 16px; border-bottom: 1px solid rgba(0, 0, 0, 0.12); }
+.md-table th { background-color: rgba(0, 0, 0, 0.02); font-weight: 500; }
+.md-table tr:hover { background-color: rgba(0, 0, 0, 0.04); }
+
+/* Material 3 compatibility for 375 components */
+.mdc-card { background: var(--md-surface); border-radius: var(--md-radius); box-shadow: var(--md-elevation-1); padding: 16px; }
+.mdc-button { position: relative; overflow: hidden; border-radius: var(--md-radius); padding: 10px 24px; font-size: 14px; font-weight: 500; letter-spacing: .1px; border: 0; cursor: pointer; }
+.mdc-button--filled { background: var(--md-primary); color: var(--md-on-primary); }
+.mdc-button--outlined { background: transparent; color: var(--md-primary); border: 1px solid var(--md-primary); }
+.mdc-button--tonal { background: var(--md-sys-color-primary-container); color: var(--md-sys-color-on-primary-container); }
+.mdc-data-table { border: 1px solid rgba(0,0,0,0.12); border-radius: var(--md-radius); overflow: hidden; background: var(--md-surface); }
+.mdc-grid { display: grid; gap: 12px; }
+
+/* Sticky editor */
+.toc { margin: 16px 0; padding: 12px; background: var(--md-surface); border-radius: var(--md-radius); position: sticky; top: 0; z-index: 10; border: 1px solid var(--md-background); box-shadow: var(--md-elevation-1); }
+.toc a { margin: 0 8px 8px 0; display: inline-block; padding: 6px 12px; border-radius: 999px; background: var(--md-primary); color: var(--md-on-primary); text-decoration: none; font-size: 13px; font-weight: 500; }

@@ -1,0 +1,1691 @@
+﻿/* DML visual designer — state, editors, no-code CSS panel, save/preview. */
+let D = {file:'', isNew:true,
+    meta:{paper:'A4', orientation:'portrait', margin:'12mm', title:'', name:'', source:''},
+    variables:[], header:{html:'', style:''}, sections:[], footer:{html:'', style:''}};
+let dmlTab = 'settings', dmlTarget = 'header', dmlCat = 'typography', _prevTimer = null;
+
+/* ── CSS property catalog (categorized, no-code controls) ── */
+const FONT_OPTS = ['Tahoma','Arial','Cairo','Amiri','Aref Ruqaa','Times New Roman','Courier New','Georgia','Verdana','sans-serif','serif','monospace'];
+function _sides(base, label, type, extra){
+    const S = [['','الكل'],['-top','أعلى'],['-right','يمين'],['-bottom','أسفل'],['-left','يسار']];
+    return S.map(([suf, ar])=>Object.assign({k:base+suf, label:label+' — '+ar, type:type}, extra||{}));
+}
+function _corners(){
+    return [{k:'border-radius',label:'استدارة — الكل',type:'range',unit:'px',min:0,max:60},
+        {k:'border-top-right-radius',label:'استدارة — يمين علوي',type:'range',unit:'px',min:0,max:60},
+        {k:'border-bottom-right-radius',label:'استدارة — يمين سفلي',type:'range',unit:'px',min:0,max:60},
+        {k:'border-bottom-left-radius',label:'استدارة — يسار سفلي',type:'range',unit:'px',min:0,max:60},
+        {k:'border-top-left-radius',label:'استدارة — يسار علوي',type:'range',unit:'px',min:0,max:60}];
+}
+const CSS_CATS = [
+{id:'typography', icon:'fa-font', label:'الخط والنص', props:[
+    {k:'font-family',label:'نوع الخط',type:'font'},
+    {k:'font-size',label:'حجم الخط',type:'range',unit:'px',min:8,max:96},
+    {k:'font-weight',label:'وزن الخط',type:'select',opts:['normal','bold','100','200','300','400','500','600','700','800','900']},
+    {k:'font-style',label:'نمط الخط',type:'select',opts:['normal','italic','oblique']},
+    {k:'font-variant-caps',label:'أحرف استهلالية',type:'select',opts:['normal','small-caps','all-small-caps','petite-caps','unicase','titling-caps']},
+    {k:'font-stretch',label:'تمدد الخط',type:'select',opts:['normal','condensed','expanded','ultra-condensed','ultra-expanded']},
+    {k:'font-kerning',label:'تقنين الأحرف',type:'select',opts:['auto','normal','none']},
+    {k:'line-height',label:'ارتفاع السطر',type:'range',unit:'',min:1,max:3,step:0.05},
+    {k:'letter-spacing',label:'تباعد الأحرف',type:'range',unit:'px',min:-5,max:20},
+    {k:'word-spacing',label:'تباعد الكلمات',type:'range',unit:'px',min:0,max:30},
+    {k:'color',label:'لون النص',type:'color'},
+    {k:'text-align',label:'محاذاة النص',type:'seg',opts:[['right','fa-align-right','يمين'],['center','fa-align-center','وسط'],['left','fa-align-left','يسار'],['justify','fa-align-justify','ضبط']]},
+    {k:'text-align-last',label:'محاذاة السطر الأخير',type:'select',opts:['auto','right','center','left','justify']},
+    {k:'text-decoration-line',label:'زخرفة النص',type:'select',opts:['none','underline','overline','line-through']},
+    {k:'text-decoration-style',label:'نمط الزخرفة',type:'select',opts:['solid','double','dotted','dashed','wavy']},
+    {k:'text-decoration-color',label:'لون الزخرفة',type:'color'},
+    {k:'text-decoration-thickness',label:'سماكة الزخرفة',type:'range',unit:'px',min:0,max:10},
+    {k:'text-underline-offset',label:'إزاحة الخط السفلي',type:'range',unit:'px',min:0,max:20},
+    {k:'text-transform',label:'تحويل الأحرف',type:'select',opts:['none','uppercase','lowercase','capitalize']},
+    {k:'text-indent',label:'مسافة أول السطر',type:'range',unit:'px',min:0,max:200},
+    {k:'text-shadow',label:'ظل النص',type:'text',ph:'2px 2px 4px #999'},
+    {k:'text-overflow',label:'فيض النص',type:'select',opts:['clip','ellipsis']},
+    {k:'text-wrap',label:'التفاف النص',type:'select',opts:['wrap','nowrap','balance','pretty','stable']},
+    {k:'white-space',label:'المسافات البيضاء',type:'select',opts:['normal','nowrap','pre','pre-line','pre-wrap']},
+    {k:'word-break',label:'كسر الكلمات',type:'select',opts:['normal','break-all','keep-all','break-word']},
+    {k:'overflow-wrap',label:'التفاف الطويل',type:'select',opts:['normal','break-word','anywhere']},
+    {k:'line-break',label:'كسر الأسطر',type:'select',opts:['auto','loose','normal','strict','anywhere']},
+    {k:'hyphens',label:'الوصل',type:'select',opts:['none','manual','auto']},
+    {k:'vertical-align',label:'محاذاة عمودية',type:'select',opts:['baseline','top','middle','bottom','text-top','text-bottom','super','sub']},
+    {k:'direction',label:'الاتجاه',type:'seg',opts:[['rtl','fa-arrow-right','يمين-يسار'],['ltr','fa-arrow-left','يسار-يمين']]},
+    {k:'unicode-bidi',label:'ثنائي الاتجاه',type:'select',opts:['normal','embed','isolate','bidi-override','plaintext']},
+    {k:'writing-mode',label:'وضع الكتابة',type:'select',opts:['horizontal-tb','vertical-rl','vertical-lr']},
+    {k:'tab-size',label:'حجم الجدولة',type:'range',unit:'',min:0,max:8,step:1},
+    {k:'quotes',label:'علامات الاقتباس',type:'text',ph:'"«" "»"'},
+]},
+{id:'background', icon:'fa-fill-drip', label:'الخلفية', props:[
+    {k:'background-color',label:'لون الخلفية',type:'color'},
+    {k:'background-image',label:'صورة الخلفية (رابط)',type:'image'},
+    {k:'background-size',label:'حجم الخلفية',type:'select',opts:['auto','cover','contain','100% 100%','100% auto','auto 100%']},
+    {k:'background-repeat',label:'تكرار الخلفية',type:'select',opts:['repeat','no-repeat','repeat-x','repeat-y','round','space']},
+    {k:'background-position',label:'موضع الخلفية',type:'select',opts:['right top','right center','right bottom','center top','center center','center bottom','left top','left center','left bottom']},
+    {k:'background-attachment',label:'ثبات الخلفية',type:'select',opts:['scroll','fixed','local']},
+    {k:'background-clip',label:'قص الخلفية',type:'select',opts:['border-box','padding-box','content-box','text']},
+    {k:'background-origin',label:'أصل الخلفية',type:'select',opts:['border-box','padding-box','content-box']},
+    {k:'background-blend-mode',label:'مزج الخلفية',type:'select',opts:['normal','multiply','screen','overlay','darken','lighten']},
+    {k:'opacity',label:'الشفافية',type:'range',unit:'',min:0,max:1,step:0.05},
+    {k:'box-shadow',label:'ظل الصندوق',type:'text',ph:'0 2px 8px rgba(0,0,0,.2)'},
+    {k:'caret-color',label:'لون المؤشر',type:'color'},
+    {k:'accent-color',label:'لون التمييز',type:'color'},
+    {k:'color-scheme',label:'نظام الألوان',type:'select',opts:['normal','light','dark']},
+]},
+{id:'borders', icon:'fa-border-all', label:'الحدود', props:[
+    ..._sides('border-width','عرض الحد',{type:'range',unit:'px',min:0,max:20}),
+    ..._sides('border-style','نمط الحد',{type:'select',opts:['none','solid','dashed','dotted','double','groove','ridge','inset','outset']}),
+    ..._sides('border-color','لون الحد',{type:'color'}),
+    ..._corners(),
+    {k:'outline-width',label:'عرض الإطار الخارجي',type:'range',unit:'px',min:0,max:20},
+    {k:'outline-style',label:'نمط الإطار الخارجي',type:'select',opts:['none','solid','dashed','dotted','double']},
+    {k:'outline-color',label:'لون الإطار الخارجي',type:'color'},
+    {k:'outline-offset',label:'إزاحة الإطار الخارجي',type:'range',unit:'px',min:0,max:20},
+    {k:'border-collapse',label:'دمج حدود الجدول',type:'select',opts:['collapse','separate']},
+    {k:'border-spacing',label:'تباعد حدود الجدول',type:'text',ph:'0'},
+    {k:'table-layout',label:'تخطيط الجدول',type:'select',opts:['auto','fixed']},
+    {k:'empty-cells',label:'الخلايا الفارغة',type:'select',opts:['show','hide']},
+    {k:'caption-side',label:'جهة التسمية',type:'select',opts:['top','bottom']},
+    {k:'border-image-source',label:'مصدر صورة الحد',type:'image'},
+    {k:'border-image-slice',label:'تقطيع صورة الحد',type:'text',ph:'30'},
+]},
+{id:'spacing', icon:'fa-arrows-up-down-left-right', label:'المسافات', props:[
+    ..._sides('margin','هامش خارجي',{type:'range',unit:'px',min:0,max:100}),
+    ..._sides('padding','حشوة داخلية',{type:'range',unit:'px',min:0,max:100}),
+    {k:'margin-inline',label:'هامش أفقي منطقي',type:'text',ph:'0 8px'},
+    {k:'margin-block',label:'هامش عمودي منطقي',type:'text',ph:'8px 0'},
+    {k:'padding-inline',label:'حشوة أفقية منطقية',type:'text',ph:'0 8px'},
+    {k:'padding-block',label:'حشوة عمودية منطقية',type:'text',ph:'8px 0'},
+    {k:'gap',label:'الفجوة',type:'range',unit:'px',min:0,max:60},
+    {k:'row-gap',label:'فجوة الصفوف',type:'range',unit:'px',min:0,max:60},
+    {k:'column-gap',label:'فجوة الأعمدة',type:'range',unit:'px',min:0,max:60},
+]},
+{id:'size', icon:'fa-ruler-combined', label:'الحجم والتخطيط', props:[
+    {k:'width',label:'العرض',type:'text',ph:'100% / 200px / auto'},
+    {k:'height',label:'الارتفاع',type:'text',ph:'auto / 100px'},
+    {k:'min-width',label:'أدنى عرض',type:'text',ph:'0'},
+    {k:'min-height',label:'أدنى ارتفاع',type:'text',ph:'0'},
+    {k:'max-width',label:'أقصى عرض',type:'text',ph:'none / 100%'},
+    {k:'max-height',label:'أقصى ارتفاع',type:'text',ph:'none'},
+    {k:'box-sizing',label:'نموذج الصندوق',type:'select',opts:['content-box','border-box']},
+    {k:'display',label:'العرض',type:'select',opts:['block','inline','inline-block','flex','inline-flex','grid','inline-grid','table','table-cell','none']},
+    {k:'overflow',label:'الفيض',type:'select',opts:['visible','hidden','auto','scroll']},
+    {k:'overflow-x',label:'فيض أفقي',type:'select',opts:['visible','hidden','auto','scroll']},
+    {k:'overflow-y',label:'فيض عمودي',type:'select',opts:['visible','hidden','auto','scroll']},
+    {k:'visibility',label:'الظهور',type:'select',opts:['visible','hidden','collapse']},
+    {k:'float',label:'التعويم',type:'select',opts:['none','right','left']},
+    {k:'clear',label:'مسح التعويم',type:'select',opts:['none','right','left','both']},
+    {k:'object-fit',label:'ملاءمة الكائن',type:'select',opts:['fill','contain','cover','none','scale-down']},
+    {k:'object-position',label:'موضع الكائن',type:'text',ph:'center'},
+    {k:'aspect-ratio',label:'نسبة الأبعاد',type:'text',ph:'16 / 9'},
+    {k:'columns',label:'الأعمدة',type:'text',ph:'2'},
+    {k:'column-rule-width',label:'عرض فاصل الأعمدة',type:'range',unit:'px',min:0,max:20},
+    {k:'column-rule-style',label:'نمط فاصل الأعمدة',type:'select',opts:['none','solid','dashed','dotted','double']},
+    {k:'column-rule-color',label:'لون فاصل الأعمدة',type:'color'},
+    {k:'cursor',label:'المؤشر',type:'select',opts:['auto','default','pointer','text','move','not-allowed','crosshair']},
+]},
+{id:'position', icon:'fa-location-crosshairs', label:'التموضع والمرونة', props:[
+    {k:'position',label:'التموضع',type:'select',opts:['static','relative','absolute','fixed','sticky']},
+    {k:'top',label:'من الأعلى',type:'text',ph:'0 / 10px / auto'},
+    {k:'right',label:'من اليمين',type:'text',ph:'0 / 10px / auto'},
+    {k:'bottom',label:'من الأسفل',type:'text',ph:'0 / 10px / auto'},
+    {k:'left',label:'من اليسار',type:'text',ph:'0 / 10px / auto'},
+    {k:'z-index',label:'ترتيب الطبقات',type:'range',unit:'',min:0,max:100,step:1},
+    {k:'inset',label:'الإزاحة الشاملة',type:'text',ph:'0'},
+    {k:'flex-direction',label:'اتجاه المرونة',type:'select',opts:['row','row-reverse','column','column-reverse']},
+    {k:'flex-wrap',label:'التفاف المرونة',type:'select',opts:['nowrap','wrap','wrap-reverse']},
+    {k:'justify-content',label:'محاذاة رئيسية',type:'select',opts:['flex-start','flex-end','center','space-between','space-around','space-evenly']},
+    {k:'align-items',label:'محاذاة العناصر',type:'select',opts:['stretch','flex-start','flex-end','center','baseline']},
+    {k:'align-content',label:'محاذاة المحتوى',type:'select',opts:['stretch','flex-start','flex-end','center','space-between','space-around']},
+    {k:'align-self',label:'محاذاة ذاتية',type:'select',opts:['auto','stretch','flex-start','flex-end','center','baseline']},
+    {k:'order',label:'الترتيب',type:'range',unit:'',min:0,max:12,step:1},
+    {k:'flex-grow',label:'النمو',type:'range',unit:'',min:0,max:5,step:1},
+    {k:'flex-shrink',label:'التقلص',type:'range',unit:'',min:0,max:5,step:1},
+    {k:'flex-basis',label:'الأساس',type:'text',ph:'auto / 100px / 50%'},
+    {k:'grid-template-columns',label:'أعمدة الشبكة',type:'text',ph:'1fr 1fr'},
+    {k:'grid-template-rows',label:'صفوف الشبكة',type:'text',ph:'auto'},
+    {k:'justify-items',label:'محاذاة عناصر الشبكة',type:'select',opts:['stretch','start','end','center']},
+]},
+{id:'lists', icon:'fa-list', label:'القوائم', props:[
+    {k:'list-style-type',label:'نوع التعداد',type:'select',opts:['disc','circle','square','decimal','decimal-leading-zero','arabic-indic','none']},
+    {k:'list-style-position',label:'موضع التعداد',type:'select',opts:['outside','inside']},
+    {k:'list-style-image',label:'صورة التعداد',type:'image'},
+    {k:'marker-side',label:'جهة العلامة',type:'text',ph:'match-self'},
+]},
+{id:'print', icon:'fa-print', label:'الطباعة', props:[
+    {k:'page-break-before',label:'فاصل قبل',type:'select',opts:['auto','always','avoid']},
+    {k:'page-break-after',label:'فاصل بعد',type:'select',opts:['auto','always','avoid']},
+    {k:'page-break-inside',label:'فاصل داخل',type:'select',opts:['auto','avoid']},
+    {k:'break-before',label:'كسر قبل',type:'select',opts:['auto','always','avoid','page','column']},
+    {k:'break-after',label:'كسر بعد',type:'select',opts:['auto','always','avoid','page','column']},
+    {k:'break-inside',label:'كسر داخل',type:'select',opts:['auto','avoid','avoid-page','avoid-column']},
+    {k:'orphans',label:'يتامى الأسطر',type:'range',unit:'',min:1,max:6,step:1},
+    {k:'widows',label:'أرامل الأسطر',type:'range',unit:'',min:1,max:6,step:1},
+]},
+];
+
+/* ── tabs ── */
+function dmlShowTab(t){
+    dmlTab = t;
+    ['info','ribbon','insert','design','preview'].forEach(k=>{
+        const el = document.getElementById('dmlTab-' + k);
+        if(el) el.classList.toggle('hidden', k !== t);
+    });
+    document.querySelectorAll('[data-dmltab]').forEach(b=>{
+        const on = b.getAttribute('data-dmltab') === t;
+        b.className = 'px-2 py-1 rounded-lg text-[11px] font-bold transition whitespace-nowrap ' + (on ? 'bg-violet-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-800');
+    });
+    if(t === 'design'){
+        if(!DML_FIELDS.length) dmlFetchFields();
+        dmlRenderSections(); dmlRenderPalette(); dmlZoneWriteAll(); dmlApplyPaper();
+        dmlPreview();
+    }
+    if(t === 'ribbon'){ dmlSyncRibbon(); dmlStyleSaveList(); }
+    if(t === 'insert'){ dmlRefreshInsert(); }
+    if(t === 'preview') dmlPreview();
+}
+/* ── docs list / load / save ── */
+function dmlRefreshDocs(){
+    fetch('/api/apps/' + encodeURIComponent(APP_NAME) + '/dml/list/')
+        .then(r=>r.json()).then(d=>{
+            const list = document.getElementById('dmlDocsList');
+            const docs = d.docs || [];
+            document.getElementById('dmlDocsCount').textContent = docs.length ? '(' + docs.length + ')' : '';
+            list.innerHTML = docs.length ? docs.map(x=>'<div onclick="dmlOpenDoc(\'' + x.file.replace(/'/g, "\\'") + '\')" class="px-2 py-1.5 rounded-lg cursor-pointer text-xs flex items-center gap-2 ' + (D.file === x.file ? 'bg-violet-100 text-violet-800 font-bold' : 'hover:bg-slate-50 text-slate-700') + '"><i class="fa-solid fa-file-lines text-violet-400"></i><span class="truncate font-mono" dir="ltr">' + x.file + '</span></div>').join('') : '<p class="text-[11px] text-slate-400">لا توجد مستندات — أنشئ أول مستند</p>';
+        }).catch(()=>{});
+}
+function dmlNewDoc(){
+    D = {file:'', isNew:true, meta:{paper:'A4', orientation:'portrait', margin:'12mm', title:'', name:'', source:document.getElementById('dmlSourceSel').value || '', doctype:'kashf', key_column:''}, variables:[], header:{html:'', style:''}, sections:[], footer:{html:'', style:''}};
+    dmlTarget = 'header';
+    dmlSyncSettings(); dmlRenderVars(); dmlRenderSections(); dmlRebuildTargets(); dmlRenderProps();
+    dmlRenderPalettes(); dmlRenderCanvases();
+    dmlFetchFields();
+    document.getElementById('dmlDocName').textContent = 'مستند جديد';
+    dmlRefreshDocs(); dmlShowTab('info');
+}
+function dmlSourceChanged(){
+    const src = document.getElementById('dmlSourceSel').value || '';
+    D.meta.source = src;
+    dmlFetchFields();
+    dmlRefreshDocs();
+}
+function dmlSuggestName(){
+    const sel = document.getElementById('dmlSourceSel').value || '';
+    const base = (sel.split('/').pop().split('.')[0] || 'document').replace(/[^A-Za-z0-9_\-]/g, '_');
+    fetch('/api/apps/' + encodeURIComponent(APP_NAME) + '/dml/suggest/?source=' + encodeURIComponent(base))
+        .then(r=>r.json()).then(d=>{
+            if(d.file){
+                document.getElementById('dmlFileName').value = d.file;
+                D.file = d.file; D.isNew = true;
+                document.getElementById('dmlDocName').textContent = d.file;
+            }
+        }).catch(()=>{});
+}
+function dmlOpenDoc(file){
+    fetch('/api/dml/metadata?dml=' + encodeURIComponent(file) + '&app=' + encodeURIComponent(APP_NAME))
+        .then(r=>r.json()).then(d=>{
+            if(d.error) throw new Error(d.error);
+            D = {file:file, isNew:false,
+                meta:Object.assign({paper:'A4', orientation:'portrait', margin:'12mm', title:'', name:'', source:'', doctype:'kashf', key_column:''}, d.metadata || {}),
+                variables:d.variables || [], header:d.header || {html:'', style:''},
+                sections:d.sections || [], footer:d.footer || {html:'', style:''}};
+            document.getElementById('dmlSourceSel').value = D.meta.source || '';
+            dmlTarget = 'header';
+            try{ dmlSyncSettings(); }catch(e){console.error(e);}
+            try{ dmlRenderVars(); }catch(e){console.error(e);}
+            try{ dmlRenderSections(); }catch(e){console.error(e);}
+            try{ dmlRebuildTargets(); }catch(e){console.error(e);}
+            try{ dmlRenderProps(); }catch(e){console.error(e);}
+            try{ dmlRenderPalettes(); }catch(e){console.error(e);}
+            try{ dmlRenderCanvases(); }catch(e){console.error(e);}
+            try{ dmlFetchFields(); }catch(e){console.error(e);}
+            document.getElementById('dmlDocName').textContent = file;
+            dmlRefreshDocs();
+        }).catch(e=>alert('تعذر فتح المستند: ' + String((e && e.message) || e).slice(0, 200)));
+}
+function dmlCollectMeta(){
+    D.meta.paper = document.getElementById('dmlPaper').value || 'A4';
+    D.meta.orientation = document.getElementById('dmlOrient').value || 'portrait';
+    D.meta.margin = document.getElementById('dmlMargin').value || '12mm';
+    D.meta.title = document.getElementById('dmlTitle').value || '';
+    D.meta.name = document.getElementById('dmlName').value || '';
+    D.meta.source = document.getElementById('dmlSourceSel').value || D.meta.source || '';
+    const _dt = document.getElementById('dmlDocType');
+    if(_dt) D.meta.doctype = _dt.value || 'kashf';
+    const _kc = document.getElementById('dmlKeyColumn');
+    if(_kc) D.meta.key_column = _kc.value || '';
+}
+function dmlCollectMetaLite(){ dmlCollectMeta(); }
+function dmlDocTypeChanged(){
+    dmlCollectMeta();
+    const isSanad = (D.meta.doctype || 'kashf') === 'sanad';
+    const wrap = document.getElementById('dmlKeyColWrap');
+    if(wrap) wrap.classList.toggle('hidden', !isSanad);
+    dmlRefreshKeyCol();
+    dmlRefreshInsert();
+    dmlSchedulePreview();
+}
+function dmlRefreshKeyCol(){
+    const sel = document.getElementById('dmlKeyColumn');
+    if(!sel) return;
+    const cur = D.meta.key_column || '';
+    sel.innerHTML = '<option value="">— اختر العمود —</option>' + DML_FIELDS.map(f=>'<option value="' + String(f.alias).replace(/"/g,'&quot;') + '"' + (cur === f.alias ? ' selected' : '') + '>' + dmlEsc(f.alias) + '</option>').join('');
+    if(cur && ![...sel.options].some(o=>o.value === cur)){
+        sel.innerHTML += '<option value="' + String(cur).replace(/"/g,'&quot;') + '" selected>' + dmlEsc(cur) + '</option>';
+    }
+    sel.value = cur;
+}
+function dmlSyncDocInfo(){
+    const dt = document.getElementById('dmlDocType');
+    if(dt) dt.value = D.meta.doctype || 'kashf';
+    dmlRefreshKeyCol();
+    const isSanad = (D.meta.doctype || 'kashf') === 'sanad';
+    const wrap = document.getElementById('dmlKeyColWrap');
+    if(wrap) wrap.classList.toggle('hidden', !isSanad);
+    dmlRefreshInsert();
+}
+function dmlSave(){
+    const fn = (document.getElementById('dmlFileName').value || '').trim();
+    if(!/^[A-Za-z0-9_\-]+_\d+\.dml$/.test(fn)){ alert('اسم الملف يجب أن يتبع القاعدة: المصدر_رقم.dml — مثال: invoice_report_1.dml'); return; }
+    dmlCollectMeta();
+    dmlSyncAll();
+    const payload = {file:fn, metadata:D.meta, variables:D.variables, header:D.header, sections:D.sections, footer:D.footer};
+    const ep = D.isNew ? 'create' : 'update';
+    fetch('/api/apps/' + encodeURIComponent(APP_NAME) + '/dml/' + ep + '/', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)})
+        .then(r=>r.json()).then(d=>{
+            if(d.error) throw new Error(d.error);
+            D.file = fn; D.isNew = false;
+            document.getElementById('dmlDocName').textContent = fn;
+            dmlRefreshDocs();
+            dmlPreview();
+            alert('تم حفظ المستند');
+        }).catch(e=>alert('تعذر الحفظ: ' + String((e && e.message) || e).slice(0, 200)));
+}
+function dmlSyncSettings(){
+    document.getElementById('dmlFileName').value = D.file || '';
+    document.getElementById('dmlPaper').value = D.meta.paper || 'A4';
+    document.getElementById('dmlOrient').value = D.meta.orientation || 'portrait';
+    document.getElementById('dmlMargin').value = D.meta.margin || '12mm';
+    document.getElementById('dmlTitle').value = D.meta.title || '';
+    document.getElementById('dmlName').value = D.meta.name || '';
+    dmlApplyPaper();
+    dmlSyncDocInfo();
+}
+const DML_PAPER_MM = {A4:[210,297], A5:[148,210], A3:[297,420], Letter:[216,279], Legal:[216,356]};
+function dmlApplyPaper(){
+    const p = ((document.getElementById('dmlPaper') || {}).value || D.meta.paper || 'A4');
+    const o = ((document.getElementById('dmlOrient') || {}).value || D.meta.orientation || 'portrait');
+    let wh = DML_PAPER_MM[p] || DML_PAPER_MM.A4;
+    let w = wh[0], h = wh[1];
+    if(o === 'landscape'){ const t = w; w = h; h = t; }
+    const page = document.getElementById('dmlPaperPage');
+    const zoom = ((document.getElementById('dmlZoom') || {}).value || '100%');
+    if(page){
+        page.style.width = w + 'mm';
+        page.style.minHeight = h + 'mm';
+        try{ page.style.zoom = zoom; }catch(e){}
+    }
+}
+function dmlSettingsChanged(){
+    dmlCollectMeta();
+    dmlApplyPaper();
+    dmlSchedulePreview();
+}
+
+/* ── variables editor ── */
+function dmlAddVar(){ D.variables.push({id:String(D.variables.length+1), name:'var' + (D.variables.length+1), type:'text'}); dmlRenderVars(); dmlRenderPalettes(); }
+function dmlDelVar(i){ D.variables.splice(i,1); dmlRenderVars(); dmlRenderPalettes(); }
+function dmlRenderSysVars(){
+    const host = document.getElementById('dmlSysVarsList');
+    if(!host) return;
+    host.innerHTML = DML_SYSVARS.map(v => 
+        `<option value="${v.name}">${v.label} </option>`
+    ).join('');
+}
+function dmlRenderVars(){
+    dmlRenderSysVars();
+    const host = document.getElementById('dmlVarsList');
+    if(!D.variables.length){ host.innerHTML = '<p class="text-slate-400 text-center py-3">لا توجد متغيرات — اضغط إضافة متغير</p>'; return; }
+    host.innerHTML = D.variables.map((v,i)=>'<div class="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5">'
+        + '<span class="text-[11px] font-bold text-slate-500">#' + (i+1) + '</span>'
+        + '<input value="' + (v.name||'').replace(/"/g,'&quot;') + '" onchange="D.variables[' + i + '].name=this.value;dmlRenderPalettes()" placeholder="اسم المتغير" class="flex-1 min-w-0 bg-white border border-slate-200 rounded-lg px-2 py-1 font-mono text-[11px]" dir="ltr">'
+        + '<select onchange="D.variables[' + i + '].type=this.value" class="bg-white border border-slate-200 rounded-lg px-2 py-1 text-[11px]">'
+        + ['text','number','date','image','boolean'].map(t=>'<option value="' + t + '"' + ((v.type||'text')===t?' selected':'') + '>' + t + '</option>').join('') + '</select>'
+        + '<span class="text-[10px] text-violet-600 font-mono" dir="ltr">[' + (v.name||'') + ']</span>'
+        + '<button onclick="dmlDelVar(' + i + ')" class="text-rose-400 hover:text-rose-600"><i class="fa-solid fa-trash text-[11px]"></i></button>'
+        + '</div>').join('');
+}
+
+/* ── visual zone editor (Word-like): inline contenteditable zones + DnD vars/fields/images ── */
+let DML_FIELDS = []; // [{name, alias}] from source report
+let dmlPalSel = {field:'', filter:'', sys:''};
+/* System (global) variables — resolved automatically at render/print (mirror of dml_python.engine.SYSTEM_VARS) */
+const DML_SYSVARS = [
+    {name:'current_user', label:'اسم المستخدم الحالي'},
+    {name:'company_name', label:'اسم الشركة'},
+    {name:'company_name_en', label:'اسم الشركة (إنجليزي)'},
+    {name:'company_code', label:'رمز الشركة'},
+    {name:'tax_number', label:'الرقم الضريبي'},
+    {name:'branch_name', label:'اسم الفرع'},
+    {name:'fiscal_year', label:'السنة المالية'},
+    {name:'today', label:'تاريخ اليوم'},
+    {name:'today_ar', label:'تاريخ اليوم (عربي)'},
+    {name:'now_time', label:'الساعة الحالية'},
+    {name:'now_datetime', label:'التاريخ والوقت الحالي'},
+    {name:'year', label:'السنة'},
+    {name:'month', label:'الشهر (رقم)'},
+    {name:'month_name', label:'اسم الشهر'},
+    {name:'day', label:'اليوم (رقم)'},
+    {name:'weekday', label:'يوم الأسبوع'},
+    {name:'doc_title', label:'عنوان المستند'},
+    {name:'report_title', label:'عنوان التقرير'},
+    {name:'app_name', label:'اسم التطبيق'},
+    {name:'row_count', label:'عدد السجلات'},
+];
+let dmlActiveZone = 'header';
+let dmlDidSeq = 0;
+function dmlEsc(s){ return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function dmlUnesc(s){ return String(s == null ? '' : s).replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&amp;/g,'&'); }
+function dmlContainer(key){
+    if(key === 'header') return D.header;
+    if(key === 'footer') return D.footer;
+    const m = String(key).match(/^sec:(\d+)$/);
+    if(m && D.sections[+m[1]]) return D.sections[+m[1]];
+    return null;
+}
+function dmlMakeChip(kind, value){
+    const sp = document.createElement('span');
+    sp.className = kind === 'var' ? 'dml-chip-var' : (kind === 'filter' ? 'dml-chip-filter' : 'dml-chip-field');
+    sp.setAttribute('contenteditable', 'false');
+    sp.setAttribute('draggable', 'true');
+    sp.setAttribute('data-v', value);
+    sp.setAttribute('data-did', 'd' + (++dmlDidSeq));
+    sp.setAttribute('dir', 'ltr');
+    sp.textContent = kind === 'field' ? '%%' + value + '%%' : '[' + value + ']';
+    sp.addEventListener('dragstart', function(e){
+        e.dataTransfer.setData('text/dml', JSON.stringify({kind:'move', did:sp.getAttribute('data-did')}));
+        e.dataTransfer.effectAllowed = 'move';
+        try{ e.stopPropagation(); }catch(err){}
+    });
+    return sp;
+}
+function dmlSerializeKids(node){
+    let out = '';
+    node.childNodes.forEach(n=>{
+        if(n.nodeType === 3){ out += dmlEsc(n.nodeValue); }
+        else if(n.nodeType === 1){
+            if(n.classList && n.classList.contains('dml-chip-var')) out += '[' + (n.getAttribute('data-v') || '') + ']';
+            else if(n.classList && n.classList.contains('dml-chip-field')) out += '%%' + (n.getAttribute('data-v') || '') + '%%';
+            else if(n.classList && n.classList.contains('dml-chip-filter')) out += '[' + (n.getAttribute('data-v') || '') + ']';
+            else if(n.classList && n.classList.contains('dml-textbox')) out += dmlSerializeTextbox(n);
+            else if(n.tagName === 'IMG') out += dmlSanitizeImg(n);
+            else if(n.tagName === 'BR') out += '<br>';
+            else if(n.tagName === 'DIV' || n.tagName === 'P') out += dmlSerializeKids(n) + '<br>';
+            else out += dmlSerializeKids(n);
+        }
+    });
+    return out;
+}
+function dmlSerializeTextbox(box){
+    const lane = box.getAttribute('data-lane') || 'right';
+    const w = box.getAttribute('data-w') || 'auto';
+    const body = box.querySelector(':scope > .dml-tb-body');
+    return '<div class="dml-textbox" data-lane="' + lane + '" data-w="' + w + '">' + dmlSerializeKids(body || box) + '</div>';
+}
+function dmlSelectedBoxEl(){
+    if(!dmlSelectedBox) return null;
+    return document.querySelector('[data-did="' + dmlSelectedBox.did + '"]');
+}
+function dmlMakeTextbox(lane, w, innerHtml){
+    const box = document.createElement('div');
+    box.className = 'dml-textbox';
+    box.setAttribute('data-did', 'd' + (++dmlDidSeq));
+    box.setAttribute('data-lane', lane || 'right');
+    box.setAttribute('data-w', w || 'auto');
+    const bar = document.createElement('div');
+    bar.className = 'dml-tb-bar';
+    bar.setAttribute('contenteditable', 'false');
+    const lanes = [['right','يمين'],['center','وسط'],['left','يسار']];
+    const widths = [['auto','تلقائي'],['third','ثلث'],['half','نصف'],['full','كامل']];
+    bar.innerHTML = '<i class="fa-solid fa-grip-vertical" style="font-size:10px;color:#7c3aed"></i>'
+        + '<span style="font-size:10px;font-weight:bold;color:#5b21b6;">مربع نص</span>'
+        + '<select title="المسار" style="font-size:10px;border:1px solid #c4b5fd;border-radius:6px;background:#fff;color:#5b21b6">'
+        + lanes.map(([v,l])=>'<option value="' + v + '">' + l + '</option>').join('') + '</select>'
+        + '<select title="العرض" style="font-size:10px;border:1px solid #c4b5fd;border-radius:6px;background:#fff;color:#5b21b6">'
+        + widths.map(([v,l])=>'<option value="' + v + '">' + l + '</option>').join('') + '</select>'
+        + '<button type="button" data-act="up" title="لأعلى" style="border:none;background:none;cursor:pointer;color:#64748b;font-size:11px">▲</button>'
+        + '<button type="button" data-act="down" title="لأسفل" style="border:none;background:none;cursor:pointer;color:#64748b;font-size:11px">▼</button>'
+        + '<button type="button" data-act="del" title="حذف" style="color:#fb7185;border:none;background:none;cursor:pointer;font-size:12px;line-height:1">×</button>';
+    bar.querySelector('select[title="المسار"]').value = lane || 'right';
+    bar.querySelectorAll('select')[1].value = w || 'auto';
+    bar.addEventListener('click', function(e){ dmlBoxSelect(box); e.stopPropagation(); });
+    bar.addEventListener('change', function(e){
+        const t = e.target;
+        if(t.tagName !== 'SELECT') return;
+        if(t.title === 'المسار') box.setAttribute('data-lane', t.value);
+        else box.setAttribute('data-w', t.value);
+        const z = box.parentElement;
+        const zkey = z && z.id ? z.id.replace('dzone-', '') : (dmlActiveZone || 'header');
+        dmlZoneRead(zkey); dmlSchedulePreview();
+        e.stopPropagation();
+    });
+    bar.addEventListener('click', function(e){
+        const b = e.target.closest ? e.target.closest('button') : null;
+        if(!b) return;
+        e.stopPropagation();
+        const z = box.parentElement;
+        const act = b.getAttribute('data-act');
+        if(act === 'del'){ dmlBoxDelete(box); return; }
+        const sibs = z ? Array.prototype.filter.call(z.children, n=>n.classList && n.classList.contains('dml-textbox')) : [];
+        const ix = sibs.indexOf(box);
+        if(act === 'up' && ix > 0){ z.insertBefore(box, sibs[ix - 1]); }
+        else if(act === 'down' && ix >= 0 && ix < sibs.length - 1){ z.insertBefore(box, sibs[ix + 1].nextSibling); }
+        else return;
+        const zkey = z && z.id ? z.id.replace('dzone-', '') : (dmlActiveZone || 'header');
+        dmlZoneRead(zkey); dmlSchedulePreview();
+    });
+    const body = document.createElement('div');
+    body.className = 'dml-tb-body';
+    body.setAttribute('contenteditable', 'true');
+    body.setAttribute('spellcheck', 'false');
+    body.addEventListener('input', function(){
+        const z = box.parentElement;
+        const zkey = z && z.id ? z.id.replace('dzone-', '') : (dmlActiveZone || 'header');
+        dmlZoneRead(zkey); dmlSchedulePreview();
+    });
+    body.addEventListener('drop', function(e){
+        e.preventDefault(); e.stopPropagation();
+        dmlBoxDrop(e, box);
+    });
+    body.addEventListener('dragover', function(e){ e.preventDefault(); e.stopPropagation(); });
+    box.appendChild(bar);
+    box.appendChild(body);
+    if(innerHtml !== undefined && innerHtml !== null) dmlWriteFragment(body, innerHtml);
+    return box;
+}
+let dmlSelectedBox = null;
+function dmlBoxSelect(box){
+    document.querySelectorAll('.dml-tb-sel').forEach(n=>n.classList.remove('dml-tb-sel'));
+    if(!box){ dmlSelectedBox = null; return; }
+    box.classList.add('dml-tb-sel');
+    const zone = box.parentElement;
+    dmlSelectedBox = {did: box.getAttribute('data-did'), zone: zone && zone.id ? zone.id.replace('dzone-', '') : (dmlActiveZone || 'header')};
+}
+function dmlMigrateBoxStyle(st){
+    let lane = 'right', w = 'auto';
+    const wm = String(st || '').match(/width\s*:\s*([\d.]+)\s*(%|px)?/i);
+    if(wm){
+        const v = parseFloat(wm[1]), u = wm[2] || 'px';
+        if(u === '%') w = v >= 90 ? 'full' : (v >= 40 ? 'half' : (v >= 20 ? 'third' : 'auto'));
+        else w = v >= 500 ? 'full' : (v >= 250 ? 'half' : (v >= 150 ? 'third' : 'auto'));
+    }
+    return {lane: lane, w: w};
+}
+function dmlWireBoxes(zone){
+    if(!zone) return;
+    zone.querySelectorAll(':scope > .dml-textbox').forEach(box=>{
+        if(box.querySelector(':scope > .dml-tb-bar') && box.querySelector(':scope > .dml-tb-body')) return;
+        const inner = dmlSerializeKids(box);
+        const mig = dmlMigrateBoxStyle(box.getAttribute('style') || '');
+        const fresh = dmlMakeTextbox(box.getAttribute('data-lane') || mig.lane, box.getAttribute('data-w') || mig.w, null);
+        dmlWriteFragment(fresh.querySelector(':scope > .dml-tb-body'), inner);
+        box.replaceWith(fresh);
+    });
+}
+function dmlAddTextbox(lane, w){
+    const key = dmlActiveZone || 'header';
+    return dmlAddTextboxTo(key, lane, w, null);
+}
+function dmlAddTextboxTo(key, lane, w, chip){
+    const zone = document.getElementById('dzone-' + key);
+    if(!zone) return null;
+    const box = dmlMakeTextbox(lane || 'right', w || 'auto', null);
+    const body = box.querySelector(':scope > .dml-tb-body');
+    if(chip) body.appendChild(chip);
+    else body.textContent = 'نص جديد';
+    zone.appendChild(box);
+    dmlZoneRead(key); dmlSchedulePreview();
+    return box;
+}
+function dmlBoxDelete(box){
+    const zone = box.parentElement;
+    box.remove();
+    const zkey = zone && zone.id ? zone.id.replace('dzone-', '') : (dmlActiveZone || 'header');
+    dmlZoneRead(zkey); dmlSchedulePreview();
+}
+function dmlBoxDrop(e, box){
+    const zone = box.parentElement;
+    const zkey = zone && zone.id ? zone.id.replace('dzone-', '') : (dmlActiveZone || 'header');
+    const body = box.querySelector(':scope > .dml-tb-body');
+    let payload = null;
+    try{ payload = JSON.parse(e.dataTransfer.getData('text/dml')); }catch(err){}
+    if(payload && payload.kind === 'move'){
+        const node = document.querySelector('[data-did="' + payload.did + '"]');
+        if(node && body.contains(node)) return;
+        if(node){
+            const clone = node.cloneNode(true);
+            clone.setAttribute('data-did', 'd' + (++dmlDidSeq));
+            dmlRebindChip(clone);
+            body.appendChild(clone);
+            node.remove();
+            dmlZoneRead(zkey); dmlSchedulePreview();
+            return;
+        }
+    }
+    if(payload && (payload.kind === 'var' || payload.kind === 'field' || payload.kind === 'filter')){
+        body.appendChild(dmlMakeChip(payload.kind, payload.value));
+        dmlZoneRead(zkey); dmlSchedulePreview();
+        return;
+    }
+    if(e.dataTransfer.files && e.dataTransfer.files.length){
+        Array.prototype.forEach.call(e.dataTransfer.files, f=>{
+            if(!f.type || f.type.indexOf('image/') !== 0) return;
+            const rd = new FileReader();
+            rd.onload = ()=>{ const im = document.createElement('img'); im.src = rd.result; im.style.maxWidth = '100%'; body.appendChild(im); dmlZoneRead(zkey); dmlSchedulePreview(); };
+            rd.readAsDataURL(f);
+        });
+    }
+}
+function dmlSanitizeImg(n){
+    const a = [];
+    ['src','alt','width','height','style'].forEach(k=>{ const v = n.getAttribute(k); if(v) a.push(k + '="' + String(v).replace(/"/g,'&quot;') + '"'); });
+    return '<img ' + a.join(' ') + '>';
+}
+function dmlZoneRead(key){
+    const z = document.getElementById('dzone-' + key);
+    const c = dmlContainer(key);
+    if(!z || !c) return;
+    c.html = dmlSerializeKids(z);
+}
+function dmlWriteFragment(container, html){
+    const varNames = {};
+    (D.variables || []).forEach(v=>{ if(v.name) varNames[v.name] = 1; });
+    DML_SYSVARS.forEach(v=>{ varNames[v.name] = 1; });
+    const parts = String(html || '').split(/(\[[^\]\n]+\]|%%[^%]+%%|<br\s*\/?>|<img\b[^>]*>)/gi);
+    const frag = document.createDocumentFragment();
+    parts.forEach(p=>{
+        if(!p) return;
+        let m = p.match(/^\[([^\]\n]+)\]$/);
+        if(m){
+            const nm = m[1].trim();
+            if(nm.indexOf('filter:') === 0 && nm.length > 7){ frag.appendChild(dmlMakeChip('filter', nm)); return; }
+            frag.appendChild(varNames[nm] ? dmlMakeChip('var', nm) : document.createTextNode(dmlUnesc(p))); return;
+        }
+        m = p.match(/^%%([^%]+)%%$/);
+        if(m){ const nm = m[1].trim(); if(nm){ frag.appendChild(dmlMakeChip('field', nm)); return; } frag.appendChild(document.createTextNode(dmlUnesc(p))); return; }
+        if(/^<br\s*\/?>$/i.test(p)){ frag.appendChild(document.createElement('br')); return; }
+        if(/^<img\b/i.test(p)){
+            const tmp = document.createElement('div');
+            tmp.innerHTML = p;
+            const im = tmp.querySelector('img');
+            if(im){
+                const clean = document.createElement('img');
+                ['src','alt','width','height','style'].forEach(k=>{ const v = im.getAttribute(k); if(v) clean.setAttribute(k, v); });
+                if(!clean.getAttribute('style')) clean.style.maxWidth = '100%';
+                frag.appendChild(clean);
+            }
+            return;
+        }
+        frag.appendChild(document.createTextNode(dmlUnesc(p.replace(/<[^>]*>/g, ''))));
+    });
+    if(container) container.appendChild(frag);
+    return frag;
+}
+function dmlZoneWrite(key){
+    const z = document.getElementById('dzone-' + key);
+    const c = dmlContainer(key);
+    if(!z || !c) return;
+    z.innerHTML = '';
+    let html = String(c.html || '');
+    const boxes = [];
+    html = html.replace(/<div\b[^>]*class="[^"]*dml-textbox[^"]*"[^>]*>([\s\S]*?)<\/div>/gi, function(m0, inner){
+        const st = (m0.match(/style="([^"]*)"/i) || [])[1] || '';
+        const ln = (m0.match(/data-lane="([^"]*)"/i) || [])[1] || '';
+        const ww = (m0.match(/data-w="([^"]*)"/i) || [])[1] || '';
+        const mig = (!ln && !ww) ? dmlMigrateBoxStyle(st) : {lane: ln || 'right', w: ww || 'auto'};
+        boxes.push({lane: mig.lane, w: mig.w, inner: inner});
+        return '\x00BOX' + (boxes.length - 1) + '\x00';
+    });
+    const parts = html.split(/(\x00BOX\d+\x00|\[[^\]\n]+\]|%%[^%]+%%|<br\s*\/?>|<img\b[^>]*>)/gi);
+    const varNames = {};
+    (D.variables || []).forEach(v=>{ if(v.name) varNames[v.name] = 1; });
+    DML_SYSVARS.forEach(v=>{ varNames[v.name] = 1; });
+    const frag = document.createDocumentFragment();
+    parts.forEach(p=>{
+        if(!p) return;
+        let m = p.match(/^\x00BOX(\d+)\x00$/);
+        if(m && boxes[+m[1]]){
+            const b = boxes[+m[1]];
+            const box = dmlMakeTextbox(b.lane, b.w, null);
+            dmlWriteFragment(box.querySelector(':scope > .dml-tb-body'), b.inner);
+            frag.appendChild(box);
+            return;
+        }
+        m = p.match(/^\[([^\]\n]+)\]$/);
+        if(m){
+            const nm = m[1].trim();
+            if(nm.indexOf('filter:') === 0 && nm.length > 7){ frag.appendChild(dmlMakeChip('filter', nm)); return; }
+            frag.appendChild(varNames[nm] ? dmlMakeChip('var', nm) : document.createTextNode(dmlUnesc(p))); return;
+        }
+        m = p.match(/^%%([^%]+)%%$/);
+        if(m){ const nm = m[1].trim(); if(nm){ frag.appendChild(dmlMakeChip('field', nm)); return; } frag.appendChild(document.createTextNode(dmlUnesc(p))); return; }
+        if(/^<br\s*\/?>$/i.test(p)){ frag.appendChild(document.createElement('br')); return; }
+        if(/^<img\b/i.test(p)){
+            const tmp = document.createElement('div');
+            tmp.innerHTML = p;
+            const im = tmp.querySelector('img');
+            if(im){
+                const clean = document.createElement('img');
+                ['src','alt','width','height','style'].forEach(k=>{ const v = im.getAttribute(k); if(v) clean.setAttribute(k, v); });
+                if(!clean.getAttribute('style')) clean.style.maxWidth = '100%';
+                frag.appendChild(clean);
+            }
+            return;
+        }
+        frag.appendChild(document.createTextNode(dmlUnesc(p.replace(/<[^>]*>/g, ''))));
+    });
+    z.appendChild(frag);
+    dmlWireBoxes(z);
+}
+function dmlZoneWriteAll(){
+    dmlZoneWrite('header'); dmlZoneWrite('footer');
+    (D.sections || []).forEach((s,i)=>dmlZoneWrite('sec:' + i));
+}
+function dmlSyncItems(key){ dmlZoneRead(key); }
+function dmlSyncAll(){
+    dmlZoneRead('header'); dmlZoneRead('footer');
+    (D.sections || []).forEach((s,i)=>dmlZoneRead('sec:' + i));
+}
+function dmlRenderPalettes(){ dmlRenderPalette(); }
+function dmlRenderCanvases(){ dmlZoneWriteAll(); }
+function dmlFetchFields(){
+    const src = ((D.meta && D.meta.source) || document.getElementById('dmlSourceSel').value || '').trim();
+    if(!src || !/\.rml$/i.test(src)){ DML_FIELDS = []; dmlRenderPalette(); return; }
+    fetch('/api/rml/metadata?rml=' + encodeURIComponent(src) + '&app=' + encodeURIComponent(APP_NAME))
+        .then(r=>r.json()).then(md=>{
+            DML_FIELDS = (md.columns || []).filter(c=>c.alias || c.name).map(c=>({name:c.name || '', alias:c.alias || c.name || ''}));
+            dmlRenderPalette();
+            dmlRefreshKeyCol();
+            if(dmlTab === 'insert') dmlRefreshInsert();
+        }).catch(()=>{});
+}
+function dmlRenderPalette(){
+    const host = document.getElementById('dmlPalette');
+    if(!host) return;
+    const vars = (D.variables || []).filter(v=>v.name);
+    const vchips = vars.map(v=>'<span draggable="true" ondragstart="dmlPalDrag(event,\'var\',\'' + String(v.name).replace(/'/g, "\\'") + '\')" onclick="dmlPalInsert(\'var\',\'' + String(v.name).replace(/'/g, "\\'") + '\')" title="اسحب أو انقر للإدراج" class="cursor-grab active:cursor-grabbing px-2 py-1 rounded-lg bg-violet-100 hover:bg-violet-200 text-violet-800 font-mono text-[11px] font-bold whitespace-nowrap" dir="ltr">[' + dmlEsc(v.name) + ']</span>').join('');
+    const fchips = DML_FIELDS.map(f=>'<span draggable="true" ondragstart="dmlPalDrag(event,\'field\',\'' + String(f.alias).replace(/'/g, "\\'") + '\')" onclick="dmlPalInsert(\'field\',\'' + String(f.alias).replace(/'/g, "\\'") + '\')" title="' + dmlEsc(f.name || '') + ' — اسحب أو انقر للإدراج" class="cursor-grab active:cursor-grabbing px-2 py-1 rounded-lg bg-emerald-100 hover:bg-emerald-200 text-emerald-800 font-mono text-[11px] font-bold whitespace-nowrap" dir="ltr">%%' + dmlEsc(f.alias) + '%%</span>').join('');
+    const ffchips = DML_FIELDS.map(f=>'<span draggable="true" ondragstart="dmlPalDrag(event,\'filter\',\'filter:' + String(f.alias).replace(/'/g, "\\'") + '\')" onclick="dmlPalInsert(\'filter\',\'filter:' + String(f.alias).replace(/'/g, "\\'") + '\')" title="عامل فلترة ' + dmlEsc(f.alias) + ' من المشغل — اسحب أو انقر" class="cursor-grab active:cursor-grabbing px-2 py-1 rounded-lg bg-cyan-100 hover:bg-cyan-200 text-cyan-800 font-mono text-[11px] font-bold whitespace-nowrap" dir="ltr">[filter:' + dmlEsc(f.alias) + ']</span>').join('');
+    const sysOpts = DML_SYSVARS.map(v=>'<option value="' + v.name + '"' + (dmlPalSel.sys === v.name ? ' selected' : '') + '>' + dmlEsc(v.label) + ' [' + v.name + ']</option>').join('');
+    const fldOpts = DML_FIELDS.map(f=>'<option value="' + String(f.alias).replace(/"/g,'&quot;') + '"' + (dmlPalSel.field === f.alias ? ' selected' : '') + '>%%' + dmlEsc(f.alias) + '%%</option>').join('');
+    const fltOpts = DML_FIELDS.map(f=>'<option value="filter:' + String(f.alias).replace(/"/g,'&quot;') + '"' + (dmlPalSel.filter === ('filter:' + f.alias) ? ' selected' : '') + '>[filter:' + dmlEsc(f.alias) + ']</option>').join('');
+    const schips = DML_SYSVARS.map(v=>'<span draggable="true" ondragstart="dmlPalDrag(event,\'var\',\'' + v.name + '\')" onclick="dmlPalInsert(\'var\',\'' + v.name + '\')" title="' + dmlEsc(v.label) + ' — متغير نظام (يُعبأ تلقائياً) — اسحب أو انقر" class="cursor-grab active:cursor-grabbing px-2 py-1 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-800 font-mono text-[11px] font-bold whitespace-nowrap" dir="ltr">[' + v.name + ']</span>').join('');
+    host.innerHTML = '<div class="flex gap-3 flex-wrap">'
+        + '<div><div class="text-[10px] font-bold text-violet-600 mb-1"><i class="fa-solid fa-braces"></i> المتغيرات</div><div class="flex flex-wrap gap-1">' + (vchips || '<span class="text-[10px] text-slate-400">أضف متغيرات من تبويب المتغيرات</span>') + '</div></div>'
+        + '<div><div class="text-[10px] font-bold text-emerald-600 mb-1"><i class="fa-solid fa-table"></i> حقول المصدر</div><div class="flex gap-1"><select id="dmlPalFieldSel" onchange="dmlPalSel.field=this.value" class="bg-slate-50 border border-slate-200 rounded-lg px-1 py-1 font-mono text-[11px] w-40" dir="ltr"><option value="">— اختر حقلاً —</option>' + fldOpts + '</select><button onclick="dmlPalSelInsert(\'field\')" title="إدراج في موضع المؤشر" class="w-7 h-7 rounded-lg bg-transparent hover:bg-emerald-100 text-emerald-600 inline-flex items-center justify-center"><i class="fa-solid fa-plus text-[11px]"></i></button></div></div>'
+        + '<div><div class="text-[10px] font-bold text-amber-600 mb-1"><i class="fa-solid fa-globe"></i> متغيرات النظام</div><div class="flex gap-1"><select id="dmlPalSysSel" onchange="dmlPalSel.sys=this.value" class="bg-slate-50 border border-slate-200 rounded-lg px-1 py-1 text-[11px] w-40"><option value="">— اختر متغيراً —</option>' + sysOpts + '</select><button onclick="dmlPalSelInsert(\'sys\')" title="إدراج في موضع المؤشر" class="w-7 h-7 rounded-lg bg-transparent hover:bg-amber-100 text-amber-600 inline-flex items-center justify-center"><i class="fa-solid fa-plus text-[11px]"></i></button><button onclick="dmlPalSysToSection()" title="إضافة إلى القسم المحدد" class="w-7 h-7 rounded-lg bg-transparent hover:bg-amber-100 text-amber-600 inline-flex items-center justify-center" style="font-size:10px"><i class="fa-solid fa-folder-plus text-[11px]"></i></button></div></div>'
+        + '<div><div class="text-[10px] font-bold text-cyan-600 mb-1"><i class="fa-solid fa-filter"></i> عوامل الفلترة</div><div class="flex gap-1"><select id="dmlPalFilterSel" onchange="dmlPalSel.filter=this.value" class="bg-slate-50 border border-slate-200 rounded-lg px-1 py-1 font-mono text-[11px] w-40" dir="ltr"><option value="">— اختر عاملاً —</option>' + fltOpts + '</select><button onclick="dmlPalSelInsert(\'filter\')" title="إدراج في موضع المؤشر" class="w-7 h-7 rounded-lg bg-transparent hover:bg-cyan-100 text-cyan-600 inline-flex items-center justify-center"><i class="fa-solid fa-plus text-[11px]"></i></button></div></div>'
+        + '<div><div class="text-[10px] font-bold text-violet-600 mb-1"><i class="fa-solid fa-box-open"></i> قسم فارغ</div><button onclick="dmlPalToEmpty()" title="إدراج المحدد في قسم فارغ" class="h-7 px-2 rounded-lg bg-transparent hover:bg-violet-100 text-violet-600 text-[11px] font-bold whitespace-nowrap"><i class="fa-solid fa-plus"></i> في قسم فارغ</button></div>'
+        + '</div>';
+}
+function dmlPalDrag(e, kind, value){
+    e.dataTransfer.setData('text/dml', JSON.stringify({kind:kind, value:value}));
+    e.dataTransfer.effectAllowed = 'copy';
+}
+function dmlPalInsert(kind, value){
+    const key = dmlActiveZone || 'header';
+    const zone = document.getElementById('dzone-' + key);
+    if(!zone) return;
+    dmlInsertAtCaret(zone, dmlMakeChip(kind, value));
+    dmlZoneRead(key); dmlSchedulePreview();
+}
+function dmlPalSelInsert(which){
+    const key = dmlActiveZone || 'header';
+    const zone = document.getElementById('dzone-' + key);
+    if(!zone) return;
+    let kind = 'var', val = '';
+    if(which === 'field'){ val = dmlPalSel.field; kind = 'field'; }
+    else if(which === 'filter'){ val = dmlPalSel.filter; kind = 'filter'; }
+    else { val = dmlPalSel.sys; kind = 'var'; }
+    if(!val){ alert('اختر عنصراً من الصندوق أولاً'); return; }
+    dmlInsertAtCaret(zone, dmlMakeChip(kind, val));
+    dmlZoneRead(key); dmlSchedulePreview();
+}
+function dmlPalSysToSection(){
+    const val = dmlPalSel.sys;
+    if(!val){ alert('اختر متغير نظام أولاً'); return; }
+    if(dmlSelectedSection === undefined || dmlSelectedSection < 0){
+        alert('اختر قسماً أولاً بالنقر عليه');
+        return;
+    }
+    const zone = document.getElementById('dzone-sec:' + dmlSelectedSection);
+    if(!zone) return;
+    const box = dmlMakeTextbox('right', 'auto', null);
+    box.querySelector(':scope > .dml-tb-body').appendChild(dmlMakeChip('var', dmlPalSel.sys));
+    zone.appendChild(box);
+    dmlZoneRead('sec:' + dmlSelectedSection);
+    dmlSchedulePreview();
+    dmlRenderSections();
+}
+function dmlIsSectionEmpty(i){
+    const s = D.sections[i];
+    if(!s) return false;
+    if(s.tableview) return false;
+    if(String(s.html || '').indexOf('dml-textbox') >= 0) return false;
+    return String(s.html || '').replace(/<[^>]*>/g, '').trim() === '';
+}
+function dmlEnsureEmptySection(){
+    for(let i = 0; i < D.sections.length; i++) if(dmlIsSectionEmpty(i)) return i;
+    D.sections.push({id:String(D.sections.length + 1), name:'قسم ' + (D.sections.length + 1), html:'', style:'', tableview:null});
+    dmlRenderSections(); dmlRebuildTargets();
+    return D.sections.length - 1;
+}
+function dmlPalToEmpty(){
+    let kind = null, val = '';
+    if(dmlPalSel.field){ kind = 'field'; val = dmlPalSel.field; }
+    else if(dmlPalSel.filter){ kind = 'filter'; val = dmlPalSel.filter; }
+    else if(dmlPalSel.sys){ kind = 'var'; val = dmlPalSel.sys; }
+    else {
+        const v = (D.variables || []).find(x=>x.name);
+        if(!v){ alert('اختر عنصراً من الصناديق أولاً'); return; }
+        kind = 'var'; val = v.name;
+    }
+    const si = dmlEnsureEmptySection();
+    const box = dmlMakeTextbox('right', 'auto', null);
+    box.querySelector(':scope > .dml-tb-body').appendChild(dmlMakeChip(kind, val));
+    const zone = document.getElementById('dzone-sec:' + si);
+    if(zone) zone.appendChild(box);
+    dmlZoneRead('sec:' + si); dmlSchedulePreview();
+    dmlSelectedSection = si;
+    dmlZoneFocus('sec:' + si);
+    dmlRenderSections();
+    dmlRebuildTargets();
+}
+function dmlMoveSection(i, dir){
+    const j = i + dir;
+    if(j < 0 || j >= D.sections.length) return;
+    const t = D.sections[i]; D.sections[i] = D.sections[j]; D.sections[j] = t;
+    if(dmlSelectedSection === i) dmlSelectedSection = j;
+    else if(dmlSelectedSection === j) dmlSelectedSection = i;
+    dmlRenderSections(); dmlRebuildTargets(); dmlSchedulePreview();
+}
+function dmlRangeAt(zone, x, y){
+    try{
+        if(document.caretRangeFromPoint){
+            const r = document.caretRangeFromPoint(x, y);
+            if(r && zone.contains(r.startContainer)) return r;
+        }
+    }catch(err){}
+    return null;
+}
+function dmlInsertAtCaret(zone, node){
+    zone.focus();
+    const sel = window.getSelection();
+    let range = null;
+    if(sel.rangeCount){
+        const r = sel.getRangeAt(0);
+        if(zone.contains(r.commonAncestorContainer)) range = r;
+    }
+    if(!range){ range = document.createRange(); range.selectNodeContents(zone); range.collapse(false); }
+    range.collapse(true);
+    range.insertNode(node);
+    range.setStartAfter(node);
+    range.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(range);
+}
+function dmlZoneOver(e){
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const z = e.currentTarget;
+    if(z && z.classList) z.classList.add('dml-drop-hint');
+}
+function dmlZoneLeave(e){
+    const z = e.currentTarget;
+    if(z && z.classList) z.classList.remove('dml-drop-hint');
+}
+function dmlZoneDrop(e, key){
+    e.preventDefault();
+    const zone = document.getElementById('dzone-' + key);
+    if(zone && zone.classList) zone.classList.remove('dml-drop-hint');
+    dmlActiveZone = key;
+    const tbBody = (e.target && e.target.closest) ? e.target.closest('.dml-tb-body') : null;
+    if(tbBody){
+        const box = tbBody.closest('.dml-textbox');
+        if(box){ dmlBoxDrop(e, box); return; }
+    }
+    let payload = null;
+    try{ payload = JSON.parse(e.dataTransfer.getData('text/dml')); }catch(err){}
+    if(payload && payload.kind === 'move'){
+        const node = document.querySelector('[data-did="' + payload.did + '"]');
+        if(node){
+            const clone = node.cloneNode(true);
+            clone.setAttribute('data-did', 'd' + (++dmlDidSeq));
+            dmlRebindChip(clone);
+            const r = dmlRangeAt(zone, e.clientX, e.clientY);
+            if(r){ r.collapse(true); r.insertNode(clone); }
+            else dmlInsertAtCaret(zone, clone);
+            node.remove();
+            if(zone){ zone.focus(); }
+            dmlZoneRead(key); dmlSchedulePreview();
+            return;
+        }
+    }
+    if(payload && (payload.kind === 'var' || payload.kind === 'field' || payload.kind === 'filter')){
+        const node = dmlMakeChip(payload.kind, payload.value);
+        const r = dmlRangeAt(zone, e.clientX, e.clientY);
+        zone.focus();
+        if(r){ r.collapse(true); r.insertNode(node); const s = window.getSelection(); s.removeAllRanges(); const nr = document.createRange(); nr.setStartAfter(node); nr.collapse(true); s.addRange(nr); }
+        else dmlInsertAtCaret(zone, node);
+        dmlZoneRead(key); dmlSchedulePreview();
+        return;
+    }
+    if(e.dataTransfer.files && e.dataTransfer.files.length){
+        dmlInsertImageFiles(key, e.dataTransfer.files);
+    }
+}
+function dmlRebindChip(node){
+    node.addEventListener('dragstart', function(e){
+        e.dataTransfer.setData('text/dml', JSON.stringify({kind:'move', did:node.getAttribute('data-did')}));
+        e.dataTransfer.effectAllowed = 'move';
+        try{ e.stopPropagation(); }catch(err){}
+    });
+}
+function dmlZoneInput(key){ dmlZoneRead(key); dmlSchedulePreview(); }
+function dmlZoneDblClick(e, key){
+    const t = e.target && e.target.tagName === 'IMG' ? e.target : null;
+    if(!t) return;
+    const cur = t.style.width || '';
+    const v = prompt('عرض الصورة (مثال: 50% أو 200px — فارغ للإلغاء):', cur);
+    if(v === null) return;
+    t.style.width = (v || '').trim();
+    if(!t.style.width) t.style.removeProperty('width');
+    dmlZoneRead(key); dmlSchedulePreview();
+}
+function dmlInsertImage(key, src){
+    const zone = document.getElementById('dzone-' + key);
+    if(!zone || !src) return;
+    const img = document.createElement('img');
+    img.src = src;
+    img.style.maxWidth = '100%';
+    dmlInsertAtCaret(zone, img);
+    dmlZoneRead(key); dmlSchedulePreview();
+}
+function dmlInsertImageFiles(key, files){
+    Array.prototype.forEach.call(files, f=>{
+        if(!f.type || f.type.indexOf('image/') !== 0) return;
+        const rd = new FileReader();
+        rd.onload = ()=>dmlInsertImage(key, rd.result);
+        rd.readAsDataURL(f);
+    });
+}
+function dmlImageFile(input){
+    const key = dmlActiveZone || 'header';
+    if(input.files && input.files.length) dmlInsertImageFiles(key, input.files);
+    input.value = '';
+}
+function dmlImageUrl(){
+    const key = dmlActiveZone || 'header';
+    const v = prompt('رابط الصورة (https://...):', 'https://');
+    if(v && v.trim() && v.trim() !== 'https://') dmlInsertImage(key, v.trim());
+}
+/* ── sections editor ── */
+function dmlAddSection(){ D.sections.push({id:String(D.sections.length+1), name:'قسم ' + (D.sections.length+1), html:'', style:'', tableview:null}); dmlRenderSections(); dmlRebuildTargets(); }
+function dmlDelSection(i){ D.sections.splice(i,1); dmlRenderSections(); dmlRebuildTargets(); }
+function dmlRenderSections(){
+    const host = document.getElementById('dmlSectionsList');
+    if(!host){ console.error('dmlSectionsList not found'); return; }
+    if(!D.sections.length){ host.innerHTML = '<p class="text-slate-400 text-center py-4 text-xs">لا توجد أقسام — اضغط إضافة قسم</p>'; return; }
+    host.innerHTML = D.sections.map((s,i)=>'<div class="dml-sec-card bg-white border border-slate-200 rounded-xl p-2 space-y-2 text-xs' + (dmlSelectedSection === i ? ' dml-sec-sel' : '') + '" onclick="dmlSelectSection(' + i + ', event)">'
+        + '<div class="flex items-center gap-2">'
+        + '<span class="text-[11px] font-bold text-slate-500">قسم #' + (i+1) + '</span>'
+        + '<input value="' + (s.name||'').replace(/"/g,'&quot;') + '" onchange="D.sections[' + i + '].name=this.value;dmlRebuildTargets()" placeholder="اسم القسم" class="flex-1 min-w-0 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1">'
+        + '<button onclick="dmlMoveSection(' + i + ',-1)" title="نقل لأعلى" class="text-slate-300 hover:text-indigo-600"><i class="fa-solid fa-chevron-up text-[11px]"></i></button>'
+        + '<button onclick="dmlMoveSection(' + i + ',1)" title="نقل لأسفل" class="text-slate-300 hover:text-indigo-600"><i class="fa-solid fa-chevron-down text-[11px]"></i></button>'
+        + '<button onclick="dmlDelSection(' + i + ')" class="text-rose-400 hover:text-rose-600"><i class="fa-solid fa-trash text-[11px]"></i></button>'
+        + '</div>'
+        + '<div id="dzone-sec:' + i + '" class="dml-zone bg-white" contenteditable="true" spellcheck="false"'
+        + ' onfocus="dmlZoneFocus(\'sec:' + i + '\')" onclick="dmlZoneFocus(\'sec:' + i + '\')"'
+        + ' oninput="dmlZoneInput(\'sec:' + i + '\')" ondragover="dmlZoneOver(event)" ondragleave="dmlZoneLeave(event)" ondrop="dmlZoneDrop(event,\'sec:' + i + '\')"'
+        + ' ondblclick="dmlZoneDblClick(event,\'sec:' + i + '\')"></div>'
+        + '<label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" ' + (s.tableview?'checked':'') + ' onchange="dmlToggleTable(' + i + ', this.checked)" class="rounded text-violet-600"> <span class="font-semibold text-slate-600">مرآة جدول (TableView) — تعكس جدول المشغل وتلائم حجم الورق</span></label>'
+        + (s.tableview ? '<div class="grid grid-cols-2 gap-2 bg-violet-50/50 border border-violet-100 rounded-lg p-2">'
+            + '<div><label class="block text-[10px] font-semibold text-slate-600">مصدر الجدول</label><select onchange="D.sections[' + i + '].tableview.source=this.value" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1">'
+            + ['player:main','player:detail','static'].map(v=>'<option value="' + v + '"' + ((s.tableview.source||'player:main')===v?' selected':'') + '>' + v + '</option>').join('') + '</select></div>'
+            + '<div><label class="block text-[10px] font-semibold text-slate-600">نوع الجدول</label><select onchange="D.sections[' + i + '].tableview.variant=this.value;dmlSchedulePreview()" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1">'
+            + [['grid','شبكي'],['striped','مخطط'],['plain','عادي'],['compact','مضغوط']].map(([v,l])=>'<option value="' + v + '"' + ((s.tableview.variant||'grid')===v?' selected':'') + '>' + l + '</option>').join('') + '</select></div>'
+            + '<div><label class="block text-[10px] font-semibold text-slate-600">تخطيط الجدول</label><select onchange="D.sections[' + i + '].tableview.layout=this.value;dmlSchedulePreview()" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1">'
+            + [['rows','صفوف عادية'],['grid2','شبكة أفقية (سند)']].map(([v,l])=>'<option value="' + v + '"' + ((s.tableview.layout||'rows')===v?' selected':'') + '>' + l + '</option>').join('') + '</select></div>'
+            + '<div class="col-span-2"><button onclick="dmlSelectTable(' + i + ')" class="w-full px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg font-bold text-[11px]"><i class="fa-solid fa-table"></i> تحديد الجدول — عرض خصائصه وأنماطه</button></div>'
+            + '<label class="flex items-center gap-1.5 cursor-pointer text-[11px] font-semibold text-slate-600"><input type="checkbox" ' + (s.tableview.total_row?'checked':'') + ' onchange="D.sections[' + i + '].tableview.total_row=this.checked;dmlSchedulePreview()" class="rounded text-violet-600"> صف الإجمالي</label>'
+            + '<label class="flex items-center gap-1.5 cursor-pointer text-[11px] font-semibold text-slate-600"><input type="checkbox" ' + (s.tableview.count_row?'checked':'') + ' onchange="D.sections[' + i + '].tableview.count_row=this.checked;dmlSchedulePreview()" class="rounded text-violet-600"> صف العدد</label>'
+            + '<div class="text-[10px] text-slate-500 leading-5 col-span-2">تنسيق th / tr / td من لوحة التنسيق (اختر الجدول ثم th/tr/td)</div>'
+            + '</div>' : '')
+        + '</div>').join('');
+    dmlZoneWriteAll();
+}
+let dmlSelectedSection = -1;
+function dmlSelectSection(i, ev){
+    if(ev && ev.target && ev.target.closest && ev.target.closest('input,select,textarea,button,a')) return;
+    dmlSelectedSection = i;
+    document.querySelectorAll('.dml-sec-card').forEach((c,ix)=>c.classList.toggle('dml-sec-sel', ix === i));
+    dmlZoneFocus('sec:' + i);
+}
+function dmlSelectTable(i){
+    dmlSelectedSection = i;
+    document.querySelectorAll('.dml-sec-card').forEach((c,ix)=>c.classList.toggle('dml-sec-sel', ix === i));
+    const key = 'tbl:' + i;
+    if(dmlTargets().some(x=>x.key === key)){
+        dmlTarget = key;
+        const sel = document.getElementById('dmlTargetSel');
+        if(sel) sel.value = key;
+        dmlRenderProps();
+    }
+}
+function dmlToggleTable(i, on){
+    if(on) D.sections[i].tableview = {source:'player:main', variant:'grid', layout:'rows', total_row:false, count_row:false, style:'', th:'', tr:'', td:''};
+    else D.sections[i].tableview = null;
+    dmlRenderSections(); dmlRebuildTargets(); dmlSchedulePreview();
+}
+
+/* ── main ribbon controls (act on current CSS target) ── */
+function dmlRbSet(prop, val){
+    if(val === undefined || val === null) return;
+    dmlSetProp(prop, val);
+    dmlRenderProps();
+    dmlSchedulePreview();
+}
+function dmlRbToggle(prop, on, off){
+    const map = dmlParseCss(dmlGetStyle());
+    dmlRbSet(prop, map[prop] === on ? off : on);
+}
+function dmlRbBg(val){ dmlRbSet('background-color', val === '#ffffff' ? '' : val); }
+function dmlRbBorder(){
+    const w = (document.getElementById('rbBorderW') || {}).value || '';
+    const s = (document.getElementById('rbBorderS') || {}).value || 'solid';
+    const c = (document.getElementById('rbBorderC') || {}).value || '';
+    const map = dmlParseCss(dmlGetStyle());
+    if(w === '' || w === '0px'){ delete map['border-width']; delete map['border-style']; delete map['border-color']; }
+    else { map['border-width'] = w; map['border-style'] = s; if(c) map['border-color'] = c; }
+    dmlSetStyle(dmlStringifyCss(map));
+    document.getElementById('dmlCssOut').value = dmlGetStyle();
+    dmlRenderProps();
+    dmlSchedulePreview();
+}
+function dmlSyncRibbon(){
+    const map = dmlParseCss(dmlGetStyle());
+    const set = (id, v)=>{ const el = document.getElementById(id); if(el && el.value !== undefined && document.activeElement !== el) el.value = v; };
+    set('rbFont', map['font-family'] || '');
+    set('rbSize', map['font-size'] || '');
+    set('rbColor', (map['color'] || '#000000').slice(0, 7));
+    set('rbLineH', parseFloat(map['line-height']) || 1.6);
+    set('rbIndent', parseInt(map['text-indent']) || 0);
+    const cc = document.getElementById('dmlCssCode');
+    if(cc && document.activeElement !== cc) cc.value = dmlGetStyle();
+}
+function dmlFillRibbonFonts(){
+    const ff = document.getElementById('rbFont');
+    if(ff && !ff.options.length){
+        ff.innerHTML = '<option value="">الخط...</option>' + FONT_OPTS.map(f=>'<option>' + f + '</option>').join('');
+    }
+    const fs = document.getElementById('rbSize');
+    if(fs && !fs.options.length){
+        fs.innerHTML = '<option value="">الحجم...</option>' + [8,9,10,11,12,14,16,18,20,22,24,28,32,36,48,72].map(s=>'<option value="' + s + 'px">' + s + '</option>').join('');
+    }
+}
+/* --- style presets (localStorage) --- */
+function dmlStylePresets(){
+    try{ return JSON.parse(localStorage.getItem('dml_style_presets') || '{}'); }
+    catch(e){ return {}; }
+}
+function dmlStyleSaveList(){
+    const sel = document.getElementById('rbStyleSel');
+    if(!sel) return;
+    const cur = sel.value;
+    const all = dmlStylePresets();
+    sel.innerHTML = '<option value="">— الأنماط —</option>' + Object.keys(all).map(n=>'<option value="' + String(n).replace(/"/g,'&quot;') + '">' + String(n).replace(/</g,'&lt;') + '</option>').join('');
+    if(cur && all[cur] !== undefined) sel.value = cur;
+}
+function dmlStyleSave(){
+    const inp = document.getElementById('rbStyleName');
+    const name = ((inp && inp.value) || '').trim();
+    if(!name){ alert('أدخل اسم النمط أولاً'); return; }
+    const all = dmlStylePresets();
+    all[name] = dmlGetStyle();
+    try{ localStorage.setItem('dml_style_presets', JSON.stringify(all)); }catch(e){}
+    if(inp) inp.value = '';
+    dmlStyleSaveList();
+    const sel = document.getElementById('rbStyleSel');
+    if(sel) sel.value = name;
+}
+function dmlStyleApply(){
+    const sel = document.getElementById('rbStyleSel');
+    const all = dmlStylePresets();
+    const css = sel ? all[sel.value] : undefined;
+    if(css === undefined){ alert('اختر نمطاً أولاً'); return; }
+    dmlSetStyle(css);
+    dmlRenderProps();
+    dmlSchedulePreview();
+}
+function dmlStyleDelete(){
+    const sel = document.getElementById('rbStyleSel');
+    if(!sel || !sel.value) return;
+    const all = dmlStylePresets();
+    delete all[sel.value];
+    try{ localStorage.setItem('dml_style_presets', JSON.stringify(all)); }catch(e){}
+    dmlStyleSaveList();
+}
+/* --- CSS code preview (editable) --- */
+function dmlCssCodeApply(){
+    const cc = document.getElementById('dmlCssCode');
+    if(!cc) return;
+    dmlSetStyle(cc.value || '');
+    dmlRenderProps();
+    dmlSchedulePreview();
+}
+function dmlCssCodeCopy(){
+    const cc = document.getElementById('dmlCssCode');
+    const txt = cc ? cc.value : '';
+    if(navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(txt); }
+    else { const ta = document.createElement('textarea'); ta.value = txt; document.body.appendChild(ta); ta.select(); try{document.execCommand('copy');}catch(e){} ta.remove(); }
+}
+/* --- clipboard: select / copy / cut / paste / delete --- */
+let dmlBoxBuffer = null;
+function dmlClipSelectAll(){
+    const key = dmlActiveZone || 'header';
+    const zone = document.getElementById('dzone-' + key);
+    if(!zone) return;
+    zone.focus();
+    const r = document.createRange();
+    r.selectNodeContents(zone);
+    const s = window.getSelection();
+    s.removeAllRanges(); s.addRange(r);
+}
+function dmlSerializeBoxEl(box){
+    const lane = box.getAttribute('data-lane') || 'right';
+    const w = box.getAttribute('data-w') || 'auto';
+    const body = box.querySelector(':scope > .dml-tb-body');
+    return '<div class="dml-textbox" data-lane="' + lane + '" data-w="' + w + '">' + dmlSerializeKids(body || box) + '</div>';
+}
+function dmlClipCopy(){
+    const box = dmlSelectedBoxEl();
+    if(box){ dmlBoxBuffer = dmlSerializeBoxEl(box); alert('تم نسخ مربع النص'); return; }
+    try{ document.execCommand('copy'); }catch(e){}
+}
+function dmlClipCut(){
+    const box = dmlSelectedBoxEl();
+    if(box){
+        dmlBoxBuffer = dmlSerializeBoxEl(box);
+        const zone = box.parentElement;
+        box.remove();
+        dmlSelectedBox = null;
+        const zkey = zone && zone.id ? zone.id.replace('dzone-', '') : (dmlActiveZone || 'header');
+        dmlZoneRead(zkey); dmlSchedulePreview();
+        return;
+    }
+    try{ document.execCommand('cut'); dmlSchedulePreview(); }catch(e){}
+}
+function dmlClipPaste(){
+    const key = dmlActiveZone || 'header';
+    const zone = document.getElementById('dzone-' + key);
+    if(!zone) return;
+    if(dmlBoxBuffer){
+        const tmp = document.createElement('div');
+        tmp.innerHTML = dmlBoxBuffer;
+        const src = tmp.querySelector('.dml-textbox');
+        if(src){
+            const fresh = dmlMakeTextbox(src.getAttribute('data-lane') || 'right', src.getAttribute('data-w') || 'auto', null);
+            dmlWriteFragment(fresh.querySelector(':scope > .dml-tb-body'), src.innerHTML);
+            zone.appendChild(fresh);
+            dmlZoneRead(key); dmlSchedulePreview();
+            return;
+        }
+    }
+    zone.focus();
+    try{ if(!document.execCommand('paste')) alert('اللصق من الحافظة محظور في المتصفح — انسخ مربع نص من المصمم'); }
+    catch(e){ alert('اللصق من الحافظة محظور في المتصفح — انسخ مربع نص من المصمم'); }
+    setTimeout(()=>{ dmlZoneRead(key); dmlSchedulePreview(); }, 60);
+}
+function dmlClipDelete(){
+    const box = dmlSelectedBoxEl();
+    if(box){ dmlBoxDelete(box); return; }
+    try{ document.execCommand('delete'); }catch(e){}
+    try{ document.execCommand('forwardDelete'); }catch(e2){}
+    const key = dmlActiveZone || 'header';
+    setTimeout(()=>{ dmlZoneRead(key); dmlSchedulePreview(); }, 60);
+}
+/* --- insert tab --- */
+function dmlRefreshInsert(){
+    const dt = (D.meta.doctype || 'kashf');
+    const lbl = document.getElementById('dmlInsertDocType');
+    if(lbl) lbl.textContent = dt === 'sanad' ? '(سند)' : (dt === 'daftar' ? '(دفتر)' : '(كشف)');
+    const host = document.getElementById('dmlInsertTables');
+    if(host){
+        let h = '';
+        if(dt === 'sanad'){
+            h += '<button onclick="dmlInsertMainGrid()" class="px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-xs font-bold"><i class="fa-solid fa-table-cells"></i> إدراج الشبكة الرئيسية (أفقي)</button>';
+            h += '<button onclick="dmlInsertDetailTable()" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold"><i class="fa-solid fa-table-list"></i> إدراج جدول التفاصيل</button>';
+        } else {
+            h += '<button onclick="dmlInsertMainTable()" class="px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-xs font-bold"><i class="fa-solid fa-table"></i> إدراج جدول إجمالي (مرآة الرئيسي)</button>';
+        }
+        host.innerHTML = h;
+    }
+    dmlInsCatChanged();
+    const ssec = document.getElementById('dmlInsSection');
+    if(ssec){
+        ssec.innerHTML = (D.sections || []).map((s,i)=>'<option value="' + i + '">قسم ' + (i+1) + ' — ' + dmlEsc(s.name || ('قسم ' + (i+1))) + '</option>').join('') || '<option value="">لا توجد أقسام — أضف قسماً أولاً</option>';
+    }
+}
+function dmlInsertMainTable(){
+    D.sections.push({id:String(D.sections.length+1), name:'الجدول الإجمالي', html:'', style:'', tableview:{source:'player:main', variant:'grid', layout:'rows', total_row:false, count_row:false, style:'', th:'', tr:'', td:''}});
+    dmlAfterInsertSection();
+}
+function dmlInsertMainGrid(){
+    D.sections.push({id:String(D.sections.length+1), name:'بيانات السند', html:'', style:'', tableview:{source:'player:main', variant:'plain', layout:'grid2', total_row:false, count_row:false, style:'', th:'', tr:'', td:''}});
+    dmlAfterInsertSection();
+}
+function dmlInsertDetailTable(){
+    D.sections.push({id:String(D.sections.length+1), name:'تفاصيل السند', html:'', style:'', tableview:{source:'player:detail', variant:'grid', layout:'rows', total_row:false, count_row:true, style:'', th:'', tr:'', td:''}});
+    dmlAfterInsertSection();
+}
+function dmlAfterInsertSection(){
+    dmlRenderSections(); dmlRebuildTargets(); dmlRefreshInsert(); dmlSchedulePreview();
+    dmlShowTab('design');
+}
+function dmlInsCatChanged(){
+    const cat = (document.getElementById('dmlInsCat') || {}).value || 'report';
+    const sel = document.getElementById('dmlInsField');
+    if(!sel) return;
+    let opts = [];
+    if(cat === 'system') opts = DML_SYSVARS.map(v=>({v:'V:' + v.name, l:v.label + ' [' + v.name + ']'}));
+    else if(cat === 'filter') opts = DML_FIELDS.map(f=>({v:'L:' + f.alias, l:'[filter:' + f.alias + ']'}));
+    else opts = DML_FIELDS.map(f=>({v:'F:' + f.alias, l:'%%' + f.alias + '%%'}));
+    sel.innerHTML = opts.map(o=>'<option value="' + String(o.v).replace(/"/g,'&quot;') + '">' + dmlEsc(o.l) + '</option>').join('') || '<option value="">— لا توجد حقول —</option>';
+}
+function dmlInsFieldBox(){
+    const raw = (document.getElementById('dmlInsField') || {}).value || '';
+    const si = parseInt(((document.getElementById('dmlInsSection') || {}).value || ''), 10);
+    const lane = (document.getElementById('dmlInsLane') || {}).value || 'right';
+    if(!raw){ alert('اختر الحقل أولاً'); return; }
+    if(isNaN(si) || !D.sections[si]){ alert('اختر القسم أولاً'); return; }
+    let kind = 'var', val = raw;
+    if(raw.indexOf('F:') === 0){ kind = 'field'; val = raw.slice(2); }
+    else if(raw.indexOf('L:') === 0){ kind = 'filter'; val = raw.slice(2); }
+    else if(raw.indexOf('V:') === 0){ kind = 'var'; val = raw.slice(2); }
+    const box = dmlMakeTextbox(lane, 'auto', null);
+    box.querySelector(':scope > .dml-tb-body').appendChild(dmlMakeChip(kind, val));
+    const zone = document.getElementById('dzone-sec:' + si);
+    if(zone) zone.appendChild(box);
+    dmlZoneRead('sec:' + si); dmlSchedulePreview();
+    dmlShowTab('design');
+}
+/* --- section print extras (left panel) --- */
+function dmlSecExtraChanged(){
+    const m = String(dmlTarget || '').match(/^sec:(\d+)$/);
+    if(!m || !D.sections[+m[1]]) return;
+    const b = document.getElementById('dmlPrintBefore');
+    const a = document.getElementById('dmlPrintAfter');
+    if(b) D.sections[+m[1]].print_before = b.value || '';
+    if(a) D.sections[+m[1]].print_after = a.value || '';
+    dmlSchedulePreview();
+}
+function dmlSyncSecExtra(){
+    const box = document.getElementById('dmlSecExtra');
+    const m = String(dmlTarget || '').match(/^sec:(\d+)$/);
+    if(!box) return;
+    if(!m || !D.sections[+m[1]]){ box.classList.add('hidden'); return; }
+    box.classList.remove('hidden');
+    const b = document.getElementById('dmlPrintBefore');
+    const a = document.getElementById('dmlPrintAfter');
+    if(b && document.activeElement !== b) b.value = D.sections[+m[1]].print_before || '';
+    if(a && document.activeElement !== a) a.value = D.sections[+m[1]].print_after || '';
+}
+
+/* ── CSS targets ── */
+function dmlTargets(){
+    const t = [{key:'header', label:'الترويسة (header)'}];
+    D.sections.forEach((s,i)=>{
+        t.push({key:'sec:' + i, label:'القسم ' + (i+1) + ' — ' + (s.name || ('قسم ' + (i+1)))});
+        if(s.tableview){
+            t.push({key:'tbl:' + i, label:'جدول القسم ' + (i+1)});
+            t.push({key:'th:' + i, label:'رأس الجدول th — قسم ' + (i+1)});
+            t.push({key:'tr:' + i, label:'صفوف الجدول tr — قسم ' + (i+1)});
+            t.push({key:'td:' + i, label:'خلايا الجدول td — قسم ' + (i+1)});
+        }
+    });
+    t.push({key:'footer', label:'التذييل (footer)'});
+    return t;
+}
+function dmlRebuildTargets(){
+    const sel = document.getElementById('dmlTargetSel');
+    const ts = dmlTargets();
+    if(!ts.some(x=>x.key === dmlTarget)) dmlTarget = 'header';
+    sel.innerHTML = ts.map(x=>'<option value="' + x.key + '"' + (x.key === dmlTarget ? ' selected' : '') + '>' + x.label + '</option>').join('');
+    dmlRenderProps();
+}
+function dmlTargetChanged(){ dmlTarget = document.getElementById('dmlTargetSel').value; dmlRenderProps(); }
+/* Auto-select CSS target when a zone is selected in the designer */
+function dmlZoneFocus(key){
+    dmlActiveZone = key;
+    let t = (key === 'header' || key === 'footer') ? key : null;
+    if(!t && /^sec:\d+$/.test(String(key))) t = key;
+    if(!t) return;
+    if(!dmlTargets().some(x=>x.key === t)) return;
+    if(dmlTarget === t) return;
+    dmlTarget = t;
+    const sel = document.getElementById('dmlTargetSel');
+    if(sel) sel.value = t;
+    dmlRenderProps();
+}
+function dmlGetStyleFor(key){
+    if(key === 'header') return D.header.style || '';
+    if(key === 'footer') return D.footer.style || '';
+    const m = String(key).match(/^(sec|tbl|th|tr|td):(\d+)$/);
+    if(!m || !D.sections[+m[2]]) return '';
+    const s = D.sections[+m[2]];
+    if(m[1] === 'sec') return s.style || '';
+    if(!s.tableview) return '';
+    if(m[1] === 'tbl') return s.tableview.style || '';
+    return s.tableview[m[1]] || '';
+}
+function dmlSetStyleFor(key, css){
+    if(key === 'header'){ D.header.style = css; return; }
+    if(key === 'footer'){ D.footer.style = css; return; }
+    const m = String(key).match(/^(sec|tbl|th|tr|td):(\d+)$/);
+    if(!m || !D.sections[+m[2]]) return;
+    const s = D.sections[+m[2]];
+    if(m[1] === 'sec'){ s.style = css; return; }
+    if(!s.tableview) return;
+    if(m[1] === 'tbl') s.tableview.style = css;
+    else s.tableview[m[1]] = css;
+}
+function dmlGetStyle(){ return dmlGetStyleFor(dmlTarget); }
+function dmlSetStyle(css){ dmlSetStyleFor(dmlTarget, css); }
+function dmlParseCss(css){
+    const map = {};
+    String(css || '').split(';').forEach(part=>{
+        const ix = part.indexOf(':');
+        if(ix < 0) return;
+        const k = part.slice(0, ix).trim().toLowerCase();
+        const v = part.slice(ix + 1).trim();
+        if(k) map[k] = v;
+    });
+    return map;
+}
+function dmlStringifyCss(map){
+    return Object.keys(map).filter(k=>map[k] !== '' && map[k] != null).map(k=>k + ': ' + map[k]).join('; ') + (Object.keys(map).length ? ';' : '');
+}
+function dmlSetProp(prop, val){
+    const map = dmlParseCss(dmlGetStyle());
+    if(val === '' || val == null) delete map[prop];
+    else map[prop] = val;
+    dmlSetStyle(dmlStringifyCss(map));
+    document.getElementById('dmlCssOut').value = dmlGetStyle();
+    dmlSchedulePreview();
+}
+function dmlClearTargetStyle(){
+    dmlSetStyle('');
+    document.getElementById('dmlCssOut').value = '';
+    dmlRenderProps(); dmlSchedulePreview();
+}
+
+/* ── CSS panel render ── */
+function dmlRenderCats(){
+    const host = document.getElementById('dmlCssCats');
+    host.innerHTML = CSS_CATS.map(c=>'<button onclick="dmlCat=\'' + c.id + '\';dmlRenderCats();dmlRenderProps()" title="' + c.label + '" class="px-2 py-1.5 rounded-lg text-[11px] transition ' + (dmlCat === c.id ? 'bg-violet-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200') + '"><i class="fa-solid ' + c.icon + '"></i></button>').join('');
+    let n = 0;
+    CSS_CATS.forEach(c=>{ n += c.props.length; });
+    document.getElementById('dmlPropsCount').textContent = '(' + n + ' خاصية)';
+}
+function dmlControlHtml(p, cur){
+    const k = p.k.replace(/"/g, '&quot;');
+    if(p.type === 'color'){
+        return '<div class="flex gap-1 items-center"><input type="color" value="' + (cur.startsWith('#') ? cur : '#000000') + '" onchange="dmlSetProp(\'' + k + '\', this.value)" class="w-8 h-7 p-0 border border-slate-200 rounded cursor-pointer shrink-0"><input value="' + cur.replace(/"/g,'&quot;') + '" oninput="dmlSetProp(\'' + k + '\', this.value)" placeholder="#fff / transparent" class="flex-1 min-w-0 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 font-mono" dir="ltr"></div>';
+    }
+    if(p.type === 'range'){
+        const num = parseFloat(cur) || 0;
+        return '<div class="flex gap-1 items-center"><input type="range" min="' + (p.min||0) + '" max="' + (p.max||100) + '" step="' + (p.step||1) + '" value="' + num + '" oninput="dmlSetProp(\'' + k + '\', this.value + \'' + (p.unit||'') + '\')" class="flex-1 min-w-0"><span class="text-[10px] font-mono text-slate-500 w-14 text-left" dir="ltr">' + cur + '</span></div>';
+    }
+    if(p.type === 'select'){
+        return '<select onchange="dmlSetProp(\'' + k + '\', this.value)" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1"><option value="">—</option>' + p.opts.map(o=>'<option value="' + o + '"' + (cur === o ? ' selected' : '') + '>' + o + '</option>').join('') + '</select>';
+    }
+    if(p.type === 'seg'){
+        return '<div class="dml-seg flex gap-1">' + p.opts.map(([v, ic, t])=>'<button onclick="dmlSetProp(\'' + k + '\', \'' + v + '\')" title="' + t + '" class="flex-1 py-1.5 rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200 text-xs ' + (cur === v ? 'on' : '') + '"><i class="fa-solid ' + ic + '"></i></button>').join('') + '</div>';
+    }
+    if(p.type === 'font'){
+        return '<select onchange="dmlSetProp(\'' + k + '\', this.value)" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1">' + [''].concat(FONT_OPTS).map(f=>'<option value="' + f + '"' + (cur === f ? ' selected' : '') + '>' + (f || '—') + '</option>').join('') + '</select>';
+    }
+    if(p.type === 'image'){
+        const id = 'img_' + p.k.replace(/[^a-z]/g, '') + '_' + Math.floor(Math.random()*1e6);
+        return '<div class="space-y-1"><div class="flex gap-1"><input value="' + (cur.indexOf('url(') === 0 ? cur.slice(4, -1).replace(/["\']/g, '') : cur).replace(/"/g,'&quot;') + '" oninput="dmlImgUrl(\'' + k + '\', this.value)" placeholder="https://... / data:..." class="flex-1 min-w-0 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 font-mono text-[10px]" dir="ltr"><label class="px-2 py-1 bg-slate-100 hover:bg-slate-200 rounded-lg cursor-pointer text-slate-600" title="اختيار صورة"><i class="fa-solid fa-image text-[11px]"></i><input id="' + id + '" type="file" accept="image/*" class="hidden" onchange="dmlImgFile(\'' + k + '\', this)"></label></div></div>';
+    }
+    return '<input value="' + cur.replace(/"/g,'&quot;') + '" oninput="dmlSetProp(\'' + k + '\', this.value)" placeholder="' + ((p.ph||'').replace(/"/g,'&quot;')) + '" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 font-mono text-[11px]" dir="ltr">';
+}
+function dmlImgUrl(prop, url){
+    url = (url || '').trim();
+    dmlSetProp(prop, url ? 'url("' + url + '")' : '');
+    dmlRenderProps();
+}
+function dmlImgFile(prop, input){
+    const f = input.files && input.files[0];
+    if(!f) return;
+    const rd = new FileReader();
+    rd.onload = ()=>{ dmlSetProp(prop, 'url("' + rd.result + '")'); dmlRenderProps(); };
+    rd.readAsDataURL(f);
+}
+function dmlRenderProps(){
+    const cat = CSS_CATS.find(c=>c.id === dmlCat) || CSS_CATS[0];
+    const map = dmlParseCss(dmlGetStyle());
+    const host = document.getElementById('dmlPropsList');
+    host.innerHTML = cat.props.map(p=>{
+        const cur = map[p.k] || '';
+        return '<div class="dml-prop bg-slate-50 border border-slate-200 rounded-lg p-2 space-y-1">'
+            + '<div class="flex items-center justify-between"><label class="text-[11px] font-semibold text-slate-600">' + p.label + '</label><code class="text-[9px] text-slate-400 font-mono" dir="ltr">' + p.k + '</code></div>'
+            + dmlControlHtml(p, cur) + '</div>';
+    }).join('');
+    document.getElementById('dmlCssOut').value = dmlGetStyle();
+    const _cc = document.getElementById('dmlCssCode');
+    if(_cc && document.activeElement !== _cc) _cc.value = dmlGetStyle();
+    dmlFillRibbonFonts();
+    dmlSyncRibbon();
+    dmlSyncSecExtra();
+}
+
+/* ── visual edit mode inside preview (move + resize header/sections/footer) ── */
+let dmlEditMode = false;
+function dmlEditorBootstrap(){
+    if(document.getElementById('dml-ve-active')) return;
+    const flag = document.createElement('span');
+    flag.id = 'dml-ve-active'; flag.style.display = 'none';
+    document.body.appendChild(flag);
+    const css = document.createElement('style');
+    css.id = 'dml-ve-css';
+    css.textContent = '.dml-ve-hover{outline:2px dashed #8b5cf6 !important;outline-offset:2px;cursor:move;}'
+        + '.dml-ve-sel{outline:2px solid #4f46e5 !important;outline-offset:2px;}'
+        + '.dml-ve-handle{position:absolute;width:11px;height:11px;background:#4f46e5;border:1.5px solid #fff;border-radius:3px;z-index:9999;box-shadow:0 1px 3px rgba(0,0,0,.4);}'
+        + '.dml-ve-nw{top:-7px;left:-7px;cursor:nwse-resize;}'
+        + '.dml-ve-n{top:-7px;left:calc(50% - 6px);cursor:ns-resize;}'
+        + '.dml-ve-ne{top:-7px;right:-7px;cursor:nesw-resize;}'
+        + '.dml-ve-e{top:calc(50% - 6px);right:-7px;cursor:ew-resize;}'
+        + '.dml-ve-se{bottom:-7px;right:-7px;cursor:nwse-resize;}'
+        + '.dml-ve-s{bottom:-7px;left:calc(50% - 6px);cursor:ns-resize;}'
+        + '.dml-ve-sw{bottom:-7px;left:-7px;cursor:nesw-resize;}'
+        + '.dml-ve-w{top:calc(50% - 6px);left:-7px;cursor:ew-resize;}';
+    document.head.appendChild(css);
+    let sel = null, drag = null, hov = null;
+    function targetOf(el){
+        if(!el || !el.closest) return null;
+        const box = el.closest('.dml-header,.dml-footer,.dml-section');
+        if(!box) return null;
+        if(box.classList.contains('dml-header')) return {key:'header', el:box};
+        if(box.classList.contains('dml-footer')) return {key:'footer', el:box};
+        const secs = Array.prototype.slice.call(document.querySelectorAll('.dml-body .dml-section'));
+        const ix = secs.indexOf(box);
+        if(ix < 0) return null;
+        return {key:'sec:' + ix, el:box};
+    }
+    function clearHandles(){ const hs = document.querySelectorAll('.dml-ve-handle'); for(let i=0;i<hs.length;i++) hs[i].remove(); }
+    function addHandles(el){
+        clearHandles();
+        ['nw','n','ne','e','se','s','sw','w'].forEach(p=>{
+            const h = document.createElement('div');
+            h.className = 'dml-ve-handle dml-ve-' + p;
+            h.setAttribute('data-h', p);
+            el.appendChild(h);
+        });
+    }
+    function select(t){
+        if(sel) sel.el.classList.remove('dml-ve-sel');
+        clearHandles();
+        sel = t;
+        if(!t) return;
+        if(getComputedStyle(t.el).position === 'static') t.el.style.position = 'relative';
+        t.el.classList.add('dml-ve-sel');
+        addHandles(t.el);
+        try{ window.parent.dmlPreviewSelect(t.key); }catch(e){}
+    }
+    function pushStyle(){
+        if(!sel) return;
+        const st = sel.el.style, props = {};
+        ['position','left','top','right','bottom','width','height','min-width','min-height'].forEach(k=>{ if(st[k]) props[k] = st[k]; });
+        try{ window.parent.dmlPreviewStyle(sel.key, props); }catch(e){}
+    }
+    document.addEventListener('pointerover', function(e){
+        if(drag) return;
+        const t = targetOf(e.target);
+        if(hov && (!t || hov.el !== t.el)) hov.el.classList.remove('dml-ve-hover');
+        hov = t;
+        if(t && (!sel || sel.el !== t.el)) t.el.classList.add('dml-ve-hover');
+    }, true);
+    document.addEventListener('pointerdown', function(e){
+        const h = (e.target.closest) ? e.target.closest('.dml-ve-handle') : null;
+        if(h && sel){
+            e.preventDefault(); e.stopPropagation();
+            const r = sel.el.getBoundingClientRect();
+            if(getComputedStyle(sel.el).position === 'static') sel.el.style.position = 'relative';
+            drag = {mode:'resize', h:h.getAttribute('data-h'), x:e.clientX, y:e.clientY, w:r.width, ht:r.height,
+                l:parseFloat(sel.el.style.left) || 0, t:parseFloat(sel.el.style.top) || 0};
+            document.body.style.userSelect = 'none';
+            return;
+        }
+        const t = targetOf(e.target);
+        if(t){
+            if(!sel || sel.el !== t.el) select(t);
+            if(getComputedStyle(t.el).position === 'static') t.el.style.position = 'relative';
+            drag = {mode:'move', x:e.clientX, y:e.clientY, l:parseFloat(t.el.style.left) || 0, t:parseFloat(t.el.style.top) || 0};
+            document.body.style.userSelect = 'none';
+            e.preventDefault();
+        } else {
+            select(null);
+        }
+    }, true);
+    document.addEventListener('pointermove', function(e){
+        if(!drag || !sel) return;
+        e.preventDefault();
+        const dx = e.clientX - drag.x, dy = e.clientY - drag.y, m = drag.h || '';
+        if(drag.mode === 'move'){
+            sel.el.style.left = (drag.l + dx) + 'px';
+            sel.el.style.top = (drag.t + dy) + 'px';
+        } else {
+            if(m.indexOf('e') >= 0) sel.el.style.width = Math.max(20, drag.w + dx) + 'px';
+            if(m.indexOf('s') >= 0) sel.el.style.height = Math.max(20, drag.ht + dy) + 'px';
+            if(m.indexOf('w') >= 0){ sel.el.style.width = Math.max(20, drag.w - dx) + 'px'; sel.el.style.left = (drag.l + dx) + 'px'; }
+            if(m.indexOf('n') >= 0){ sel.el.style.height = Math.max(20, drag.ht - dy) + 'px'; sel.el.style.top = (drag.t + dy) + 'px'; }
+        }
+    }, true);
+    document.addEventListener('pointerup', function(){
+        if(drag){ drag = null; document.body.style.userSelect = ''; pushStyle(); }
+    }, true);
+}
+function dmlToggleEditMode(){
+    dmlEditMode = !dmlEditMode;
+    const btn = document.getElementById('dmlEditModeBtn');
+    const hint = document.getElementById('dmlEditHint');
+    if(btn) btn.className = 'px-3 py-1.5 rounded-xl text-xs font-bold ' + (dmlEditMode ? 'bg-violet-600 text-white shadow-sm' : 'bg-slate-100 hover:bg-slate-200 text-slate-700');
+    if(hint) hint.textContent = dmlEditMode ? 'الوضع المرئي مفعّل: انقر عنصراً لتحديده — اسحبه للتحريك — اسحب المقابض للتحجيم (يُحفظ التنسيق تلقائياً)' : 'فعّل وضع التحرير ثم انقر عنصراً (رأس / قسم / تذييل) لتحديده — اسحب للتحريك واسحب المقابض للتحجيم';
+    if(dmlEditMode){ dmlInjectEditor(); }
+    else {
+        try{
+            const frame = document.getElementById('dmlPreviewFrame');
+            const doc = frame.contentDocument;
+            ['dml-ve-active','dml-ve-css','dml-ve-script'].forEach(id=>{ const n = doc.getElementById(id); if(n) n.remove(); });
+            doc.querySelectorAll('.dml-ve-sel,.dml-ve-hover').forEach(n=>n.classList.remove('dml-ve-sel','dml-ve-hover'));
+            doc.querySelectorAll('.dml-ve-handle').forEach(n=>n.remove());
+        }catch(e){}
+    }
+}
+function dmlInjectEditor(){
+    let doc = null;
+    try{ doc = document.getElementById('dmlPreviewFrame').contentDocument; }catch(e){ return; }
+    if(!doc || !doc.body || doc.getElementById('dml-ve-active')) return;
+    const sc = doc.createElement('script');
+    sc.id = 'dml-ve-script';
+    sc.textContent = '(' + dmlEditorBootstrap.toString() + ')()';
+    doc.body.appendChild(sc);
+}
+function dmlPreviewSelect(key){
+    if(!key) return;
+    const ts = dmlTargets();
+    if(!ts.some(x=>x.key === key)) return;
+    dmlTarget = key;
+    const sel = document.getElementById('dmlTargetSel');
+    if(sel) sel.value = key;
+    dmlRenderProps();
+}
+function dmlPreviewStyle(key, props){
+    const map = dmlParseCss(dmlGetStyleFor(key));
+    Object.keys(props || {}).forEach(k=>{ map[k] = props[k]; });
+    dmlSetStyleFor(key, dmlStringifyCss(map));
+    if(key === dmlTarget){
+        const sel = document.getElementById('dmlTargetSel');
+        if(sel) sel.value = key;
+        dmlRenderProps();
+    }
+}
+
+/* ── preview ── */
+function dmlDocPayload(){
+    dmlCollectMeta();
+    dmlSyncAll();
+    return {metadata:D.meta, variables:D.variables, header:D.header, sections:D.sections, footer:D.footer};
+}
+function dmlSampleData(){
+    const d = {};
+    (D.variables || []).forEach(v=>{ d[v.name] = v.name; });
+    return d;
+}
+function dmlPreview(){
+    const frame = document.getElementById('dmlPreviewFrame');
+    if(!frame) return; // اللوحة الدائمة محذوفة — المعاينة عبر ملء الشاشة فقط
+    const cnt = document.getElementById('dmlPreviewCount');
+    if(cnt) cnt.textContent = 'المتغيرات: ' + (D.variables || []).length + ' • الأقسام: ' + (D.sections || []).length;
+    const cnt2 = document.getElementById('dmlPreviewCount2');
+    if(cnt2) cnt2.textContent = ' — المتغيرات: ' + (D.variables || []).length + ' • الأقسام: ' + (D.sections || []).length;
+    frame.srcdoc = '<div style="padding:40px;text-align:center;color:#64748b;font-size:12px">جاري توليد المعاينة...</div>';
+    const body = {doc:dmlDocPayload(), data:dmlSampleData(), table:{columns:[], rows:[]}};
+    const src = (D.meta.source || '').trim();
+    const done = (cols)=>{
+        body.table = {columns:cols || [], rows:[]};
+        fetch('/api/dml/render', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)})
+            .then(r=>r.text()).then(html=>{ frame.srcdoc = html; })
+            .catch(e=>{ frame.srcdoc = '<div style="padding:20px;color:#e11d48">تعذر المعاينة</div>'; });
+    };
+    if(src && src.toLowerCase().endsWith('.rml')){
+        fetch('/api/rml/metadata?rml=' + encodeURIComponent(src) + '&app=' + encodeURIComponent(APP_NAME))
+            .then(r=>r.json()).then(md=>done((md.columns || []).map(c=>({name:c.name, alias:c.alias}))))
+            .catch(()=>done([]));
+    } else done([]);
+}
+function dmlSchedulePreview(){
+    if(dmlTab !== 'preview') return;
+    clearTimeout(_prevTimer);
+    _prevTimer = setTimeout(dmlPreview, 900);
+}
+function dmlPrintPreview(){
+    const frame = document.getElementById('dmlPreviewFrame');
+    try{ frame.contentWindow.print(); }catch(e){ alert('افتح المعاينة أولاً'); }
+}
+
+/* ── fullscreen live preview (paper-sized, centered) ── */
+const DML_PAPER_PX = {A4:[794,1123], A5:[559,794], A3:[1123,1587], Letter:[816,1056], Legal:[816,1346]};
+function dmlLivePaperPx(){
+    const p = (D.meta.paper || 'A4'), o = (D.meta.orientation || 'portrait');
+    let wh = DML_PAPER_PX[p] || DML_PAPER_PX.A4;
+    let w = wh[0], h = wh[1];
+    if(o === 'landscape'){ const t = w; w = h; h = t; }
+    return [w, h];
+}
+function dmlLivePreview(){
+    const ov = document.getElementById('dmlLiveOverlay');
+    const fr = document.getElementById('dmlLiveFrame');
+    if(!ov || !fr) return;
+    const dim = document.getElementById('dmlLiveDims');
+    const pw = dmlLivePaperPx()[0];
+    const bar = document.getElementById('dmlSideBar');
+    const sidePx = (bar && bar.classList.contains('dml-side-collapsed')) ? 48 : 256;
+    const w = Math.min(pw, Math.floor(window.innerWidth - sidePx - 48));
+    fr.style.width = w + 'px';
+    fr.style.height = '88vh';
+    if(dim) dim.textContent = (D.meta.paper || 'A4') + ' \u2022 ' + ((D.meta.orientation || 'portrait') === 'landscape' ? 'أفقي' : 'عمودي');
+    fr.srcdoc = '<div style="padding:40px;text-align:center;color:#cbd5e1;font-size:13px">جاري توليد المعاينة...</div>';
+    dmlSyncLiveOffset();
+    ov.classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+    const body = {doc:dmlDocPayload(), data:dmlSampleData(), table:{columns:[], rows:[]}};
+    const msrc = (D.meta.source || '').trim();
+    const done = (cols, groups)=>{
+        body.table = {columns:cols || [], rows:[], groups:groups || []};
+        fetch('/api/dml/render', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)})
+            .then(r=>r.text()).then(html=>{ fr.srcdoc = html; })
+            .catch(()=>{ fr.srcdoc = '<div style="padding:20px;color:#e11d48">تعذر المعاينة</div>'; });
+    };
+    if(msrc && /\.rml$/i.test(msrc)){
+        fetch('/api/rml/metadata?rml=' + encodeURIComponent(msrc) + '&app=' + encodeURIComponent(APP_NAME))
+            .then(r=>r.json()).then(md=>done((md.columns || []).map(c=>({name:c.name, alias:c.alias})), (md.groups || [])))
+            .catch(()=>done([]));
+    } else done([]);
+}
+function dmlCloseLivePreview(){
+    const ov = document.getElementById('dmlLiveOverlay');
+    if(ov) ov.classList.add('hidden');
+    const fr = document.getElementById('dmlLiveFrame');
+    if(fr) fr.srcdoc = '';
+    document.body.style.overflow = '';
+}
+function dmlPrintLive(){
+    const fr = document.getElementById('dmlLiveFrame');
+    try{ fr.contentWindow.print(); }catch(e){}
+}
+function dmlToggleSidebar(){
+    const bar = document.getElementById('dmlSideBar');
+    if(bar) bar.classList.toggle('dml-side-collapsed');
+    dmlSyncLiveOffset();
+}
+function dmlSyncLiveOffset(){
+    const bar = document.getElementById('dmlSideBar');
+    const ov = document.getElementById('dmlLiveOverlay');
+    if(!ov) return;
+    ov.classList.toggle('side-mini', !!(bar && bar.classList.contains('dml-side-collapsed')));
+    
+    // Handle preview pane visibility for live overlay positioning
+    const previewPane = document.getElementById('dmlPreviewPane');
+    if(previewPane && !previewPane.classList.contains('hidden')) {
+        ov.classList.add('preview-visible');
+    } else {
+        ov.classList.remove('preview-visible');
+    }
+}
+document.addEventListener('keydown', function(e){
+    if(e.key === 'Escape'){
+        const ov = document.getElementById('dmlLiveOverlay');
+        if(ov && !ov.classList.contains('hidden')) dmlCloseLivePreview();
+    }
+});
+
+/* ── init ── */
+(function(){
+    const q = new URLSearchParams(location.search);
+    const src = q.get('source') || '';
+    const f = q.get('file') || '';
+    if(src) document.getElementById('dmlSourceSel').value = src;
+    dmlRenderCats(); dmlRebuildTargets(); dmlShowTab('info'); dmlRefreshDocs();
+    
+    // Ensure preview pane is visible on load
+    const previewPane = document.getElementById('dmlPreviewPane');
+    if(previewPane) {
+        previewPane.classList.remove('hidden');
+        previewPane.style.display = 'flex';
+    }
+    
+    // Initial live overlay sync
+    dmlSyncLiveOffset();
+    
+    try{
+        document.getElementById('dmlPreviewFrame').addEventListener('load', function(){
+            if(dmlEditMode) setTimeout(dmlInjectEditor, 60);
+        });
+    }catch(e){}
+    if(f) dmlOpenDoc(f);
+    else if(src){
+        D.meta.source = src;
+        dmlSuggestName();
+    }
+})();

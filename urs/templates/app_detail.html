@@ -1,0 +1,881 @@
+{% extends "base.html" %}
+{% block title %}{{ app.ar }} — {{ app.name }}{% endblock %}
+{% block head_css %}
+{% block topbar %}{% endblock %}
+        .custom-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+        .custom-scroll::-webkit-scrollbar-track { background: #f1f5f9; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        .custom-scroll::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+{% endblock %}
+{% block sidebar %}
+    <!-- Sidebar -->
+    <aside class="w-72 bg-white border-l border-gray-200 flex flex-col overflow-hidden">
+        <div class="p-4 border-b border-gray-100">
+            <a href="/" class="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-800 mb-3"><i class="fa-solid fa-arrow-right"></i> العودة للتطبيقات</a>
+            <div class="flex items-center gap-3">
+                <div class="w-12 h-12 {{ app.icon_bg }} {{ app.icon_color }} rounded-2xl flex items-center justify-center text-xl">
+                    {% include "partials/app_icon.html" with icon=app.icon app_name=app_name %}
+                </div>
+                <div>
+                    <h1 class="font-bold text-gray-800">{{ app.ar }}</h1>
+                    <p class="text-xs text-gray-500">v{{ app.version }} • {{ app.category|default:"عام" }}</p>
+                </div>
+            </div>
+            <p class="text-xs text-gray-500 mt-2">{{ app.description }}</p>
+        </div>
+
+        <div class="flex-1 overflow-y-auto p-3 space-y-4">
+            <!-- الادخالات -->
+            <div>
+                <h3 class="text-xs font-bold text-gray-700 flex items-center gap-2 mb-2">
+                    <i class="fa-solid fa-pen-to-square text-indigo-600"></i>
+                    الادخالات
+                </h3>
+                {% if fml_files %}
+                    <div class="space-y-1" id="sideFmlList">
+                        {% for f in fml_files %}
+                        <div class="flex items-center gap-1 group side-fml-item" data-search="{{ f.metadata.displayName }} {{ f.metadata.category|default:'' }} {{ f.metadata.description|default:'' }}">
+                            <a href="{% if f.virtual %}{{ f.url }}{% else %}/app/{{ app_name }}/form/{{ f.file }}/{% endif %}" class="flex-1 block p-2.5 rounded-xl hover:bg-slate-50 border border-transparent hover:border-slate-200 transition text-right">
+                                <div class="text-xs font-semibold text-gray-800 truncate">{% if f.virtual %}<i class="fa-solid fa-table-list text-indigo-500"></i> {% endif %}{{ f.metadata.displayName }}</div>
+                            </a>
+                            {% if not f.virtual %}
+                            <button onclick="toggleFavorite('{{ f.file|escapejs }}')" data-file="{{ f.file }}" class="favorite-btn w-8 h-8 flex items-center justify-center rounded-xl hover:bg-amber-50 text-slate-300 hover:text-amber-500 shrink-0 transition" title="إضافة للمفضلة">
+                                <i class="fa-regular fa-star text-xs"></i>
+                            </button>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <p class="text-xs text-gray-400">لا توجد ادخالات</p>
+                {% endif %}
+                <button onclick="location.href='/app/{{ app_name }}/forms-designer/'" class="w-full mt-2 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1"><i class="fa-solid fa-plus text-[10px]"></i> مصمم النماذج</button>
+            </div>
+
+            {% if app_name != 'settings' %}
+            <!-- التقارير -->
+            <div>
+                <h3 class="text-xs font-bold text-gray-700 flex items-center gap-2 mb-2">
+                    <i class="fa-solid fa-chart-line text-emerald-600"></i>
+                    التقارير
+                </h3>
+                {% if rml_files %}
+                    <div class="space-y-1" id="sideRmlList">
+                        {% for f in rml_files %}
+                        <div class="flex items-center gap-1 group side-rml-item" data-search="{{ f.metadata.displayName }} {{ f.metadata.category|default:'' }} {{ f.metadata.description|default:'' }}">
+                            <a href="/app/{{ app_name }}/report/{{ f.file }}/" class="flex-1 block p-2.5 rounded-xl hover:bg-slate-50 border border-transparent hover:border-slate-200 transition text-right">
+                                <div class="text-xs font-semibold text-gray-800 truncate">{{ f.metadata.displayName }}</div>
+                            </a>
+                            <button onclick="toggleMyReport('{{ app_name|escapejs }}','{{ f.file|escapejs }}','{{ f.metadata.displayName|escapejs }}')" data-myrepp data-app="{{ app_name }}" data-file="{{ f.file }}" class="myrep-btn w-8 h-8 flex items-center justify-center rounded-xl hover:bg-amber-50 text-slate-300 hover:text-amber-500 shrink-0 transition" title="أضف إلى تقاريري">
+                                <i class="fa-regular fa-star text-xs"></i>
+                            </button>
+                        </div>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <p class="text-xs text-gray-400">لا توجد تقارير</p>
+                {% endif %}
+                <a href="/app/{{ app_name }}/report-designer/" class="w-full mt-2 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1"><i class="fa-solid fa-plus text-[10px]"></i> إضافة تقرير</a>
+            </div>
+            {% endif %}
+
+            {% if app_rules %}
+            <!-- قواعد الأعمال -->
+            <div>
+                <h3 class="text-xs font-bold text-gray-700 flex items-center gap-2 mb-2">
+                    <i class="fa-solid fa-scale-balanced text-amber-600"></i>
+                    قواعد الأعمال
+                </h3>
+                <div class="space-y-1" id="sideRulesList">
+                    {% for r in app_rules %}
+                    <button onclick="openRulePolicies('{{ r.file|escapejs }}','{{ r.name|escapejs }}')" data-search="{{ r.display|default:r.name }} {{ r.description|default:'' }} {{ r.file }}" class="side-rule-item w-full flex items-center gap-2 p-2.5 rounded-xl hover:bg-amber-50 border border-transparent hover:border-amber-200 transition text-right">
+                        <span class="w-7 h-7 rounded-lg bg-amber-100 text-amber-700 flex items-center justify-center shrink-0"><i class="fa-solid {{ r.icon|default:'fa-scale-balanced' }} text-[11px]"></i></span>
+                        <span class="flex-1 min-w-0">
+                            <span class="block text-xs font-semibold text-gray-800 truncate">{{ r.display|default:r.name }}</span>
+                        </span>
+                        <span class="text-[10px] px-1.5 py-0.5 rounded-full {% if r.policy_count %}bg-emerald-100 text-emerald-700{% else %}bg-slate-100 text-slate-500{% endif %} shrink-0">{{ r.policy_count }} سياسة</span>
+                    </button>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Actions -->
+            <div class="pt-3 border-t border-gray-100 space-y-2">
+                <button onclick="fetch('/api/apps/sync/',{method:'POST'}).then(()=>location.reload())" class="w-full py-2 bg-slate-100 hover:bg-slate-200 rounded-xl text-xs font-semibold">مزامنة النظام</button>
+            </div>
+        </div>
+    </aside>
+{% endblock %}
+{% block main %}
+    <!-- Main Content -->
+    <main class="flex-1 overflow-y-auto p-6 space-y-6">
+        <!-- Header — بحث أنيق عن التقارير والادخالات -->
+        <div class="bg-gradient-to-l from-indigo-900 via-blue-900 to-indigo-800 rounded-3xl p-6 text-white relative overflow-hidden">
+            <div class="absolute -left-16 -top-16 w-64 h-64 bg-white/10 rounded-full blur-3xl pointer-events-none"></div>
+            <div class="absolute -right-10 -bottom-20 w-72 h-72 bg-emerald-400/10 rounded-full blur-3xl pointer-events-none"></div>
+            <div class="relative z-10">
+                <div class="flex items-center justify-between gap-3 flex-wrap">
+                    <div>
+                        <h1 class="text-xl font-bold">{{ app.ar }}</h1>
+                        <p class="text-xs text-blue-200 mt-1">{{ app.description }}</p>
+                    </div>
+                </div>
+                {% if app_name == 'settings' %}
+                <div class="mt-4">
+                    <a href="/settings/" class="inline-flex items-center gap-2 bg-emerald-400 hover:bg-emerald-300 text-emerald-950 rounded-2xl px-4 py-2.5 text-sm font-bold shadow-lg transition"><i class="fa-solid fa-gear"></i> صفحة الإعدادات المستقلة (النماذج مبوبة + الاتصالات + الموديلات) ←</a>
+                </div>
+                {% endif %}
+                <div class="mt-4 flex items-center gap-2 bg-white/95 rounded-2xl px-4 py-3 shadow-lg">
+                    <span class="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0"><i class="fa-solid fa-magnifying-glass text-sm"></i></span>
+                    <input id="overviewSearch" type="text" placeholder="{% if app_name == 'settings' %}ابحث عن إدخال...{% else %}ابحث عن إدخال أو تقرير... (مثال: إجازات، رواتب){% endif %}" class="flex-1 bg-transparent text-gray-800 placeholder-gray-400 text-sm focus:outline-none">
+                    <span id="overviewSearchCount" class="hidden md:inline-block text-[11px] text-gray-500 bg-gray-100 px-2.5 py-1 rounded-full whitespace-nowrap"></span>
+                    <button id="overviewSearchClear" onclick="clearOverviewSearch()" class="hidden w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-500 items-center justify-center shrink-0"><i class="fa-solid fa-xmark text-xs"></i></button>
+                </div>
+                <div class="mt-2 flex items-center gap-2 text-[11px]">
+                    <button onclick="setOverviewFilter('all')" data-filter="all" class="overview-filter-btn px-3 py-1 rounded-full bg-white text-indigo-700 font-bold">الكل</button>
+                    <button onclick="setOverviewFilter('forms')" data-filter="forms" class="overview-filter-btn px-3 py-1 rounded-full bg-white/20 text-white hover:bg-white/30">الادخالات</button>
+                    {% if app_name != 'settings' %}<button onclick="setOverviewFilter('reports')" data-filter="reports" class="overview-filter-btn px-3 py-1 rounded-full bg-white/20 text-white hover:bg-white/30">التقارير</button>{% endif %}
+                    <button onclick="toggleTheme()" title="الوضع الداكن / الفاتح" class="mr-auto w-7 h-7 rounded-full bg-white/20 hover:bg-white/30 text-white flex items-center justify-center transition"><i class="theme-toggle-btn-icon fa-regular fa-moon text-[11px]"></i></button>
+                    <span id="overviewNoResults" class="hidden text-amber-200 font-semibold">لا توجد نتائج مطابقة</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- الادخالات المفضلة — أزرار ملونة مستطيلة دورانية -->
+        <div class="bg-white rounded-2xl border border-gray-200 p-4">
+            <h2 class="font-bold text-gray-800 mb-3 flex items-center gap-2">
+                <i class="fa-solid fa-star text-amber-500"></i>
+                الادخالات المفضلة
+                <span class="text-xs font-normal text-slate-400 mr-2">— تظهر فقط الادخالات المنجمة ☆</span>
+            </h2>
+            <div id="favoritesGrid" class="flex flex-wrap gap-3 min-h-[44px]">
+                <!-- يتم تعبئتها عبر JS بأزرار ملونة -->
+            </div>
+            <p id="noFavoritesMsg" class="text-xs text-slate-400 mt-3">لا توجد ادخالات مفضلة — اضغط النجمة ☆ بجانب أي إدخال في الشريط الجانبي لإضافته هنا</p>
+            <div class="mt-4 pt-4 border-t border-gray-100">
+                <h3 class="font-bold text-gray-800 mb-3 flex items-center gap-2 text-sm">
+                    <i class="fa-solid fa-grip text-indigo-600"></i>
+                    جميع الادخالات
+                </h3>
+                <div id="allFormsGrid" class="flex flex-wrap gap-2.5">
+                    {% for f in fml_files %}
+                    <a href="{% if f.virtual %}{{ f.url }}{% else %}/app/{{ app_name }}/form/{{ f.file }}/{% endif %}" title="{{ f.metadata.displayName }}" data-search="{{ f.metadata.displayName }} {{ f.metadata.category|default:'' }} {{ f.metadata.description|default:'' }}" class="all-fml-card inline-flex items-center gap-2 px-4 py-2.5 text-white rounded-xl text-xs font-bold shadow-sm transition {% cycle 'bg-indigo-600 hover:bg-indigo-700' 'bg-emerald-600 hover:bg-emerald-700' 'bg-amber-500 hover:bg-amber-600' 'bg-sky-600 hover:bg-sky-700' 'bg-violet-600 hover:bg-violet-700' 'bg-rose-600 hover:bg-rose-700' 'bg-teal-600 hover:bg-teal-700' 'bg-orange-600 hover:bg-orange-700' %}">
+                        <span class="truncate max-w-[180px]">{% if f.virtual %}<i class="fa-solid fa-table-list"></i> {% endif %}{{ f.metadata.displayName }}</span>
+                        <span class="w-6 h-6 bg-white/20 rounded-full flex items-center justify-center shrink-0"><i class="fa-solid {% if f.virtual %}fa-arrow-left{% else %}fa-plus{% endif %} text-[10px]"></i></span>
+                    </a>
+                    {% endfor %}
+                </div>
+                <p id="noAllFormsMsg" class="hidden text-xs text-slate-400 mt-3">لا توجد ادخالات مطابقة للبحث</p>
+            </div>
+        </div>
+
+        {% if app_name != 'settings' %}
+        <!-- التقارير -->
+        <div class="bg-white rounded-2xl border border-gray-200 p-4">
+            <h2 class="font-bold text-gray-800 mb-3 flex items-center gap-2">
+                <i class="fa-solid fa-chart-line text-emerald-600"></i>
+                التقارير
+            </h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {% for f in rml_files|slice:":6" %}
+                <div id="rml-{{ forloop.counter }}" data-search="{{ f.metadata.displayName }} {{ f.metadata.category|default:'' }} {{ f.metadata.description|default:'' }}" class="report-card border border-gray-200 rounded-xl p-4 hover:shadow-md transition bg-gradient-to-br from-white to-slate-50">
+                    <div class="flex items-start justify-between">
+                        <div class="flex items-center gap-2">
+                            <div class="w-8 h-8 bg-emerald-100 text-emerald-600 rounded-lg flex items-center justify-center text-sm"><i class="fa-solid {{ f.metadata.icon|default:'fa-chart-bar' }}"></i></div>
+                            <div>
+                                <div class="font-semibold text-sm text-gray-800">{{ f.metadata.displayName }}</div>
+                                <div class="text-[11px] text-slate-500">{{ f.metadata.category|default:"HR" }}</div>
+                            </div>
+                        </div>
+                        <span class="text-[10px] bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full">{{ f.charts|length }} مخطط</span>
+                    </div>
+                    {% if f.metadata.description %}<div class="text-xs text-gray-500 mt-2">{{ f.metadata.description }}</div>{% endif %}
+                    {% if f.charts %}
+                    <div class="mt-3 space-y-2">
+                        {% for ch in f.charts|slice:":2" %}
+                        <div class="bg-white border border-slate-100 rounded-xl p-2">
+                            <div class="flex items-center gap-2 text-[11px] px-1 pb-1">
+                                <span class="w-6 h-6 rounded-full bg-indigo-50 text-indigo-600 flex items-center justify-center"><i class="fa-solid {% if ch.type == 'bar' %}fa-chart-column{% elif ch.type == 'line' %}fa-chart-line{% elif ch.type == 'pie' %}fa-chart-pie{% else %}fa-chart-bar{% endif %} text-[10px]"></i></span>
+                                <span class="font-semibold text-slate-700">{{ ch.title|default:"مخطط" }}</span>
+                                <span class="text-slate-400">({{ ch.type }})</span>
+                                <span class="mr-auto text-slate-500">{{ ch.x }} ← {{ ch.y }}{% if ch.y2 %} + {{ ch.y2 }}{% endif %}</span>
+                                <select onchange="changeChartLimit('{{ f.file|escapejs }}','{{ ch.id|escapejs }}',this.value)" title="عدد النقاط" class="text-[10px] bg-slate-50 border border-slate-200 rounded-lg px-1 py-0.5 text-slate-600 focus:outline-none">
+                                    <option value="5">5</option>
+                                    <option value="10" selected>10</option>
+                                    <option value="15">15</option>
+                                    <option value="20">20</option>
+                                    <option value="30">30</option>
+                                    <option value="50">50</option>
+                                </select>
+                                <button onclick="toggleChartFilterBox('{{ f.file|escapejs }}','{{ ch.id|escapejs }}')" title="فلترة المخطط" class="w-6 h-6 rounded-full hover:bg-slate-100 text-slate-400 hover:text-indigo-600 flex items-center justify-center"><i class="fa-solid fa-filter text-[10px]"></i></button>
+                                <button onclick="openChartInReport('{{ f.file|escapejs }}','{{ ch.id|escapejs }}')" title="فتح في التقرير بنفس الفلترة" class="w-6 h-6 rounded-full hover:bg-slate-100 text-slate-400 hover:text-emerald-600 flex items-center justify-center"><i class="fa-solid fa-arrow-up-right-from-square text-[10px]"></i></button>
+                                <button onclick="openChartFullscreen('{{ f.file|escapejs }}','{{ ch.id|escapejs }}')" title="ملء الشاشة" class="w-6 h-6 rounded-full hover:bg-slate-100 text-slate-400 hover:text-indigo-600 flex items-center justify-center"><i class="fa-solid fa-expand text-[10px]"></i></button>
+                            </div>
+                            <div id="flt-chart-{{ f.file }}-{{ ch.id }}" class="hidden px-1 pb-1"></div>
+                            <div class="h-36"><canvas id="chart-{{ f.file }}-{{ ch.id }}"></canvas></div>
+                        </div>
+                        {% endfor %}
+                        {% if f.charts|length > 2 %}<div class="text-[11px] text-slate-400">+{{ f.charts|length|add:"-2" }} مخطط آخر</div>{% endif %}
+                    </div>
+                    {% endif %}
+                    {% if f.connections %}
+                    <div class="mt-2 flex items-center gap-1 flex-wrap">
+                        <span class="text-[11px] text-slate-500">الاتصالات:</span>
+                        {% for conn in f.connections|slice:":3" %}
+                        <span class="text-[10px] bg-slate-100 px-1.5 py-0.5 rounded-full">اتصال {{ conn.id }}</span>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                    <div class="mt-3 flex items-center gap-2">
+                        <a href="/app/{{ app_name }}/report/{{ f.file }}/" class="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold"><i class="fa-solid fa-eye text-[10px]"></i> عرض التقرير</a>
+                        <button onclick="toggleMyReport('{{ app_name|escapejs }}','{{ f.file|escapejs }}','{{ f.metadata.displayName|escapejs }}')" data-myrepp data-app="{{ app_name }}" data-file="{{ f.file }}" class="myrep-btn inline-flex items-center gap-1 px-3 py-1.5 bg-white border border-slate-200 hover:bg-amber-50 text-slate-600 hover:text-amber-600 rounded-lg text-xs font-semibold" title="أضف إلى تقاريري"><i class="fa-regular fa-star text-[10px]"></i> <span>تقاريري</span></button>
+                        <a href="/app/{{ app_name }}/report/{{ f.file }}/?setup=1" class="inline-flex items-center gap-1 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold"><i class="fa-solid fa-sliders text-[10px]"></i> إعداد التقرير</a>
+                        {% if has_rml_wizard %}<button onclick="openEditRmlModal('{{ f.file|escapejs }}')" class="inline-flex items-center gap-1 px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-semibold"><i class="fa-solid fa-pen text-[10px]"></i> تعديل</button>{% endif %}
+                        <a href="/app/{{ app_name }}/report-designer/?file={{ f.file }}" class="inline-flex items-center gap-1 px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-semibold"><i class="fa-solid fa-pen-ruler text-[10px]"></i> المصمم</a>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% if rml_files|length > 6 %}
+            <div class="text-center mt-3">
+                <span class="text-xs text-gray-500">المزيد في الشريط الجانبي</span>
+            </div>
+            {% endif %}
+        </div>
+        {% endif %}
+
+    </main>
+{% endblock %}
+{% block modals %}
+    {% if has_rml_wizard %}{% include "rml_wizard_modal.html" %}{% endif %}
+    <!-- Chart Fullscreen Modal -->
+    <div id="chartFullscreenModal" class="hidden fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-4" onclick="if(event.target===this) closeChartFullscreen()">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-6xl overflow-hidden flex flex-col" style="height:85vh">
+            <div class="px-6 py-3 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+                <h3 id="chartFullscreenTitle" class="text-sm font-bold text-slate-800">مخطط</h3>
+                <button onclick="closeChartFullscreen()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-lg"></i></button>
+            </div>
+            <div class="flex-1 p-4 min-h-0"><canvas id="chartFullscreenCanvas"></canvas></div>
+        </div>
+    </div>
+    {% endblock %}
+{% block scripts %}
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script>
+        const APP_NAME = "{{ app_name|escapejs }}";
+        const FML_FILES = [{% for f in fml_files %}{file: "{{ f.file|escapejs }}", displayName: "{{ f.metadata.displayName|escapejs }}"},{% endfor %}];
+        const FAV_KEY = `favorites_${APP_NAME}`;
+        function getFavorites(){ try{return JSON.parse(localStorage.getItem(FAV_KEY)||'[]')}catch(e){return []}}
+        function saveFavorites(list){ localStorage.setItem(FAV_KEY, JSON.stringify(list)); }
+        function toggleFavorite(file){
+            let fav = getFavorites();
+            if(fav.includes(file)) fav = fav.filter(f=>f!==file);
+            else fav.push(file);
+            saveFavorites(fav);
+            renderFavorites();
+            updateStarButtons();
+        }
+        function updateStarButtons(){
+            const fav = getFavorites();
+            document.querySelectorAll('.favorite-btn').forEach(btn=>{
+                const file = btn.dataset.file;
+                const icon = btn.querySelector('i');
+                const isFav = fav.includes(file);
+                if(isFav){
+                    btn.classList.add('text-amber-500','bg-amber-50');
+                    btn.classList.remove('text-slate-300');
+                    if(icon){ icon.classList.remove('fa-regular'); icon.classList.add('fa-solid'); }
+                    btn.title='إزالة من المفضلة';
+                } else {
+                    btn.classList.remove('text-amber-500','bg-amber-50');
+                    btn.classList.add('text-slate-300');
+                    if(icon){ icon.classList.add('fa-regular'); icon.classList.remove('fa-solid'); }
+                    btn.title='إضافة للمفضلة';
+                }
+            });
+        }
+        function renderFavorites(){
+            const fav = getFavorites();
+            const grid = document.getElementById('favoritesGrid');
+            const noMsg = document.getElementById('noFavoritesMsg');
+            if(!grid) return;
+            if(fav.length===0){
+                grid.innerHTML = '';
+                if(noMsg) noMsg.classList.remove('hidden');
+                return;
+            }
+            if(noMsg) noMsg.classList.add('hidden');
+            const colors = ['bg-indigo-600 hover:bg-indigo-700','bg-emerald-600 hover:bg-emerald-700','bg-amber-500 hover:bg-amber-600','bg-sky-600 hover:bg-sky-700','bg-violet-600 hover:bg-violet-700','bg-rose-600 hover:bg-rose-700','bg-teal-600 hover:bg-teal-700','bg-orange-600 hover:bg-orange-700'];
+            grid.innerHTML = fav.map((file, idx)=>{
+                const meta = FML_FILES.find(f=>f.file===file);
+                const name = (meta && meta.displayName) ? meta.displayName : "بدون عنوان";
+                const color = colors[idx % colors.length];
+                return `<a href="/app/${APP_NAME}/form/${encodeURIComponent(file)}/" data-search="${name}" class="fav-item inline-flex items-center gap-2 px-5 py-3 ${color} text-white rounded-xl text-xs font-bold shadow-sm transition">
+                    <span>${name}</span>
+                    <span class="w-6 h-6 bg-white/20 rounded-full flex items-center justify-center shrink-0"><i class="fa-solid fa-plus text-[10px]"></i></span>
+                </a>`;
+            }).join('');
+            filterOverview(false);
+        }
+        // --- Overview elegant search (forms + reports) ---
+        let overviewFilterType = 'all';
+        function setOverviewFilter(t){
+            overviewFilterType = t;
+            document.querySelectorAll('.overview-filter-btn').forEach(b=>{
+                const active = b.dataset.filter === t;
+                b.className = 'overview-filter-btn px-3 py-1 rounded-full ' + (active ? 'bg-white text-indigo-700 font-bold' : 'bg-white/20 text-white hover:bg-white/30');
+            });
+            filterOverview();
+        }
+        function clearOverviewSearch(){
+            const inp = document.getElementById('overviewSearch');
+            if(inp) inp.value = '';
+            filterOverview();
+        }
+        function refreshMyReportButtons(){
+            try{
+                document.querySelectorAll('.myrep-btn').forEach(btn=>{
+                    const on = isMyReport(btn.dataset.app, btn.dataset.file);
+                    const icon = btn.querySelector('i');
+                    if(on){
+                        btn.classList.add('text-amber-500');
+                        btn.classList.remove('text-slate-300','text-slate-600');
+                        if(icon){ icon.classList.remove('fa-regular'); icon.classList.add('fa-solid'); }
+                        btn.title = 'في تقاريري — اضغط للإزالة';
+                    } else {
+                        btn.classList.remove('text-amber-500');
+                        if(icon){ icon.classList.add('fa-regular'); icon.classList.remove('fa-solid'); }
+                        btn.title = 'أضف إلى تقاريري';
+                    }
+                });
+            }catch(e){}
+        }
+        function filterOverview(scroll){
+            const inp = document.getElementById('overviewSearch');
+            const q = (inp ? inp.value : '').trim().toLowerCase();
+            const clearBtn = document.getElementById('overviewSearchClear');
+            if(clearBtn){
+                const show = !!q;
+                clearBtn.classList.toggle('hidden', !show);
+                clearBtn.classList.toggle('inline-flex', show);
+            }
+            let visibleCount = 0;
+            const match = (el)=>{
+                const txt = ((el.dataset && el.dataset.search) || el.textContent || '').toLowerCase();
+                return !q || txt.includes(q);
+            };
+            const applyType = (kind)=>{
+                if(overviewFilterType === 'all') return true;
+                return overviewFilterType === kind;
+            };
+            document.querySelectorAll('.side-fml-item').forEach(el=>{
+                const show = match(el) && applyType('forms');
+                el.style.display = show ? '' : 'none';
+                if(show) visibleCount++;
+            });
+            document.querySelectorAll('.side-rml-item').forEach(el=>{
+                const show = match(el) && applyType('reports');
+                el.style.display = show ? '' : 'none';
+                if(show) visibleCount++;
+            });
+            document.querySelectorAll('.side-rule-item').forEach(el=>{
+                const show = match(el) && (overviewFilterType === 'all' || overviewFilterType === 'reports');
+                el.style.display = show ? '' : 'none';
+                if(show) visibleCount++;
+            });
+            document.querySelectorAll('.fav-item').forEach(el=>{
+                const show = match(el) && applyType('forms');
+                el.style.display = show ? '' : 'none';
+                if(show) visibleCount++;
+            });
+            let visibleForms = 0;
+            document.querySelectorAll('.all-fml-card').forEach(el=>{
+                const show = match(el) && applyType('forms');
+                el.style.display = show ? '' : 'none';
+                if(show){ visibleCount++; visibleForms++; }
+            });
+            document.querySelectorAll('.report-card').forEach(el=>{
+                const show = match(el) && applyType('reports');
+                el.style.display = show ? '' : 'none';
+                if(show) visibleCount++;
+            });
+            const countEl = document.getElementById('overviewSearchCount');
+            if(countEl) countEl.textContent = q ? `${visibleCount} نتيجة` : '';
+            const noEl = document.getElementById('overviewNoResults');
+            if(noEl) noEl.classList.toggle('hidden', !(q && visibleCount === 0));
+            const noAll = document.getElementById('noAllFormsMsg');
+            if(noAll) noAll.classList.toggle('hidden', !(visibleForms === 0));
+        }
+        function previewFml(file){ window.location.href = `/app/${APP_NAME}/form/${encodeURIComponent(file)}/`; }
+        function previewRml(file){ window.location.href = `/app/${APP_NAME}/report/${encodeURIComponent(file)}/`; }
+        function openAddRmlModal(){ document.getElementById('addRmlModal').classList.remove('hidden'); }
+        function closeAddRmlModal(){ document.getElementById('addRmlModal').classList.add('hidden'); document.getElementById('rmlError').classList.add('hidden'); }
+        {% if has_rml_wizard %}{% include "rml_wizard_script.html" %}{% endif %}
+        // --- Overview charts (Chart.js) ---
+        const OVERVIEW_CHARTS = [{% for f in rml_files %}{% if f.charts %}{file: "{{ f.file|escapejs }}", displayName: "{{ f.metadata.displayName|escapejs }}", charts: [{% for ch in f.charts %}{id:"{{ ch.id|escapejs }}", type:"{{ ch.type|escapejs }}", x:"{{ ch.x|escapejs }}", y:"{{ ch.y|escapejs }}", y2:"{{ ch.y2|default:''|escapejs }}", title:"{{ ch.title|escapejs }}"},{% endfor %}]},{% endif %}{% endfor %}];
+        const OVERVIEW_CHART_DATA = {};
+        const OVERVIEW_CHART_LIMIT = {};
+        const OVERVIEW_CHART_FILTER = {};
+        const OVERVIEW_CHART_KIND = {};
+        let fullscreenChart = null;
+        async function renderSingleChart(rep, ch){
+            const canvasId = `chart-${rep.file}-${ch.id}`;
+            const canvas = document.getElementById(canvasId);
+            if(!canvas) return;
+            const limit = OVERVIEW_CHART_LIMIT[canvasId] || 10;
+            const isPie = ch.type==='pie' || ch.type==='doughnut';
+            const compare = !!(ch.y2 && ch.y);
+            try{
+                const savedF = OVERVIEW_CHART_FILTER[canvasId] || [];
+                const payload = {filters: savedF, sort:{column: ch.x, direction:'desc'}, page:1, pageSize:50};
+                if(isPie && ch.y2) payload.summary = [ch.y, ch.y2];
+                else if(isPie) payload.summary = [ch.y, ch.x];
+                const res = await fetch('/api/rml/execute', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({rml: rep.file, app: APP_NAME, payload})});
+                const data = await res.json();
+                const rows = data.rows || [];
+                // كشف نوع معامل المخطط (X) لبناء الفلترة المناسبة
+                const xv = rows.map(r=>r[ch.x]).filter(v=>v!==undefined && v!==null && String(v).trim()!=='');
+                let kind = 'text';
+                if(xv.length && xv.every(v=>!isNaN(Date.parse(String(v))))) kind = 'date';
+                else if(xv.length && xv.every(v=>String(v).trim()!=='' && !isNaN(parseFloat(String(v))))) kind = 'number';
+                OVERVIEW_CHART_KIND[canvasId] = kind;
+                // ترتيب تنازلي للمحور X: الأحدث/الأكبر أولاً
+                const pairs = rows.map(r=>({label: String(r[ch.x] ?? ''), v1: parseFloat(r[ch.y]) || 0, v2: (ch.y2 ? parseFloat(r[ch.y2]) : 0) || 0}));
+                pairs.sort((a,b)=>{
+                    const da = Date.parse(a.label), db = Date.parse(b.label);
+                    if(!isNaN(da) && !isNaN(db)) return db - da;
+                    const na = parseFloat(a.label), nb = parseFloat(b.label);
+                    if(!isNaN(na) && !isNaN(nb) && a.label.trim() !== '' && b.label.trim() !== '') return nb - na;
+                    return b.label.localeCompare(a.label, 'ar');
+                });
+                const PALETTE = ['#4f46e5','#10b981','#f59e0b','#0ea5e9','#8b5cf6','#ef4444','#14b8a6','#f97316','#6366f1','#84cc16'];
+                const fmtT = (v)=>Number(v).toLocaleString('en-US');
+                const ssum = data.summary || {};
+                const totOf = (alias, fb)=>{
+                    const t = ssum[alias];
+                    if(t !== undefined && t !== null) return t;
+                    return pairs.reduce((a,p)=>a+fb(p), 0);
+                };
+                let labels, datasets;
+                const xNumeric = isPie && !compare && pairs.length > 0 && pairs.every(p=>p.label.trim() !== '' && !isNaN(parseFloat(p.label)));
+                if(isPie && compare){
+                    // مقارنة إجماليين: شريحتان (ملخص السيرفر، أو مجموع الصفوف كاحتياط)
+                    let t1 = totOf(ch.y, (p)=>p.v1);
+                    let t2 = totOf(ch.y2, (p)=>p.v2);
+                    labels = [ch.y, ch.y2];
+                    datasets = [{label: ch.title || '', data: [t1, t2], backgroundColor: PALETTE.slice(0, 2)}];
+                } else if(xNumeric){
+                    // الدائري بمدخلين رقميين (x/y) يقارن إجماليهما بدل شرائح لكل صف
+                    let t1 = totOf(ch.x, (p)=>parseFloat(p.label) || 0);
+                    let t2 = totOf(ch.y, (p)=>p.v1);
+                    labels = [ch.x, ch.y];
+                    datasets = [{label: ch.title || '', data: [t1, t2], backgroundColor: PALETTE.slice(0, 2)}];
+                } else {
+                    const cut = pairs.slice(0, limit);
+                    labels = cut.map(p=>p.label);
+                    datasets = [{label: ch.y, data: cut.map(p=>p.v1), backgroundColor: PALETTE}];
+                    if(ch.y2) datasets.push({label: ch.y2, data: cut.map(p=>p.v2), backgroundColor: PALETTE.slice().reverse()});
+                }
+                OVERVIEW_CHART_DATA[canvasId] = {labels, values: datasets.length > 1 ? null : datasets[0].data, datasets: datasets.map(d=>({label: d.label, data: d.data})), type: ch.type, title: ch.title || ch.y};
+                renderChartFilterBox(rep, ch, canvasId);
+                const old = Chart.getChart(canvas);
+                if(old){ try{ old.destroy(); }catch(e){} }
+                new Chart(canvas, {type: isPie ? ch.type : (ch.type==='line'?'line':'bar'), data:{labels, datasets}, options:{responsive:true, maintainAspectRatio:false, plugins:{legend:{display:true, position:'bottom'}, tooltip:{callbacks:{label:(c)=>` ${c.dataset.label}: ${fmtT(c.parsed.y ?? c.parsed)}`}}}, scales:(isPie ? {} : {y:{ticks:{callback:(v)=>fmtT(v)}}})}});
+            }catch(e){ /* ignore */ }
+        }
+        function changeChartLimit(file, id, val){
+            OVERVIEW_CHART_LIMIT[`chart-${file}-${id}`] = parseInt(val) || 10;
+            const r = chartRef(file, id);
+            if(!r) return;
+            renderSingleChart(r.rep, r.ch);
+        }
+        function chartRef(file, id){
+            const rep = (typeof OVERVIEW_CHARTS !== 'undefined' ? OVERVIEW_CHARTS : []).find(r=>r.file===file);
+            if(!rep) return null;
+            const ch = (rep.charts || []).find(c=>String(c.id)===String(id));
+            if(!ch) return null;
+            return {rep, ch, canvasId: `chart-${file}-${id}`};
+        }
+        function toggleChartFilterBox(file, id){
+            const box = document.getElementById(`flt-chart-${file}-${id}`);
+            if(box) box.classList.toggle('hidden');
+        }
+        function renderChartFilterBox(rep, ch, canvasId){
+            const box = document.getElementById(`flt-${canvasId}`);
+            if(!box) return;
+            const kind = OVERVIEW_CHART_KIND[canvasId] || 'text';
+            const saved = OVERVIEW_CHART_FILTER[canvasId];
+            let f1 = '', f2 = '', q = '';
+            if(saved && saved.length){
+                if(saved[0].op === 'between'){ f1 = saved[0].valFrom || ''; f2 = saved[0].valTo || ''; }
+                else if(saved[0].op === 'contains'){ q = saved[0].value || ''; }
+                else if(saved[0].value !== undefined){ f1 = saved[0].value; }
+            }
+            const inp = 'text-[10px] bg-slate-50 border border-slate-200 rounded-lg px-1.5 py-1 text-slate-700 focus:outline-none focus:border-indigo-500';
+            const btn = 'px-2 py-1 rounded-lg text-[10px] font-bold';
+            if(kind === 'date'){
+                box.innerHTML = `<div class="flex items-center gap-1 flex-wrap"><span class="text-slate-500">من</span><input id="fltFrom-${canvasId}" type="date" data-uidate="from" value="${f1}" class="${inp}"><span class="text-slate-500">إلى</span><input id="fltTo-${canvasId}" type="date" data-uidate="to" value="${f2}" class="${inp}"><button onclick="applyChartFilter('${rep.file}','${ch.id}')" class="${btn} bg-indigo-600 text-white">تطبيق</button><button onclick="clearChartFilter('${rep.file}','${ch.id}')" class="${btn} bg-slate-100 text-slate-600">مسح</button></div>`;
+                try{ if(typeof uiEnhanceDates === 'function') uiEnhanceDates(box); }catch(e){}
+            } else if(kind === 'number'){
+                box.innerHTML = `<div class="flex items-center gap-1 flex-wrap"><span class="text-slate-500">من</span><input id="fltFrom-${canvasId}" type="number" value="${f1}" class="${inp} w-20"><span class="text-slate-500">إلى</span><input id="fltTo-${canvasId}" type="number" value="${f2}" class="${inp} w-20"><button onclick="applyChartFilter('${rep.file}','${ch.id}')" class="${btn} bg-indigo-600 text-white">تطبيق</button><button onclick="clearChartFilter('${rep.file}','${ch.id}')" class="${btn} bg-slate-100 text-slate-600">مسح</button></div>`;
+            } else {
+                box.innerHTML = `<div class="flex items-center gap-1 flex-wrap"><input id="fltQ-${canvasId}" type="text" value="${String(q).replace(/"/g,'&quot;')}" placeholder="تصفية التسميات (يحتوي)..." class="${inp} flex-1 min-w-[120px]"><button onclick="applyChartFilter('${rep.file}','${ch.id}')" class="${btn} bg-indigo-600 text-white">تطبيق</button><button onclick="clearChartFilter('${rep.file}','${ch.id}')" class="${btn} bg-slate-100 text-slate-600">مسح</button></div>`;
+            }
+        }
+        function applyChartFilter(file, id){
+            const r = chartRef(file, id);
+            if(!r) return;
+            const kind = OVERVIEW_CHART_KIND[r.canvasId] || 'text';
+            const gv = (s)=>{ const el = document.getElementById(s); return el ? el.value : ''; };
+            let filters = [];
+            if(kind === 'text'){
+                const q = gv(`fltQ-${r.canvasId}`).trim();
+                if(q) filters = [{field: r.ch.x, op: 'contains', value: q}];
+            } else {
+                const f1 = gv(`fltFrom-${r.canvasId}`).trim();
+                const f2 = gv(`fltTo-${r.canvasId}`).trim();
+                if(f1 && f2) filters = [{field: r.ch.x, op: 'between', valFrom: kind === 'number' ? parseFloat(f1) : f1, valTo: kind === 'number' ? parseFloat(f2) : f2}];
+                else if(f1) filters = [{field: r.ch.x, op: 'gte', value: kind === 'number' ? parseFloat(f1) : f1}];
+                else if(f2) filters = [{field: r.ch.x, op: 'lte', value: kind === 'number' ? parseFloat(f2) : f2}];
+            }
+            OVERVIEW_CHART_FILTER[r.canvasId] = filters;
+            renderSingleChart(r.rep, r.ch);
+        }
+        function clearChartFilter(file, id){
+            const r = chartRef(file, id);
+            if(!r) return;
+            delete OVERVIEW_CHART_FILTER[r.canvasId];
+            renderSingleChart(r.rep, r.ch);
+        }
+        function openChartInReport(file, id){
+            const r = chartRef(file, id);
+            if(!r) return;
+            const flt = OVERVIEW_CHART_FILTER[r.canvasId] || [];
+            const q = flt.length ? ('?filters=' + encodeURIComponent(JSON.stringify(flt))) : '';
+            location.href = `/app/${APP_NAME}/report/${file}/${q}`;
+        }
+        async function renderOverviewCharts(){
+            for(const rep of OVERVIEW_CHARTS){
+                for(const ch of rep.charts.slice(0,2)){
+                    await renderSingleChart(rep, ch);
+                }
+            }
+        }
+        function openChartFullscreen(file, id){
+            const canvasId = `chart-${file}-${id}`;
+            const stored = OVERVIEW_CHART_DATA[canvasId];
+            if(!stored) return;
+            const modal = document.getElementById('chartFullscreenModal');
+            const title = document.getElementById('chartFullscreenTitle');
+            const canvas = document.getElementById('chartFullscreenCanvas');
+            if(!modal || !canvas) return;
+            if(title) title.textContent = stored.title || 'مخطط';
+            if(fullscreenChart){ try{ fullscreenChart.destroy(); }catch(e){} fullscreenChart = null; }
+            modal.classList.remove('hidden');
+            if(typeof lockScroll === 'function') lockScroll();
+            const PALETTE2 = ['#4f46e5','#10b981','#f59e0b','#0ea5e9','#8b5cf6','#ef4444','#14b8a6','#f97316','#6366f1','#84cc16'];
+            const dsList = (stored.datasets && stored.datasets.length) ? stored.datasets : [{label: stored.title, data: stored.values || []}];
+            const ds = dsList.map((d)=>({label: d.label, data: d.data, backgroundColor: dsList.length > 1 ? PALETTE2.slice().reverse() : PALETTE2}));
+            const isPie2 = stored.type==='pie' || stored.type==='doughnut';
+            const fmtF = (v)=>Number(v).toLocaleString('en-US');
+            fullscreenChart = new Chart(canvas, {type: isPie2 ? stored.type : (stored.type==='line' ? 'line' : 'bar'), data:{labels: stored.labels, datasets: ds}, options:{responsive:true, maintainAspectRatio:false, plugins:{legend:{display:true, position:'bottom'}, tooltip:{callbacks:{label:(c)=>` ${c.dataset.label}: ${fmtF(c.parsed.y ?? c.parsed)}`}}}, scales:(isPie2 ? {} : {y:{ticks:{callback: fmtF}}})}});
+        }
+        function closeChartFullscreen(){
+            const modal = document.getElementById('chartFullscreenModal');
+            if(modal) modal.classList.add('hidden');
+            if(fullscreenChart){ try{ fullscreenChart.destroy(); }catch(e){} fullscreenChart = null; }
+            if(typeof unlockScroll === 'function') unlockScroll();
+        }
+        document.addEventListener('keydown', (e)=>{ if(e.key === 'Escape') closeChartFullscreen(); });
+        document.addEventListener('DOMContentLoaded', ()=>{
+            updateStarButtons(); renderFavorites(); refreshMyReportButtons(); renderOverviewCharts();
+            const inp = document.getElementById('overviewSearch');
+            if(inp) inp.addEventListener('input', ()=>filterOverview());
+            filterOverview();
+        });
+        // immediate for cached DOM
+        updateStarButtons(); renderFavorites(); refreshMyReportButtons(); renderOverviewCharts();
+        (function(){
+            const inp = document.getElementById('overviewSearch');
+            if(inp && !inp.dataset.bound){ inp.dataset.bound = '1'; inp.addEventListener('input', ()=>filterOverview()); }
+            filterOverview();
+            // مصمم النماذج الجديد (صفحة مستقلة): /app/<app>/forms-designer/?file=<file>
+            const dq = new URLSearchParams(location.search).get('design');
+            if(dq){ try{ history.replaceState(null, '', location.pathname); }catch(e){} location.href = `/app/${APP_NAME}/forms-designer/` + (dq !== '__new__' ? ('?file=' + encodeURIComponent(dq)) : ''); }
+        })();
+    </script>
+    <!-- مودال سياسات قاعدة الأعمال -->
+    <div id="rulePolicyModal" class="hidden fixed inset-0 z-[90] flex items-center justify-center p-4">
+        <div class="absolute inset-0 bg-slate-900/60" onclick="closeRulePolicies()"></div>
+        <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden">
+            <div class="px-5 py-4 border-b border-slate-100 flex items-center gap-3">
+                <span class="w-10 h-10 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0"><i id="rpIcon" class="fa-solid fa-scale-balanced"></i></span>
+                <div class="flex-1 min-w-0">
+                    <h3 id="rpTitle" class="font-bold text-slate-800">سياسات القاعدة</h3>
+                    <p id="rpSub" class="text-[11px] text-slate-500"></p>
+                </div>
+                <button onclick="closeRulePolicies()" class="w-8 h-8 rounded-full hover:bg-slate-100 text-slate-500"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div id="rpBody" class="flex-1 overflow-y-auto p-5 space-y-4"></div>
+        </div>
+    </div>
+    <script>
+        let RP = {file:'', rule:null, editing:null, matchSel:{}, varVals:{}, applyAll:false, distinctCache:{}};
+        function rpEsc(s){ return String(s ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+        function rpNotify(msg, kind){ if(typeof notify === 'function') notify(msg, kind || 'info'); else alert(msg); }
+        async function openRulePolicies(file, name){
+            try{
+                const res = await fetch(`/api/apps/${encodeURIComponent(APP_NAME)}/rules/`);
+                const data = await res.json();
+                if(data.error){ rpNotify(data.error, 'error'); return; }
+                const rule = (data.rules || []).find(r=>r.file === file && r.name === name);
+                if(!rule){ rpNotify('القاعدة غير موجودة', 'error'); return; }
+                RP = {file: file, rule: rule, editing:null, matchSel:{}, varVals:{}, applyAll:false, distinctCache:{}};
+                document.getElementById('rpIcon').className = 'fa-solid ' + (rule.icon || 'fa-scale-balanced');
+                document.getElementById('rpTitle').textContent = 'سياسات: ' + (rule.display || rule.name);
+                const _rpSub = document.getElementById('rpSub');
+                _rpSub.textContent = (rule.description || '') || ((rule.variables || []).length + ' متغير • ' + (rule.policies || []).length + ' سياسة');
+                _rpSub.removeAttribute('dir');
+                document.getElementById('rulePolicyModal').classList.remove('hidden');
+                if(typeof lockScroll === 'function') lockScroll();
+                renderRulePolicies();
+            }catch(e){ rpNotify('تعذر فتح السياسات: ' + (e.message || e), 'error'); }
+        }
+        function closeRulePolicies(){
+            document.getElementById('rulePolicyModal').classList.add('hidden');
+            if(typeof unlockScroll === 'function') unlockScroll();
+            if(RP.dirty) location.reload();
+        }
+        function renderRulePolicies(){
+            const body = document.getElementById('rpBody');
+            const rule = RP.rule, pols = [...(rule.policies || [])].sort((a,b)=>((a.priority ?? 100) - (b.priority ?? 100)));
+            const warns = rule.warnings || [];
+            let html = '';
+            if(!RP.editing){
+                if(warns.length){
+                    html += `<div class="bg-amber-50 border border-amber-300 rounded-xl p-3 text-[12px] text-amber-800 space-y-1">
+                        <div class="font-bold flex items-center gap-2"><i class="fa-solid fa-triangle-exclamation"></i> تداخل سياسات (${warns.length}) — الأولوية الأصغر تفوز</div>`
+                        + warns.map(w=>`<div>«${rpEsc(w.a)}» × «${rpEsc(w.b)}» — مشترك في ${rpEsc((w.fields||[]).join('، '))}: ${(Object.values(w.values||{}).flat().slice(0,5)).map(rpEsc).join('، ')}${Object.values(w.values||{}).flat().length > 5 ? '…' : ''}</div>`).join('') + `</div>`;
+                }
+                html += pols.length ? `<div class="space-y-2">` + pols.map(p=>{
+                    const mKeys = Object.keys(p.match || {});
+                    const isDef = !!p.is_default || !mKeys.length;
+                    const mTxt = isDef ? 'كل السجلات (افتراضية)' : mKeys.map(k=>`${rpEsc(k)} (${(p.match[k]||[]).length})`).join('، ');
+                    return `<div class="flex items-center gap-2 p-3 rounded-xl border ${isDef ? 'border-emerald-300 bg-emerald-50/50' : 'border-slate-200 bg-white'} hover:border-amber-300">
+                        <span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-600 shrink-0" title="الأولوية — الأصغر يُقيّم أولاً ويفوز عند التداخل">أ${p.priority ?? 100}</span>
+                        <div class="flex-1 min-w-0">
+                            <div class="text-sm font-bold text-slate-800">${rpEsc(p.name || p.id)} ${isDef ? '<span class="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700">افتراضية</span>' : ''}</div>
+                            <div class="text-[11px] text-slate-500">تنطبق على: ${mTxt} • ${Object.keys(p.values||{}).length} متغير</div>
+                        </div>
+                        <button onclick="rpEditPolicy('${rpEsc(p.id)}')" class="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-xs font-bold"><i class="fa-solid fa-pen"></i> تعديل</button>
+                        <button onclick="rpDeletePolicy('${rpEsc(p.id)}')" class="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg text-xs font-bold"><i class="fa-solid fa-trash"></i></button>
+                    </div>`;
+                }).join('') + `</div>` : `<p class="text-slate-400 text-center py-6">لا توجد سياسات بعد — أضف سياسة لتفعيل القاعدة في التقارير</p>`;
+                html += `<button onclick="rpNewPolicy()" class="w-full py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-sm font-bold"><i class="fa-solid fa-plus"></i> إضافة سياسة</button>`;
+                html += `<p class="text-[11px] text-slate-400">تُستخدم المتغيرات في تعبير العمود بالمصمم — اكتب <span class="font-mono" dir="ltr">$</span> واختر القاعدة والمتغير من القائمة. المحرك يستبدلها بقيمة السياسة المطابقة للسجل حسب الأولوية، والسجل بلا سياسة مطابقة يأخذ قيمة السياسة الافتراضية أو NULL (يُتجاهل الاستدعاء).</p>`;
+            } else {
+                html = rpPolicyFormHtml();
+            }
+            body.innerHTML = html;
+            try{ if(typeof uiEnhanceDates === 'function') uiEnhanceDates(body); }catch(e){}
+            if(RP.editing) rpLoadDistinct();
+        }
+        function rpNewPolicy(){
+            RP.editing = {id:'', name:'', priority: 100, is_default: false, match:{}, values:{}};
+            RP.matchSel = {}; RP.varVals = {}; RP.applyAll = false;
+            (RP.rule.variables || []).forEach(v=>{ RP.varVals[v.name] = ''; });
+            renderRulePolicies();
+        }
+        function rpEditPolicy(pid){
+            const p = (RP.rule.policies || []).find(x=>String(x.id) === String(pid));
+            if(!p) return;
+            RP.editing = {id: p.id, name: p.name || '', priority: (p.priority ?? 100), is_default: !!p.is_default, match: JSON.parse(JSON.stringify(p.match || {})), values: Object.assign({}, p.values || {})};
+            RP.matchSel = {}; RP.varVals = {}; RP.applyAll = !!p.is_default || Object.keys(RP.editing.match).length === 0;
+            (RP.rule.sources || []).forEach(s=>{ RP.matchSel[s] = new Set((RP.editing.match[s] || []).map(String)); });
+            (RP.rule.variables || []).forEach(v=>{ RP.varVals[v.name] = (RP.editing.values[v.name] ?? ''); });
+            renderRulePolicies();
+        }
+        function rpPolicyFormHtml(){
+            const rule = RP.rule, p = RP.editing;
+            const srcs = rule.sources || [];
+            const vars = (rule.variables || []);
+            let html = `<div class="space-y-3">`;
+            html += `<div class="grid grid-cols-3 gap-2">
+                <div class="col-span-2"><label class="block text-xs font-bold text-slate-700 mb-1">اسم السياسة *</label><input id="rpName" value="${rpEsc(p.name)}" placeholder="مثال: دوام صباحي — فرع الرئيس" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm"></div>
+                <div><label class="block text-xs font-bold text-slate-700 mb-1" title="الأصغر = أعلى أولوية = يُقيّم أولاً ويفوز عند تداخل السياسات">الأولوية *</label><input id="rpPriority" type="number" value="${p.priority ?? 100}" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-mono" dir="ltr"></div>
+            </div>`;
+            html += `<div class="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-1.5">
+                <label class="flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer"><input type="checkbox" ${p.is_default?'checked':''} onchange="RP.editing.is_default=this.checked;if(this.checked){RP.applyAll=true;}renderRulePolicies()" class="rounded text-emerald-600"> سياسة افتراضية (Fallback) — تُطبق قيمها على أي سجل لا تطابقه سياسة أخرى</label>
+                <label class="flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer"><input type="checkbox" ${RP.applyAll?'checked':''} onchange="RP.applyAll=this.checked;if(!this.checked){RP.editing.is_default=false;}renderRulePolicies()" class="rounded text-amber-600"> تنطبق على كل السجلات (بلا شروط مطابقة)</label>
+            </div>`;
+            if(!RP.applyAll){
+                if(!srcs.length) html += `<div class="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">القاعدة بلا مصادر — حدد مصادر القاعدة من المصمم أولاً، أو اجعلها سياسة افتراضية (كل السجلات).</div>`;
+                srcs.forEach(s=>{
+                    const sel = RP.matchSel[s] || new Set();
+                    html += `<div class="bg-white border border-slate-200 rounded-xl p-3">
+                        <div class="flex items-center justify-between mb-2">
+                            <div class="text-xs font-bold text-slate-700">تطبيق السياسة على — <span class="font-mono" dir="ltr">${rpEsc(s)}</span> <span class="text-[10px] text-slate-400">(${sel.size} محدد)</span></div>
+                            <input placeholder="بحث..." oninput="rpFilterVals('${rpEsc(s)}',this.value)" class="w-32 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-[11px]">
+                        </div>
+                        <div id="rpVals-${rpEsc(s)}" class="max-h-40 overflow-y-auto space-y-1 text-xs"><p class="text-slate-400">جارٍ تحميل القيم...</p></div>
+                    </div>`;
+                });
+            }
+            html += `<div id="rpOverlapHint">${rpOverlapHintHtml()}</div>`;
+            // المتغيرات بترتيب تعريفها — النوع يُكتشف تلقائياً من القيم ولا يُعرض
+            vars.forEach(v=>{
+                const t = v.type || 'text';
+                if(t === 'boolean'){
+                    const bval = RP.varVals[v.name] ?? '';
+                    const bon = ['1','true','صح','نعم','yes'].includes(String(bval).toLowerCase());
+                    html += `<div><label class="inline-flex items-center gap-2 cursor-pointer"><input type="checkbox" ${bon?'checked':''} onchange="RP.varVals['${rpEsc(v.name)}']=this.checked?'صح':'غلط'" class="rounded text-emerald-600 w-5 h-5"> <span class="text-xs font-bold text-slate-700">${rpEsc(v.display || v.name)}</span></label></div>`;
+                } else {
+                    html += `<div><label class="block text-xs font-bold text-slate-700 mb-1">${rpEsc(v.display || v.name)}</label>${rpVarInputHtml(v)}</div>`;
+                }
+            });
+            if(!vars.length) html += `<p class="text-[11px] text-slate-400">القاعدة بلا متغيرات — عرّف المتغيرات من المصمم أولاً.</p>`;
+            html += `<div class="flex gap-2">
+                <button onclick="rpSavePolicy()" class="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-bold">حفظ السياسة</button>
+                <button onclick="RP.editing=null;renderRulePolicies()" class="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-sm font-bold">رجوع</button>
+            </div></div>`;
+            return html;
+        }
+        function rpVarInputHtml(v){
+            const val = RP.varVals[v.name] ?? '';
+            const t = v.type || 'text';
+            if(t === 'boolean'){
+                const on = ['1','true','صح','نعم','yes'].includes(String(val).toLowerCase());
+                return `<label class="inline-flex items-center gap-2 cursor-pointer"><input type="checkbox" ${on?'checked':''} onchange="RP.varVals['${rpEsc(v.name)}']=this.checked?'صح':'غلط'" class="rounded text-emerald-600 w-5 h-5"> <span class="text-xs font-bold text-slate-700">${rpEsc(v.display || v.name)}</span></label>`;
+            }
+            if(t === 'choice'){
+                const opts = v.options || [];
+                return `<select onchange="RP.varVals['${rpEsc(v.name)}']=this.value" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm"><option value="">— اختر —</option>${opts.map(o=>`<option value="${rpEsc(o)}" ${String(val)===String(o)?'selected':''}>${rpEsc(o)}</option>`).join('')}</select>`;
+            }
+            if(t === 'number') return `<input type="number" step="any" dir="ltr" value="${rpEsc(val)}" oninput="RP.varVals['${rpEsc(v.name)}']=this.value" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-mono">`;
+            if(t === 'date') return `<input type="date" data-uidate="single" value="${rpEsc(val)}" onchange="RP.varVals['${rpEsc(v.name)}']=this.value" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm">`;
+            if(t === 'time') return `<input type="time" value="${rpEsc(val)}" onchange="RP.varVals['${rpEsc(v.name)}']=this.value" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm">`;
+            if(t === 'expression') return `<input dir="ltr" value="${rpEsc(val)}" oninput="RP.varVals['${rpEsc(v.name)}']=this.value" placeholder="تعبير — مثال: [punch_time]" class="w-full bg-slate-900 text-emerald-300 border border-slate-700 rounded-xl px-3 py-2 text-sm font-mono">`;
+            return `<input value="${rpEsc(val)}" oninput="RP.varVals['${rpEsc(v.name)}']=this.value" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm">`;
+        }
+        async function rpLoadDistinct(){
+            for(const s of (RP.rule.sources || [])){
+                if(RP.applyAll) break;
+                const box = document.getElementById('rpVals-' + s);
+                if(!box) continue;
+                try{
+                    let vals = RP.distinctCache[s];
+                    if(!vals){
+                        const res = await fetch('/api/rml/distinct', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({rml: RP.file, app: APP_NAME, column: s, limit: 500})});
+                        const data = await res.json();
+                        if(data.error) throw new Error(data.error);
+                        vals = RP.distinctCache[s] = (data.values || []).map(String);
+                    }
+                    rpPaintVals(s, vals, '');
+                }catch(e){ box.innerHTML = `<p class="text-rose-500">تعذر تحميل القيم: ${rpEsc(e.message || e)}</p>`; }
+            }
+        }
+        function rpPaintVals(s, vals, q){
+            const box = document.getElementById('rpVals-' + s);
+            if(!box) return;
+            const sel = RP.matchSel[s] || new Set();
+            q = (q || '').trim();
+            const list = vals.filter(v=>!q || v.includes(q)).slice(0, 200);
+            box.innerHTML = list.map(v=>`<label class="flex items-center gap-2 px-2 py-1 hover:bg-amber-50 rounded-lg cursor-pointer"><input type="checkbox" ${sel.has(v)?'checked':''} onchange="rpToggleVal('${rpEsc(s)}',this)" data-v="${rpEsc(v)}" class="rounded text-amber-600"><span class="flex-1">${rpEsc(v)}</span></label>`).join('') || '<p class="text-slate-400">لا قيم مطابقة</p>';
+        }
+        function rpFilterVals(s, q){ rpPaintVals(s, RP.distinctCache[s] || [], q); }
+        function rpToggleVal(s, cb){
+            if(!RP.matchSel[s]) RP.matchSel[s] = new Set();
+            const v = cb.dataset.v;
+            if(cb.checked) RP.matchSel[s].add(v); else RP.matchSel[s].delete(v);
+            const hint = document.getElementById('rpOverlapHint');
+            if(hint) hint.innerHTML = rpOverlapHintHtml();
+        }
+        function rpOverlapHintHtml(){
+            // فحص محلي فوري: القيم المحددة حالياً × السياسات الأخرى (بلا حفظ)
+            try{
+                if(!RP.editing || RP.applyAll || (RP.editing || {}).is_default) return '';
+                const cur = {};
+                Object.keys(RP.matchSel || {}).forEach(s=>{
+                    const a = [...(RP.matchSel[s] || new Set())];
+                    if(a.length) cur[s.toLowerCase()] = {orig: s, set: new Set(a)};
+                });
+                if(!Object.keys(cur).length) return '';
+                const myPrio = parseInt((((document.getElementById('rpPriority') || {}).value ?? '100')), 10) || 100;
+                const msgs = [];
+                (RP.rule.policies || []).forEach(p=>{
+                    if(String(p.id) === String((RP.editing || {}).id)) return;
+                    if(p.is_default || !Object.keys(p.match || {}).length) return;
+                    const shared = Object.keys(p.match || {}).filter(f=>cur[f.toLowerCase()]);
+                    if(!shared.length) return;
+                    const inter = {};
+                    let ok = true;
+                    shared.forEach(f=>{
+                        const mine = cur[f.toLowerCase()].set;
+                        const theirs = new Set((p.match[f] || []).map(String));
+                        const both = [...mine].filter(v=>theirs.has(v));
+                        if(!both.length) ok = false;
+                        else inter[cur[f.toLowerCase()].orig] = both;
+                    });
+                    if(!ok) return;
+                    const op = (p.priority ?? 100);
+                    const winner = (myPrio <= op) ? 'السياسة الحالية' : `«${p.name || p.id}»`;
+                    msgs.push(`تداخل مع «${p.name || p.id}» في ${Object.keys(inter).join('، ')} — عند التعارض تفوز ${winner} (الأولوية الأصغر)`);
+                });
+                if(!msgs.length) return '';
+                return `<div class="bg-amber-50 border border-amber-300 rounded-xl p-2.5 text-[11px] text-amber-800 space-y-1"><div class="font-bold"><i class="fa-solid fa-triangle-exclamation"></i> تنبيه تداخل (سيُحفظ — والأولوية تحسم الفائز):</div><div>${msgs.map(rpEsc).join('<br>')}</div></div>`;
+            }catch(e){ return ''; }
+        }
+        async function rpSavePolicy(){
+            const name = (document.getElementById('rpName') || {}).value || '';
+            if(!name.trim()){ rpNotify('أدخل اسم السياسة', 'info'); return; }
+            let prio = 100;
+            try{ prio = parseInt(((document.getElementById('rpPriority') || {}).value ?? '100'), 10); if(isNaN(prio)) prio = 100; }catch(e){ prio = 100; }
+            const isDef = !!(RP.editing || {}).is_default;
+            const match = {};
+            if(!RP.applyAll){
+                (RP.rule.sources || []).forEach(s=>{
+                    const sel = [...(RP.matchSel[s] || new Set())];
+                    if(sel.length) match[s] = sel;
+                });
+                if(!Object.keys(match).length && !isDef){ rpNotify('حدد سجلاً واحداً على الأقل أو اجعلها سياسة افتراضية', 'info'); return; }
+            }
+            const values = {};
+            (RP.rule.variables || []).forEach(v=>{
+                const val = RP.varVals[v.name];
+                if(val !== undefined && String(val).trim() !== '') values[v.name] = String(val).trim();
+            });
+            try{
+                const res = await fetch(`/api/apps/${encodeURIComponent(APP_NAME)}/rules/policy/save/`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({file: RP.file, rule: RP.rule.name, policy: {id: (RP.editing || {}).id || '', name: name.trim(), priority: prio, is_default: isDef, match: match, values: values}})});
+                const data = await res.json();
+                if(!res.ok || data.error){ rpNotify(data.error || 'فشل الحفظ', 'error'); return; }
+                rpNotify('تم حفظ السياسة ✓', 'success');
+                if((data.warnings || []).length){
+                    rpNotify('تنبيه تداخل: ' + data.warnings.map(w=>`«${w.a}» × «${w.b}»`).join('، ') + ' — الأولوية الأصغر تفوز', 'info');
+                }
+                RP.editing = null; RP.dirty = true;
+                await openRulePoliciesSilent();
+            }catch(e){ rpNotify('تعذر الحفظ: ' + (e.message || e), 'error'); }
+        }
+        async function openRulePoliciesSilent(){
+            try{
+                const res = await fetch(`/api/apps/${encodeURIComponent(APP_NAME)}/rules/`);
+                const data = await res.json();
+                const rule = (data.rules || []).find(r=>r.file === RP.file && r.name === (RP.rule || {}).name);
+                if(rule){ RP.rule = rule; renderRulePolicies(); }
+            }catch(e){}
+        }
+        async function rpDeletePolicy(pid){
+            if(!confirm('حذف هذه السياسة؟')) return;
+            try{
+                const res = await fetch(`/api/apps/${encodeURIComponent(APP_NAME)}/rules/policy/delete/`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({file: RP.file, rule: RP.rule.name, policy_id: pid})});
+                const data = await res.json();
+                if(!res.ok || data.error){ rpNotify(data.error || 'فشل الحذف', 'error'); return; }
+                rpNotify('تم حذف السياسة', 'success');
+                RP.dirty = true;
+                await openRulePoliciesSilent();
+            }catch(e){ rpNotify('تعذر الحذف: ' + (e.message || e), 'error'); }
+        }
+        document.addEventListener('keydown', (e)=>{ if(e.key === 'Escape'){ const m = document.getElementById('rulePolicyModal'); if(m && !m.classList.contains('hidden')) closeRulePolicies(); } });
+    </script>
+    {% endblock %}

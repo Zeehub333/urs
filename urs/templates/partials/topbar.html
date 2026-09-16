@@ -1,0 +1,76 @@
+<header class="bg-white border-b border-gray-200 h-11 px-4 flex items-center justify-between sticky top-0 z-10">
+    <div class="flex items-center gap-2">
+        <div class="relative">
+            <div class="w-7 h-7 rounded-full bg-emerald-700 text-white flex items-center justify-center font-bold text-[10px] shadow-sm">
+                <i class="fa-solid fa-user"></i>
+            </div>
+            <span class="absolute bottom-0 right-0 w-2 h-2 bg-emerald-500 border border-white rounded-full"></span>
+        </div>
+        <div>
+            <h3 class="text-[11px] font-bold text-gray-800 leading-none">admin</h3>
+        </div>
+    </div>
+
+    <div class="flex items-center gap-2">
+        <a href="/settings/" id="connStatusPill" title="حالة الاتصالات — اضغط للإدارة" class="flex items-center gap-1.5 px-2 py-0.5 bg-gray-50 border border-gray-200 rounded-lg text-[10px] font-semibold text-gray-600 hover:bg-gray-100 transition">
+            <span id="connDot" class="w-2 h-2 rounded-full bg-slate-300 animate-pulse"></span>
+            <i class="fa-solid fa-plug text-[10px]"></i>
+            <span id="connTxt">...</span>
+        </a>
+        <button class="w-7 h-7 rounded-full bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 flex items-center justify-center transition relative">
+            <i class="fa-regular fa-bell text-[11px]"></i>
+            <span class="absolute top-1 right-1 w-1.5 h-1.5 bg-rose-500 rounded-full"></span>
+        </button>
+        <button onclick="toggleTheme()" title="الوضع الداكن / الفاتح" class="w-7 h-7 rounded-full bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 flex items-center justify-center transition">
+            <i class="theme-toggle-btn-icon fa-regular fa-moon text-[11px]"></i>
+        </button>
+        <div class="px-2 py-0.5 bg-gray-50 border border-gray-200 rounded-lg text-[10px] font-semibold text-gray-600">
+            AR
+        </div>
+    </div>
+</header>
+<script>
+(function(){
+    // حالة الاتصالات من آخر فحص مسجل (بلا فحص حي ثقيل) — تحديث كل دقيقة
+    async function refreshConnStatus(){
+        var dot = document.getElementById('connDot');
+        var txt = document.getElementById('connTxt');
+        var pill = document.getElementById('connStatusPill');
+        if(!dot || !txt) return;
+        try{
+            const res = await fetch('/api/connections/');
+            const data = await res.json();
+            const conns = data.connections || [];
+            if(!conns.length){ dot.className = 'w-2 h-2 rounded-full bg-slate-300'; txt.textContent = 'لا اتصالات'; return; }
+            let ok = 0, bad = 0, unknown = 0;
+            const badRows = [];
+            conns.forEach(c=>{
+                if(c.last_check_ok === true) ok++;
+                else if(c.last_check_ok === false){ bad++; badRows.push(c); }
+                else unknown++;
+            });
+            dot.classList.remove('animate-pulse');
+            if(bad > 0){ dot.className = 'w-2 h-2 rounded-full bg-rose-500'; }
+            else if(unknown > 0){ dot.className = 'w-2 h-2 rounded-full bg-amber-400'; }
+            else { dot.className = 'w-2 h-2 rounded-full bg-emerald-500'; }
+            txt.textContent = ok + '/' + conns.length;
+            if(pill){
+                let tip = 'الاتصالات: سليم ' + ok + ' • فاشل ' + bad + ' • بلا فحص ' + unknown;
+                if(badRows.length){
+                    tip += '\n' + badRows.slice(0, 4).map(c=>{
+                        const e = String(c.last_check_error || '').replace(/\s+/g, ' ').trim().slice(0, 160);
+                        return '✗ ' + (c.name || ('#' + c.id)) + (e ? ': ' + e : ' (بلا تفاصيل — أعد فحصه من إدارة الاتصالات)');
+                    }).join('\n');
+                    if(badRows.length > 4) tip += '\n… +' + (badRows.length - 4) + ' أخرى';
+                }
+                pill.title = tip + '\n— اضغط للإدارة';
+            }
+        }catch(e){
+            dot.className = 'w-2 h-2 rounded-full bg-slate-300';
+            txt.textContent = '؟';
+        }
+    }
+    refreshConnStatus();
+    setInterval(refreshConnStatus, 60000);
+})();
+</script>

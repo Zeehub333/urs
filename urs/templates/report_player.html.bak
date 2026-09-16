@@ -1,0 +1,917 @@
+{% extends "base.html" %}
+{% block title %}{{ app.ar }} — {{ rml_metadata.displayName }} — مشغل التقارير{% endblock %}
+{% block head_css %}
+        body { background-color: #f8fafc; }
+        .custom-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+        .custom-scroll::-webkit-scrollbar-track { background: #f1f5f9; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        .custom-scroll::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        .excel-cell { border-right: 1px solid #e2e8f0; border-bottom: 1px solid #e2e8f0; }
+{% endblock %}
+{% block sidebar %}
+    <!-- Sidebar — kept for navigation (Forms + Reports) — URS integration -->
+    <aside class="w-72 bg-white border-l border-gray-200 flex flex-col overflow-hidden shrink-0">
+        <div class="p-4 border-b border-gray-100">
+            <a href="/" class="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-800 mb-3"><i class="fa-solid fa-arrow-right"></i> العودة للتطبيقات</a>
+            <div class="flex items-center gap-3">
+                <div class="w-12 h-12 {{ app.icon_bg }} {{ app.icon_color }} rounded-2xl flex items-center justify-center text-xl">
+                    <i class="fa-solid {{ app.icon }}"></i>
+                </div>
+                <div>
+                    <h1 class="font-bold text-gray-800">{{ app.ar }}</h1>
+                    <p class="text-xs text-gray-500">v{{ app.version }} • {{ app.category|default:"عام" }}</p>
+                </div>
+            </div>
+            <p class="text-xs text-gray-500 mt-2">{{ app.description }}</p>
+            <a href="/app/{{ app_name }}/" class="mt-3 inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800">
+                <i class="fa-solid fa-grip"></i> نظرة عامة
+            </a>
+        </div>
+        <div class="flex-1 overflow-y-auto p-3 space-y-4">
+            <div>
+                <h3 class="text-xs font-bold text-gray-700 flex items-center gap-2 mb-2">
+                    <i class="fa-solid fa-pen-to-square text-indigo-600"></i>
+                    الادخالات
+                </h3>
+                <div class="space-y-1">
+                    {% for f in fml_files %}
+                    <a href="/app/{{ app_name }}/form/{{ f.file }}/" class="block p-2.5 rounded-xl border transition text-right hover:bg-slate-50 border-transparent hover:border-slate-200">
+                        <div class="text-xs font-semibold text-gray-800 truncate">{{ f.metadata.displayName }}</div>
+                        {% if f.metadata.description %}<div class="text-[11px] text-gray-500 truncate">{{ f.metadata.description }}</div>{% else %}<div class="text-[11px] text-gray-400 truncate">{{ f.metadata.category|default:"" }}</div>{% endif %}
+                    </a>
+                    {% endfor %}
+                    {% if not fml_files %}<p class="text-xs text-gray-400">لا توجد ادخالات</p>{% endif %}
+                </div>
+            </div>
+            <div>
+                <h3 class="text-xs font-bold text-gray-700 flex items-center gap-2 mb-2">
+                    <i class="fa-solid fa-chart-line text-emerald-600"></i>
+                    التقارير
+                </h3>
+                <div class="space-y-1">
+                    {% for f in rml_files %}
+                    <a href="/app/{{ app_name }}/report/{{ f.file }}/" class="block p-2.5 rounded-xl border transition text-right {% if f.file == rml_file %}bg-emerald-50 border-emerald-200{% else %}hover:bg-slate-50 border-transparent hover:border-slate-200{% endif %}">
+                        <div class="text-xs font-semibold truncate {% if f.file == rml_file %}text-emerald-800{% else %}text-gray-800{% endif %}">{{ f.metadata.displayName }}</div>
+                        {% if f.metadata.description %}<div class="text-[11px] text-gray-500 truncate">{{ f.metadata.description }}</div>{% else %}<div class="text-[11px] text-gray-400 truncate">{{ f.metadata.category|default:"" }}</div>{% endif %}
+                    </a>
+                    {% endfor %}
+                    {% if not rml_files %}<p class="text-xs text-gray-400">لا توجد تقارير</p>{% endif %}
+                </div>
+            </div>
+            <div class="pt-3 border-t border-gray-100">
+                <button onclick="fetch('/api/apps/sync/',{method:'POST'}).then(()=>location.reload())" class="w-full py-2 bg-slate-100 hover:bg-slate-200 rounded-xl text-xs font-semibold">مزامنة النظام</button>
+            </div>
+        </div>
+    </aside>
+{% endblock %}
+{% block main %}
+    <!-- Main Report Player — All features from provided HTML integrated -->
+    <div class="flex-1 flex flex-col overflow-hidden min-w-0">
+    <header class="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between sticky top-0 z-30 shadow-sm shrink-0">
+        <!-- Right: Report Title (dynamic from Django RML) -->
+        <div class="flex items-center gap-3">
+            <div class="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white shadow-md shadow-indigo-100">
+                <i class="fa-solid fa-table-columns text-lg"></i>
+            </div>
+            <div>
+                <h1 id="reportTitleDisplay" class="text-base font-bold text-slate-800">{{ rml_metadata.displayName }}</h1>
+                <p class="text-xs text-slate-500 hidden md:block">{{ rml_metadata.category|default:"التقارير" }}</p>
+            </div>
+        </div>
+
+        <!-- Center: Search, Filters & Presets (full-featured) -->
+        <div class="flex-1 max-w-2xl mx-6 hidden lg:flex items-center gap-2">
+            <div id="searchTagsContainer" class="flex-1 flex items-center flex-wrap gap-1.5 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 min-h-[40px] focus-within:border-indigo-500 focus-within:ring-1 focus-within:ring-indigo-500 transition">
+                <i class="fa-solid fa-search text-slate-400 text-sm ml-1"></i>
+                <div id="activeTagsList" class="flex flex-wrap gap-1.5"></div>
+                <input type="text" id="searchInput" placeholder="ابحث أو أضف تصفية (مثال: القسم = المالية)..." class="bg-transparent border-none text-xs focus:outline-none flex-1 min-w-[140px] text-slate-700 py-1">
+            </div>
+            <div class="relative">
+                <button onclick="togglePresetsMenu()" class="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg flex items-center gap-1.5 transition">
+                    <i class="fa-solid fa-bookmark text-indigo-600"></i>
+                    <span>المحفوظة</span>
+                </button>
+                <div id="presetsMenu" class="hidden absolute left-0 mt-2 w-56 bg-white border border-slate-200 rounded-xl shadow-xl z-50 p-2">
+                    <div class="text-[11px] font-bold text-slate-400 px-2 py-1">النماذج السريعة</div>
+                    <div id="presetsList" class="space-y-1 mb-2"></div>
+                    <button onclick="saveCurrentPreset()" class="w-full text-right px-2 py-1.5 text-xs text-indigo-600 hover:bg-indigo-50 rounded-lg font-semibold flex items-center gap-1.5">
+                        <i class="fa-solid fa-plus"></i> حفظ النموذج الحالي
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Left: Actions — all features -->
+        <div class="flex items-center gap-1">
+            <button onclick="toggleTheme()" title="الوضع الداكن / الفاتح" class="w-9 h-9 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 transition">
+                <i class="theme-toggle-btn-icon fa-regular fa-moon text-base"></i>
+            </button>
+            <button onclick="fetchReportFromAPI()" title="تحديث" class="w-9 h-9 rounded-full flex items-center justify-center text-emerald-600 hover:bg-emerald-50 transition hidden md:flex">
+                <i class="fa-solid fa-rotate text-base"></i>
+            </button>
+            <button onclick="resetAllFilters()" title="إلغاء جميع الفلاتر" class="w-9 h-9 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-rose-600 transition">
+                <i class="fa-solid fa-filter-circle-xmark text-base"></i>
+            </button>
+            <button onclick="openAdvancedFilterModal()" title="تصفية متقدمة" class="w-9 h-9 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-indigo-600 transition">
+                <i class="fa-solid fa-sliders text-base"></i>
+            </button>
+
+            <button onclick="exportToCSV()" title="تصدير إلى CSV" class="w-9 h-9 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-emerald-600 transition">
+                <i class="fa-solid fa-file-excel text-base"></i>
+            </button>
+            <button onclick="printReport()" title="طباعة التقرير" class="w-9 h-9 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-blue-600 transition">
+                <i class="fa-solid fa-print text-base"></i>
+            </button>
+            <button onclick="openEditRmlModal(currentRml)" title="تخصيص التقرير" class="w-9 h-9 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-indigo-600 transition">
+                <i class="fa-solid fa-gear text-base"></i>
+            </button>
+            <a href="/app/{{ app_name }}/" title="العودة" class="w-9 h-9 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 transition md:hidden">
+                <i class="fa-solid fa-arrow-right"></i>
+            </a>
+        </div>
+    </header>
+
+    <!-- Mobile search bar -->
+    <div class="lg:hidden bg-white border-b border-slate-200 px-4 py-2 flex items-center gap-2">
+        <div class="flex-1 flex items-center flex-wrap gap-1.5 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5">
+            <i class="fa-solid fa-search text-slate-400 text-sm"></i>
+            <div id="activeTagsListMobile" class="flex flex-wrap gap-1.5"></div>
+            <input type="text" id="searchInputMobile" placeholder="ابحث..." class="bg-transparent border-none text-xs focus:outline-none flex-1 min-w-[100px]">
+        </div>
+    </div>
+
+    <div class="flex-1 flex overflow-hidden min-h-0">
+        <!-- Collapsible Grouping Sidebar (feature) -->
+        <aside id="groupingSidebar" class="w-64 bg-white border-l border-slate-200 flex flex-col transition-all duration-300 hidden shrink-0">
+            <div class="p-4 border-b border-slate-100 flex items-center justify-between">
+                <h3 class="text-xs font-bold text-slate-700 flex items-center gap-2">
+                    <i class="fa-solid fa-layer-group text-indigo-600"></i> العناصر المجمعة
+                </h3>
+                <button onclick="toggleGroupingSidebar()" class="text-slate-400 hover:text-slate-600 text-xs">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <div id="groupingSidebarContent" class="flex-1 overflow-y-auto p-3 space-y-2 custom-scroll text-xs"></div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="flex-1 flex flex-col overflow-hidden min-w-0">
+            <!-- Table selector bar -->
+            <div class="bg-white border-b border-slate-200 px-6 py-2.5 flex items-center justify-between text-xs shrink-0">
+                <div class="flex items-center gap-3">
+                    <span id="apiModeBadge" class="hidden text-[10px] bg-emerald-50 text-emerald-700 px-2 py-1 rounded-full">{{ rml_metadata.displayName }}</span>
+                </div>
+                <div id="activeGroupIndicator" class="hidden items-center gap-2 bg-indigo-50 text-indigo-700 px-3 py-1 rounded-lg font-medium">
+                    <span>مجموعة بـ: <strong id="activeGroupColName"></strong> = <span id="activeGroupVal"></span></span>
+                    <button onclick="clearGroupFilter()" class="hover:text-indigo-900"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+            </div>
+
+            <!-- Excel-Like Data Table -->
+            <div id="tableScrollContainer" class="flex-1 overflow-auto custom-scroll bg-white relative">
+                <table id="dataTable" class="w-full border-collapse text-right text-xs">
+                    <thead id="tableHeader" class="bg-slate-50 text-slate-700 font-semibold sticky top-0 z-20 shadow-xs"></thead>
+                    <tbody id="tableBody" class="divide-y divide-slate-100"></tbody>
+                </table>
+                <div id="scrollSentinel" class="h-1"></div>
+            </div>
+
+            <!-- Pagination Bar — Lazy Load Status -->
+            <footer class="bg-white border-t border-slate-200 px-6 py-3 flex items-center justify-between text-xs text-slate-600 shrink-0">
+                <div class="flex items-center gap-2">
+                    <span>عرض <strong id="loadedRowsCount">0</strong> سجل من أصل <strong id="totalRecordsCount">0</strong></span>
+                    <span id="lazyLoadPct" class="text-indigo-600 font-semibold"></span>
+                </div>
+                <div class="flex items-center gap-3">
+                    <button onclick="changePageSize(this.value)" id="lazyLoadBtn" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium text-xs hidden">تحميل المزيد</button>
+                    <div id="lazyLoadSpinner" class="hidden items-center gap-2 text-slate-500">
+                        <i class="fa-solid fa-spinner fa-spin text-indigo-600"></i> جاري التحميل...
+                    </div>
+                    <button onclick="exportToCSV()" title="تصدير إلى CSV" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-medium text-xs"><i class="fa-solid fa-file-excel"></i> تصدير</button>
+                </div>
+            </footer>
+        </main>
+    </div>
+
+    <!-- Column Dropdown Menu -->
+    <div id="columnDropdownMenu" class="hidden absolute bg-white border border-slate-200 rounded-xl shadow-2xl z-50 w-64 p-3 text-xs">
+        <div class="space-y-1 mb-2 pb-2 border-b border-slate-100">
+            <button onclick="execColumnSort('asc')" class="w-full text-right px-2 py-1.5 hover:bg-slate-50 rounded-lg flex items-center gap-2 text-slate-700">
+                <i class="fa-solid fa-arrow-down-a-z text-indigo-600"></i> الفرز من أإ إلى ي
+            </button>
+            <button onclick="execColumnSort('desc')" class="w-full text-right px-2 py-1.5 hover:bg-slate-50 rounded-lg flex items-center gap-2 text-slate-700">
+                <i class="fa-solid fa-arrow-up-z-a text-indigo-600"></i> الفرز من ي إلى أ
+            </button>
+            <button onclick="execColumnGroup()" class="w-full text-right px-2 py-1.5 hover:bg-slate-50 rounded-lg flex items-center gap-2 text-slate-700">
+                <i class="fa-solid fa-layer-group text-indigo-600"></i> تجميع حسب هذا العمود
+            </button>
+            <button onclick="clearColumnFilter()" class="w-full text-right px-2 py-1.5 hover:bg-slate-50 rounded-lg flex items-center gap-2 text-rose-600">
+                <i class="fa-solid fa-filter-circle-xmark"></i> إلغاء عامل التصفية
+            </button>
+        </div>
+        <div class="relative mb-2">
+            <i class="fa-solid fa-search absolute right-2.5 top-2.5 text-slate-400 text-xs"></i>
+            <input type="text" id="colSearchInput" oninput="filterColumnCheckboxes(this.value)" placeholder="بحث..." class="w-full bg-slate-50 border border-slate-200 rounded-lg pr-7 pl-3 py-1.5 text-xs focus:outline-none focus:border-indigo-500">
+        </div>
+        <div class="max-h-40 overflow-y-auto space-y-1 custom-scroll mb-2" id="colValuesCheckboxesList"></div>
+        <div class="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+            <button onclick="closeColumnMenu()" class="px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg">إلغاء الأمر</button>
+            <button onclick="applyColumnFilter()" class="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg">موافق</button>
+        </div>
+    </div>
+
+    <!-- Advanced Filter Modal -->
+    <div id="advancedFilterModal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col">
+            <div class="px-6 py-3 border-b border-slate-200 flex items-center justify-between bg-slate-50 gap-2">
+                <h3 class="text-sm font-bold text-slate-800 flex items-center gap-2">
+                    <i class="fa-solid fa-sliders text-indigo-600"></i> تصفية متقدمة
+                </h3>
+                <div class="flex items-center gap-2">
+                    <button onclick="closeAdvancedFilterModal()" class="px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded-xl text-xs">إلغاء</button>
+                    <button onclick="applyAdvancedFilter()" class="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-xl shadow-md shadow-indigo-100 text-xs">تطبيق التصفية</button>
+                    <button onclick="closeAdvancedFilterModal()" class="text-slate-400 hover:text-slate-600 ms-1"><i class="fa-solid fa-xmark text-base"></i></button>
+                </div>
+            </div>
+            <div class="p-6 space-y-4 text-xs">
+                <div>
+                    <label class="block font-semibold text-slate-700 mb-1">اختر الحقل:</label>
+                    <select id="advFilterField" onchange="updateAdvOperators()" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 font-medium focus:outline-none focus:border-indigo-500"></select>
+                </div>
+                <div>
+                    <label class="block font-semibold text-slate-700 mb-1">عملية التصفية:</label>
+                    <select id="advFilterOp" onchange="toggleAdvRangeInputs()" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 font-medium focus:outline-none focus:border-indigo-500">
+                        <option value="equals">يساوي</option>
+                        <option value="contains">يحتوي على</option>
+                        <option value="gt">أكبر من</option>
+                        <option value="lt">أقل من</option>
+                        <option value="between">بين (رقمين أو تاريخين)</option>
+                    </select>
+                </div>
+                <div id="advSingleValContainer">
+                    <label class="block font-semibold text-slate-700 mb-1">القيمة:</label>
+                    <input type="text" id="advFilterValue" placeholder="أدخل القيمة..." class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500">
+                </div>
+                <div id="advRangeValContainer" class="hidden grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">من:</label>
+                        <input type="text" id="advFilterValFrom" placeholder="القيمة الصغرى / البداية" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500">
+                    </div>
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">إلى:</label>
+                        <input type="text" id="advFilterValTo" placeholder="القيمة الكبرى / النهاية" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {% include "rml_wizard_modal.html" %}
+    </div><!-- end flex-1 -->
+{% endblock %}
+{% block scripts %}
+    <script>
+        // Injected Django context
+        const DJANGO_RML = "{{ rml_file|escapejs }}";
+        const DJANGO_APP = "{{ app_name|escapejs }}";
+        const DJANGO_RML_DISPLAY = "{{ rml_metadata.displayName|escapejs }}";
+        const DJANGO_RML_COLUMNS = {{ rml_columns_json|safe }};
+        let currentRml = DJANGO_RML;
+        let currentApp = DJANGO_APP;
+
+        // Mock Databases & Tables (feature parity with provided HTML)
+        const dbSchemas = {
+            connections: ['ORCL_PROD', 'ORCL_HR_DB', 'ORCL_FIN_DB'],
+            schemas: ['HR_SYS', 'FIN_SYS', 'PUBLIC'],
+            tables: {
+                employees: ['id', 'name', 'department', 'position', 'salary', 'hire_date', 'status'],
+                departments: ['dept_id', 'dept_name', 'location'],
+                suspended: ['emp_id', 'suspension_date', 'state', 'reason']
+            }
+        };
+
+        // Mock data removed — now relies solely on real DB (172.16.10.101/urs)
+        let mockEmployees = [];
+        let mockDepartments = [];
+        let mockSuspended = [];
+
+        // App State — initialized from Django RML if available
+        let activeTable = 'employees';
+        let queryColumns = [];
+        if (DJANGO_RML_COLUMNS && DJANGO_RML_COLUMNS.length) {
+            queryColumns = DJANGO_RML_COLUMNS.map(c => ({
+                _rid: c.id, _origin: c,
+                alias: c.alias || c.name,
+                name: c.name || '',
+                icon: c.icon || 'fa-hashtag',
+                where_clause: c.where_clause || c.whereClause || '',
+                col_type: c.col_type || c.type || 'direct',
+                connection_id: c.connection_id || c.connectionId || '',
+                connection: 'ORCL_PROD',
+                schema: '{{ rml_metadata.schema|default:"HR_SYS"|escapejs }}' || 'HR_SYS',
+                table: 'employees',
+                expr: c.name || c.expr || c.alias,
+                refTable: c.refTable || c.ref_table || '',
+                refFk: c.refFk || c.ref_fk || '',
+                refDisplay: c.refDisplay || c.ref_display || ''
+            }));
+        } else {
+            queryColumns = [
+                { alias: 'المعرف', connection: 'ORCL_PROD', schema: 'HR_SYS', table: 'employees', expr: 'id', refTable: '', refFk: '', refDisplay: '' },
+                { alias: 'اسم الموظف', connection: 'ORCL_PROD', schema: 'HR_SYS', table: 'employees', expr: 'name', refTable: '', refFk: '', refDisplay: '' },
+                { alias: 'القسم', connection: 'ORCL_PROD', schema: 'HR_SYS', table: 'employees', expr: 'department', refTable: '', refFk: '', refDisplay: '' },
+                { alias: 'المسمى الوظيفي', connection: 'ORCL_PROD', schema: 'HR_SYS', table: 'employees', expr: 'position', refTable: '', refFk: '', refDisplay: '' },
+                { alias: 'الراتب (ر.س)', connection: 'ORCL_PROD', schema: 'HR_SYS', table: 'employees', expr: 'salary', refTable: '', refFk: '', refDisplay: '' },
+                { alias: 'تاريخ التعيين', connection: 'ORCL_PROD', schema: 'HR_SYS', table: 'employees', expr: 'hire_date', refTable: '', refFk: '', refDisplay: '' },
+                { alias: 'الحالة', connection: 'ORCL_PROD', schema: 'HR_SYS', table: 'employees', expr: 'status', refTable: '', refFk: '', refDisplay: '' }
+            ];
+        }
+
+        let activeFilters = [];
+        let activeSort = { column: null, direction: 'asc' };
+        let activeGroupColumn = null;
+        let activeGroupValue = null;
+        let columnFilters = {};
+        let savedPresets = [
+            { name: 'رواتب فوق 8000', filters: [{ field: 'الراتب (ر.س)', op: 'gt', value: '8000' }] },
+            { name: 'موظفي تقنية المعلومات', filters: [{ field: 'القسم', op: 'equals', value: 'تقنية المعلومات' }] }
+        ];
+        let currentMenuColumn = null;
+        let apiMode = false;
+        let lastApiData = null;
+        let apiLoading = true;
+        let apiFailed = '';
+        // Lazy loading state
+        let lazyLoadedRows = [];
+        let lazyPage = 1;
+        let lazyPageSize = 100;
+        let lazyTotal = 0;
+        let lazyTotalPages = 0;
+        let lazyLoading = false;
+        let lazyDone = false;
+        let lazyObserver = null;
+        function resolveDbField(field) {
+            // Map Arabic alias / name / expr -> real DB expr for backend filtering
+            if (!field) return field;
+            const key = String(field).trim().toLowerCase();
+            const fromApi = (lastApiData && lastApiData.columns) || [];
+            const pools = [];
+            if (fromApi.length) pools.push(...fromApi);
+            if (typeof DJANGO_RML_COLUMNS !== 'undefined' && DJANGO_RML_COLUMNS) pools.push(...DJANGO_RML_COLUMNS);
+            pools.push(...queryColumns.map(q => ({alias: q.alias, name: q.expr || q.name, expr: q.expr})));
+            for (const c of pools) {
+                for (const cand of [c.alias, c.name, c.expr]) {
+                    if (cand && String(cand).trim().toLowerCase() === key) {
+                        return c.expr || c.name || field;
+                    }
+                }
+            }
+            return field;
+        }
+
+        window.onload = function() {
+            document.getElementById('reportTitleDisplay').textContent = DJANGO_RML_DISPLAY || 'تقرير الموارد البشرية للاختبار';
+            renderPresetsList();
+            setupSearchInput();
+            resetLazyState();
+            fetchReportFromAPI();
+        };
+
+        function getRawTableData() {
+            if (activeTable === 'departments') return mockDepartments;
+            if (activeTable === 'suspended') return mockSuspended;
+            return mockEmployees;
+        }
+
+        function evaluateQueryRows() {
+            const rawData = getRawTableData();
+            return rawData.map(row => {
+                let mapped = {};
+                queryColumns.forEach(qc => {
+                    let val = row[qc.expr] !== undefined ? row[qc.expr] : row[qc.alias];
+                    if (val === undefined) {
+                        try {
+                            let fn = new Function('row', `with(row) { return ${qc.expr}; }`);
+                            val = fn(row);
+                        } catch(e) { val = qc.expr; }
+                    }
+                    if (qc.refTable && qc.refFk && qc.refDisplay) {
+                        let refData = qc.refTable === 'departments' ? mockDepartments : (qc.refTable === 'suspended' ? mockSuspended : mockEmployees);
+                        let match = refData.find(r => r[qc.refFk] == row[qc.expr] || r['id'] == row[qc.expr]);
+                        if (match) val = match[qc.refDisplay];
+                    }
+                    mapped[qc.alias] = val;
+                });
+                return mapped;
+            });
+        }
+
+        // API integration — fetch from Django RML engine (keeps sidebar navigation, shows real DB data)
+        async function fetchReportFromAPI(append){
+            if(lazyLoading) return;
+            if(append && lazyDone) return;
+            lazyLoading = true;
+            const spinner = document.getElementById('lazyLoadSpinner');
+            if(spinner) spinner.classList.remove('hidden');
+            try{
+                const page = append ? lazyPage : 1;
+                const payload = { activeTable, filters: activeFilters.map(f=>({field:resolveDbField(f.field), op:f.op, value:f.value, valFrom:f.valFrom, valTo:f.valTo})), sort: activeSort.column?{column:resolveDbField(activeSort.column), direction:activeSort.direction}:undefined, page: page, pageSize: lazyPageSize };
+                payload.columnFilters = {};
+                for (const k in (columnFilters || {})) {
+                    if (columnFilters[k] && columnFilters[k].length) {
+                        payload.columnFilters[resolveDbField(k)] = columnFilters[k];
+                    }
+                }
+                if(activeGroupColumn) payload.groupBy = resolveDbField(activeGroupColumn);
+                const res = await fetch('/api/rml/execute', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({rml: currentRml, app: currentApp, payload})});
+                if(res.ok){
+                    const data = await res.json();
+                    if(data && data.error) throw new Error(data.error);
+                    lastApiData = data;
+                    lazyTotal = data.total || 0;
+                    lazyTotalPages = data.totalPages || Math.ceil(lazyTotal / lazyPageSize) || 1;
+                    if(append && data.rows && data.rows.length){
+                        lazyLoadedRows = lazyLoadedRows.concat(data.rows);
+                    } else if(!append){
+                        lazyLoadedRows = data.rows || [];
+                    }
+                    lazyPage = page + 1;
+                    if(!data.rows || data.rows.length < lazyPageSize || lazyPage > lazyTotalPages) lazyDone = true;
+                    apiMode = true;
+                    apiFailed = '';
+                    const badge = document.getElementById('apiModeBadge');
+                    if(badge){ badge.classList.remove('hidden'); badge.textContent = `مباشر`; }
+                    renderApiData(data, append);
+                } else {
+                    let msg = `خطأ ${res.status}`;
+                    try { const ej = await res.json(); if(ej && ej.error) msg = ej.error; } catch(e2){}
+                    throw new Error(msg);
+                }
+            }catch(e){ console.log('API fetch failed', e); apiFailed = String((e && e.message) || e).slice(0, 300); }
+            lazyLoading = false;
+            if(spinner) spinner.classList.add('hidden');
+            updateLazyStats();
+        }
+        function updateLazyStats(){
+            const loaded = document.getElementById('loadedRowsCount');
+            const total = document.getElementById('totalRecordsCount');
+            const pct = document.getElementById('lazyLoadPct');
+            if(loaded) loaded.textContent = lazyLoadedRows.length.toLocaleString();
+            if(total) total.textContent = lazyTotal.toLocaleString();
+            if(pct && lazyTotal > 0) pct.textContent = Math.round(lazyLoadedRows.length / lazyTotal * 100) + '%';
+        }
+        function renderApiData(data, append){
+            const cols = data.columns || [];
+            const rows = data.rows || [];
+            const thead = document.getElementById('tableHeader');
+            if(!append){
+                thead.innerHTML = '<tr><th class="w-12 px-3 py-2 text-center border-b border-slate-200 bg-slate-100 font-bold">#</th>' + cols.map(c=>`<th class="px-4 py-2.5 font-bold border-b border-slate-200 bg-slate-50 text-slate-700 cursor-pointer hover:bg-slate-100 select-none group" onclick="openColumnMenu(event, '${c.alias}')"><div class="flex items-center justify-between"><span>${c.alias}</span><i class="fa-solid fa-chevron-down text-[10px] text-slate-400 group-hover:text-indigo-600"></i></div></th>`).join('') + '</tr>';
+            }
+            const tbody = document.getElementById('tableBody');
+            if(!append){
+                tbody.innerHTML = '';
+            }
+            if(!rows.length && !append){
+                tbody.innerHTML = `<tr><td colspan="${cols.length+1}" class="text-center py-12 text-slate-400">لا توجد بيانات</td></tr>`;
+            } else {
+                const startIdx = append ? (lazyLoadedRows.length - rows.length) : 0;
+                const fragment = document.createDocumentFragment();
+                rows.forEach((r, i) => {
+                    const tr = document.createElement('tr');
+                    tr.className = 'hover:bg-slate-50/80 transition';
+                    const idx = startIdx + i + 1;
+                    let cells = `<td class="px-3 py-2 text-center text-slate-400 excel-cell">${idx}</td>`;
+                    cols.forEach(c => {
+                        let v = r[c.alias]; if(v===undefined) v=r[c.name]||''; if(v instanceof Object) v=JSON.stringify(v);
+                        cells += `<td class="px-4 py-2 text-slate-800 excel-cell">${v ?? ''}</td>`;
+                    });
+                    tr.innerHTML = cells;
+                    fragment.appendChild(tr);
+                });
+                tbody.appendChild(fragment);
+            }
+            renderGroupingSidebar(lazyLoadedRows);
+            updateLazyStats();
+            setupLazyObserver();
+        }
+
+        function toggleSqlPreview(){
+            const el = document.getElementById('sql-preview');
+            if(el) el.classList.toggle('hidden');
+        }
+
+        function renderGrid() {
+            // If we have API data, use lazy-loaded rows; otherwise use local evaluation
+            if(apiMode && lazyLoadedRows.length){
+                renderApiData({columns: lastApiData?.columns || [], rows: [], total: lazyTotal, page: lazyPage-1, pageSize: lazyPageSize}, false);
+                // Re-render all loaded rows
+                const tbody = document.getElementById('tableBody');
+                const cols = (lastApiData && lastApiData.columns) || [];
+                tbody.innerHTML = '';
+                const fragment = document.createDocumentFragment();
+                lazyLoadedRows.forEach((r, i) => {
+                    const tr = document.createElement('tr');
+                    tr.className = 'hover:bg-slate-50/80 transition';
+                    let cells = `<td class="px-3 py-2 text-center text-slate-400 excel-cell">${i+1}</td>`;
+                    cols.forEach(c => {
+                        let v = r[c.alias]; if(v===undefined) v=r[c.name]||''; if(v instanceof Object) v=JSON.stringify(v);
+                        cells += `<td class="px-4 py-2 text-slate-800 excel-cell">${v ?? ''}</td>`;
+                    });
+                    tr.innerHTML = cells;
+                    fragment.appendChild(tr);
+                });
+                tbody.appendChild(fragment);
+                renderGroupingSidebar(lazyLoadedRows);
+                updateLazyStats();
+                setupLazyObserver();
+                return;
+            }
+            // Fallback: local mock data
+            const processedRows = evaluateQueryRows();
+            const columns = queryColumns.map(qc => qc.alias);
+            let filtered = processedRows;
+                if (activeGroupColumn && activeGroupValue !== null) {
+                    if (String(row[activeGroupColumn]) !== String(activeGroupValue)) return false;
+                }
+                for (let f of activeFilters) {
+                    let val = row[f.field];
+                    if (val === undefined) continue;
+                    if (f.op === 'equals' && String(val) !== String(f.value)) return false;
+                    if (f.op === 'contains' && !String(val).toLowerCase().includes(String(f.value).toLowerCase())) return false;
+                    if (f.op === 'gt' && !(Number(val) > Number(f.value))) return false;
+                    if (f.op === 'lt' && !(Number(val) < Number(f.value))) return false;
+                    if (f.op === 'between') {
+                        if (typeof val === 'number' || !isNaN(val)) {
+                            if (!(Number(val) >= Number(f.valFrom) && Number(val) <= Number(f.valTo))) return false;
+                        } else {
+                            if (!(String(val) >= String(f.valFrom) && String(val) <= String(f.valTo))) return false;
+                        }
+                    }
+                }
+                for (let col in columnFilters) {
+                    if (columnFilters[col] && columnFilters[col].length > 0) {
+                        if (!columnFilters[col].includes(String(row[col]))) return false;
+                    }
+                }
+                return true;
+            });
+            if (activeSort.column) {
+                filtered.sort((a, b) => {
+                    let va = a[activeSort.column];
+                    let vb = b[activeSort.column];
+                    if (va < vb) return activeSort.direction === 'asc' ? -1 : 1;
+                    if (va > vb) return activeSort.direction === 'asc' ? 1 : -1;
+                    return 0;
+                });
+            }
+            document.getElementById('totalRecordsCount').innerText = filtered.length;
+            let pSize = pageSize === 'all' ? filtered.length : Number(pageSize);
+            let totalPages = Math.ceil(filtered.length / pSize) || 1;
+            if (currentPage > totalPages) currentPage = totalPages;
+            document.getElementById('currentPageNum').innerText = currentPage;
+            document.getElementById('totalPagesNum').innerText = totalPages;
+            let startIndex = (currentPage - 1) * pSize;
+            let pagedRows = filtered.slice(startIndex, startIndex + pSize);
+            let theadHtml = '<tr>';
+            theadHtml += '<th class="w-12 px-3 py-2 text-center border-b border-slate-200 bg-slate-100 font-bold">#</th>';
+            columns.forEach(col => {
+                theadHtml += `<th class="px-4 py-2.5 font-bold border-b border-slate-200 bg-slate-50 text-slate-700 cursor-pointer hover:bg-slate-100 select-none group" onclick="openColumnMenu(event, '${col}')">
+                    <div class="flex items-center justify-between">
+                        <span>${col}</span>
+                        <i class="fa-solid fa-chevron-down text-[10px] text-slate-400 group-hover:text-indigo-600"></i>
+                    </div>
+                </th>`;
+            });
+            theadHtml += '</tr>';
+            document.getElementById('tableHeader').innerHTML = theadHtml;
+            let tbodyHtml = '';
+            if (pagedRows.length === 0) {
+                if(apiLoading) {
+                    tbodyHtml = `<tr><td colspan="${columns.length + 1}" class="text-center py-12 text-slate-400"><i class="fa-solid fa-circle-notch fa-spin"></i> جاري تحميل البيانات من قاعدة البيانات...</td></tr>`;
+                } else if(apiFailed) {
+                    tbodyHtml = `<tr><td colspan="${columns.length + 1}" class="text-center py-12"><div class="text-rose-500 text-xs font-bold mb-1">تعذر جلب البيانات من الخادم</div><div class="text-slate-500 text-xs mb-3 font-mono" dir="ltr">${apiFailed}</div><button onclick="retryApiLoad()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold"><i class="fa-solid fa-rotate"></i> إعادة المحاولة</button></td></tr>`;
+                } else if(hasActiveFilters()) {
+                    tbodyHtml = `<tr><td colspan="${columns.length + 1}" class="text-center py-12 text-slate-400"><div class="mb-3">لا توجد بيانات مطابقة للشروط الحالية (يوجد فلتر نشط)</div><button onclick="resetAllFilters()" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold"><i class="fa-solid fa-filter-circle-xmark"></i> مسح كل الفلاتر</button></td></tr>`;
+                } else {
+                    tbodyHtml = `<tr><td colspan="${columns.length + 1}" class="text-center py-12 text-slate-400">لا توجد بيانات مطابقة للشروط الحالية</td></tr>`;
+                }
+            } else {
+                pagedRows.forEach((row, idx) => {
+                    tbodyHtml += `<tr class="hover:bg-slate-50/80 transition">`;
+                    tbodyHtml += `<td class="px-3 py-2 text-center text-slate-400 excel-cell">${startIndex + idx + 1}</td>`;
+                    columns.forEach(col => {
+                        tbodyHtml += `<td class="px-4 py-2 text-slate-800 excel-cell">${row[col] !== undefined ? row[col] : ''}</td>`;
+                    });
+                    tbodyHtml += `</tr>`;
+                });
+            }
+            document.getElementById('tableBody').innerHTML = tbodyHtml;
+            renderGroupingSidebar(processedRows);
+        }
+
+        function resetLazyState(){
+            lazyLoadedRows = [];
+            lazyPage = 1;
+            lazyTotal = 0;
+            lazyTotalPages = 0;
+            lazyLoading = false;
+            lazyDone = false;
+            if(lazyObserver) lazyObserver.disconnect();
+            const tbody = document.getElementById('tableBody');
+            if(tbody) tbody.innerHTML = '<tr><td colspan="10" class="text-center py-12 text-slate-400"><i class="fa-solid fa-spinner fa-spin text-indigo-400"></i> جاري تحميل البيانات...</td></tr>';
+            updateLazyStats();
+        }
+        function setupLazyObserver(){
+            if(lazyObserver) lazyObserver.disconnect();
+            const sentinel = document.getElementById('scrollSentinel');
+            const container = document.getElementById('tableScrollContainer');
+            if(!sentinel || !container) return;
+            lazyObserver = new IntersectionObserver(entries => {
+                if(entries[0].isIntersecting && !lazyLoading && !lazyDone){
+                    fetchReportFromAPI(true);
+                }
+            }, { root: container, rootMargin: '300px' });
+            lazyObserver.observe(sentinel);
+        }
+            const sidebar = document.getElementById('groupingSidebar');
+            const content = document.getElementById('groupingSidebarContent');
+            if (!activeGroupColumn) { sidebar.classList.add('hidden'); return; }
+            sidebar.classList.remove('hidden');
+            let groups = {};
+            allRows.forEach(row => {
+                let key = row[activeGroupColumn] || '(فارغ)';
+                if (!groups[key]) groups[key] = 0;
+                groups[key]++;
+            });
+            let html = '';
+            for (let key in groups) {
+                let isSelected = String(activeGroupValue) === String(key);
+                html += `<div onclick="selectGroupItem('${activeGroupColumn}', '${key}')" class="p-2.5 rounded-xl cursor-pointer transition flex items-center justify-between ${isSelected ? 'bg-indigo-600 text-white shadow-sm' : 'bg-slate-50 hover:bg-slate-100 text-slate-700'}">
+                    <span class="font-semibold truncate">${key}</span>
+                    <span class="px-2 py-0.5 rounded-full text-[10px] ${isSelected ? 'bg-indigo-500 text-white' : 'bg-slate-200 text-slate-600'}">${groups[key]}</span>
+                </div>`;
+            }
+            content.innerHTML = html;
+        }
+
+        function selectGroupItem(col, val) {
+            activeGroupValue = val;
+            document.getElementById('activeGroupIndicator').classList.remove('hidden');
+            document.getElementById('activeGroupColName').innerText = col;
+            document.getElementById('activeGroupVal').innerText = val;
+            currentPage = 1;
+            renderGrid();
+        }
+        function clearGroupFilter() {
+            activeGroupColumn = null;
+            activeGroupValue = null;
+            document.getElementById('activeGroupIndicator').classList.add('hidden');
+            renderGrid();
+        }
+        function toggleGroupingSidebar() {
+            document.getElementById('groupingSidebar').classList.add('hidden');
+            activeGroupColumn = null;
+            renderGrid();
+        }
+        function getRowsForUniqueValues(colName) {
+            if(lazyLoadedRows && lazyLoadedRows.length) {
+                return lazyLoadedRows.map(r => {
+                    let v = r[colName];
+                    if (v === undefined) {
+                        const colMeta = (lastApiData && lastApiData.columns || []).find(c => c.alias === colName);
+                        if (colMeta) v = r[colMeta.name] ?? r[colMeta.alias];
+                    }
+                    return { [colName]: v };
+                });
+            }
+            try {
+                return evaluateQueryRows();
+            } catch(e) { return []; }
+        }
+        async function openColumnMenu(event, colName) {
+            event.stopPropagation();
+            currentMenuColumn = colName;
+            const menu = document.getElementById('columnDropdownMenu');
+            menu.classList.remove('hidden');
+            const rect = event.currentTarget.getBoundingClientRect();
+            menu.style.top = `${rect.bottom + window.scrollY}px`;
+            menu.style.left = `${Math.min(rect.left, window.innerWidth - 280)}px`;
+            const listEl = document.getElementById('colValuesCheckboxesList');
+            listEl.innerHTML = '<p class="text-slate-400 text-center py-4">جاري تحميل القيم...</p>';
+            document.getElementById('colSearchInput').value = '';
+            let rows = getRowsForUniqueValues(colName);
+            // Normalize: trim, drop undefined, keep empty as '(فارغ)' label but filterable as ''
+            const seen = new Map();
+            (rows || []).forEach(r => {
+                let v = r[colName];
+                if (v === undefined || v === null) v = '';
+                else v = String(v);
+                if (!seen.has(v)) seen.set(v, (seen.get(v) || 0) + 1);
+            });
+            let uniqueVals = [...seen.keys()].sort((a,b)=>a.localeCompare(b, 'ar'));
+            // Cap at 200 to keep menu usable
+            const capped = uniqueVals.slice(0, 200);
+            let listHtml = '';
+            if (!capped.length) {
+                listHtml = '<p class="text-slate-400 text-center py-4">لا توجد قيم</p>';
+            } else {
+                capped.forEach(val => {
+                    const safeVal = String(val).replace(/"/g, '&quot;');
+                    let checked = (!columnFilters[colName] || columnFilters[colName].includes(val)) ? 'checked' : '';
+                    listHtml += `<label class="flex items-center gap-2 px-2 py-1 hover:bg-slate-50 rounded cursor-pointer">
+                        <input type="checkbox" value="${safeVal}" ${checked} class="col-filter-chk rounded text-indigo-600 focus:ring-0">
+                        <span class="text-slate-700 truncate">${val === '' ? '(فارغ)' : safeVal}</span>
+                        <span class="mr-auto text-[10px] text-slate-400">${seen.get(val)}</span>
+                    </label>`;
+                });
+                if (uniqueVals.length > capped.length) {
+                    listHtml += `<p class="text-[11px] text-slate-400 text-center pt-1">+${uniqueVals.length - capped.length} قيمة أخرى — استخدم البحث</p>`;
+                }
+            }
+            listEl.innerHTML = listHtml;
+        }
+        function closeColumnMenu() { document.getElementById('columnDropdownMenu').classList.add('hidden'); currentMenuColumn = null; }
+        function filterColumnCheckboxes(query) {
+            const items = document.querySelectorAll('#colValuesCheckboxesList label');
+            items.forEach(item => {
+                let text = item.innerText.toLowerCase();
+                item.style.display = text.includes(query.toLowerCase()) ? 'flex' : 'none';
+            });
+        }
+        function execColumnSort(dir) { if (!currentMenuColumn) return; activeSort = { column: currentMenuColumn, direction: dir }; closeColumnMenu(); renderGrid(); }
+        function execColumnGroup() { if (!currentMenuColumn) return; activeGroupColumn = currentMenuColumn; activeGroupValue = null; closeColumnMenu(); renderGrid(); }
+        function clearColumnFilter() { if (!currentMenuColumn) return; delete columnFilters[currentMenuColumn]; closeColumnMenu(); renderGrid(); }
+        function applyColumnFilter() {
+            if (!currentMenuColumn) return;
+            const chks = document.querySelectorAll('.col-filter-chk');
+            let selected = [];
+            chks.forEach(chk => { if (chk.checked) selected.push(chk.value); });
+            columnFilters[currentMenuColumn] = selected;
+            closeColumnMenu();
+            renderGrid();
+        }
+        window.addEventListener('click', function(e) {
+            const menu = document.getElementById('columnDropdownMenu');
+            if (!menu.contains(e.target) && !e.target.closest('[onclick*=\"openColumnMenu\"]')) {
+                menu.classList.add('hidden');
+            }
+        });
+        function setupSearchInput() {
+            const input = document.getElementById('searchInput');
+            const mobileInput = document.getElementById('searchInputMobile');
+            const handler = function(e) {
+                if (e.key === 'Enter' && this.value.trim() !== '') {
+                    let val = this.value.trim();
+                    let parts = val.split(/(>|<|=|like)/i);
+                    if (parts.length >= 3) {
+                        let field = parts[0].trim();
+                        let opCode = parts[1].trim().toLowerCase();
+                        let targetVal = parts[2].trim();
+                        let op = 'equals';
+                        if (opCode === '>') op = 'gt';
+                        else if (opCode === '<') op = 'lt';
+                        else if (opCode === 'like') op = 'contains';
+                        activeFilters.push({ field, op, value: targetVal });
+                    } else {
+                        activeFilters.push({ field: queryColumns[0].alias, op: 'contains', value: val });
+                    }
+                    this.value = '';
+                    if(mobileInput) mobileInput.value='';
+                    renderSearchTags();
+                    renderGrid();
+                }
+            };
+            if(input) input.addEventListener('keydown', handler);
+            if(mobileInput) mobileInput.addEventListener('keydown', handler);
+        }
+        function renderSearchTags() {
+            const container = document.getElementById('activeTagsList');
+            const mobileContainer = document.getElementById('activeTagsListMobile');
+            let html = '';
+            activeFilters.forEach((f, idx) => {
+                let label = `${f.field} ${f.op === 'gt' ? '>' : (f.op === 'lt' ? '<' : '=')} ${f.value || (f.valFrom + ' - ' + f.valTo)}`;
+                html += `<span class="inline-flex items-center gap-1.5 bg-indigo-50 text-indigo-700 px-2.5 py-1 rounded-lg text-xs font-semibold">
+                    <span>${label}</span>
+                    <button onclick="removeFilter(${idx})" class="hover:text-indigo-900"><i class="fa-solid fa-xmark text-[10px]"></i></button>
+                </span>`;
+            });
+            if(container) container.innerHTML = html;
+            if(mobileContainer) mobileContainer.innerHTML = html;
+        }
+        function removeFilter(idx) { activeFilters.splice(idx, 1); renderSearchTags(); renderGrid(); }
+        function hasActiveFilters() {
+            if(activeFilters.length) return true;
+            if(activeGroupColumn && activeGroupValue !== null) return true;
+            for(const k in (columnFilters || {})) { if(columnFilters[k] && columnFilters[k].length) return true; }
+            return false;
+        }
+        function retryApiLoad() { resetLazyState(); fetchReportFromAPI(); }
+        function resetAllFilters() {
+            activeFilters = []; columnFilters = {}; activeSort = { column: null, direction: 'asc' };
+            activeGroupColumn = null; activeGroupValue = null;
+            document.getElementById('activeGroupIndicator').classList.add('hidden');
+            renderSearchTags(); resetLazyState(); fetchReportFromAPI();
+        }
+        function openAdvancedFilterModal() {
+            const fieldSelect = document.getElementById('advFilterField');
+            fieldSelect.innerHTML = queryColumns.map(qc => `<option value="${qc.alias}">${qc.alias}</option>`).join('');
+            document.getElementById('advancedFilterModal').classList.remove('hidden');
+            if(typeof lockScroll === 'function') lockScroll();
+            toggleAdvRangeInputs();
+        }
+        function closeAdvancedFilterModal() { document.getElementById('advancedFilterModal').classList.add('hidden'); if(typeof unlockScroll === 'function') unlockScroll(); }
+        function toggleAdvRangeInputs() {
+            const op = document.getElementById('advFilterOp').value;
+            if (op === 'between') {
+                document.getElementById('advSingleValContainer').classList.add('hidden');
+                document.getElementById('advRangeValContainer').classList.remove('hidden');
+            } else {
+                document.getElementById('advSingleValContainer').classList.remove('hidden');
+                document.getElementById('advRangeValContainer').classList.add('hidden');
+            }
+        }
+        function applyAdvancedFilter() {
+            const field = document.getElementById('advFilterField').value;
+            const op = document.getElementById('advFilterOp').value;
+            if (op === 'between') {
+                let valFrom = document.getElementById('advFilterValFrom').value;
+                let valTo = document.getElementById('advFilterValTo').value;
+                activeFilters.push({ field, op, valFrom, valTo });
+            } else {
+                let value = document.getElementById('advFilterValue').value;
+                activeFilters.push({ field, op, value });
+            }
+            closeAdvancedFilterModal(); renderSearchTags(); renderGrid();
+        }
+        function togglePresetsMenu() { document.getElementById('presetsMenu').classList.toggle('hidden'); }
+        function renderPresetsList() {
+            const list = document.getElementById('presetsList');
+            let html = '';
+            savedPresets.forEach((p, idx) => {
+                html += `<div class="flex items-center justify-between px-2 py-1.5 hover:bg-slate-50 rounded-lg cursor-pointer">
+                    <span onclick="applyPreset(${idx})" class="text-slate-700 font-medium">${p.name}</span>
+                    <button onclick="deletePreset(${idx})" class="text-slate-400 hover:text-rose-600"><i class="fa-solid fa-trash text-[10px]"></i></button>
+                </div>`;
+            });
+            list.innerHTML = html;
+        }
+        function applyPreset(idx) { let p = savedPresets[idx]; activeFilters = [...p.filters]; renderSearchTags(); renderGrid(); togglePresetsMenu(); }
+        function saveCurrentPreset() { let name = prompt('أدخل اسم النموذج (Preset):'); if (name) { savedPresets.push({ name, filters: [...activeFilters] }); renderPresetsList(); togglePresetsMenu(); } }
+        function deletePreset(idx) { savedPresets.splice(idx, 1); renderPresetsList(); }
+        function changePageSize(val) { lazyPageSize = val === 'all' ? 1000 : parseInt(val); resetLazyState(); fetchReportFromAPI(); }
+        function changePage(dir) { /* no-op for lazy loading */ }
+        function switchActiveTable(tbl) {
+            activeTable = tbl;
+            if (tbl === 'departments') {
+                queryColumns = [
+                    { alias: 'معرف القسم', connection: 'ORCL_PROD', schema: 'HR_SYS', table: 'departments', expr: 'dept_id', refTable: '', refFk: '', refDisplay: '' },
+                    { alias: 'اسم القسم', connection: 'ORCL_PROD', schema: 'HR_SYS', table: 'departments', expr: 'dept_name', refTable: '', refFk: '', refDisplay: '' },
+                    { alias: 'الموقع', connection: 'ORCL_PROD', schema: 'HR_SYS', table: 'departments', expr: 'location', refTable: '', refFk: '', refDisplay: '' }
+                ];
+            } else if (tbl === 'suspended') {
+                queryColumns = [
+                    { alias: 'معرف الموظف', connection: 'ORCL_PROD', schema: 'HR_SYS', table: 'suspended', expr: 'emp_id', refTable: '', refFk: '', refDisplay: '' },
+                    { alias: 'تاريخ الإيقاف', connection: 'ORCL_PROD', schema: 'HR_SYS', table: 'suspended', expr: 'suspension_date', refTable: '', refFk: '', refDisplay: '' },
+                    { alias: 'حالة التوقيف', connection: 'ORCL_PROD', schema: 'HR_SYS', table: 'suspended', expr: 'state', refTable: '', refFk: '', refDisplay: '' },
+                    { alias: 'السبب', connection: 'ORCL_PROD', schema: 'HR_SYS', table: 'suspended', expr: 'reason', refTable: '', refFk: '', refDisplay: '' }
+                ];
+            } else {
+                // Restore from Django RML if available
+                if (DJANGO_RML_COLUMNS && DJANGO_RML_COLUMNS.length) {
+                    queryColumns = DJANGO_RML_COLUMNS.map(c => ({ alias: c.alias || c.name, connection: 'ORCL_PROD', schema: 'HR_SYS', table: 'employees', expr: c.name || c.expr || c.alias, refTable: c.refTable || '', refFk: c.refFk || '', refDisplay: c.refDisplay || '' }));
+                } else {
+                    queryColumns = [
+                        { alias: 'المعرف', connection: 'ORCL_PROD', schema: 'HR_SYS', table: 'employees', expr: 'id', refTable: '', refFk: '', refDisplay: '' },
+                        { alias: 'اسم الموظف', connection: 'ORCL_PROD', schema: 'HR_SYS', table: 'employees', expr: 'name', refTable: '', refFk: '', refDisplay: '' },
+                        { alias: 'القسم', connection: 'ORCL_PROD', schema: 'HR_SYS', table: 'employees', expr: 'department', refTable: '', refFk: '', refDisplay: '' },
+                        { alias: 'المسمى الوظيفي', connection: 'ORCL_PROD', schema: 'HR_SYS', table: 'employees', expr: 'position', refTable: '', refFk: '', refDisplay: '' },
+                        { alias: 'الراتب (ر.س)', connection: 'ORCL_PROD', schema: 'HR_SYS', table: 'employees', expr: 'salary', refTable: '', refFk: '', refDisplay: '' },
+                        { alias: 'تاريخ التعيين', connection: 'ORCL_PROD', schema: 'HR_SYS', table: 'employees', expr: 'hire_date', refTable: '', refFk: '', refDisplay: '' },
+                        { alias: 'الحالة', connection: 'ORCL_PROD', schema: 'HR_SYS', table: 'employees', expr: 'status', refTable: '', refFk: '', refDisplay: '' }
+                    ];
+                }
+            }
+            resetAllFilters();
+        }
+        {% include "rml_wizard_script.html" %}
+        function exportToCSV() {
+            const data = lazyLoadedRows.length ? lazyLoadedRows : evaluateQueryRows();
+            if (data.length === 0) return;
+            const cols = (lastApiData && lastApiData.columns) || queryColumns.map(qc => ({alias: qc.alias, name: qc.expr}));
+            const headers = cols.map(c => c.alias);
+            let csvContent = "\uFEFF" + headers.join(",") + "\n";
+            data.forEach(row => {
+                let line = headers.map(h => {
+                    const colMeta = cols.find(c => c.alias === h);
+                    let v = row[h]; if(v===undefined && colMeta) v = row[colMeta.name];
+                    return `"${String(v !== undefined ? v : '').replace(/"/g, '""')}"`;
+                }).join(",");
+                csvContent += line + "\n";
+            });
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a'); a.setAttribute('href', url); a.setAttribute('download', (DJANGO_RML||'oracle_report') + '.csv'); document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        }
+        function printReport() { window.print(); }
+    </script>
+{% endblock %}

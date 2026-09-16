@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}النظام ERP{% endblock %}</title>
+    <!-- Tailwind CSS via CDN (development only - use local build for production) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>try{if(localStorage.getItem('theme')==='dark')document.documentElement.classList.add('dark')}catch(e){}</script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Cairo', sans-serif; background-color: #f3f4f6; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        html.dark body{background:#0b1220 !important;color:#e2e8f0}
+        html.dark .bg-white{background-color:#131c2e !important}
+        html.dark .bg-gray-100{background-color:#0b1220 !important}
+        html.dark .bg-gray-50,html.dark .bg-slate-50{background-color:#1a2438 !important}
+        html.dark .bg-slate-100{background-color:#22304a !important}
+        html.dark .bg-white\/95{background-color:rgba(19,28,46,.95) !important}
+        html.dark .text-gray-800,html.dark .text-slate-800,html.dark .text-slate-700{color:#e8eef7 !important}
+        html.dark .text-gray-600{color:#c3cede !important}
+        html.dark .text-gray-500,html.dark .text-slate-500{color:#9fb0c7 !important}
+        html.dark .text-gray-400,html.dark .text-slate-400{color:#7d8ea8 !important}
+        html.dark .border-gray-200,html.dark .border-slate-200,html.dark .border-gray-100,html.dark .border-slate-100{border-color:#2a3a56 !important}
+        html.dark input,html.dark select,html.dark textarea{background-color:#1a2438 !important;color:#e8eef7 !important;border-color:#2a3a56 !important}
+        html.dark input::placeholder,html.dark textarea::placeholder{color:#64748b !important}
+        html.dark option{background-color:#1a2438}
+        html.dark .shadow-sm,html.dark .shadow-md,html.dark .shadow-lg,html.dark .shadow-xl,html.dark .shadow-xs{box-shadow:none !important}
+        html.dark .excel-cell{border-color:#2a3a56 !important}
+        html.dark th.excel-cell{background:#1a2438 !important}
+        html.dark .fmlk-category{background:#131c2e !important;border-color:#2a3a56 !important}
+        @keyframes notify-in{from{opacity:0;transform:translateY(-12px)}to{opacity:1;transform:translateY(0)}}
+        @keyframes notify-out{to{opacity:0;transform:translateY(-12px)}}
+        .notify-item{animation:notify-in .25s ease-out}
+        .notify-item.leaving{animation:notify-out .25s ease-in forwards}
+        /* ── UI date picker (shared): inline text + calendar + quick ranges ── */
+        .uidp-wrap{position:relative; display:flex; align-items:stretch; gap:4px; width:100%;}
+        .uidp-wrap>input{flex:1; min-width:0;}
+        .uidp-btn{flex:none; width:2rem; border-radius:.65rem; background:#eef2ff; color:#4f46e5; border:1px solid #e0e7ff; cursor:pointer; display:inline-flex; align-items:center; justify-content:center;}
+        .uidp-btn:hover{background:#e0e7ff;}
+        .uidp-pop{position:absolute; top:calc(100% + 6px); right:0; z-index:120; background:#fff; border:1px solid #e2e8f0; border-radius:14px; box-shadow:0 12px 32px rgba(15,23,42,.18); padding:10px; width:252px; color:#1e293b;}
+        [dir="ltr"] .uidp-pop{right:auto; left:0;}
+        .uidp-quick{display:flex; gap:4px; margin-bottom:8px;}
+        .uidp-quick button{flex:1; font-size:10px; font-weight:bold; padding:5px 2px; border-radius:8px; background:#f1f5f9; color:#475569; border:1px solid #e2e8f0; cursor:pointer; white-space:nowrap;}
+        .uidp-quick button:hover{background:#e0e7ff; color:#4338ca;}
+        .uidp-cal-head{display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;}
+        .uidp-cal-head strong{font-size:12px; color:#334155;}
+        .uidp-nav{width:26px; height:26px; border-radius:8px; background:#f8fafc; border:1px solid #e2e8f0; color:#64748b; cursor:pointer; display:inline-flex; align-items:center; justify-content:center;}
+        .uidp-nav:hover{background:#eef2ff; color:#4338ca;}
+        .uidp-grid{display:grid; grid-template-columns:repeat(7,1fr); gap:2px;}
+        .uidp-dow{font-size:9px; color:#94a3b8; text-align:center; font-weight:bold; padding:2px 0;}
+        .uidp-day{aspect-ratio:1/1; font-size:11px; border-radius:8px; background:transparent; border:none; color:#334155; cursor:pointer; display:inline-flex; align-items:center; justify-content:center;}
+        .uidp-day:hover{background:#eef2ff;}
+        .uidp-day.dim{color:#cbd5e1;}
+        .uidp-day.today{box-shadow:inset 0 0 0 1.5px #6366f1;}
+        .uidp-day.sel{background:#4f46e5 !important; color:#fff !important;}
+        .uidp-hint{font-size:9px; color:#94a3b8; text-align:center; margin-top:6px;}
+        .uidp-err{border-color:#f43f5e !important; box-shadow:0 0 0 2px rgba(244,63,94,.15);}
+        {% block head_css %}{% endblock %}
+    </style>
+    {% block head_extra %}{% endblock %}
+</head>
+<body class="bg-gray-100 text-gray-800 flex h-screen overflow-hidden">
+<div id="notifyStack" class="fixed top-4 left-1/2 -translate-x-1/2 z-[100] flex flex-col items-center pointer-events-none"></div>
+{% block sidebar %}{% endblock %}
+<div class="flex-1 flex flex-col h-screen overflow-hidden min-w-0">
+{% block topbar %}{% include "partials/topbar.html" %}{% endblock %}
+<div class="flex-1 overflow-y-auto min-h-0 flex flex-col">
+{% block main %}{% endblock %}
+</div>
+</div>
+{% block modals %}{% endblock %}
+<script>
+    /* ── UI date picker (shared across players/forms/filters/policies) ──
+       - inline text: YYYY-MM-DD, YYYYMMDD (20260913), DDMMYYYY (13092026), D/M/YYYY
+       - popup: quick (today / this month / this year / clear) + month calendar
+       - modes via data-uidate: single | from | to (range-aware quick values)
+       - value always stored as YYYY-MM-DD */
+    const UI_MONTHS_AR = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
+    const UI_DOW_AR = ['ح','ن','ث','ر','خ','ج','س'];
+    function uiFmtDate(y, m, d){ return y + '-' + String(m).padStart(2,'0') + '-' + String(d).padStart(2,'0'); }
+    function uiParseDate(s){
+        try{
+            s = String(s == null ? '' : s).trim();
+            if(!s) return null;
+            let m, y, mo, d;
+            if((m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/))){ y=+m[1]; mo=+m[2]; d=+m[3]; }
+            else if((m = s.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4})$/))){ d=+m[1]; mo=+m[2]; y=+m[3]; }
+            else if((m = s.match(/^(\d{4})(\d{2})(\d{2})$/))){
+                // 8 digits: YYYYMMDD (20260913) else DDMMYYYY (13092026)
+                const ty = +m[1], tm = +m[2], td = +m[3];
+                if(ty >= 1900 && ty <= 2100){
+                    const chk = new Date(ty, tm-1, td);
+                    if(chk.getFullYear()===ty&&chk.getMonth()===tm-1&&chk.getDate()===td) return uiFmtDate(ty, tm, td);
+                }
+                d=+s.slice(0,2); mo=+s.slice(2,4); y=+s.slice(4,8);
+            }
+            else return null;
+            if(!(y>=1900&&y<=2100)||!(mo>=1&&mo<=12)||!(d>=1&&d<=31)) return null;
+            const dt = new Date(y, mo-1, d);
+            if(dt.getFullYear()!==y||dt.getMonth()!==mo-1||dt.getDate()!==d) return null;
+            return uiFmtDate(y, mo, d);
+        }catch(e){ return null; }
+    }
+    let __uidpOpen = null;
+    function uiClosePicker(){
+        try{ if(__uidpOpen && __uidpOpen.pop && __uidpOpen.pop.isConnected) __uidpOpen.pop.remove(); }catch(e){}
+        __uidpOpen = null;
+    }
+    if(!window.__uidpBound){
+        window.__uidpBound = true;
+        document.addEventListener('mousedown', function(e){
+            if(!__uidpOpen) return;
+            try{
+                if(__uidpOpen.pop.contains(e.target)) return;
+                const w = __uidpOpen.input.closest ? __uidpOpen.input.closest('.uidp-wrap') : null;
+                if(w && w.contains(e.target)) return;
+            }catch(e2){}
+            uiClosePicker();
+        });
+        document.addEventListener('keydown', function(e){ if(e.key === 'Escape') uiClosePicker(); });
+    }
+    function uiSetInputValue(input, iso){
+        input.value = iso || '';
+        try{ input.dataset.uilast = iso || ''; }catch(e){}
+        try{
+            input.dispatchEvent(new Event('input', {bubbles: true}));
+            input.dispatchEvent(new Event('change', {bubbles: true}));
+        }catch(e){}
+    }
+    function uiQuickPick(input, which){
+        const mode = (input.dataset && input.dataset.uidate) || 'single';
+        const now = new Date();
+        const y = now.getFullYear(), m = now.getMonth();
+        let iso = '';
+        if(which === 'today') iso = uiFmtDate(y, m+1, now.getDate());
+        else if(which === 'month') iso = (mode === 'to') ? uiFmtDate(y, m+1, new Date(y, m+1, 0).getDate()) : uiFmtDate(y, m+1, 1);
+        else if(which === 'year') iso = (mode === 'to') ? uiFmtDate(y, 12, 31) : uiFmtDate(y, 1, 1);
+        else if(which === 'clear') iso = '';
+        uiSetInputValue(input, iso);
+        uiClosePicker();
+        try{ input.focus(); }catch(e){}
+    }
+    function uiOpenPicker(input){
+        try{
+            if(__uidpOpen && __uidpOpen.input === input){ uiClosePicker(); return; }
+            uiClosePicker();
+            const wrap = input.closest ? input.closest('.uidp-wrap') : null;
+            if(!wrap) return;
+            const pop = document.createElement('div');
+            pop.className = 'uidp-pop';
+            wrap.appendChild(pop);
+            __uidpOpen = {input: input, pop: pop};
+            let vy = null, vm = null;
+            const cur = uiParseDate(input.value);
+            if(cur){ const p = cur.split('-'); vy = +p[0]; vm = +p[1] - 1; }
+            else { const n = new Date(); vy = n.getFullYear(); vm = n.getMonth(); }
+            const view = {y: vy, m: vm};
+            const render = ()=>{
+                const first = new Date(view.y, view.m, 1).getDay();
+                const dim = new Date(view.y, view.m + 1, 0).getDate();
+                const todayIso = uiFmtDate(new Date().getFullYear(), new Date().getMonth()+1, new Date().getDate());
+                let cells = UI_DOW_AR.map(d=>'<span class="uidp-dow">' + d + '</span>').join('');
+                for(let i = 0; i < first; i++) cells += '<span></span>';
+                for(let d = 1; d <= dim; d++){
+                    const iso = uiFmtDate(view.y, view.m+1, d);
+                    const cls = 'uidp-day' + (iso === todayIso ? ' today' : '') + (input.value === iso ? ' sel' : '');
+                    cells += '<button type="button" class="' + cls + '" data-iso="' + iso + '">' + d + '</button>';
+                }
+                pop.innerHTML = '<div class="uidp-quick">'
+                    + '<button type="button" data-q="today">اليوم</button>'
+                    + '<button type="button" data-q="month">هذا الشهر</button>'
+                    + '<button type="button" data-q="year">هذه السنة</button>'
+                    + '<button type="button" data-q="clear">مسح</button></div>'
+                    + '<div class="uidp-cal-head"><button type="button" class="uidp-nav" data-nav="-1">‹</button>'
+                    + '<strong>' + UI_MONTHS_AR[view.m] + ' ' + view.y + '</strong>'
+                    + '<button type="button" class="uidp-nav" data-nav="1">›</button></div>'
+                    + '<div class="uidp-grid">' + cells + '</div>'
+                    + '<div class="uidp-hint">اكتب مباشرة: 20260913 أو 13092026</div>';
+                pop.querySelectorAll('[data-q]').forEach(b=>{ b.onclick = ()=>uiQuickPick(input, b.getAttribute('data-q')); });
+                pop.querySelectorAll('[data-nav]').forEach(b=>{ b.onclick = ()=>{ view.m += parseInt(b.getAttribute('data-nav'), 10); if(view.m < 0){ view.m = 11; view.y--; } if(view.m > 11){ view.m = 0; view.y++; } render(); }; });
+                pop.querySelectorAll('[data-iso]').forEach(b=>{ b.onclick = ()=>{ uiSetInputValue(input, b.getAttribute('data-iso')); render(); }; });
+            };
+            render();
+        }catch(e){}
+    }
+    function uiCommitText(input){
+        const iso = uiParseDate(input.value);
+        if(iso){ uiSetInputValue(input, iso); input.classList.remove('uidp-err'); return true; }
+        if(String(input.value || '').trim() === ''){ uiSetInputValue(input, ''); input.classList.remove('uidp-err'); return true; }
+        try{
+            const last = input.dataset.uilast || '';
+            input.value = last;
+            input.classList.add('uidp-err');
+            setTimeout(()=>{ try{ input.classList.remove('uidp-err'); }catch(e){} }, 1200);
+        }catch(e){}
+        return false;
+    }
+    function uiEnhanceDate(input, mode){
+        try{
+            if(!input || input.dataset.uidone) return false;
+            mode = mode || input.dataset.uidate || 'single';
+            input.dataset.uidate = mode;
+            input.dataset.uidone = '1';
+            if(input.type === 'date' || input.type === 'datetime-local'){
+                try{ input.dataset.origtype = input.type; }catch(e){}
+                input.type = 'text';
+            }
+            input.setAttribute('inputmode', 'numeric');
+            input.setAttribute('placeholder', input.getAttribute('placeholder') || 'YYYY-MM-DD');
+            try{ input.setAttribute('dir', 'ltr'); }catch(e){}
+            const cur = uiParseDate(input.value);
+            input.dataset.uilast = cur || '';
+            if(cur && input.value !== cur) input.value = cur;
+            const wrap = document.createElement('span');
+            wrap.className = 'uidp-wrap';
+            input.parentNode.insertBefore(wrap, input);
+            wrap.appendChild(input);
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'uidp-btn';
+            btn.title = 'منتقي التاريخ';
+            btn.innerHTML = '<i class="fa-solid fa-calendar-days text-xs"></i>';
+            btn.onclick = (e)=>{ e.preventDefault(); e.stopPropagation(); uiOpenPicker(input); };
+            wrap.appendChild(btn);
+            input.addEventListener('change', ()=>uiCommitText(input));
+            input.addEventListener('keydown', (e)=>{ if(e.key === 'Enter'){ uiCommitText(input); } });
+            input.addEventListener('focus', ()=>{ try{ input.select(); }catch(e){} });
+            return true;
+        }catch(e){ return false; }
+    }
+    function uiReleaseDate(input){
+        // فك البكر عن حقل لم يعد تاريخياً (إزالة الزر والغلاف مع بقاء القيمة)
+        try{
+            if(!input || !input.dataset.uidone) return false;
+            const wrap = input.closest ? input.closest('.uidp-wrap') : null;
+            delete input.dataset.uidone;
+            delete input.dataset.uidate;
+            if(wrap && wrap.parentNode){
+                wrap.parentNode.insertBefore(input, wrap);
+                wrap.remove();
+            }
+            return true;
+        }catch(e){ return false; }
+    }
+    function uiEnhanceDates(root){
+        try{
+            const scope = root || document;
+            scope.querySelectorAll('input[type="date"]:not([data-uidone]), input[data-uidate]:not([data-uidone])').forEach(el=>{
+                uiEnhanceDate(el, (el.dataset && el.dataset.uidate) || 'single');
+            });
+        }catch(e){}
+    }
+    function openModal(id){var el=document.getElementById(id);if(!el)return;el.classList.remove('hidden');el.classList.add('flex');}
+    function closeModal(id){var el=document.getElementById(id);if(!el)return;el.classList.remove('flex');el.classList.add('hidden');}
+    var __scrollLocks = 0;
+    function lockScroll(){__scrollLocks++;document.body.style.overflow='hidden';}
+    function unlockScroll(){__scrollLocks=Math.max(0,__scrollLocks-1);if(!__scrollLocks)document.body.style.overflow='';}
+    function toggleTheme(src){var d=src?(src.checked===true):!document.documentElement.classList.contains('dark');document.documentElement.classList.toggle('dark',d);try{localStorage.setItem('theme',d?'dark':'light')}catch(e){}syncThemeUI();}
+    function syncThemeUI(){var d=document.documentElement.classList.contains('dark');document.querySelectorAll('.theme-toggle-input').forEach(function(el){el.checked=d});document.querySelectorAll('.theme-toggle-label').forEach(function(el){el.textContent=d?'الوضع الداكن':'الوضع الفاتح'});document.querySelectorAll('.theme-toggle-icon').forEach(function(el){el.classList.toggle('fa-moon',d);el.classList.toggle('fa-sun',!d);el.classList.toggle('text-indigo-300',d);el.classList.toggle('text-amber-500',!d)});document.querySelectorAll('.theme-toggle-btn-icon').forEach(function(el){el.classList.toggle('fa-sun',d);el.classList.toggle('fa-moon',!d)});}
+    document.addEventListener('DOMContentLoaded',syncThemeUI);
+    syncThemeUI();
+    function notify(msg, type){
+        type = type || 'info';
+        var stack = document.getElementById('notifyStack');
+        if(!stack) return;
+        var styles = {
+            success: ['bg-emerald-600', 'fa-circle-check'],
+            error: ['bg-rose-600', 'fa-circle-exclamation'],
+            info: ['bg-indigo-600', 'fa-circle-info']
+        };
+        var s = styles[type] || styles.info;
+        var el = document.createElement('div');
+        el.className = 'notify-item pointer-events-auto flex items-center gap-2 px-4 py-2.5 ' + s[0] + ' text-white rounded-xl text-xs font-semibold shadow-lg mb-2 max-w-md';
+        var icon = document.createElement('i');
+        icon.className = 'fa-solid ' + s[1];
+        var label = document.createElement('span');
+        label.textContent = msg;
+        var btn = document.createElement('button');
+        btn.className = 'mr-2 opacity-80 hover:opacity-100';
+        btn.setAttribute('aria-label', 'إغلاق');
+        btn.innerHTML = '<i class="fa-solid fa-xmark"></i>';
+        el.appendChild(icon);
+        el.appendChild(label);
+        el.appendChild(btn);
+        stack.appendChild(el);
+        var t = setTimeout(dismiss, 4000);
+        function dismiss(){ clearTimeout(t); el.classList.add('leaving'); setTimeout(function(){ el.remove(); }, 250); }
+        btn.onclick = dismiss;
+    }
+    // رجوع ذكي: إلى الصفحة التي جئت منها (داخل النظام) وإلا للرابط الاحتياطي
+    function goBackSmart(fallback){
+        try{
+            var ref = document.referrer;
+            if(ref){
+                var u = new URL(ref, location.origin);
+                if(u.origin === location.origin && u.pathname !== location.pathname){ location.href = ref; return; }
+            }
+        }catch(e){}
+        if(fallback){ location.href = fallback; return; }
+        try{ if(history.length > 1){ history.back(); return; } }catch(e){}
+        location.href = '/';
+    }
+    // ── تقاريري: تقارير مفضلة عبر كل التطبيقات (localStorage: my_reports) ──
+    function getMyReports(){ try{ return JSON.parse(localStorage.getItem('my_reports')||'[]'); }catch(e){ return []; } }
+    function saveMyReports(l){ try{ localStorage.setItem('my_reports', JSON.stringify(l)); }catch(e){} }
+    function isMyReport(app, file){ try{ return getMyReports().some(function(r){ return r.app===app && r.file===file; }); }catch(e){ return false; } }
+    function toggleMyReport(app, file, name){
+        var l = getMyReports();
+        var i = l.findIndex(function(r){ return r.app===app && r.file===file; });
+        var added;
+        if(i>=0){ l.splice(i,1); added=false; try{ notify('أُزيل من تقاريري', 'info'); }catch(e){} }
+        else { l.unshift({app:app, file:file, name:name||file}); added=true; try{ notify('أُضيف إلى تقاريري ✓', 'success'); }catch(e){} }
+        saveMyReports(l);
+        try{ if(typeof refreshMyReportButtons === 'function') refreshMyReportButtons(); }catch(e){}
+        try{ if(typeof renderMyReportsHome === 'function') renderMyReportsHome(); }catch(e){}
+        return added;
+    }
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

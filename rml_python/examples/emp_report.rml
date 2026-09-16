@@ -1,0 +1,11 @@
+<rml>
+  <rpt_metadata name="emp_report" displayName="تقرير بيانات الموظفين المتقدم" category="HR" connection="ORCL_PROD" schema="HR_SYS"/>
+  <columns>
+    <column id="1" name="id" alias="المعرف" dataType="NUMBER" expr="id" col_type="direct"/>
+    <column id="2" name="name" alias="اسم الموظف" expr="name" col_type="direct"/>
+    <column id="3" name="department" alias="القسم" expr="department" col_type="direct"/>
+    <column id="4" name="salary" alias="الراتب (ر.س)" expr="salary" dataType="NUMBER" col_type="direct"/>
+    <column id="5" name="dept_display" alias="القسم (عرض)" expr="department" refTable="departments" refFk="dept_id" refDisplay="dept_name" col_type="fk_lookup"/>
+    <column id="6" name="total" alias="العدد" expr="COUNT(*)" col_type="aggregated"/>
+  </columns>
+</rml>

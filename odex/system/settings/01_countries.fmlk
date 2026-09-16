@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<fml>
+  <fml_metadata name="countries" displayName="الدول" table="urs_country" category="النظام" description="سجل الدول والدولة الافتراضية" connection="urs_local" schema="main_hq_2026"/>
+  <tabs>
+    <tab id="main" name="بيانات الدولة" alias="بيانات الدولة" sort_order="1"/>
+  </tabs>
+  <fields>
+    <field id="1" name="code" alias="رمز الدولة" inputType="text" required="true" tab="main" category="أساسية">
+      <validation regex="^[A-Z]{2,3}$" min_length="2" max_length="10"/>
+    </field>
+    <field id="2" name="name" alias="اسم الدولة" inputType="text" required="true" tab="main" category="أساسية"/>
+    <field id="3" name="name_en" alias="الاسم بالإنجليزية" inputType="text" tab="main" category="أساسية"/>
+    <field id="4" name="phone_code" alias="مفتاح الاتصال" inputType="text" tab="main" category="الاتصال" placeholder="+966"/>
+    <field id="5" name="is_default" alias="الدولة الافتراضية" inputType="boolean" tab="main" category="الحالة"/>
+    <field id="6" name="is_active" alias="نشطة" inputType="boolean" tab="main" category="الحالة"/>
+  </fields>
+</fml>

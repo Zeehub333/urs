@@ -1,0 +1,13 @@
+{
+  "name": "transaction_reports",
+  "ar": "تقارير الحوالات",
+  "en": "Transaction",
+  "icon": "fa-chart-line",
+  "icon_bg": "bg-fuchsia-50",
+  "icon_color": "text-fuchsia-600",
+  "version": "1.0.0",
+  "category": "عام",
+  "description": "",
+  "sort_order": 1,
+  "is_new": true
+}

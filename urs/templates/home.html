@@ -1,0 +1,524 @@
+{% extends "base.html" %}
+{% block title %}تطبيقات النظام — Odex ERP{% endblock %}
+{% block sidebar %}
+    <!-- Sidebar (Right side in Arabic RTL) — بدون اسم شركة -->
+    <aside class="w-64 bg-white border-l border-gray-200 flex flex-col justify-between hidden md:flex z-20">
+        <div>
+            {% include "partials/main_nav.html" with active="apps" %}
+        </div>
+
+        {% include "partials/sidebar_footer.html" %}
+    </aside>
+{% endblock %}
+{% block main %}
+
+    <!-- Main Content Area -->
+    <div class="flex-1 flex flex-col min-h-0">
+
+        <main class="p-6 space-y-6 max-w-7xl mx-auto w-full">
+
+            <!-- Hero Section -->
+            <div class="bg-gradient-to-l from-blue-900 via-indigo-900 to-blue-800 rounded-3xl p-8 text-white relative overflow-hidden shadow-lg">
+                <div class="absolute -left-20 -bottom-20 w-80 h-80 bg-blue-600/20 rounded-full blur-3xl pointer-events-none"></div>
+                <div class="absolute right-10 top-0 w-60 h-60 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none"></div>
+
+                <div class="relative z-10 text-center max-w-2xl mx-auto space-y-4">
+                    <h1 class="text-2xl md:text-3xl font-extrabold tracking-wide">تطبيقات النظام</h1>
+                    <p class="text-xs md:text-sm text-blue-200 leading-relaxed">اختر التطبيق المطلوب لبدء العمل، أو اكتب أي اسم، رقم، أو وصف للبحث الشامل</p>
+                    
+                    <div class="relative mt-4">
+                        <span class="absolute inset-y-0 right-0 flex items-center pr-4 pointer-events-none text-gray-400">
+                            <i class="fa-solid fa-magnifying-glass"></i>
+                        </span>
+                        <input id="appSearch" type="text" placeholder="ابحث عن أي اسم مثل: (تقرير مبيعات، كشف راتب، العملاء...)" class="w-full bg-white/95 text-gray-800 placeholder-gray-400 text-xs md:text-sm rounded-2xl py-3.5 pr-11 pl-20 focus:outline-none focus:ring-2 focus:ring-emerald-400 shadow-md transition">
+                        <div class="absolute inset-y-0 left-0 flex items-center pl-3">
+                            <span class="bg-gray-100 text-gray-500 text-[10px] font-bold px-2 py-1 rounded-lg border border-gray-200">Ctrl + K</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Statistics — real data (no static numbers) -->
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div class="bg-white p-4 rounded-2xl border border-gray-200 shadow-sm flex items-center justify-between">
+                    <div>
+                        <span class="text-[11px] text-gray-400 font-medium block mb-1">التقارير المفضلة</span>
+                        <span id="favTotalHome" class="text-xl font-bold text-gray-800">0</span>
+                        <span class="text-[11px] text-emerald-600 font-semibold block mt-2">من جهازك (☆)</span>
+                    </div>
+                    <div class="w-12 h-12 bg-amber-50 text-amber-500 rounded-2xl flex items-center justify-center text-xl">
+                        <i class="fa-regular fa-star"></i>
+                    </div>
+                </div>
+                <div class="bg-white p-4 rounded-2xl border border-gray-200 shadow-sm flex items-center justify-between">
+                    <div>
+                        <span class="text-[11px] text-gray-400 font-medium block mb-1">إجمالي التقارير</span>
+                        <span class="text-xl font-bold text-gray-800">{{ total_reports|default:0 }}</span>
+                        <span class="text-[11px] text-gray-500 font-semibold block mt-2">تقرير في النظام</span>
+                    </div>
+                    <div class="w-12 h-12 bg-purple-50 text-purple-500 rounded-2xl flex items-center justify-center text-xl">
+                        <i class="fa-solid fa-share-nodes"></i>
+                    </div>
+                </div>
+                <div class="bg-white p-4 rounded-2xl border border-gray-200 shadow-sm flex items-center justify-between">
+                    <div>
+                        <span class="text-[11px] text-gray-400 font-medium block mb-1">إجمالي الادخالات</span>
+                        <span class="text-xl font-bold text-gray-800">{{ total_forms|default:0 }}</span>
+                        <span class="text-[11px] text-gray-500 font-semibold block mt-2">إدخال في النظام</span>
+                    </div>
+                    <div class="w-12 h-12 bg-blue-50 text-blue-500 rounded-2xl flex items-center justify-center text-xl">
+                        <i class="fa-regular fa-clock"></i>
+                    </div>
+                </div>
+                <div class="bg-white p-4 rounded-2xl border border-gray-200 shadow-sm flex items-center justify-between">
+                    <div>
+                        <span class="text-[11px] text-gray-400 font-medium block mb-1">لوحات المعلومات</span>
+                        <span class="text-xl font-bold text-gray-800">{{ reports_with_charts|default:0 }}</span>
+                        <span class="text-[11px] text-gray-500 font-semibold block mt-2">تقارير بمخططات + {{ connections_count|default:0 }} اتصال</span>
+                    </div>
+                    <div class="w-12 h-12 bg-emerald-50 text-emerald-500 rounded-2xl flex items-center justify-center text-xl">
+                        <i class="fa-solid fa-chart-pie"></i>
+                    </div>
+                </div>
+            </div>
+
+            <!-- تقاريري — تقارير مفضلة محفوظة على هذا الجهاز -->
+            <div id="myReportsSection" class="hidden">
+                <div class="flex items-center justify-between mb-3">
+                    <h2 class="text-base font-bold text-gray-800 flex items-center gap-2">
+                        <i class="fa-solid fa-star text-amber-500"></i>
+                        تقاريري
+                        <span id="myReportsCount" class="text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-bold">0</span>
+                    </h2>
+                    <a href="/my-reports/" class="text-[11px] text-emerald-600 hover:text-emerald-700 font-bold">عرض الكل ←</a>
+                </div>
+                <div id="myReportsGrid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4"></div>
+            </div>
+
+            <!-- Filter Controls -->
+            <div class="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 pt-2">
+                <h2 class="text-base font-bold text-gray-800">جميع التطبيقات</h2>
+                
+                <div class="flex items-center gap-2 flex-wrap">
+                    <button class="w-9 h-9 rounded-xl bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 flex items-center justify-center shadow-sm">
+                        <i class="fa-solid fa-table-cells text-xs"></i>
+                    </button>
+                    <button class="w-9 h-9 rounded-xl bg-white border border-gray-200 text-gray-400 hover:bg-gray-50 flex items-center justify-center shadow-sm">
+                        <i class="fa-solid fa-list text-xs"></i>
+                    </button>
+
+                    <div class="relative">
+                        <select class="bg-white border border-gray-200 text-gray-600 text-xs rounded-xl px-3 py-2 pr-8 appearance-none focus:outline-none shadow-sm cursor-pointer">
+                            <option>الكل</option>
+                            <option>أنظمة مالية</option>
+                            <option>إدارية</option>
+                        </select>
+                        <span class="absolute inset-y-0 left-0 flex items-center pl-2.5 pointer-events-none text-gray-400 text-xs">
+                            <i class="fa-solid fa-chevron-down"></i>
+                        </span>
+                    </div>
+
+                    <div class="relative">
+                        <select class="bg-white border border-gray-200 text-gray-600 text-xs rounded-xl px-3 py-2 pr-8 appearance-none focus:outline-none shadow-sm cursor-pointer">
+                            <option>ترتيب أبجدي</option>
+                            <option>الأحدث</option>
+                        </select>
+                        <span class="absolute inset-y-0 left-0 flex items-center pl-2.5 pointer-events-none text-gray-400 text-xs">
+                            <i class="fa-solid fa-arrow-down-up"></i>
+                        </span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Applications Grid — DYNAMIC from DB + odex/system folders -->
+            <div id="appsGrid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 pb-12">
+                {% for app in apps %}
+                <a href="/app/{{ app.name }}/" class="app-card bg-white p-5 rounded-3xl border border-gray-200 shadow-sm hover:shadow-md transition relative flex flex-col justify-between group text-right" data-name="{{ app.name }}" data-ar="{{ app.ar }}" data-desc="{{ app.description }}">
+                    <button class="absolute top-4 left-4 text-gray-300 hover:text-amber-400 transition text-sm" onclick="event.preventDefault(); event.stopPropagation();">
+                        <i class="fa-regular fa-star"></i>
+                    </button>
+                    <div>
+                        <div class="w-12 h-12 {{ app.icon_bg }} {{ app.icon_color }} rounded-2xl flex items-center justify-center text-lg mb-4 shadow-sm">
+                            {% include "partials/app_icon.html" with icon=app.icon app_name=app.name %}
+                        </div>
+                        <h3 class="text-sm font-bold text-gray-800 mb-1">{{ app.ar }}</h3>
+                        <p class="text-[11px] text-gray-500 leading-relaxed mb-4">{{ app.description }}</p>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        {% if app.is_new %}<span class="inline-block bg-emerald-50 text-emerald-600 text-[10px] font-bold px-2.5 py-0.5 rounded-full">جديد</span>{% endif %}
+                        <span class="text-[10px] text-gray-400">{{ app.version }}</span>
+                        <span class="mr-auto text-[10px] text-indigo-600">عرض →</span>
+                    </div>
+                </a>
+                {% endfor %}
+            </div>
+
+            <div id="noResults" class="hidden text-center py-12 text-gray-500 text-sm">لا توجد نتائج للبحث</div>
+
+            <footer class="border-t border-gray-200 py-6 mt-auto flex flex-col md:flex-row items-center justify-between text-xs text-gray-500 gap-4">
+                <div class="flex items-center gap-6">
+                    <a href="#" class="hover:text-emerald-600 transition">سياسة الخصوصية</a>
+                    <a href="#" class="hover:text-emerald-600 transition">الشروط والأحكام</a>
+                    <a href="#" class="hover:text-emerald-600 transition">مركز المساعدة</a>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span class="bg-emerald-100 text-emerald-700 font-bold px-2 py-0.5 rounded text-[10px]">V2.0.0</span>
+                    <span>جميع الحقوق محفوظة © 2026</span>
+                </div>
+            </footer>
+
+        </main>
+    </div>
+
+    {% block modals %}{% include "partials/support_modal.html" %}
+    <div id="addAppModal" class="hidden fixed inset-0 z-[80] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4" onclick="if(event.target===this)closeAddApp()">
+        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden">
+            <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-indigo-50">
+                <h3 class="text-sm font-bold text-slate-800 flex items-center gap-2"><i class="fa-solid fa-plus text-indigo-600"></i> إضافة تطبيق جديد</h3>
+                <button onclick="closeAddApp()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="p-5 space-y-3 text-xs">
+                <p class="text-[11px] text-slate-500">يُنشأ مجلد <span class="font-mono" dir="ltr">odex/system/&lt;name&gt;/</span> مع <span class="font-mono" dir="ltr">metadata.json</span> ويظهر آخر القائمة.</p>
+                <div class="grid grid-cols-2 gap-3">
+                    <div><label class="block font-semibold text-slate-700 mb-1">الاسم البرمجي *</label><input id="addAppName" dir="ltr" placeholder="my_app" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono"></div>
+                    <div><label class="block font-semibold text-slate-700 mb-1">الاسم العربي *</label><input id="addAppAr" placeholder="تطبيقي" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"></div>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div><label class="block font-semibold text-slate-700 mb-1">الاسم الإنجليزي</label><input id="addAppEn" dir="ltr" placeholder="My App" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"></div>
+                    <div class="relative"><label class="block font-semibold text-slate-700 mb-1">الأيقونة</label>
+                        <input type="hidden" id="addAppIcon" value="fa-cube">
+                        <button type="button" id="addAppIconBtn" onclick="toggleAppIconPanel(event)" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 flex items-center gap-2 hover:border-indigo-400">
+                            <span id="addAppIconPrev" class="w-7 h-7 bg-indigo-100 text-indigo-600 rounded-lg flex items-center justify-center"><i class="fa-solid fa-cube"></i></span>
+                            <span id="addAppIconName" class="font-mono text-[11px]" dir="ltr">fa-cube</span>
+                            <i class="fa-solid fa-chevron-down mr-auto text-slate-400 text-[10px]"></i>
+                        </button>
+                        <div id="addAppIconPanel" class="hidden fixed inset-0 z-[95] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4" onclick="if(event.target===this)closeAppIconPanel()">
+                            <div class="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden">
+                                <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-indigo-50 shrink-0">
+                                    <h3 class="text-sm font-bold text-slate-800 flex items-center gap-2"><i class="fa-solid fa-icons text-indigo-600"></i> اختر الأيقونة</h3>
+                                    <button type="button" onclick="closeAppIconPanel()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+                                </div>
+                                <div class="p-4 space-y-3 overflow-y-auto custom-scroll">
+                                    <input type="text" id="addAppIconSearch" oninput="renderAppIcons()" placeholder="بحث بالاسم (cube) أو العربي أو التصنيف..." class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-indigo-500">
+                                    <div class="flex items-center gap-2">
+                                        <button type="button" onclick="document.getElementById('addAppIconFile').click()" class="flex-1 py-2 border-2 border-dashed border-indigo-300 hover:border-indigo-500 text-indigo-700 rounded-xl text-xs font-bold"><i class="fa-solid fa-upload"></i> رفع مخصص (SVG/PNG ≤512KB)</button>
+                                        <input type="file" id="addAppIconFile" accept=".svg,.png,.jpg,.jpeg,.webp" class="hidden" onchange="uploadAppIcon(this)">
+                                        <span id="addAppIconUpMsg" class="text-[11px] text-slate-500"></span>
+                                    </div>
+                                    <div id="addAppIconCats" class="flex flex-wrap gap-1.5"></div>
+                                    <div id="addAppIconGrid" class="grid grid-cols-4 sm:grid-cols-6 gap-2"></div>
+                                </div>
+                                <div class="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between shrink-0">
+                                    <span class="text-[11px] text-slate-500">المحدد: <span id="addAppIconNameM" class="font-mono" dir="ltr">fa-cube</span></span>
+                                    <button type="button" onclick="closeAppIconPanel()" class="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold">تم</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                    <div><label class="block font-semibold text-slate-700 mb-1">التصنيف</label><input id="addAppCat" placeholder="عام" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"></div>
+                    <div><label class="block font-semibold text-slate-700 mb-1">لون البادج</label>
+                        <input type="hidden" id="addAppIconBg" value="bg-indigo-50">
+                        <input type="hidden" id="addAppIconFg" value="text-indigo-600">
+                        <div id="addAppBadgeRow" class="flex flex-wrap gap-1.5 pt-1"></div>
+                    </div>
+                <div><label class="block font-semibold text-slate-700 mb-1">الوصف</label><textarea id="addAppDesc" rows="2" placeholder="وصف مختصر" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"></textarea></div>
+                <div id="addAppMsg" class="hidden rounded-xl px-3 py-2"></div>
+            </div>
+            <div class="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2">
+                <button onclick="closeAddApp()" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs">إلغاء</button>
+                <button id="addAppBtn" onclick="submitAddApp()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold">إنشاء التطبيق</button>
+            </div>
+        </div>
+    </div>
+    {% endblock %}
+    {% endblock %}
+    {% block scripts %}
+    <script>
+        // Dynamic search — filters app-card via /api/apps/?q=...
+        const searchInput = document.getElementById('appSearch');
+        const appsGrid = document.getElementById('appsGrid');
+        const noResults = document.getElementById('noResults');
+        let allApps = Array.from(document.querySelectorAll('.app-card'));
+
+        async function fetchApps(q) {
+            try {
+                const res = await fetch(`/api/apps/?q=${encodeURIComponent(q)}`);
+                const data = await res.json();
+                // Re-render grid dynamically — link to /app/<name>/ with الادخالات/التقارير
+                appsGrid.innerHTML = data.apps.map(app => `
+                    <a href="/app/${app.name}/" class="bg-white p-5 rounded-3xl border border-gray-200 shadow-sm hover:shadow-md transition relative flex flex-col justify-between group text-right">
+                        <button class="absolute top-4 left-4 text-gray-300 hover:text-amber-400 transition text-sm" onclick="event.preventDefault();"><i class="fa-regular fa-star"></i></button>
+                        <div>
+                            <div class="w-12 h-12 ${app.icon_bg} ${app.icon_color} rounded-2xl flex items-center justify-center text-lg mb-4 shadow-sm">
+                                ${appIconHtml(app)}
+                            </div>
+                            <h3 class="text-sm font-bold text-gray-800 mb-1">${app.ar}</h3>
+                            <p class="text-[11px] text-gray-500 leading-relaxed mb-4">${app.description || ''}</p>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            ${app.is_new ? '<span class="inline-block bg-emerald-50 text-emerald-600 text-[10px] font-bold px-2.5 py-0.5 rounded-full">جديد</span>' : ''}
+                            <span class="text-[10px] text-gray-400">${app.version}</span>
+                            <span class="mr-auto text-[10px] text-indigo-600">عرض →</span>
+                        </div>
+                    </a>
+                `).join('') + addAppCardHtml();
+                noResults.classList.toggle('hidden', data.apps.length > 0);
+            } catch(e) {
+                // Fallback: client-side filter
+                const ql = q.toLowerCase();
+                let visible = 0;
+                allApps.forEach(card => {
+                    const name = (card.dataset.name + ' ' + card.dataset.ar + ' ' + card.dataset.desc).toLowerCase();
+                    const show = !ql || name.includes(ql);
+                    card.style.display = show ? '' : 'none';
+                    if(show) visible++;
+                });
+                noResults.classList.toggle('hidden', visible > 0);
+                if(q) {
+                    // Also try API in background
+                    fetch(`/api/apps/?q=${encodeURIComponent(q)}`).then(r=>r.json()).then(d=>{
+                        if(d.apps.length !== visible) fetchApps(q);
+                    });
+                }
+            }
+        }
+
+        let searchTimeout;
+        searchInput.addEventListener('input', (e) => {
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(() => fetchApps(e.target.value.trim()), 300);
+        });
+        // Ctrl+K focus
+        document.addEventListener('keydown', (e) => {
+            if((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+                e.preventDefault();
+                searchInput.focus();
+            }
+        });
+        // Also support direct typing without API (instant)
+        searchInput.addEventListener('input', (e) => {
+            const q = e.target.value.toLowerCase();
+            if(!q) {
+                // If API not yet, show all
+                document.querySelectorAll('.app-card').forEach(c=>c.style.display='');
+                noResults.classList.add('hidden');
+            }
+        });
+        // Real favorites total from this device (keys: favorites_<app> + my_reports)
+        (function(){
+            try{
+                let total = 0;
+                for(let i=0; i<localStorage.length; i++){
+                    const k = localStorage.key(i);
+                    if(k && k.indexOf('favorites_') === 0){
+                        try{ total += (JSON.parse(localStorage.getItem(k)) || []).length; }catch(e){}
+                    }
+                }
+                try{ total += (JSON.parse(localStorage.getItem('my_reports') || '[]') || []).length; }catch(e){}
+                const el = document.getElementById('favTotalHome');
+                if(el) el.textContent = total;
+            }catch(e){}
+        })();
+        // تقاريري — عرض التقارير المفضلة المحفوظة
+        let HOME_APP_AR = null;
+        async function homeAppArMap(){
+            if(HOME_APP_AR) return HOME_APP_AR;
+            HOME_APP_AR = {};
+            try{
+                const res = await fetch('/api/apps/');
+                const data = await res.json();
+                (data.apps || []).forEach(a=>{ if(a && a.name) HOME_APP_AR[a.name] = a.ar || a.name; });
+            }catch(e){}
+            return HOME_APP_AR;
+        }
+        async function renderMyReportsHome(){
+            try{
+                const list = (typeof getMyReports === 'function') ? getMyReports() : [];
+                const sec = document.getElementById('myReportsSection');
+                const grid = document.getElementById('myReportsGrid');
+                const cnt = document.getElementById('myReportsCount');
+                if(!sec || !grid) return;
+                if(!list.length){ sec.classList.add('hidden'); return; }
+                sec.classList.remove('hidden');
+                if(cnt) cnt.textContent = list.length;
+                const arMap = await homeAppArMap();
+                const appAr = (n)=>arMap[n] || n;
+                grid.innerHTML = list.map(r=>{
+                    const url = '/app/' + encodeURIComponent(r.app) + '/report/' + encodeURIComponent(r.file) + '/';
+                    return `<div class="bg-white p-4 rounded-3xl border border-amber-200 shadow-sm hover:shadow-md transition relative flex flex-col justify-between text-right">
+                        <button onclick="toggleMyReport('${String(r.app).replace(/'/g, "\\'")}', '${String(r.file).replace(/'/g, "\\'")}', '${String(r.name || '').replace(/'/g, "\\'")}')" title="إزالة من تقاريري" class="absolute top-4 left-4 w-8 h-8 flex items-center justify-center rounded-xl bg-amber-50 text-amber-500 hover:text-rose-500 transition text-sm"><i class="fa-solid fa-star"></i></button>
+                        <div>
+                            <div class="w-12 h-12 bg-amber-100 text-amber-600 rounded-2xl flex items-center justify-center text-lg mb-4 shadow-sm">
+                                <i class="fa-solid fa-chart-line"></i>
+                            </div>
+                            <h3 class="text-sm font-bold text-gray-800 mb-1">${String(r.name || appAr(r.app)).replace(/</g, '&lt;')}</h3>
+                            <p class="text-[11px] text-gray-500 leading-relaxed mb-4">التطبيق: ${String(appAr(r.app)).replace(/</g, '&lt;')}</p>
+                        </div>
+                        <a href="${url}" class="inline-flex items-center justify-center gap-1 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold"><i class="fa-solid fa-eye text-[10px]"></i> فتح التقرير</a>
+                    </div>`;
+                }).join('');
+            }catch(e){}
+        }
+        document.addEventListener('DOMContentLoaded', function(){ try{ renderMyReportsHome(); }catch(e){} try{ appendAddCard(); }catch(e){} });
+        renderMyReportsHome();
+        // ── إضافة تطبيق: بطاقة الإضافة في آخر الشبكة ──
+        function addAppCardHtml(){
+            return `<button id="addAppCard" onclick="openAddApp()" class="bg-white/60 p-5 rounded-3xl border-2 border-dashed border-indigo-200 hover:border-indigo-400 hover:bg-indigo-50/50 transition flex flex-col items-center justify-center gap-2 min-h-[148px] text-center">`
+                + `<span class="w-12 h-12 bg-indigo-100 text-indigo-600 rounded-2xl flex items-center justify-center text-lg"><i class="fa-solid fa-plus"></i></span>`
+                + `<span class="text-sm font-bold text-indigo-700">إضافة تطبيق</span>`
+                + `<span class="text-[11px] text-slate-400">مجلد + metadata.json</span></button>`;
+        }
+        function appendAddCard(){
+            const grid = document.getElementById('appsGrid');
+            if(grid && !document.getElementById('addAppCard')) grid.insertAdjacentHTML('beforeend', addAppCardHtml());
+        }
+        // ── منتقي الأيقونات: بحث + تصنيف + معاينة ──
+        const APP_ICON_CHOICES = [
+            {c:'fa-cube',ar:'مكعب',cat:'عام'},{c:'fa-folder-open',ar:'مجلد',cat:'عام'},
+            {c:'fa-gear',ar:'إعدادات',cat:'عام'},{c:'fa-boxes-stacked',ar:'مخزون',cat:'عام'},
+            {c:'fa-chart-line',ar:'مخطط',cat:'مالية'},{c:'fa-coins',ar:'عملات',cat:'مالية'},
+            {c:'fa-calculator',ar:'حاسبة',cat:'مالية'},{c:'fa-wallet',ar:'محفظة',cat:'مالية'},
+            {c:'fa-industry',ar:'صناعة',cat:'عمليات'},{c:'fa-truck',ar:'نقل',cat:'عمليات'},
+            {c:'fa-warehouse',ar:'مستودع',cat:'عمليات'},{c:'fa-file-contract',ar:'عقود',cat:'عمليات'},
+            {c:'fa-server',ar:'خادم',cat:'تقنية'},{c:'fa-database',ar:'بيانات',cat:'تقنية'},
+            {c:'fa-bolt',ar:'طاقة',cat:'تقنية'},{c:'fa-clipboard-list',ar:'مهام',cat:'تقنية'},
+            {c:'fa-users',ar:'أفراد',cat:'موارد'},{c:'fa-heart-pulse',ar:'صحة',cat:'موارد'},
+            {c:'fa-shield-halved',ar:'حماية',cat:'موارد'},{c:'fa-store',ar:'متجر',cat:'موارد'},
+            {c:'fa-screwdriver-wrench',ar:'صيانة',cat:'صيانة'},{c:'fa-wrench',ar:'مفتاح',cat:'صيانة'},
+            {c:'fa-car',ar:'مركبة',cat:'صيانة'},{c:'fa-helmet-safety',ar:'سلامة',cat:'صيانة'},
+        ];
+        let appIconCat = '';
+        // ── عرض الأيقونة: ملف مخصص أو FontAwesome ──
+        function appIconHtml(app){
+            if(app && app.icon && String(app.icon).startsWith('file:')) return `<img src="/api/apps/${encodeURIComponent(app.name)}/icon-file" alt="app icon" style="max-width:1.6em;max-height:1.6em;object-fit:contain">`;
+            return `<i class="fa-solid ${app ? app.icon : 'fa-cube'}"></i>`;
+        }
+        const APP_BADGES = [
+            ['bg-emerald-50','text-emerald-600'],['bg-blue-50','text-blue-600'],
+            ['bg-violet-50','text-violet-600'],['bg-amber-50','text-amber-600'],
+            ['bg-rose-50','text-rose-600'],['bg-cyan-50','text-cyan-600'],
+            ['bg-fuchsia-50','text-fuchsia-600'],['bg-lime-50','text-lime-600'],
+            ['bg-orange-50','text-orange-600'],['bg-teal-50','text-teal-600'],
+            ['bg-indigo-50','text-indigo-600'],['bg-pink-50','text-pink-600'],
+        ];
+        function renderAppBadges(){
+            const cur = document.getElementById('addAppIconBg').value;
+            document.getElementById('addAppBadgeRow').innerHTML = APP_BADGES.map(b=>`<button type="button" onclick="pickAppBadge('${b[0]}','${b[1]}')" title="${b[0]}" class="w-8 h-8 rounded-xl flex items-center justify-center ${b[0]} ${cur===b[0]?'ring-2 ring-offset-1 ring-indigo-500':'hover:ring-2 hover:ring-offset-1 hover:ring-slate-300'}"><i class="fa-solid fa-cube text-sm ${b[1]}"></i></button>`).join('');
+        }
+        function pickAppBadge(bg, fg){
+            document.getElementById('addAppIconBg').value = bg;
+            document.getElementById('addAppIconFg').value = fg;
+            renderAppBadges();
+        }
+        function openAddApp(){
+            const box = document.getElementById('addAppMsg');
+            if(box) box.classList.add('hidden');
+            appIconCat = '';
+            const si = document.getElementById('addAppIconSearch');
+            if(si) si.value = '';
+            renderAppIcons();
+            renderAppBadges();
+            openModal('addAppModal');
+        }
+        function toggleAppIconPanel(e){
+            if(e){ e.stopPropagation(); }
+            const p = document.getElementById('addAppIconPanel');
+            p.classList.toggle('hidden');
+            if(!p.classList.contains('hidden')){ renderAppIcons(); const si = document.getElementById('addAppIconSearch'); if(si) si.focus(); }
+        }
+        function closeAppIconPanel(){
+            document.getElementById('addAppIconPanel').classList.add('hidden');
+        }
+        document.addEventListener('click', function(e){
+            // تجاهل النقرات على عناصر أُزيلت من DOM أثناء الفقاعة (إعادة رسم الشبكة) —
+            // وإلا اعتبرها النقر-الخارجي خطأً وأغلق اللوحة عند اختيار الفئة
+            if(!e.target || !document.contains(e.target)) return;
+            const p = document.getElementById('addAppIconPanel');
+            if(p && !p.classList.contains('hidden') && !p.contains(e.target) && !e.target.closest('#addAppIconBtn')) p.classList.add('hidden');
+        });
+        function setAppIconCat(cat){
+            appIconCat = (appIconCat === cat) ? '' : cat;
+            renderAppIcons();
+        }
+        function renderAppIcons(){
+            const q = ((document.getElementById('addAppIconSearch') || {}).value || '').trim().toLowerCase();
+            const cats = [...new Set(APP_ICON_CHOICES.map(i=>i.cat))];
+            document.getElementById('addAppIconCats').innerHTML = cats.map(c=>`<button type="button" onclick="setAppIconCat('${c}')" class="text-[10px] px-2 py-0.5 rounded-full border font-bold ${appIconCat===c?'bg-indigo-600 text-white border-indigo-600':'bg-slate-50 text-slate-500 border-slate-200'}">${c}</button>`).join('');
+            const cur = document.getElementById('addAppIcon').value;
+            const list = APP_ICON_CHOICES.filter(i=>(!appIconCat || i.cat===appIconCat) && (!q || i.c.toLowerCase().includes(q) || i.ar.includes(q) || i.cat.includes(q)));
+            document.getElementById('addAppIconGrid').innerHTML = list.length ? list.map(i=>`<button type="button" onclick="pickAppIcon('${i.c}')" title="${i.c}" class="flex flex-col items-center gap-1.5 p-3 rounded-2xl border-2 ${cur===i.c?'border-indigo-500 bg-indigo-50':'border-slate-100 hover:border-indigo-300'}"><i class="fa-solid ${i.c} text-2xl ${cur===i.c?'text-indigo-600':'text-slate-600'}"></i><span class="text-[10px] text-slate-500">${i.ar}</span><span class="font-mono text-[8px] text-slate-400" dir="ltr">${i.c}</span></button>`).join('') : '<p class="col-span-4 sm:col-span-6 text-center text-slate-400 text-sm py-8">لا نتائج مطابقة</p>';
+        }
+        function pickAppIcon(cls){
+            setAppIconValue(cls, null);
+        }
+        async function uploadAppIcon(input){
+            const msg = document.getElementById('addAppIconUpMsg');
+            const f = input && input.files && input.files[0];
+            if(!f) return;
+            if(msg){ msg.textContent = 'جارٍ الرفع...'; }
+            try{
+                const fd = new FormData();
+                fd.append('file', f);
+                const res = await fetch('/api/apps/icon/upload/', {method:'POST', body: fd});
+                const data = await res.json();
+                if(res.ok && data.token){
+                    setAppIconValue('upload:' + data.token, {name: f.name, url: URL.createObjectURL(f)});
+                    try{ notify('تم رفع الأيقونة ✓', 'success'); }catch(e){}
+                } else {
+                    if(msg){ msg.textContent = data.error || 'فشل الرفع'; }
+                    try{ notify(data.error || 'فشل الرفع', 'error'); }catch(e){}
+                }
+            }catch(e){
+                if(msg){ msg.textContent = 'تعذر الاتصال'; }
+            }
+            input.value = '';
+        }
+        function setAppIconValue(val, custom){
+            document.getElementById('addAppIcon').value = val;
+            const msg = document.getElementById('addAppIconUpMsg');
+            if(custom){
+                document.getElementById('addAppIconPrev').innerHTML = `<img src="${custom.url}" alt="" style="max-width:100%;max-height:100%;object-fit:contain">`;
+                document.getElementById('addAppIconName').textContent = custom.name;
+                const nm = document.getElementById('addAppIconNameM');
+                if(nm) nm.textContent = custom.name;
+                if(msg){ msg.textContent = custom.name; }
+            } else {
+                document.getElementById('addAppIconPrev').innerHTML = `<i class="fa-solid ${val}"></i>`;
+                document.getElementById('addAppIconName').textContent = val;
+                const nm = document.getElementById('addAppIconNameM');
+                if(nm) nm.textContent = val;
+                if(msg){ msg.textContent = ''; }
+            }
+            const panel = document.getElementById('addAppIconPanel');
+            if(panel && custom) panel.classList.add('hidden');
+            renderAppIcons();
+        }
+        function closeAddApp(){ closeModal('addAppModal'); }
+        async function submitAddApp(){
+            const box = document.getElementById('addAppMsg');
+            box.classList.add('hidden');
+            const body = {
+                name: (document.getElementById('addAppName').value || '').trim().toLowerCase(),
+                ar: (document.getElementById('addAppAr').value || '').trim(),
+                en: (document.getElementById('addAppEn').value || '').trim(),
+                icon: document.getElementById('addAppIcon').value,
+                icon_bg: document.getElementById('addAppIconBg').value,
+                icon_color: document.getElementById('addAppIconFg').value,
+                category: (document.getElementById('addAppCat').value || '').trim(),
+                description: (document.getElementById('addAppDesc').value || '').trim(),
+            };
+            if(!/^[a-z][a-z0-9_]*$/.test(body.name)){ box.textContent = 'الاسم البرمجي: أحرف لاتينية صغيرة تبدأ بحرف'; box.className = 'rounded-xl px-3 py-2 bg-rose-50 text-rose-600 border border-rose-200 text-xs'; return; }
+            if(!body.ar){ box.textContent = 'الاسم العربي مطلوب'; box.className = 'rounded-xl px-3 py-2 bg-rose-50 text-rose-600 border border-rose-200 text-xs'; return; }
+            const btn = document.getElementById('addAppBtn');
+            btn.disabled = true;
+            try{
+                const res = await fetch('/api/apps/create/', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+                const data = await res.json();
+                if(res.ok){ try{ notify('تم إنشاء التطبيق ✓', 'success'); }catch(e){} setTimeout(()=>location.reload(), 700); }
+                else { box.textContent = data.error || 'فشل الإنشاء'; box.className = 'rounded-xl px-3 py-2 bg-rose-50 text-rose-600 border border-rose-200 text-xs'; }
+            }catch(e){ box.textContent = 'تعذر الاتصال'; box.className = 'rounded-xl px-3 py-2 bg-rose-50 text-rose-600 border border-rose-200 text-xs'; }
+            btn.disabled = false;
+        }
+    </script>
+    {% endblock %}

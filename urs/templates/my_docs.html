@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% block title %}مستنداتي — Odex ERP{% endblock %}
+{% block sidebar %}
+    <aside class="w-64 bg-white border-l border-gray-200 flex flex-col justify-between hidden md:flex z-20">
+        <div>
+            {% include "partials/main_nav.html" with active="mydocs" %}
+        </div>
+        {% include "partials/sidebar_footer.html" %}
+    </aside>
+{% endblock %}
+{% block main %}
+    <div class="flex-1 flex flex-col min-h-0">
+        <main class="p-6 space-y-6 w-full">
+            <div class="flex items-center justify-between flex-wrap gap-3">
+                <h1 class="text-lg font-extrabold text-gray-800 flex items-center gap-2">
+                    <i class="fa-solid fa-folder-open text-emerald-600"></i> مستنداتي
+                    <span id="myDocsCount" class="text-[10px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-bold"></span>
+                </h1>
+                <p class="text-[11px] text-slate-400">مستندات محفوظة بحالتها من بانل الطباعة</p>
+            </div>
+
+            <div id="myDocsEmpty" class="hidden text-center py-16 bg-white rounded-3xl border border-gray-200">
+                <i class="fa-regular fa-folder-open text-5xl text-slate-200 mb-4 block"></i>
+                <p class="font-bold text-slate-700">لا توجد مستندات محفوظة بعد</p>
+                <p class="text-xs text-slate-400 mt-1 mb-4">من مشغل التقرير ← معاينة الطباعة ← زر حفظ — أدخل الاسم فيُحفظ هنا بحالته</p>
+            </div>
+
+            <div id="myDocsGrid" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4"></div>
+        </main>
+    </div>
+    <!-- عارض المستند المحفوظ -->
+    <div id="myDocViewModal" class="hidden fixed inset-0 z-[90] items-center justify-center p-4">
+        <div class="absolute inset-0 bg-slate-900/60" onclick="closeMyDocView()"></div>
+        <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-4xl h-[85vh] flex flex-col overflow-hidden">
+            <div class="px-5 py-3 border-b border-slate-200 flex items-center gap-2 bg-slate-50 shrink-0">
+                <i class="fa-solid fa-file-lines text-emerald-600"></i>
+                <h3 id="myDocViewTitle" class="text-sm font-bold text-slate-800 flex-1 truncate"></h3>
+                <a id="myDocDl" href="#" download class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold"><i class="fa-solid fa-download"></i> تنزيل</a>
+                <button onclick="closeMyDocView()" class="w-8 h-8 rounded-full hover:bg-slate-200 text-slate-500"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <iframe id="myDocFrame" sandbox="allow-same-origin allow-modals" class="flex-1 w-full bg-white" title="المستند"></iframe>
+        </div>
+    </div>
+    {% block modals %}{% include "partials/support_modal.html" %}{% endblock %}
+    {% endblock %}
+    {% block scripts %}
+    <script>
+        function myDocEsc(s){ return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+        async function renderMyDocs(){
+            const grid = document.getElementById('myDocsGrid');
+            const empty = document.getElementById('myDocsEmpty');
+            const cnt = document.getElementById('myDocsCount');
+            let docs = [];
+            try{
+                const r = await fetch('/api/my-docs/list/');
+                const d = await r.json();
+                if(d.error) throw new Error(d.error);
+                docs = d.docs || [];
+            }catch(e){ grid.innerHTML = `<p class="text-rose-500 text-center text-xs col-span-full">تعذر التحميل: ${myDocEsc(e.message || e)}</p>`; return; }
+            if(cnt) cnt.textContent = docs.length ? docs.length : '';
+            if(!docs.length){ grid.innerHTML = ''; empty.classList.remove('hidden'); return; }
+            empty.classList.add('hidden');
+            const kb = (n)=>{ n = Number(n) || 0; return n > 1048576 ? (n/1048576).toFixed(1) + 'MB' : Math.max(1, Math.round(n/1024)) + 'KB'; };
+            grid.innerHTML = docs.map(d=>`
+                <div class="bg-white rounded-3xl border border-slate-200 shadow-sm hover:shadow-md transition flex flex-col overflow-hidden">
+                    <div onclick="openMyDocView('${String(d.id).replace(/'/g, "\\'")}')" title="اضغط للمعاينة" class="h-48 bg-slate-100 border-b border-slate-100 overflow-hidden flex items-center justify-center p-2 cursor-pointer group">
+                        ${d.thumb
+                            ? `<img src="/api/my-docs/${encodeURIComponent(d.id)}/thumb/" alt="" loading="lazy" class="h-full object-contain shadow-md transition group-hover:scale-[1.03] group-hover:shadow-lg">`
+                            : `<i class="fa-solid fa-file-lines text-4xl text-slate-300 transition group-hover:scale-110"></i>`}
+                    </div>
+                    <div class="p-4 flex items-start gap-3">
+                        <div class="w-11 h-11 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center text-lg shrink-0"><i class="fa-solid fa-file-lines"></i></div>
+                        <div class="flex-1 min-w-0">
+                            <h3 class="text-sm font-bold text-gray-800 truncate">${myDocEsc(d.name)}</h3>
+                            <p class="text-[11px] text-gray-400 truncate">${myDocEsc(d.title || '')}</p>
+                            <p class="text-[10px] text-slate-400 mt-0.5">${myDocEsc(d.created || '').replace('T', ' ')} • ${kb(d.size)}</p>
+                        </div>
+                        <button onclick="deleteMyDoc('${String(d.id).replace(/'/g, "\\'")}')" title="حذف" class="w-8 h-8 flex items-center justify-center rounded-xl hover:bg-rose-50 text-slate-300 hover:text-rose-500 shrink-0 transition"><i class="fa-solid fa-trash-can text-xs"></i></button>
+                    </div>
+                    <div class="px-4 pb-2 flex gap-2">
+                        <button onclick="openMyDocView('${String(d.id).replace(/'/g, "\\'")}')" class="flex-1 inline-flex items-center justify-center gap-1 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold"><i class="fa-solid fa-eye text-[10px]"></i> عرض</button>
+                        <button onclick="printMyDoc('${String(d.id).replace(/'/g, "\\'")}')" title="طباعة المستند" class="inline-flex items-center justify-center px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold"><i class="fa-solid fa-print text-[10px]"></i></button>
+                        <a href="/api/my-docs/${encodeURIComponent(d.id)}/" download="${myDocEsc(d.name)}.html" title="تنزيل HTML" class="inline-flex items-center justify-center px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold"><i class="fa-solid fa-download text-[10px]"></i></a>
+                    </div>
+                    <div class="px-4 pb-4 flex gap-2">
+                        <button disabled title="آلية التوقيع والاعتماد — لاحقاً" class="flex-1 inline-flex items-center justify-center gap-1 px-3 py-1.5 bg-slate-50 text-slate-400 rounded-xl text-[11px] font-bold cursor-not-allowed"><i class="fa-solid fa-signature text-[10px]"></i> توقيع واعتماد <span class="text-[9px] bg-slate-200 px-1.5 py-0.5 rounded-full">قريباً</span></button>
+                        <button disabled title="الإرسال — عند تجهيز تطبيق التخويل" class="flex-1 inline-flex items-center justify-center gap-1 px-3 py-1.5 bg-slate-50 text-slate-400 rounded-xl text-[11px] font-bold cursor-not-allowed"><i class="fa-solid fa-paper-plane text-[10px]"></i> إرسال <span class="text-[9px] bg-slate-200 px-1.5 py-0.5 rounded-full">قريباً</span></button>
+                    </div>
+                </div>`).join('');
+        }
+        function openMyDocView(id){
+            const frame = document.getElementById('myDocFrame');
+            frame.src = '/api/my-docs/' + encodeURIComponent(id) + '/';
+            document.getElementById('myDocDl').href = '/api/my-docs/' + encodeURIComponent(id) + '/';
+            const m = document.getElementById('myDocViewModal');
+            m.classList.remove('hidden'); m.classList.add('flex');
+            if(typeof lockScroll === 'function') lockScroll();
+            fetch('/api/my-docs/list/').then(r=>r.json()).then(d=>{
+                const hit = ((d && d.docs) || []).find(x=>String(x.id) === String(id));
+                document.getElementById('myDocViewTitle').textContent = (hit && hit.name) || '';
+            }).catch(()=>{});
+        }
+        function closeMyDocView(){
+            const m = document.getElementById('myDocViewModal');
+            m.classList.add('hidden'); m.classList.remove('flex');
+            document.getElementById('myDocFrame').src = 'about:blank';
+            if(typeof unlockScroll === 'function') unlockScroll();
+        }
+        function printMyDoc(id){
+            // طباعة المستند المحفوظ عبر iframe مؤقت (من الملف المشفر بعد فكه خادمياً)
+            try{ notify('جارٍ تجهيز الطباعة...', 'info'); }catch(e){}
+            const fr = document.createElement('iframe');
+            fr.style.cssText = 'position:fixed;width:0;height:0;border:0;visibility:hidden';
+            fr.src = '/api/my-docs/' + encodeURIComponent(id) + '/';
+            fr.onload = function(){
+                try{ fr.contentWindow.print(); }catch(e){ try{ notify('تعذر الطباعة', 'error'); }catch(e2){} }
+                setTimeout(()=>{ try{ fr.remove(); }catch(e){} }, 30000);
+            };
+            fr.onerror = function(){ try{ notify('تعذر تحميل المستند', 'error'); }catch(e){} try{ fr.remove(); }catch(e){} };
+            document.body.appendChild(fr);
+        }
+        async function deleteMyDoc(id){
+            if(!confirm('حذف هذا المستند نهائياً؟')) return;
+            try{
+                const r = await fetch('/api/my-docs/delete/', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id: id})});
+                const d = await r.json();
+                if(!r.ok || d.error) throw new Error((d && d.error) || 'فشل الحذف');
+                try{ notify('تم حذف المستند', 'success'); }catch(e){}
+                renderMyDocs();
+            }catch(e){ try{ notify(String((e && e.message) || e), 'error'); }catch(e2){} }
+        }
+        document.addEventListener('keydown', (e)=>{ if(e.key === 'Escape'){ const m = document.getElementById('myDocViewModal'); if(m && !m.classList.contains('hidden')) closeMyDocView(); } });
+        document.addEventListener('DOMContentLoaded', function(){ try{ renderMyDocs(); }catch(e){} });
+        renderMyDocs();
+    </script>
+    {% endblock %}

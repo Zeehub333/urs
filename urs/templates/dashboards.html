@@ -1,0 +1,246 @@
+{% extends "base.html" %}
+{% block title %}لوحات المعلومات — Odex ERP{% endblock %}
+{% block sidebar %}
+    <aside class="w-64 bg-white border-l border-gray-200 flex flex-col justify-between hidden md:flex z-20">
+        <div>
+            {% include "partials/main_nav.html" with active="dashboards" %}
+        </div>
+        {% include "partials/sidebar_footer.html" %}
+    </aside>
+{% endblock %}
+{% block main %}
+    <div class="flex-1 flex flex-col min-h-0">
+        <main class="p-6 space-y-6 w-full">
+            <div class="flex items-center justify-between flex-wrap gap-3">
+                <h1 class="text-lg font-extrabold text-gray-800 flex items-center gap-2">
+                    <i class="fa-solid fa-chart-pie text-indigo-600"></i> لوحات المعلومات
+                    <span id="dashCount" class="text-[10px] bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-bold"></span>
+                </h1>
+                <button onclick="openDashPick()" class="inline-flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-sm"><i class="fa-solid fa-plus"></i> إضافة مخطط</button>
+            </div>
+
+            <div id="dashEmpty" class="hidden text-center py-16 bg-white rounded-3xl border border-gray-200">
+                <i class="fa-solid fa-chart-pie text-5xl text-slate-200 mb-4 block"></i>
+                <p class="font-bold text-slate-700">لا توجد مخططات بعد</p>
+                <p class="text-xs text-slate-400 mt-1 mb-4">أضف مخططاً من أي تقرير عبر زر إضافة مخطط</p>
+                <button onclick="openDashPick()" class="inline-flex items-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold"><i class="fa-solid fa-plus"></i> إضافة مخطط</button>
+            </div>
+
+            <div id="dashGrid" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4"></div>
+        </main>
+    </div>
+    <!-- مودال اختيار المخطط: شجرة تطبيق ← تقرير ← مخطط -->
+    <div id="dashPickModal" class="hidden fixed inset-0 z-[90] items-center justify-center p-4">
+        <div class="absolute inset-0 bg-slate-900/60" onclick="closeDashPick()"></div>
+        <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[85vh] flex flex-col overflow-hidden">
+            <div class="px-5 py-4 border-b border-slate-100 flex items-center gap-3 shrink-0">
+                <span class="w-10 h-10 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0"><i class="fa-solid fa-diagram-project"></i></span>
+                <div class="flex-1 min-w-0">
+                    <h3 class="font-bold text-slate-800">إضافة مخطط للوحة</h3>
+                    <p class="text-[11px] text-slate-500">اختر التطبيق ← التقرير ← المخطط</p>
+                </div>
+                <button onclick="closeDashPick()" class="w-8 h-8 rounded-full hover:bg-slate-100 text-slate-500"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="px-5 pt-3 shrink-0">
+                <input id="dashTreeSearch" oninput="renderDashTree()" placeholder="ابحث عن تطبيق أو تقرير..." autocomplete="off" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-indigo-500">
+            </div>
+            <div id="dashTree" class="flex-1 overflow-y-auto p-4 space-y-1 text-sm"><p class="text-slate-400 text-center py-6 text-xs">جارٍ التحميل...</p></div>
+        </div>
+    </div>
+    {% block modals %}{% include "partials/support_modal.html" %}{% endblock %}
+    {% endblock %}
+    {% block scripts %}
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script>
+        const DASH_COLORS = ['#4f46e5','#10b981','#f59e0b','#0ea5e9','#8b5cf6','#ef4444','#14b8a6','#f97316'];
+        function dashEsc(s){ return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+        function getDashCharts(){ try{ return JSON.parse(localStorage.getItem('dash_charts') || '[]'); }catch(e){ return []; } }
+        function saveDashCharts(l){ try{ localStorage.setItem('dash_charts', JSON.stringify(l)); }catch(e){} }
+        let DASH_APP_AR = {};
+        async function dashAppAr(){
+            try{
+                const r = await fetch('/api/apps/');
+                const d = await r.json();
+                (d.apps || []).forEach(a=>{ if(a && a.name) DASH_APP_AR[a.name] = a.ar || a.name; });
+            }catch(e){}
+        }
+        function dashAppName(n){ return DASH_APP_AR[n] || n; }
+        function renderDashboards(){
+            const grid = document.getElementById('dashGrid');
+            const empty = document.getElementById('dashEmpty');
+            const cnt = document.getElementById('dashCount');
+            const list = getDashCharts();
+            if(cnt) cnt.textContent = list.length ? list.length : '';
+            if(!list.length){ grid.innerHTML = ''; empty.classList.remove('hidden'); return; }
+            empty.classList.add('hidden');
+            grid.innerHTML = list.map((c, i)=>`
+                <div class="bg-white rounded-3xl border border-slate-200 shadow-sm hover:shadow-md transition flex flex-col overflow-hidden">
+                    <div class="p-4 pb-1 flex items-start gap-2">
+                        <div class="flex-1 min-w-0">
+                            <h3 class="text-sm font-bold text-gray-800 truncate">${dashEsc(c.title || c.y || '')}</h3>
+                            <p class="text-[11px] text-gray-400 truncate">${dashEsc(c.reportName || '')} • ${dashEsc(dashAppName(c.app))}</p>
+                        </div>
+                        <a href="/app/${encodeURIComponent(c.app)}/report/${encodeURIComponent(c.file)}/" title="فتح التقرير" class="w-8 h-8 flex items-center justify-center rounded-xl hover:bg-slate-100 text-slate-400 hover:text-emerald-600 shrink-0 transition"><i class="fa-solid fa-arrow-up-right-from-square text-xs"></i></a>
+                        <button onclick="removeDashChart(${i})" title="إزالة من اللوحة" class="w-8 h-8 flex items-center justify-center rounded-xl hover:bg-rose-50 text-slate-300 hover:text-rose-500 shrink-0 transition"><i class="fa-solid fa-trash-can text-xs"></i></button>
+                    </div>
+                    <div class="px-4 pb-4">
+                        <div id="dash-chart-${i}" class="h-52"><p class="text-[11px] text-slate-400 text-center py-10">جارٍ تحميل البيانات...</p></div>
+                    </div>
+                </div>`).join('');
+            list.forEach((c, i)=>loadDashChart(c, i));
+        }
+        function removeDashChart(i){
+            const l = getDashCharts();
+            l.splice(i, 1);
+            saveDashCharts(l);
+            renderDashboards();
+        }
+        async function loadDashChart(c, i){
+            const box = document.getElementById('dash-chart-' + i);
+            if(!box) return;
+            try{
+                const res = await fetch('/api/rml/groups', {method:'POST', headers:{'Content-Type':'application/json'},
+                    body: JSON.stringify({rml: c.file, app: c.app, column: c.x, limit: 12})});
+                const data = await res.json();
+                if(data.error) throw new Error(data.error);
+                const groups = (data.groups || []).slice(0, 12);
+                if(!groups.length) throw new Error('بلا بيانات');
+                const labels = groups.map(g=>String(g.value ?? '(فارغ)').slice(0, 20));
+                const vals = groups.map(g=>g.count || 0);
+                const type = (c.type === 'pie' || c.type === 'doughnut') ? c.type : (c.type === 'line' ? 'line' : 'bar');
+                const isPie = type === 'pie' || type === 'doughnut';
+                box.innerHTML = '<canvas></canvas>';
+                new Chart(box.querySelector('canvas'), {type: type,
+                    data: {labels: labels, datasets: [{data: vals,
+                        backgroundColor: isPie ? DASH_COLORS : DASH_COLORS[0],
+                        borderRadius: isPie ? 0 : 6, fill: type === 'line' ? false : true,
+                        borderColor: type === 'line' ? DASH_COLORS[0] : undefined}]},
+                    options: {responsive: true, maintainAspectRatio: false,
+                        plugins: {legend: {display: isPie, position: 'bottom', labels: {font: {size: 9}}},
+                                  tooltip: {callbacks: {label: (t)=>` ${Number(isPie ? t.parsed : t.parsed.y).toLocaleString('en-US')}`}}},
+                        scales: isPie ? {} : {x: {ticks: {font: {size: 9}}}, y: {beginAtZero: true, ticks: {font: {size: 9}}}}}});
+            }catch(e){
+                box.innerHTML = `<p class="text-[11px] text-slate-400 text-center py-10">تعذر تحميل المخطط — <a href="/app/${encodeURIComponent(c.app)}/report/${encodeURIComponent(c.file)}/" class="text-emerald-600 font-bold">فتح التقرير</a></p>`;
+            }
+        }
+        // ── شجرة الاختيار: تطبيق ← تقرير ← مخطط ──
+        let DASH_APPS = [], DASH_OPEN = {}, DASH_FILES = {}, DASH_CHARTS = {};
+        let DASH_PICK = []; // خيارات الإضافة (كائنات حقيقية) — الزر يحمل فهرساً رقمياً فقط
+        async function openDashPick(){
+            document.getElementById('dashPickModal').classList.remove('hidden');
+            document.getElementById('dashPickModal').classList.add('flex');
+            if(typeof lockScroll === 'function') lockScroll();
+            if(!DASH_APPS.length){
+                try{
+                    const r = await fetch('/api/apps/');
+                    const d = await r.json();
+                    DASH_APPS = d.apps || [];
+                }catch(e){ DASH_APPS = []; }
+            }
+            renderDashTree();
+        }
+        function closeDashPick(){
+            document.getElementById('dashPickModal').classList.add('hidden');
+            document.getElementById('dashPickModal').classList.remove('flex');
+            if(typeof unlockScroll === 'function') unlockScroll();
+        }
+        async function dashToggleApp(app){
+            DASH_OPEN[app] = !DASH_OPEN[app];
+            if(DASH_OPEN[app] && !DASH_FILES[app]){
+                try{
+                    const r = await fetch(`/api/apps/${encodeURIComponent(app)}/files/`);
+                    const d = await r.json();
+                    DASH_FILES[app] = d.rml || [];
+                }catch(e){ DASH_FILES[app] = []; }
+            }
+            renderDashTree();
+        }
+        async function dashToggleRep(app, file){
+            const k = app + '::' + file;
+            DASH_OPEN[k] = !DASH_OPEN[k];
+            if(DASH_OPEN[k] && !DASH_CHARTS[k]){
+                try{
+                    const r = await fetch(`/api/rml/metadata?rml=${encodeURIComponent(file)}&app=${encodeURIComponent(app)}`);
+                    const d = await r.json();
+                    if(d.error) throw new Error(d.error);
+                    DASH_CHARTS[k] = {charts: d.charts || [], name: (d.metadata && d.metadata.displayName) || file};
+                }catch(e){ DASH_CHARTS[k] = {charts: [], name: file, error: String((e && e.message) || e)}; }
+            }
+            renderDashTree();
+        }
+        function dashAddPicked(n){
+            const o = DASH_PICK[Number(n)];
+            if(!o){ try{ notify('تعذر الإضافة — أعد فتح النافذة', 'error'); }catch(e){} return; }
+            dashAddChart(o.app, o.file, o.repName, o.ch);
+        }
+        function dashAddChart(app, file, repName, ch){
+            const l = getDashCharts();
+            l.push({app: app, file: file, reportName: repName, chartId: ch.id, title: ch.title || ch.y || '', type: ch.type || 'bar', x: ch.x, y: ch.y || ''});
+            saveDashCharts(l);
+            try{ notify('أُضيف المخطط للوحة ✓', 'success'); }catch(e){}
+            closeDashPick();
+            renderDashboards();
+        }
+        function renderDashTree(){
+            const box = document.getElementById('dashTree');
+            const q = (document.getElementById('dashTreeSearch').value || '').trim().toLowerCase();
+            if(!DASH_APPS.length){ box.innerHTML = '<p class="text-slate-400 text-center py-6 text-xs">لا توجد تطبيقات</p>'; return; }
+            DASH_PICK = [];
+            const pickIdx = (o)=>{ DASH_PICK.push(o); return DASH_PICK.length - 1; };
+            const apps = DASH_APPS.filter(a=>!q || (a.ar || '').includes(q) || (a.name || '').toLowerCase().includes(q));
+            box.innerHTML = apps.map(a=>{
+                const open = !!DASH_OPEN[a.name];
+                const files = DASH_FILES[a.name] || [];
+                const shownFiles = files.filter(f=>!q || (f.file || '').toLowerCase().includes(q));
+                let inner = '';
+                if(open){
+                    inner = shownFiles.length ? shownFiles.map(f=>{
+                        const k = a.name + '::' + f.file;
+                        const rop = !!DASH_OPEN[k];
+                        const info = DASH_CHARTS[k];
+                        let chHtml = '';
+                        if(rop){
+                            if(!info) chHtml = '<p class="text-[11px] text-slate-400 pr-8 py-1">جارٍ التحميل...</p>';
+                            else if(info.error) chHtml = `<p class="text-[11px] text-rose-500 pr-8 py-1">${dashEsc(info.error)}</p>`;
+                            else if(!(info.charts || []).length){
+                                // بلا مخططات معرفة — إنشاء سريع من أي عمود
+                                const cols = (info.columns || []).filter(c=>c && (c.alias || c.name));
+                                chHtml = cols.length ? ('<p class="text-[10px] text-slate-400 pr-8 py-1">بلا مخططات معرفة — أنشئ من عمود:</p>' + cols.slice(0, 15).map(c=>{
+                                    const al = c.alias || c.name;
+                                    return `<div class="flex items-center gap-2 pr-8 py-1 hover:bg-indigo-50/50 rounded-lg">
+                                        <i class="fa-solid fa-table-columns text-slate-300 text-[11px]"></i>
+                                        <span class="flex-1 text-xs text-slate-700 truncate">${dashEsc(al)}</span>
+                                        <button onclick="dashAddPicked(${pickIdx({app: a.name, file: f.file, repName: ((info && info.name) || f.file), ch: {id: 'custom', title: al, type: 'bar', x: al, y: ''}})})" class="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[11px] font-bold">＋ مخطط</button>
+                                    </div>`;
+                                }).join('')) : '<p class="text-[11px] text-slate-400 pr-8 py-1">لا أعمدة متاحة</p>';
+                            }
+                            else chHtml = info.charts.map(ch=>`
+                                <div class="flex items-center gap-2 pr-8 py-1.5 hover:bg-indigo-50/50 rounded-lg">
+                                    <i class="fa-solid fa-chart-column text-indigo-400 text-[11px]"></i>
+                                    <span class="flex-1 text-xs text-slate-700 truncate">${dashEsc(ch.title || ch.y || '')} <span class="text-[10px] text-slate-400">(${dashEsc(ch.type || 'bar')})</span></span>
+                                    <button onclick="dashAddPicked(${pickIdx({app: a.name, file: f.file, repName: ((info && info.name) || f.file), ch: {id: ch.id, title: ch.title || '', type: ch.type || 'bar', x: ch.x || '', y: ch.y || ''}})})" class="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[11px] font-bold">إضافة</button>
+                                </div>`).join('');
+                        }
+                        return `<div class="rounded-xl">
+                            <button onclick="dashToggleRep('${String(a.name).replace(/'/g, "\\'")}', '${String(f.file).replace(/'/g, "\\'")}')" class="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-50 rounded-xl text-right">
+                                <i class="fa-solid ${rop ? 'fa-chevron-down' : 'fa-chevron-left'} text-[10px] text-slate-400"></i>
+                                <i class="fa-solid fa-file-lines text-emerald-500 text-xs"></i>
+                                <span class="text-xs font-semibold text-slate-700 truncate">${dashEsc(f.displayName || f.file)}</span>
+                            </button>${chHtml}</div>`;
+                    }).join('') : '<p class="text-[11px] text-slate-400 pr-8 py-1">لا تقارير مطابقة</p>';
+                }
+                return `<div class="border border-slate-100 rounded-xl mb-1 overflow-hidden">
+                    <button onclick="dashToggleApp('${String(a.name).replace(/'/g, "\\'")}')" class="w-full flex items-center gap-2 px-3 py-2.5 bg-slate-50/60 hover:bg-slate-100 rounded-xl text-right">
+                        <i class="fa-solid ${open ? 'fa-chevron-down' : 'fa-chevron-left'} text-[10px] text-slate-400"></i>
+                        <span class="text-xs font-bold text-slate-800">${dashEsc(a.ar || a.name)}</span>
+                        <span class="mr-auto text-[10px] text-slate-400">${(files.length || '')}</span>
+                    </button>${inner}</div>`;
+            }).join('') || '<p class="text-slate-400 text-center py-6 text-xs">لا نتائج مطابقة</p>';
+        }
+        document.addEventListener('DOMContentLoaded', async function(){
+            try{ await dashAppAr(); }catch(e){}
+            try{ renderDashboards(); }catch(e){}
+        });
+        renderDashboards();
+    </script>
+    {% endblock %}

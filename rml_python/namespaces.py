@@ -1,0 +1,432 @@
+"""
+Namespace registry + cross-file reference resolution for RML/CML.
+
+A file declares addressability via <..._metadata namespace="hrRules">.
+Expressions may then reference:
+  - [field_name]        → validated DB field from the same file's <fields>
+  - ns.rule_or_column   → computed fragment from the namespaced file
+
+Resolution is single-attr canonical: writers emit only `connection_id`
+(columns) / `conn_id` (fields); readers still accept legacy variants.
+"""
+from __future__ import annotations
+import pathlib
+import re
+from typing import Dict, List, Optional, Tuple, Any
+
+REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
+
+FIELD_REF_RE = re.compile(r"\[([A-Za-z0-9_][A-Za-z0-9_.]*)\]")
+NS_REF_RE = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)\b")
+
+
+def _candidate_dirs() -> List[pathlib.Path]:
+    roots = []
+    for base in [REPO_ROOT / "odex" / "system", REPO_ROOT / "system"]:
+        if base.exists():
+            roots.append(base)
+    return roots
+
+
+def build_registry() -> Dict[str, Tuple[str, pathlib.Path]]:
+    """Scan RML + CML files for metadata namespace attributes.
+
+    Returns {namespace_lower: (kind, path)} where kind in ("rml", "cml").
+    First match wins; files without namespace are skipped.
+    """
+    registry: Dict[str, Tuple[str, pathlib.Path]] = {}
+
+    def _metadata_ns(path: pathlib.Path, kind: str) -> Optional[str]:
+        try:
+            from xml.etree import ElementTree as ET
+            root = ET.fromstring(path.read_text(encoding="utf-8").lstrip("\ufeff"))
+            for el in root.iter():
+                if el.tag.lower() in ("rpt_metadata", "cml_metadata", "fml_metadata"):
+                    for k, v in el.attrib.items():
+                        if k.lower() in ("namespace", "ns") and v and v.strip():
+                            return v.strip()
+        except Exception:
+            pass
+        return None
+
+    for base in _candidate_dirs():
+        for path in sorted(base.glob("*.rml")) + sorted(base.glob("*/*.rml")):
+            ns = _metadata_ns(path, "rml")
+            if ns and ns.lower() not in registry:
+                registry[ns.lower()] = ("rml", path)
+        for path in sorted(base.glob("*.cml")) + sorted(base.glob("*/*.cml")):
+            ns = _metadata_ns(path, "cml")
+            if ns and ns.lower() not in registry:
+                registry[ns.lower()] = ("cml", path)
+    # rml engine examples fallback
+    ex_dir = REPO_ROOT / "rml_python" / "examples"
+    if ex_dir.exists():
+        for path in sorted(ex_dir.glob("*.rml")):
+            ns = _metadata_ns(path, "rml")
+            if ns and ns.lower() not in registry:
+                registry[ns.lower()] = ("rml", path)
+    return registry
+
+
+def _norm_tname(t: str) -> str:
+    """Upper-case table name without schema prefix/quotes (for compare)."""
+    s = str(t or "").strip().replace('"', "")
+    if "." in s:
+        s = s.split(".")[-1]
+    return s.upper()
+
+
+def _quote_literal(value: str) -> str:
+    v = str(value).strip()
+    if re.fullmatch(r"-?\d+(\.\d+)?", v):
+        return v
+    if v.lower() in ("true", "false", "null"):
+        return v.upper()
+    return "'" + v.replace("'", "''") + "'"
+
+
+def _field_conns(f: Any) -> set:
+    """All connection tokens stored on a <field> (conn_id / connection_id / ...)."""
+    out = set()
+    for attr in ("connection_id", "conn_id", "connectionId", "connection"):
+        try:
+            v = getattr(f, attr, None)
+        except Exception:
+            v = None
+        if v is not None and str(v).strip() != "":
+            out.add(str(v).strip())
+    return out
+
+
+def _conn_accepted(tok: str, fconns: set, conn_map: Optional[Dict[str, str]]) -> bool:
+    """True when a [conn...] qualifier matches the field's connection.
+
+    Accepts the rml-local number (mapped via conn_map to the global id),
+    the global id itself, or the literal stored value.
+    """
+    tok = str(tok or "").strip()
+    if not tok:
+        return False
+    if tok in fconns:
+        return True
+    if conn_map:
+        try:
+            mapped = conn_map.get(tok)
+        except Exception:
+            mapped = None
+        if mapped is not None and str(mapped).strip() in fconns:
+            return True
+        # reverse: token is global, field stores the local id
+        rev = {str(v).strip(): k for k, v in conn_map.items()}
+        if tok in rev and str(rev[tok]).strip() in fconns:
+            return True
+    return False
+
+
+def resolve_ns_member(ns: str, member: str, registry: Dict[str, Tuple[str, pathlib.Path]],
+                      visited: Optional[set] = None) -> Optional[str]:
+    """Resolve `ns.member` to a SQL fragment, or None if not a known namespace.
+
+    - RML: looks for <rule name=member> first, then <column name|alias=member>;
+      the referenced expression is resolved recursively (fields of its own file).
+    - CML: looks for <rule name=member> with a usable `value` (default/equals);
+      substitutes the literal. Rules without values raise ValueError.
+    Raises ValueError on unknown member inside a KNOWN namespace or on cycles.
+    """
+    if visited is None:
+        visited = set()
+    entry = registry.get(ns.lower())
+    if entry is None:
+        return None
+    kind, path = entry
+    key = (str(path), member.lower())
+    if key in visited:
+        raise ValueError(f"Circular namespace reference: {ns}.{member}")
+    visited = visited | {key}
+
+    if kind == "rml":
+        from .compiler import RMLReportCompiler
+        comp = RMLReportCompiler(path=path)
+        try:
+            cmap = {str(c.id).strip(): str(c.connection_id).strip()
+                    for c in comp.connections()
+                    if str(getattr(c, "id", "") or "").strip()}
+        except Exception:
+            cmap = {}
+        # rule first
+        for r in comp.rules():
+            if r.name.lower() == member.lower():
+                if not (r.expr or "").strip():
+                    raise ValueError(f"Rule '{member}' in namespace '{ns}' has no expression")
+                return _resolve_expression(r.expr, comp.fields(), registry, visited, None, cmap)
+        # then computed/display column
+        for c in comp.columns():
+            if (c.name and c.name.lower() == member.lower()) or (c.alias and c.alias.lower() == member.lower()):
+                if not (c.expr or "").strip():
+                    raise ValueError(f"Column '{member}' in namespace '{ns}' has no expression")
+                return _resolve_expression(c.expr, comp.fields(), registry, visited, None, cmap)
+        raise ValueError(f"Unknown member '{member}' in namespace '{ns}' ({path.name})")
+
+    # kind == "cml"
+    from cml_engine.compiler import CMLCompiler
+    comp = CMLCompiler(path=path)
+    for r in comp.rules():
+        if r.name.lower() == member.lower():
+            if r.value is None or str(r.value).strip() == "":
+                raise ValueError(f"CML rule '{member}' in namespace '{ns}' has no value to substitute")
+            return _quote_literal(str(r.value))
+    raise ValueError(f"Unknown rule '{member}' in namespace '{ns}' ({path.name})")
+
+
+def _resolve_expression(expr_text: str, fields: Optional[List[Any]],
+                        registry: Optional[Dict[str, Tuple[str, pathlib.Path]]] = None,
+                        visited: Optional[set] = None,
+                        table_map: Optional[Dict[str, str]] = None,
+                        conn_map: Optional[Dict[str, str]] = None,
+                        alias_by_table: Optional[Dict[str, str]] = None) -> str:
+    """Resolve [field] refs (validated) and ns.member refs inside an expression.
+
+    Supported bracket forms (validated against the file's <fields>):
+    - `[name]` — field by name (must be defined).
+    - `[table.name]` — field `name` whose table_source is `table`
+      (when the head is a known namespace, `ns.member` resolution wins).
+    - `[conn.table.name]` — additionally checks the field's connection:
+      the head accepts the rml-local connection number (mapped through
+      conn_map), the global connection id, or the stored value itself.
+    - `[ns.member]` resolves via the namespace registry.
+    - Bare `ns.member` tokens resolve only when `ns` is a known namespace;
+      otherwise left untouched (regular table.column SQL).
+    - String literals (single quotes) are never touched.
+    - table_map: optional {field_lower: table_alias} — when given, refs are
+      emitted qualified as "alias"."COL" (for multi-table/JOIN queries).
+    """
+    if not expr_text:
+        return expr_text or ""
+    # T-SQL ISNULL(a, b) → COALESCE (works on Postgres + Oracle + SQL Server)
+    expr_text = re.sub(r"(?i)\bISNULL\s*\(", "COALESCE(", expr_text)
+    # T-SQL CAST targets → portable (DATETIME unknown to Postgres/Oracle)
+    expr_text = re.sub(r"(?i)\bAS\s+DATETIME\b", "AS TIMESTAMP", expr_text)
+    expr_text = re.sub(r"(?i)\bAS\s+SMALLDATETIME\b", "AS TIMESTAMP", expr_text)
+    if registry is None:
+        registry = build_registry()
+    if visited is None:
+        visited = set()
+    field_map = {f.name.lower(): f.name for f in (fields or []) if getattr(f, "name", None)}
+    alias_map = {k.lower(): v for k, v in (table_map or {}).items()} if table_map else {}
+    by_name: Dict[str, List[Any]] = {}
+    for f in (fields or []):
+        n = getattr(f, "name", None)
+        if n:
+            by_name.setdefault(str(n).strip().lower(), []).append(f)
+
+    def _emit(key: str, f: Optional[Any] = None) -> str:
+        if table_map and key in table_map:
+            # Qualified refs ([table.col]/[conn.table.col]) must use the alias of
+            # THEIR OWN table — bare-name lookup binds to the wrong table when the
+            # column exists in several tables (e.g. RT_BILL_NO in MST and DTL).
+            if f is not None and alias_by_table:
+                tn = _norm_tname(getattr(f, "table_source", None) or "")
+                if tn and tn in alias_by_table:
+                    return f'{_q_ident(alias_by_table[tn])}.{_q_ident(field_map[key])}'
+            return f'{_q_ident(table_map[key])}.{_q_ident(field_map[key])}'
+        return _q_ident(field_map[key])
+
+    def _find_in_table(col: str, table: str) -> Optional[Any]:
+        """First field named `col` whose table_source matches `table` (None if none).
+
+        Fallback مرايا IoT: [att.col] تُقبل على جدول المرآة iot_<engine>_att
+        (تقارير قديمة كُتبت قبل المرايا).
+        """
+        tnorm = _norm_tname(table)
+        cands = by_name.get(str(col).strip().lower(), [])
+        for f in cands:
+            if _norm_tname(getattr(f, "table_source", None) or "") == tnorm:
+                return f
+        if tnorm in ("ATT", "USERS", "ATTENDANCE"):
+            for f in cands:
+                ts = _norm_tname(getattr(f, "table_source", None) or "")
+                if ts.startswith("IOT_") and ts.endswith("_" + tnorm):
+                    return f
+        return None
+
+    def _q_ident(name: str) -> str:
+        return '"' + name.replace('"', '""') + '"'
+
+    def _qualify_bare(seg: str) -> str:
+        """Qualify bare/quoted field tokens when table_map is given.
+
+        Skips tokens already qualified (dot-adjacent) and SQL keywords
+        (they never match a field name).
+        """
+        if not alias_map:
+            return seg
+
+        def _rep_quoted(m: re.Match) -> str:
+            name = m.group(1)
+            key = name.lower()
+            if key in field_map and key in alias_map:
+                return f'{_q_ident(alias_map[key])}.{_q_ident(field_map[key])}'
+            return m.group(0)
+
+        seg = re.sub(r'(?<!\.)"([A-Za-z_][A-Za-z0-9_]*)"(?!\.)', _rep_quoted, seg)
+        names = sorted(field_map.keys(), key=len, reverse=True)
+        if not names:
+            return seg
+        alt = "|".join(re.escape(n) for n in names)
+
+        def _rep_bare(m: re.Match) -> str:
+            key = m.group(1).lower()
+            if key in alias_map:
+                return f'{_q_ident(alias_map[key])}.{_q_ident(field_map[key])}'
+            return m.group(1)
+
+        # Apply bare-word matching only OUTSIDE double-quoted spans
+        # (so "T0"."COL" is never re-wrapped).
+        qparts = re.split(r'("[^"]*")', seg)
+        for qi in range(0, len(qparts), 2):
+            qparts[qi] = re.sub(r"(?<!\.)\b(" + alt + r")\b(?!\.)", _rep_bare, qparts[qi], flags=re.IGNORECASE)
+        return "".join(qparts)
+
+    # split out single-quoted literals so we never rewrite inside them
+    parts = re.split(r"('(?:[^']|'')*')", expr_text)
+    for i in range(0, len(parts), 2):
+        seg = parts[i]
+        # T-SQL leftovers: alias.[col] / alias."col" where alias is not a known
+        # table — bind when col matches exactly one report field, else a clear error.
+        _known_tables = {_norm_tname(getattr(f, "table_source", None) or "")
+                         for f in (fields or [])}
+        try:
+            _known_tables |= {str(_v or "").strip().lower() for _v in (table_map or {}).values()}
+            _known_tables |= {_norm_tname(_k) for _k in (alias_by_table or {})}
+        except Exception:
+            pass
+
+        def _qsub(m: re.Match) -> str:
+            qual, col = m.group(1), m.group(2).strip()
+            if _norm_tname(qual) in _known_tables or qual.strip().lower() in _known_tables:
+                return m.group(0)  # known table — handled by the passes below
+            cands = by_name.get(col.strip().lower(), [])
+            if len(cands) == 1:
+                return _emit(str(getattr(cands[0], "name", col)).strip().lower(), cands[0])
+            if not cands:
+                raise ValueError(
+                    f"المرجع '{qual}.[{col}]' يشير لجدول/مستعار غير معروف '{qual}' "
+                    f"ولا يوجد حقل باسم '{col}' — استورده من تبويب الحقول أو صحح العمود")
+            actual = sorted({_norm_tname(getattr(x, "table_source", None) or "") or "؟" for x in cands})
+            raise ValueError(
+                f"المرجع '{qual}.[{col}]' ملتبس — '{col}' موجود في ({'، '.join(actual)}): "
+                f"استخدم [الجدول.{col}] صراحة")
+        seg = re.sub(r"([A-Za-z_][A-Za-z0-9_$#]*)\.\[([^\]]+)\]", _qsub, seg)
+        seg = re.sub(r'([A-Za-z_][A-Za-z0-9_$#]*)\."([^"]+)"', _qsub, seg)
+        # T-SQL/Arabic leftovers the Latin-only FIELD_REF_RE cannot see:
+        # ["T"."C"] / [T."C"] → [T.C], collapse [[..]], then resolve any
+        # bracket holding quotes or non-Latin (pure [1] subscripts untouched).
+        seg = re.sub(r'\["([^"]+)"\."([^"]+)"\]', r'[\1.\2]', seg)
+        seg = re.sub(r'\[([A-Za-z_][\w$#]*)\."([^"]+)"\]', r'[\1.\2]', seg)
+        while '[[' in seg:
+            seg = seg.replace('[[', '[')
+        while ']]' in seg:
+            seg = seg.replace(']]', ']')
+
+        def _left_sub(m: re.Match) -> str:
+            inner = m.group(1).strip()
+            pts = [p.strip().strip('"') for p in inner.split(".")]
+            if len(pts) == 1:
+                key = pts[0].lower()
+                cands = by_name.get(key, [])
+                if len(cands) == 1:
+                    return _emit(str(getattr(cands[0], "name", pts[0])).strip().lower(), cands[0])
+                if not cands:
+                    raise ValueError(
+                        f"مرجع غير معروف '[{inner}]' — استورد الحقل من تبويب الحقول أولاً")
+                actual = sorted({_norm_tname(getattr(x, "table_source", None) or "") or "؟"
+                                 for x in cands})
+                raise ValueError(
+                    f"المرجع '[{inner}]' ملتبس — موجود في ({'، '.join(actual)}): "
+                    f"استخدم [الجدول.{inner}] صراحة")
+            if len(pts) == 2:
+                head, member = pts
+                if head.lower() in (registry or {}):
+                    resolved = resolve_ns_member(head, member, registry, visited)
+                    if resolved is None:
+                        raise ValueError(f"Unknown namespace '{head}' in [{inner}]")
+                    return f"({resolved})"
+                f = _find_in_table(member, head)
+                if f is not None:
+                    return _emit(str(getattr(f, "name", member)).strip().lower(), f)
+                if member.strip().lower() in field_map:
+                    actual = sorted({_norm_tname(getattr(x, "table_source", None) or "") or "؟"
+                                     for x in by_name[member.strip().lower()]})
+                    raise ValueError(
+                        f"الحقل '[{member}]' موجود في ({'، '.join(actual)}) وليس في '{head}' — "
+                        f"استخدم [{actual[0]}.{member}] أو استورد الحقل من '{head}'")
+                raise ValueError(
+                    f"مرجع غير معروف '[{inner}]' — للجداول استورد الحقل من '{head}' "
+                    f"(تبويب الحقول ← استيراد من جدول)")
+            raise ValueError(
+                f"صيغة مرجع غير مدعومة '[{inner}]' — الصيغ: [الحقل] أو [الجدول.الحقل]")
+        seg = re.sub(r"\[([^\]]*(?:\"|[^\x00-\x7F])[^\]]*)\]", _left_sub, seg)
+        # [field] or [table.field] or [conn.table.field] or [ns.member]
+        def _field_sub(m: re.Match) -> str:
+            inner = m.group(1).strip()
+            parts = [p.strip() for p in inner.split(".")]
+            if len(parts) == 1:
+                key = inner.lower()
+                if key not in field_map:
+                    known = ", ".join(sorted(field_map.values())) or "—"
+                    raise ValueError(f"Unknown field '[{inner}]' — defined fields: {known}")
+                return _emit(key)
+            if len(parts) == 2:
+                head, member = parts
+                # Known namespace wins (backward compat for [ns.member])
+                if head.lower() in (registry or {}):
+                    resolved = resolve_ns_member(head, member, registry, visited)
+                    if resolved is None:
+                        raise ValueError(f"Unknown namespace '{head}' in [{inner}]")
+                    return f"({resolved})"
+                f = _find_in_table(member, head)
+                if f is not None:
+                    return _emit(str(getattr(f, "name", member)).strip().lower(), f)
+                if member.strip().lower() in field_map:
+                    actual = sorted({_norm_tname(getattr(x, "table_source", None) or "") or "؟"
+                                     for x in by_name[member.strip().lower()]})
+                    raise ValueError(
+                        f"الحقل '[{member}]' موجود في ({'، '.join(actual)}) وليس في '{head}' — "
+                        f"استخدم [{actual[0]}.{member}] أو استورد الحقل من '{head}'")
+                raise ValueError(
+                    f"مرجع غير معروف '[{inner}]' — للجداول استورد الحقل من '{head}' "
+                    f"(تبويب الحقول ← استيراد من جدول)")
+            if len(parts) == 3:
+                ctok, table, member = parts
+                f = _find_in_table(member, table)
+                if f is None:
+                    if member.strip().lower() in field_map:
+                        actual = sorted({_norm_tname(getattr(x, "table_source", None) or "") or "؟"
+                                         for x in by_name[member.strip().lower()]})
+                        raise ValueError(
+                            f"الحقل '[{member}]' موجود في ({'، '.join(actual)}) وليس في '{table}' — "
+                            f"استورد الحقل من '{table}' أولاً")
+                    raise ValueError(
+                        f"مرجع غير معروف '[{inner}]' — استورد الحقل '{member}' من جدول '{table}' "
+                        f"(تبويب الحقول ← استيراد من جدول)")
+                if not _conn_accepted(ctok, _field_conns(f), conn_map):
+                    have = sorted(_field_conns(f)) or ["؟"]
+                    raise ValueError(
+                        f"الحقل '{member}' في جدول '{table}' مربوط بالاتصال ({'، '.join(have)}) "
+                        f"وليس '{ctok}' — اختر الاتصال الصحيح من المودال")
+                return _emit(str(getattr(f, "name", member)).strip().lower(), f)
+            raise ValueError(
+                f"صيغة مرجع غير مدعومة '[{inner}]' — الصيغ: [الحقل] أو [الجدول.الحقل] "
+                f"أو [الاتصال.الجدول.الحقل]")
+        seg = FIELD_REF_RE.sub(_field_sub, seg)
+
+        def _ns_sub(m: re.Match) -> str:
+            ns, member = m.group(1), m.group(2)
+            resolved = resolve_ns_member(ns, member, registry, visited)
+            if resolved is None:
+                return m.group(0)  # not a namespace → regular SQL (table.column)
+            return f"({resolved})"
+        seg = NS_REF_RE.sub(_ns_sub, seg)
+        seg = _qualify_bare(seg)
+        parts[i] = seg
+    return "".join(parts)

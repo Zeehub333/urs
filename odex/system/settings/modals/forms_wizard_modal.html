@@ -1,0 +1,119 @@
+    <!-- مصمم النماذج FMLK — بيانات + جداول + مدخلات + تبويبات + مستندات (بلا مخططات) -->
+    <div id="addFmlModal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-start justify-center p-4 overflow-y-auto">
+        <div class="wb-shell bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+            <div class="hidden">
+                <span id="fmlWizardTitle">نموذج جديد</span><span id="fwDirty">●</span>
+                <button onclick="fwPrev()" id="fwPrevBtn">السابق</button>
+                <button onclick="fwNext()" id="fwNextBtn">التالي</button>
+                <button onclick="fwSave()" id="fwCreateBtn">حفظ</button>
+            </div>
+            <!-- الشريط المعلوماتي: بيانات النموذج -->
+            <div id="fwInfoStrip" class="border-b border-slate-100 px-3 py-2 bg-slate-50/60">
+                <div class="grid grid-cols-2 lg:grid-cols-4 gap-2 text-xs">
+                    <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">الاسم العربي *</label><input id="fmlDisplayName" placeholder="نموذج جديد" class="wb-inp"></div>
+                    <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">الاسم الإنجليزي *</label><input id="fmlProgName" placeholder="my_form" class="wb-inp font-mono" dir="ltr" oninput="fwSyncFile()"></div>
+                    <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">اسم الملف *</label><input id="fmlFileName" placeholder="my_form.fmlk" class="wb-inp font-mono" dir="ltr" oninput="fwSyncProg()"></div>
+                    <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">الأيقونة</label><input type="hidden" id="fmlIcon" value="fa-pen-to-square"><button type="button" id="fmlIconBtn" onclick="openIconPicker(document.getElementById('fmlIcon').value, function(cls){ document.getElementById('fmlIcon').value = cls; syncFmlIconPrev(); })" class="wb-inp flex items-center gap-2"><span id="fmlIconPrev"><i class="fa-solid fa-pen-to-square"></i></span><span id="fmlIconName" class="font-mono" dir="ltr">fa-pen-to-square</span></button></div>
+                    <script>
+                    (function(){
+                        function ready(){
+                            if(typeof hookHiddenIcon === 'function'){ try{ hookHiddenIcon('fmlIcon', 'fmlIconPrev', 'fmlIconName'); }catch(e){} }
+                            else setTimeout(ready, 100);
+                        }
+                        if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', ready);
+                        else ready();
+                    })();
+                    </script>
+                    <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">الاتصال المحلي *</label><select id="fmlConnection" onchange="fwConnChanged()" class="wb-inp"></select></div>
+                    <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">الجدول الأساسي *</label><input id="fmlMainTableSearch" oninput="fwFilterMainTables(this.value)" placeholder="ابحث..." class="wb-inp font-mono mb-1" dir="ltr"><select id="fmlMainTable" onchange="fwMainTableChanged()" class="wb-inp font-mono" dir="ltr"></select></div>
+                    <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">الفئة</label><input id="fmlCategory" placeholder="عام" class="wb-inp"></div>
+                    <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">الوصف</label><input id="fmlDescription" placeholder="وصف مختصر" class="wb-inp"></div>
+                </div>
+                <div id="fmlError" class="hidden text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-3 py-1.5 text-xs mt-2"></div>
+            </div>
+            <!-- الأوراق -->
+            <div id="fwSheets" class="flex-1 min-h-0 flex flex-col overflow-hidden text-xs">
+                <div id="fwSheetTabs" class="flex items-center gap-0.5 px-2 pt-1.5 border-b border-slate-100 bg-slate-50/40 shrink-0 overflow-x-auto custom-scroll"></div>
+                <div id="fwSheetBody" class="flex-1 min-h-0 overflow-y-auto custom-scroll p-2"></div>
+                <div id="fwSheetFoot" class="shrink-0 border-t border-slate-200 bg-slate-50/70 px-2 py-1.5 flex items-center gap-2"></div>
+            </div>
+            <span id="fwCompatStepNum" class="hidden">1</span>
+            <div id="fwStatus" class="border-t border-slate-200 px-3 py-1 flex items-center gap-3 text-[10px] text-slate-500 bg-slate-50/70 shrink-0">
+                <span id="fwStatTables">جداول: 0</span><span class="text-slate-300">|</span>
+                <span id="fwStatInputs">مدخلات: 0</span><span class="text-slate-300">|</span>
+                <span id="fwStatTabs">تبويبات: 0</span><span class="mr-auto"></span>
+                <span id="fwStatConn" class="font-bold text-emerald-600">محلي</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- مودال نوع البيانات للمدخل -->
+    <div id="fwTypeModal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[77] flex items-center justify-center p-4" onclick="if(event.target===this) closeFwTypeModal()">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
+            <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-indigo-50 gap-2 shrink-0">
+                <h3 id="fwTypeTitle" class="text-sm font-bold text-slate-800 flex items-center gap-2"><i class="fa-solid fa-shapes text-indigo-600"></i> نوع المدخل وإعداده</h3>
+                <button onclick="closeFwTypeModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="flex-1 min-h-0 overflow-y-auto custom-scroll p-5 space-y-3 text-xs">
+                <div>
+                    <div class="text-[11px] font-bold text-slate-600 mb-1.5">نوع البيانات — يقود شكل المدخل في المشغل</div>
+                    <div id="fwTypeGrid" class="grid grid-cols-3 sm:grid-cols-4 gap-1.5"></div>
+                </div>
+                <div id="fwTypeConfig" class="space-y-2"></div>
+            </div>
+            <div class="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2 shrink-0">
+                <button onclick="closeFwTypeModal()" class="px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs">إلغاء</button>
+                <button onclick="saveFwTypeModal()" class="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold">حفظ النوع</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- مودال أعمدة شبكة الجدول المتفرع -->
+    <div id="fwBranchColsModal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[76] flex items-center justify-center p-4" onclick="if(event.target===this) closeFwBranchCols()">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] overflow-hidden flex flex-col">
+            <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-emerald-50 gap-2 shrink-0">
+                <h3 id="fwBranchColsTitle" class="text-sm font-bold text-slate-800 flex items-center gap-2"><i class="fa-solid fa-table-columns text-emerald-600"></i> أعمدة شبكة التفاصيل</h3>
+                <button onclick="closeFwBranchCols()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="px-5 pt-3 shrink-0 flex items-center gap-2">
+                <button onclick="fwBranchColsAll(true)" class="text-[11px] text-indigo-600 hover:text-indigo-800">تحديد الكل</button>
+                <button onclick="fwBranchColsAll(false)" class="text-[11px] text-slate-500 hover:text-slate-700">إلغاء التحديد</button>
+            </div>
+            <div id="fwBranchColsList" class="flex-1 min-h-0 overflow-y-auto custom-scroll p-3 space-y-1 text-xs"></div>
+            <div class="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2 shrink-0">
+                <button onclick="closeFwBranchCols()" class="px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs">إلغاء</button>
+                <button onclick="saveFwBranchCols()" class="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold">حفظ الأعمدة</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- استعلام تجريبي عن الجدول -->
+    <div id="fwTblPreviewModal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[300] overflow-y-auto p-4" onclick="if(event.target===this) closeFwTblPreview()">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-6xl m-auto overflow-hidden flex flex-col max-h-[92vh]">
+            <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-sky-50 gap-2 shrink-0">
+                <h3 id="fwTblPreviewTitle" class="text-sm font-bold text-slate-800 flex items-center gap-2"><i class="fa-solid fa-table-cells text-sky-600"></i> استعلام تجريبي</h3>
+                <div class="flex items-center gap-2">
+                    <input id="fwTblPreviewSearch" onkeydown="if(event.key==='Enter')fwTblPreviewReload()" placeholder="بحث... (Enter)" class="bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs w-48 focus:outline-none focus:ring-2 focus:ring-sky-500">
+                    <select id="fwTblPreviewLimit" onchange="fwTblPreviewReload()" class="bg-white border border-slate-200 rounded-xl px-2 py-1.5 text-xs font-mono" dir="ltr"><option>25</option><option selected>50</option><option>100</option></select>
+                    <button onclick="closeFwTblPreview()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+            </div>
+            <div id="fwTblPreviewBody" class="flex-1 min-h-0 overflow-auto custom-scroll p-3 bg-slate-100"></div>
+        </div>
+    </div>
+
+    <!-- معاينة المستند المرتبط -->
+    <div id="fwDmlPreviewModal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[80] overflow-y-auto p-4" onclick="if(event.target===this) closeFwDmlPreview()">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-4xl m-auto overflow-hidden flex flex-col max-h-[90vh]">
+            <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-slate-50 gap-2 shrink-0">
+                <h3 id="fwDmlPreviewTitle" class="text-sm font-bold text-slate-800 flex items-center gap-2"><i class="fa-solid fa-eye text-violet-600"></i> معاينة المستند</h3>
+                <div class="flex items-center gap-2">
+                    <button onclick="printFwDmlPreview()" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs"><i class="fa-solid fa-print"></i> طباعة</button>
+                    <button onclick="closeFwDmlPreview()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+            </div>
+            <div class="flex-1 min-h-0 p-3 bg-slate-200">
+                <iframe id="fwDmlPreviewFrame" class="w-full h-[65vh] bg-white border border-slate-200 rounded-xl" title="معاينة المستند"></iframe>
+            </div>
+        </div>
+    </div>

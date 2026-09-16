@@ -1,0 +1,37 @@
+<div class="p-4 flex items-center justify-between border-b border-gray-100">
+    <div class="flex items-center gap-2">
+        <div class="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white font-bold text-lg">O</div>
+        <span class="font-bold text-lg tracking-wide text-gray-800">النظام <span class="text-xs font-normal text-gray-500">ERP</span></span>
+    </div>
+</div>
+
+<nav class="p-3 space-y-1">
+    <a href="/dashboards/" class="flex items-center gap-3 px-3 py-2.5 rounded-xl transition text-sm font-medium {% if active == 'dashboards' %}bg-emerald-50 text-emerald-600 font-semibold{% else %}text-gray-600 hover:bg-gray-50{% endif %}">
+        <i class="fa-solid fa-chart-pie {% if active == 'dashboards' %}text-emerald-500{% else %}text-gray-400{% endif %}"></i>
+        <span>لوحات المعلومات</span>
+    </a>
+    <a href="/" class="flex items-center gap-3 px-3 py-2.5 rounded-xl transition text-sm font-medium {% if active == 'apps' %}bg-emerald-50 text-emerald-600 font-semibold{% else %}text-gray-600 hover:bg-gray-50{% endif %}">
+        <i class="fa-solid fa-grip {% if active == 'apps' %}text-emerald-500{% else %}text-gray-400{% endif %}"></i>
+        <span>التطبيقات</span>
+    </a>
+    <a href="/my-reports/" class="flex items-center gap-3 px-3 py-2.5 rounded-xl transition text-sm font-medium {% if active == 'myreports' %}bg-emerald-50 text-emerald-600 font-semibold{% else %}text-gray-600 hover:bg-gray-50{% endif %}">
+        <i class="fa-regular fa-star {% if active == 'myreports' %}text-emerald-500{% else %}text-gray-400{% endif %}"></i>
+        <span>تقاريري</span>
+    </a>
+    <a href="/my-docs/" class="flex items-center gap-3 px-3 py-2.5 rounded-xl transition text-sm font-medium {% if active == 'mydocs' %}bg-emerald-50 text-emerald-600 font-semibold{% else %}text-gray-600 hover:bg-gray-50{% endif %}">
+        <i class="fa-solid fa-folder-open {% if active == 'mydocs' %}text-emerald-500{% else %}text-gray-400{% endif %}"></i>
+        <span>مستنداتي</span>
+    </a>
+    <a href="#" class="flex items-center gap-3 px-3 py-2.5 rounded-xl text-gray-600 hover:bg-gray-50 transition text-sm font-medium">
+        <i class="fa-solid fa-share-nodes text-gray-400"></i>
+        <span>المشاركات</span>
+    </a>
+    <a href="#" class="flex items-center gap-3 px-3 py-2.5 rounded-xl text-gray-600 hover:bg-gray-50 transition text-sm font-medium">
+        <i class="fa-regular fa-clock text-gray-400"></i>
+        <span>العمليات المجدولة</span>
+    </a>
+    <a href="/app/settings/" class="flex items-center gap-3 px-3 py-2.5 rounded-xl transition text-sm font-medium {% if active == 'settings' %}bg-emerald-50 text-emerald-600 font-semibold{% else %}text-gray-600 hover:bg-gray-50{% endif %}">
+        <i class="fa-solid fa-gear {% if active == 'settings' %}text-emerald-500{% else %}text-gray-400{% endif %}"></i>
+        <span>الإعدادات</span>
+    </a>
+</nav>

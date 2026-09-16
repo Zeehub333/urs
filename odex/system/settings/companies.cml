@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<cml>
+  <cml_metadata name="companies" displayName="الشركات" category="النظام" icon="fa-building" description="بيانات الشركات — الحقول وقواعد العمل" table="sys_companies" schema="SYS" connection="ORCL_PROD" scope="system" app="settings"/>
+  <controls>
+    <control id="1" name="company_code" alias="رمز الشركة" inputType="text" dataType="VARCHAR" required="true" category="أساسية" placeholder="مثال: CMP-001">
+      <validation regex="^[A-Z0-9-]+$" min_length="2" max_length="20"/>
+    </control>
+    <control id="2" name="company_name" alias="اسم الشركة" inputType="text" dataType="VARCHAR" required="true" category="أساسية" placeholder="اسم الشركة الرسمي"/>
+    <control id="3" name="company_name_en" alias="اسم الشركة (إنجليزي)" inputType="text" dataType="VARCHAR" category="أساسية" placeholder="Company name"/>
+    <control id="4" name="tax_number" alias="الرقم الضريبي" inputType="text" dataType="VARCHAR" category="مالية">
+      <validation regex="^[0-9]{15}$"/>
+    </control>
+    <control id="5" name="commercial_register" alias="السجل التجاري" inputType="text" dataType="VARCHAR" category="مالية"/>
+    <control id="6" name="phone" alias="الهاتف" inputType="phone" dataType="VARCHAR" category="الاتصال"/>
+    <control id="7" name="email" alias="البريد الإلكتروني" inputType="email" dataType="VARCHAR" category="الاتصال"/>
+    <control id="8" name="city" alias="المدينة" inputType="text" dataType="VARCHAR" category="العنوان"/>
+    <control id="9" name="address" alias="العنوان" inputType="textarea" dataType="TEXT" category="العنوان"/>
+    <control id="10" name="is_active" alias="نشطة" inputType="boolean" dataType="BOOLEAN" category="الحالة" default="true"/>
+    <control id="11" name="logo" alias="الشعار" inputType="file" dataType="VARCHAR" category="الهوية"/>
+  </controls>
+  <rules>
+    <rule id="1" name="code_unique" type="unique" target="company_code" message="رمز الشركة يجب أن يكون فريداً"/>
+    <rule id="2" name="name_required" type="required" target="company_name" message="اسم الشركة مطلوب"/>
+    <rule id="3" name="code_format" type="regex" target="company_code" value="^[A-Z0-9-]+$" message="رمز الشركة: أحرف إنجليزية كبيرة وأرقام وشرطات فقط"/>
+    <rule id="4" name="tax_format" type="regex" target="tax_number" value="^[0-9]{15}$" message="الرقم الضريبي يجب أن يتكون من 15 رقماً"/>
+  </rules>
+</cml>

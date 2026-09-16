@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rml>
+  <rpt_metadata name="connections_list" displayName="سجل الاتصالات" category="الاتصالات" schema="main_hq_2026" icon="fa-plug" connection="urs_local"/>
+  <rml_connections>
+    <connection id="1" connection_id="1"/>
+  </rml_connections>
+  <fields>
+    <field id="1" name="id" type="INTEGER" conn_id="1" table_source="urs_connection"/>
+    <field id="2" name="conn_type" type="VARCHAR" conn_id="1" table_source="urs_connection"/>
+    <field id="3" name="name" type="VARCHAR" conn_id="1" table_source="urs_connection"/>
+    <field id="4" name="engine" type="VARCHAR" conn_id="1" table_source="urs_connection"/>
+    <field id="5" name="host" type="VARCHAR" conn_id="1" table_source="urs_connection"/>
+    <field id="6" name="port" type="INTEGER" conn_id="1" table_source="urs_connection"/>
+    <field id="7" name="user" type="VARCHAR" conn_id="1" table_source="urs_connection"/>
+    <field id="8" name="instance" type="VARCHAR" conn_id="1" table_source="urs_connection"/>
+    <field id="9" name="instance_name" type="VARCHAR" conn_id="1" table_source="urs_connection"/>
+    <field id="10" name="schema" type="VARCHAR" conn_id="1" table_source="urs_connection"/>
+    <field id="11" name="devices" type="TEXT" conn_id="1" table_source="urs_connection"/>
+    <field id="12" name="endpoint" type="VARCHAR" conn_id="1" table_source="urs_connection"/>
+    <field id="13" name="is_local" type="BOOLEAN" conn_id="1" table_source="urs_connection"/>
+    <field id="14" name="is_queryable" type="BOOLEAN" conn_id="1" table_source="urs_connection"/>
+    <field id="15" name="description" type="TEXT" conn_id="1" table_source="urs_connection"/>
+  </fields>
+  <columns>
+    <column id="1" name="col_id" alias="المعرف" expr="[id]" dataType="INTEGER" col_type="direct" join_type="one_to_one"/>
+    <column id="2" name="col_conn_type" alias="نوع الاتصال" expr="[conn_type]" dataType="VARCHAR" col_type="direct" join_type="one_to_one"/>
+    <column id="3" name="col_name" alias="اسم الاتصال" expr="[name]" dataType="VARCHAR" col_type="direct" join_type="one_to_one"/>
+    <column id="4" name="col_engine" alias="نوع المحرك" expr="[engine]" dataType="VARCHAR" col_type="direct" join_type="one_to_one"/>
+    <column id="5" name="col_host" alias="المضيف" expr="[host]" dataType="VARCHAR" col_type="direct" join_type="one_to_one"/>
+    <column id="6" name="col_port" alias="المنفذ" expr="[port]" dataType="INTEGER" col_type="direct" join_type="one_to_one"/>
+    <column id="7" name="col_user" alias="المستخدم" expr="[user]" dataType="VARCHAR" col_type="direct" join_type="one_to_one"/>
+    <column id="8" name="col_instance" alias="القاعدة" expr="[instance]" dataType="VARCHAR" col_type="direct" join_type="one_to_one"/>
+    <column id="9" name="col_instance_name" alias="اسم المثيل" expr="[instance_name]" dataType="VARCHAR" col_type="direct" join_type="one_to_one"/>
+    <column id="10" name="col_schema" alias="السكيما" expr="[schema]" dataType="VARCHAR" col_type="direct" join_type="one_to_one"/>
+    <column id="11" name="col_devices" alias="الأجهزة" expr="[devices]" dataType="TEXT" col_type="direct" join_type="one_to_one"/>
+    <column id="12" name="col_endpoint" alias="نقطة البيانات" expr="[endpoint]" dataType="VARCHAR" col_type="direct" join_type="one_to_one"/>
+    <column id="13" name="col_is_local" alias="محلي" expr="[is_local]" dataType="BOOLEAN" col_type="direct" join_type="one_to_one"/>
+    <column id="14" name="col_is_queryable" alias="قابل للاستعلام" expr="[is_queryable]" dataType="BOOLEAN" col_type="direct" join_type="one_to_one"/>
+    <column id="15" name="col_description" alias="الوصف" expr="[description]" dataType="TEXT" col_type="direct" join_type="one_to_one"/>
+  </columns>
+  <table_opts>
+    <table name="urs_connection" conn="1" is_default="1"/>
+  </table_opts>
+</rml>

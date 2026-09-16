@@ -1,0 +1,1 @@
+{% if icon|slice:":5" == "file:" %}<img src="/api/apps/{{ app_name }}/icon-file" alt="app icon" style="max-width:1.6em;max-height:1.6em;object-fit:contain" class="{{ cls|default:'' }}">{% else %}<i class="fa-solid {{ icon }} {{ cls|default:'' }}"></i>{% endif %}

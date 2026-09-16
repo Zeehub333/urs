@@ -1,0 +1,2649 @@
+{% extends "base.html" %}
+{% block title %}{{ app.ar }} — {{ fml_metadata.displayName }} — مشغل الادخالات{% endblock %}
+{% block head_css %}
+        .fmlk-tab-active { background: #4f46e5; color: white; border-color: #4f46e5; }
+        .fmlk-category { border: 1px solid #e2e8f0; border-radius: 12px; background: white; }
+        .fmlk-field-left { grid-column: span 1; }
+        .fmlk-field-full { grid-column: 1 / -1; }
+        @media (max-width: 768px) { .fmlk-field-left { grid-column: 1 / -1; } }
+        @keyframes toolbarBtnPop { from { opacity: 0; transform: scale(.5); } to { opacity: 1; transform: scale(1); } }
+        .toolbar-btn-pop { animation: toolbarBtnPop .18s ease; }
+        .freeze-col { position: sticky; right: 0; z-index: 5; box-shadow: -1px 0 0 #e2e8f0; }
+        .freeze-col-head { position: sticky; right: 0; z-index: 30; background: #f1f5f9; box-shadow: -1px 0 0 #e2e8f0; }
+{% endblock %}
+{% block sidebar %}
+    <!-- Sidebar — kept for navigation (Forms + Reports) -->
+    <aside class="w-60 bg-white border-l border-gray-200 flex flex-col overflow-hidden shrink-0">
+        <div class="p-4 border-b border-gray-100">
+            <a href="/" class="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-800 mb-3"><i class="fa-solid fa-arrow-right"></i> العودة للتطبيقات</a>
+            <div class="flex items-center gap-3">
+                <div class="w-12 h-12 {{ app.icon_bg }} {{ app.icon_color }} rounded-2xl flex items-center justify-center text-xl">
+                    {% include "partials/app_icon.html" with icon=app.icon app_name=app_name %}
+                </div>
+                <div>
+                    <h1 class="font-bold text-gray-800">{{ app.ar }}</h1>
+                    <p class="text-xs text-gray-500">v{{ app.version }} • {{ app.category|default:"عام" }}</p>
+                </div>
+            </div>
+            <p class="text-xs text-gray-500 mt-2">{{ app.description }}</p>
+            <a href="/app/{{ app_name }}/" class="mt-3 inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800">
+                <i class="fa-solid fa-grip"></i> نظرة عامة
+            </a>
+        </div>
+
+        <div class="flex-1 overflow-y-auto p-3 space-y-4">
+            <!-- الادخالات — مبوبة حسب الفئة قابلة للطي والتوسيع -->
+            <div>
+                <h3 class="text-xs font-bold text-gray-700 flex items-center gap-2 mb-2">
+                    <i class="fa-solid fa-pen-to-square text-indigo-600"></i>
+                    <span class="flex-1">الادخالات</span>
+                    <button onclick="toggleSideCats(true)" class="font-normal text-indigo-600 hover:text-indigo-800" title="توسيع الكل">توسيع</button>
+                    <span class="text-slate-300 font-normal">|</span>
+                    <button onclick="toggleSideCats(false)" class="font-normal text-slate-400 hover:text-slate-600" title="طي الكل">طي</button>
+                </h3>
+                <div class="space-y-2">
+                    {% for g in fml_by_category %}
+                    <details open data-side-cat class="border border-slate-100 rounded-xl overflow-hidden">
+                        <summary class="cursor-pointer list-none bg-slate-50 px-2.5 py-2 flex items-center gap-2">
+                            <i class="fa-solid fa-chevron-down text-[10px] text-slate-400"></i>
+                            <span class="flex-1 text-xs font-bold text-slate-700 truncate">{{ g.name }}</span>
+                            <span class="text-[10px] text-slate-500 bg-white border border-slate-200 px-1.5 py-0.5 rounded-full">{{ g.files|length }}</span>
+                        </summary>
+                        <div class="p-1.5 space-y-1">
+                            {% for f in g.files %}
+                            <a href="{% if f.virtual %}{{ f.url }}{% else %}/app/{{ app_name }}/form/{{ f.file }}/{% endif %}" class="side-fml-item block p-2.5 rounded-xl border transition text-right {% if f.file == fml_file %}bg-indigo-50 border-indigo-200{% else %}hover:bg-slate-50 border-transparent hover:border-slate-200{% endif %}" data-search="{{ f.metadata.displayName }} {{ f.metadata.category|default:'' }}">
+                                <div class="text-xs font-semibold truncate {% if f.file == fml_file %}text-indigo-800{% else %}text-gray-800{% endif %}">{{ f.metadata.displayName }}</div>
+                            </a>
+                            {% endfor %}
+                        </div>
+                    </details>
+                    {% endfor %}
+                    {% if not fml_files %}<p class="text-xs text-gray-400">لا توجد ادخالات</p>{% endif %}
+                </div>
+            </div>
+
+            <!-- التقارير -->
+            <div>
+                <h3 class="text-xs font-bold text-gray-700 flex items-center gap-2 mb-2">
+                    <i class="fa-solid fa-chart-line text-emerald-600"></i>
+                    التقارير
+                </h3>
+                <div class="space-y-1">
+                    {% for f in rml_files %}
+                    <a href="/app/{{ app_name }}/report/{{ f.file }}/" class="block p-2.5 rounded-xl border transition text-right hover:bg-slate-50 border-transparent hover:border-slate-200">
+                        <div class="text-xs font-semibold text-gray-800 truncate">{{ f.metadata.displayName }}</div>
+                    </a>
+                    {% endfor %}
+                    {% if not rml_files %}<p class="text-xs text-gray-400">لا توجد تقارير</p>{% endif %}
+                </div>
+            </div>
+
+            <div class="pt-3 border-t border-gray-100">
+                <button onclick="fetch('/api/apps/sync/',{method:'POST'}).then(()=>location.reload())" class="w-full py-2 bg-slate-100 hover:bg-slate-200 rounded-xl text-xs font-semibold">مزامنة النظام</button>
+            </div>
+        </div>
+    </aside>
+{% endblock %}
+{% block main %}
+    <!-- Main Player Area -->
+    <div class="flex-1 flex flex-col overflow-hidden min-w-0">
+        <!-- Header toolbar: actions | record nav | view tools -->
+        <header class="bg-white border-b border-slate-200 px-4 py-2 shrink-0">
+            <div class="flex items-center gap-2 flex-wrap">
+                <div class="flex items-center gap-1">
+                    <a href="/app/{{ app_name }}/" title="رجوع" class="w-8 h-8 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 transition"><i class="fa-solid fa-arrow-right"></i></a>
+                    <span class="text-xs bg-indigo-50 text-indigo-700 px-3 py-1 rounded-full font-bold hidden sm:inline">{{ fml_metadata.displayName }}</span>
+                    <select onchange="playerModelGo(this)" title="الموديلات" class="hidden md:block bg-slate-50 border border-slate-200 rounded-full px-3 py-1.5 text-xs font-bold text-slate-600 max-w-[170px]">
+                        <option value="">الموديلات ({{ fml_files|length }})</option>
+                        {% for f in fml_files %}<option value="{{ f.file }}" data-url="{% if f.virtual %}{{ f.url }}{% endif %}" {% if f.file == fml_file %}selected{% endif %}>{{ f.metadata.displayName }}</option>{% endfor %}
+                        <option value="__designer__">+ مصمم موديل جديد</option>
+                    </select>
+                    <button onclick="location.href=`/app/${currentApp}/?design=${encodeURIComponent(currentFml)}`" title="فتح في المصمم" class="w-8 h-8 rounded-full hidden md:flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-violet-600 transition"><i class="fa-solid fa-table-list"></i></button>
+                    <button onclick="migrateCurrentModel()" title="ترحيل الجدول" class="w-8 h-8 rounded-full hidden md:flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-emerald-600 transition"><i class="fa-solid fa-database"></i></button>
+                    <span class="w-px h-6 bg-slate-200 mx-1 hidden md:block"></span>
+                    <span id="formActionsBar" class="flex items-center gap-1"></span>
+                    <button id="addToolbarBtn" onclick="openAddPanel()" title="إضافة" class="w-8 h-8 rounded-full flex items-center justify-center text-indigo-600 hover:bg-indigo-50 transition"><i class="fa-solid fa-plus"></i></button>
+                    <button onclick="document.getElementById('importFile').click()" title="استيراد" class="w-8 h-8 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-indigo-600 transition"><i class="fa-solid fa-file-import"></i></button>
+                    <input type="file" id="importFile" accept=".csv" class="hidden" onchange="importCSV(this)">
+                    <button id="editToolbarBtn" onclick="editSelected()" title="تعديل السجل المحدد" class="hidden w-8 h-8 rounded-full items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-amber-600 transition"><i class="fa-solid fa-pen"></i></button>
+                    <button id="deleteToolbarBtn" onclick="deleteSelected()" title="حذف السجلات المحددة" class="hidden w-8 h-8 rounded-full items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-rose-600 transition"><i class="fa-solid fa-trash"></i></button>
+                    <button id="saveToolbarBtn" onclick="saveForm()" title="حفظ السجل" class="hidden w-8 h-8 rounded-full items-center justify-center text-emerald-600 hover:bg-emerald-50 transition"><i class="fa-solid fa-floppy-disk"></i></button>
+                    <button onclick="saveAndNew()" title="حفظ وجديد" class="w-8 h-8 rounded-full flex items-center justify-center text-teal-600 hover:bg-teal-50 transition"><i class="fa-solid fa-floppy-disk-circle-arrow-right"></i></button>
+                    <button onclick="toggleBlankPanel()" title="لوحة المعلومات" class="w-8 h-8 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-indigo-600 transition"><i class="fa-regular fa-square"></i></button>
+                </div>
+                <div class="flex items-center gap-1 mx-auto">
+                    <button onclick="prevRecord()" title="السابق" class="w-8 h-8 bg-slate-100 hover:bg-slate-200 rounded-full flex items-center justify-center"><i class="fa-solid fa-chevron-right text-xs"></i></button>
+                    <select id="recordSelector" onchange="loadRecord(this.value)" class="bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs min-w-[150px] max-w-[220px]">
+                        <option value="">-- اختر سجل --</option>
+                    </select>
+                    <button onclick="nextRecord()" title="التالي" class="w-8 h-8 bg-slate-100 hover:bg-slate-200 rounded-full flex items-center justify-center"><i class="fa-solid fa-chevron-left text-xs"></i></button>
+                    <span id="recordCount" class="text-slate-400 text-xs whitespace-nowrap">0 سجل</span>
+                </div>
+                <div class="flex items-center gap-1">
+                    <button onclick="toggleView('list')" id="viewListBtn" title="عرض قائمة" class="w-8 h-8 rounded-full flex items-center justify-center text-indigo-600 bg-indigo-50 transition"><i class="fa-solid fa-list"></i></button>
+                    <button onclick="toggleView('grid')" id="viewGridBtn" title="عرض شبكة" class="w-8 h-8 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 transition"><i class="fa-solid fa-table-cells"></i></button>
+                    <span id="viewActionsBar" class="flex items-center gap-1"></span>
+                    <button onclick="exportGrid()" title="تصدير" class="w-8 h-8 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-emerald-600 transition"><i class="fa-solid fa-file-excel"></i></button>
+                    <button onclick="toggleDocPanel()" title="معاينة الطباعة (مستندات DML)" class="w-8 h-8 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-indigo-600 transition"><i class="fa-solid fa-print text-sm"></i></button>
+                    <button onclick="shareGrid()" title="مشاركة" class="w-8 h-8 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-violet-600 transition"><i class="fa-solid fa-share-nodes"></i></button>
+                    <button onclick="openGridSettings()" title="إعدادات الادخال" class="w-8 h-8 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-indigo-600 transition"><i class="fa-solid fa-gear"></i></button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main -->
+        <main class="flex-1 flex flex-col overflow-hidden min-h-0 bg-slate-50">
+            <!-- Form right-side drawer (add / edit) -->
+            <div id="formPanel" class="hidden fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm" onclick="if(event.target===this)closePanel()">
+                <div class="bg-white shadow-2xl h-full w-full max-w-2xl ml-auto flex flex-col overflow-hidden rounded-l-2xl">
+                    <div class="px-4 py-3 flex items-center justify-between bg-slate-50 border-b border-slate-200 gap-2">
+                        <span id="formPanelTitle" class="text-sm font-bold text-slate-800">سجل جديد</span>
+                        <div class="flex items-center gap-2">
+                            <span id="formPanelActionsBar" class="flex items-center gap-2"></span>
+                            <button onclick="saveAndNew()" class="px-4 py-1.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-semibold">حفظ وجديد</button>
+                            <button onclick="saveAndClose()" class="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold">حفظ</button>
+                            <button onclick="closePanel()" class="px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs">إلغاء</button>
+                            <button onclick="closePanel()" class="w-8 h-8 rounded-full hover:bg-slate-200 text-slate-400 flex items-center justify-center ms-1"><i class="fa-solid fa-xmark"></i></button>
+                        </div>
+                    </div>
+                    <div class="px-2 py-2 overflow-x-auto border-b border-slate-100">
+                        <div id="tabsBar" class="flex items-center gap-1 min-w-max">
+                            <div class="text-xs text-slate-400 px-4">جاري تحميل التبويبات...</div>
+                        </div>
+                    </div>
+                    <div id="formRoot" class="flex-1 min-h-0 overflow-y-auto custom-scroll p-4 max-w-6xl mx-auto w-full space-y-4">
+                        <div class="text-center py-8 text-slate-400 text-sm">جاري تحميل البيانات...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Grid toolbar -->
+            <div class="px-3 py-1.5 flex items-center gap-2 text-xs shrink-0 bg-white border-b border-slate-200">
+                <i class="fa-solid fa-search text-slate-400"></i>
+                <input id="gridSearch" type="text" placeholder="بحث ذكي: نص، رقم، تاريخ، 09:00... (& للجمع، ، للتخيير)..." oninput="onGridSearch(this.value)" class="flex-1 min-w-[120px] bg-transparent border-none focus:outline-none text-slate-700">
+                <span id="selectedCount" class="text-slate-400 whitespace-nowrap"></span>
+                <div id="activeGroupIndicator" class="hidden items-center gap-2 bg-indigo-50 text-indigo-700 px-3 py-1 rounded-lg font-medium">
+                    <span>تجميع: <strong id="activeGroupColName"></strong> = <span id="activeGroupVal"></span></span>
+                    <button onclick="clearGroupFilter()" class="hover:text-indigo-900"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+            </div>
+
+            <!-- Body: grouping sidebar + table/cards -->
+            <div class="flex-1 flex overflow-hidden min-h-0">
+                <aside id="groupSidebar" class="w-56 bg-white border-l border-slate-200 flex-col transition-all duration-300 hidden shrink-0 overflow-y-auto custom-scroll">
+                    <div class="p-3 border-b border-slate-100 flex items-center justify-between">
+                        <h3 class="text-xs font-bold text-slate-700 flex items-center gap-2"><i class="fa-solid fa-layer-group text-indigo-600"></i> المجموعات</h3>
+                        <button onclick="toggleGroupSidebar()" class="text-slate-400 hover:text-slate-600 text-xs"><i class="fa-solid fa-xmark"></i></button>
+                    </div>
+                    <div id="groupSidebarContent" class="p-3 space-y-2 text-xs"></div>
+                </aside>
+                <div id="formTableWrap" class="flex-1 overflow-auto custom-scroll bg-white relative min-w-0">
+                    <table id="dataTable" class="w-full border-collapse text-right text-xs">
+                        <thead id="tableHeader" class="bg-slate-50 text-slate-700 font-semibold sticky top-0 z-20"></thead>
+                        <tbody id="tableBody" class="divide-y divide-slate-100"></tbody>
+                    </table>
+                    <div id="cardsView" class="hidden p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3"></div>
+                </div>
+                <aside id="docPrintPanel" class="hidden w-[34rem] max-w-[92vw] shrink-0 bg-white border-r border-slate-200 flex-col overflow-hidden">
+                    <div class="px-3 py-2 border-b border-slate-100 flex items-center gap-2 bg-slate-50">
+                        <span class="text-xs font-bold text-slate-700 whitespace-nowrap"><i class="fa-solid fa-print text-indigo-600"></i> معاينة الطباعة</span>
+                        <button onclick="toggleDocPanel()" class="mr-auto text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-xs"></i></button>
+                    </div>
+                    <div class="px-3 py-2 border-b border-slate-100 bg-white space-y-2">
+                        <div>
+                            <label class="block text-[10px] font-bold text-slate-500 mb-1">المستند</label>
+                            <select id="printDocSel" onchange="onPrintDocChanged()" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-xs"></select>
+                        </div>
+                        <div class="flex items-center gap-1.5">
+                            <button onclick="printPreviewDoc()" title="طباعة" class="flex-1 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold"><i class="fa-solid fa-print"></i> طباعة</button>
+                            <button onclick="openSaveDocModal()" title="حفظ المستند في مستنداتي" class="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold"><i class="fa-solid fa-floppy-disk"></i> حفظ</button>
+                            <button onclick="downloadPreviewPdf()" title="حفظ المستند PDF" class="flex-1 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold"><i class="fa-solid fa-file-pdf"></i> PDF</button>
+                        </div>
+                    </div>
+                    <div class="flex-1 overflow-hidden bg-slate-200 p-2 min-h-0">
+                        <iframe id="printPreviewFrame" class="w-full h-full bg-white border border-slate-200 rounded-lg" title="معاينة الطباعة"></iframe>
+                    </div>
+                    <div class="px-3 py-1.5 border-t border-slate-100 bg-slate-50 text-center text-[11px] text-slate-500">عدد الصفحات: <strong id="printPageCount">—</strong></div>
+                </aside>
+                <aside id="blankPanel" class="hidden w-96 shrink-0 bg-white border-r border-slate-200 flex-col overflow-hidden">
+                    <div class="p-3 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+                        <h3 class="text-xs font-bold text-slate-700">لوحة المعلومات</h3>
+                        <button onclick="toggleBlankPanel()" class="text-slate-400 hover:text-slate-600 text-xs"><i class="fa-solid fa-xmark"></i></button>
+                    </div>
+                    <div id="blankPanelBody" class="flex-1 overflow-y-auto custom-scroll p-4 text-xs text-slate-400 text-center">فارغة</div>
+                </aside>
+            </div>
+
+            <!-- Pagination -->
+            <footer class="bg-white border-t border-slate-200 px-4 py-2 flex items-center justify-between text-xs text-slate-600 shrink-0">
+                <div class="flex items-center gap-2">
+                    <span>عرض</span>
+                    <select id="pageSizeSel" onchange="changePageSize(this.value)" class="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 font-semibold text-slate-800 focus:outline-none">
+                        <option value="10">10</option>
+                        <option value="25" selected>25</option>
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                        <option value="all">الكل</option>
+                    </select>
+                    <span>سجل من أصل <strong id="totalRecordsCount">0</strong> سجل</span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button onclick="changePage(-1)" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg font-medium">السابق</button>
+                    <span class="font-semibold text-slate-800">الصفحة <span id="currentPageNum">1</span> من <span id="totalPagesNum">1</span></span>
+                    <button onclick="changePage(1)" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg font-medium">التالي</button>
+                </div>
+            </footer>
+        </main>
+    </div>
+
+    <!-- Data-grid modal picker (datamodal inputs) -->
+    <div id="fmlkDataModal" class="hidden fixed inset-0 z-[70] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4" onclick="if(event.target===this)fmlkDataModalClose()">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
+            <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-indigo-50 gap-2 shrink-0">
+                <h3 id="fmlkDataModalTitle" class="text-sm font-bold text-slate-800 flex items-center gap-2"><i class="fa-solid fa-table-cells text-indigo-600"></i> اختيار من الشبكة</h3>
+                <button onclick="fmlkDataModalClose()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="px-5 pt-3 shrink-0">
+                <input id="fmlkDataModalSearch" oninput="fmlkDataModalRender()" placeholder="بحث..." autocomplete="off" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-indigo-500">
+            </div>
+            <div id="fmlkDataModalList" class="flex-1 min-h-0 overflow-y-auto custom-scroll p-3"></div>
+        </div>
+    </div>
+    <!-- Save doc to my_docs -->
+    <div id="saveDocModal" class="hidden fixed inset-0 z-[80] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4" onclick="if(event.target===this)closeSaveDocModal()">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+            <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-emerald-50">
+                <h3 class="text-sm font-bold text-slate-800 flex items-center gap-2"><i class="fa-solid fa-floppy-disk text-emerald-600"></i> حفظ في مستنداتي</h3>
+                <button onclick="closeSaveDocModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="p-5 space-y-3 text-xs">
+                <p class="text-[11px] text-slate-500">يُحفظ المستند المعروض حالياً (HTML) بحالته إلى مجلد مستنداتي.</p>
+                <div><label class="block font-semibold text-slate-700 mb-1">اسم المستند *</label><input id="saveDocName" placeholder="مثال: سند قبض" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 focus:outline-none focus:border-emerald-500"></div>
+            </div>
+            <div class="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2">
+                <button onclick="closeSaveDocModal()" class="px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs">إلغاء</button>
+                <button onclick="confirmSaveDoc()" class="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold">حفظ</button>
+            </div>
+        </div>
+    </div>
+    <!-- Column menu -->
+    <div id="columnDropdownMenu" class="hidden fixed bg-white border border-slate-200 rounded-xl shadow-2xl z-50 w-64 p-3 text-xs">
+        <div class="space-y-1 mb-2 pb-2 border-b border-slate-100">
+            <button onclick="execColumnSort('asc')" class="w-full text-right px-2 py-1.5 hover:bg-slate-50 rounded-lg flex items-center gap-2 text-slate-700"><i class="fa-solid fa-arrow-down-a-z text-indigo-600"></i> الفرز من أ إلى ي</button>
+            <button onclick="execColumnSort('desc')" class="w-full text-right px-2 py-1.5 hover:bg-slate-50 rounded-lg flex items-center gap-2 text-slate-700"><i class="fa-solid fa-arrow-up-z-a text-indigo-600"></i> الفرز من ي إلى أ</button>
+            <button onclick="execColumnGroup()" class="w-full text-right px-2 py-1.5 hover:bg-slate-50 rounded-lg flex items-center gap-2 text-slate-700"><i class="fa-solid fa-layer-group text-indigo-600"></i> تجميع حسب هذا العمود</button>
+            <button onclick="clearColumnFilter()" class="w-full text-right px-2 py-1.5 hover:bg-slate-50 rounded-lg flex items-center gap-2 text-rose-600"><i class="fa-solid fa-filter-circle-xmark"></i> إلغاء التصفية</button>
+        </div>
+        <div class="relative mb-2">
+            <i class="fa-solid fa-search absolute right-2.5 top-2.5 text-slate-400 text-xs"></i>
+            <input type="text" id="colSearchInput" oninput="filterColumnCheckboxes(this.value)" placeholder="بحث..." class="w-full bg-slate-50 border border-slate-200 rounded-lg pr-7 pl-3 py-1.5 text-xs focus:outline-none focus:border-indigo-500">
+        </div>
+        <div class="flex items-center justify-between mb-1">
+            <span class="text-[10px] text-slate-400" id="colValuesCount"></span>
+            <div class="flex gap-3">
+                <button onclick="colFilterCheckAll(true)" class="text-[11px] text-indigo-600 hover:text-indigo-800 font-bold">تحديد الكل</button>
+                <button onclick="colFilterCheckAll(false)" class="text-[11px] text-slate-500 hover:text-slate-700 font-bold">مسح الكل</button>
+            </div>
+        </div>
+        <div class="max-h-40 overflow-y-auto space-y-1 custom-scroll mb-2" id="colValuesCheckboxesList"></div>
+        <div class="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+            <button onclick="closeColumnMenu()" class="px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg">إلغاء</button>
+            <button onclick="applyColumnFilter()" class="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg">موافق</button>
+        </div>
+    </div>
+
+    <!-- Generic dynamic-action shell: المحتوى يُحمَّل من ملف render المنفصل لكل زر -->
+    <div id="dynamicActionModal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[70] overflow-y-auto p-4" onclick="if(event.target===this)closeDynamicModal()">
+        <div id="dynamicActionBody" class="w-full max-w-md m-auto max-h-[90vh] overflow-y-auto custom-scroll"></div>
+    </div>
+
+    <!-- Form settings modal -->
+    <div id="gridSettingsModal" class="hidden fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col max-h-[85vh]">
+            <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+                <h3 class="text-sm font-bold text-slate-800 flex items-center gap-2"><i class="fa-solid fa-gear text-indigo-600"></i> إعدادات الادخال</h3>
+                <button onclick="closeGridSettings()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="p-5 space-y-3 text-xs overflow-y-auto custom-scroll">
+                <div>
+                    <div class="font-bold text-slate-800 text-sm">{{ fml_metadata.displayName }}</div>
+                    {% if fml_metadata.description %}<div class="text-slate-500 mt-1">{{ fml_metadata.description }}</div>{% endif %}
+                </div>
+                <div>
+                    <div class="font-semibold text-slate-700 mb-2">الأعمدة الظاهرة في الجدول</div>
+                    <div id="colsVisibilityList" class="space-y-1"></div>
+                </div>
+            </div>
+            <div class="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-end">
+                <button onclick="closeGridSettings()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold">تم</button>
+            </div>
+        </div>
+    </div>
+    {% endblock %}
+{% block scripts %}
+    <script>
+        // Injected by Django
+        let currentFml = "{{ fml_file|escapejs }}";
+        let currentApp = "{{ app_name|escapejs }}";
+        let currentRecordId = null;
+        let currentData = {};
+
+        let fmlMeta = {fields: [], tabs: []};
+        let allRows = [];
+        let viewMode = 'list';
+        let selectedIds = new Set();
+        let activeSort = {column: null, direction: 'asc'};
+        let columnFilters = {};
+        let groupCol = null;
+        let groupVal = null;
+        let gridSearch = '';
+        let currentPage = 1;
+        let pageSize = 25;
+        let hiddenCols = new Set();
+        let menuCol = null;
+        let customActions = [];
+
+        // ── الأخطاء: SQL/Python ← مودال (نسخ + اسأل AI) | FMLK ← توست ──
+        function isSqlPyError(msg){
+            return /syntax error|relation .*does not exist|column .*does not exist|schema .*does not exist|does not exist|LINE \d+|SELECT\s|Traceback|File ".*", line \d+|psycopg2|oracledb|ORA-\d+|permission denied|timed out|timeout|connection (refused|failed|was closed)|duplicate key|violates .*constraint|current transaction is aborted|Table .*doesn't exist|Unknown column|SQL/i.test(String(msg || ''));
+        }
+        function errCopyText(txt, okMsg){
+            const done = ()=>{ try{ notify(okMsg || 'تم النسخ', 'success'); }catch(e){} };
+            try{
+                if(navigator.clipboard && navigator.clipboard.writeText) return void navigator.clipboard.writeText(txt).then(done).catch(()=>errCopyFallback(txt, done));
+                errCopyFallback(txt, done);
+            }catch(e){ errCopyFallback(txt, done); }
+        }
+        function errCopyFallback(txt, done){
+            try{
+                const ta = document.createElement('textarea');
+                ta.value = txt; ta.style.position = 'fixed'; ta.style.opacity = '0';
+                document.body.appendChild(ta); ta.select();
+                document.execCommand('copy'); ta.remove(); done();
+            }catch(e){ try{ notify('تعذر النسخ', 'error'); }catch(e2){} }
+        }
+        function closeErrorModal(){
+            const ov = document.getElementById('errModal');
+            if(ov) ov.classList.add('hidden');
+        }
+        function askAiAboutError(){
+            const ov = document.getElementById('errModal');
+            const msg = ((ov && ov.dataset.msg) || '').slice(0, 4000);
+            const ctx = (ov && ov.dataset.ctx) || '';
+            const prompt = 'عندي خطأ في نظام URS/Odex:\n' + (ctx ? ('السياق: ' + ctx + '\n') : '') + 'الخطأ:\n' + msg + '\nما السبب المحتمل والحل خطوة بخطوة؟';
+            try{ window.open('https://chatgpt.com/?q=' + encodeURIComponent(prompt.slice(0, 1800)), '_blank'); }catch(e){}
+            errCopyText(prompt, 'فُتح ChatGPT — تم نسخ التشخيص الكامل أيضاً');
+        }
+        function isDbDownError(msg){
+            try{ return /mock db|connection to server|could not connect|connection refused|timed out|timeout expired|no such host|name or service not known/i.test(String(msg || '')); }catch(e){ return false; }
+        }
+        function showErrorModal(title, msg, ctx){
+            let ov = document.getElementById('errModal');
+            if(!ov){
+                ov = document.createElement('div');
+                ov.id = 'errModal';
+                ov.className = 'hidden fixed inset-0 z-[90] bg-slate-900/50 backdrop-blur-sm flex items-start justify-center p-4 overflow-y-auto';
+                ov.setAttribute('onclick', 'if(event.target===this)closeErrorModal()');
+                document.body.appendChild(ov);
+            }
+            ov.dataset.msg = String(msg || '');
+            ov.dataset.ctx = String(ctx || '');
+            ov.innerHTML = '';
+            const box = document.createElement('div');
+            box.className = 'bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-8 p-5 text-xs';
+            const esc = s=>String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            const dbDown = isDbDownError(msg);
+            box.innerHTML = `
+                <div class="flex items-center justify-between mb-3">
+                    <h3 class="text-sm font-bold text-rose-700 flex items-center gap-2"><i class="fa-solid fa-triangle-exclamation"></i> ${esc(title || 'خطأ')}</h3>
+                    <button onclick="closeErrorModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                ${ctx ? `<div class="mb-2 text-[11px] text-slate-500">${esc(ctx)}</div>` : ''}
+                ${dbDown ? `<div class="mb-3 rounded-2xl border border-amber-200 bg-amber-50 p-3">
+                    <div class="font-bold text-amber-800 mb-1"><i class="fa-solid fa-plug-circle-exclamation"></i> تعذر الوصول إلى قاعدة البيانات</div>
+                    <div class="text-amber-700 mb-2">أنشئ اتصالاً محلياً وهيئ القاعدة من المعالج، أو عدّل بيانات الاتصال الحالي، ثم أعد المحاولة.</div>
+                    <div class="flex flex-wrap gap-2">
+                        <a href="/settings/setup/" class="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold"><i class="fa-solid fa-wand-magic-sparkles"></i> معالج الإعداد والتهيئة</a>
+                        <a href="/app/settings/form/connections.fmlk/" class="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold"><i class="fa-solid fa-plug"></i> إدارة الاتصالات</a>
+                        <button onclick="closeErrorModal(); if(typeof loadAllRecords==='function') loadAllRecords();" class="px-3 py-2 bg-white border border-amber-300 text-amber-800 rounded-xl font-bold"><i class="fa-solid fa-rotate"></i> إعادة المحاولة</button>
+                    </div>
+                </div>` : ''}
+                <pre class="bg-slate-900 text-rose-100 rounded-xl p-3 overflow-auto max-h-72 text-[11px] font-mono whitespace-pre-wrap" dir="ltr">${esc(msg)}</pre>
+                <div class="flex gap-2 mt-3">
+                    <button onclick="errCopyText((document.getElementById('errModal')||{}).dataset.msg||'', 'تم نسخ الخطأ')" class="flex-1 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold"><i class="fa-solid fa-copy"></i> نسخ</button>
+                    <button onclick="askAiAboutError()" class="flex-1 py-2 bg-violet-600 hover:bg-violet-700 text-white rounded-xl font-bold"><i class="fa-solid fa-robot"></i> اسأل AI</button>
+                    <button onclick="closeErrorModal()" class="px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-xl font-bold">إغلاق</button>
+                </div>`;
+            ov.appendChild(box);
+            ov.classList.remove('hidden');
+        }
+        function showError(err, ctx){
+            const msg = String((err && err.message) || err || 'خطأ غير معروف');
+            try{
+                if(isSqlPyError(msg)) showErrorModal('خطأ تنفيذ', msg.slice(0, 4000), ctx);
+                else notify(msg.slice(0, 300), 'error');
+            }catch(e2){ try{ notify(msg.slice(0, 300), 'error'); }catch(e3){} }
+        }
+        let _lookupToastAt = 0;
+        function showLookupError(msg){
+            const now = Date.now();
+            if(now - _lookupToastAt < 8000) return;
+            _lookupToastAt = now;
+            showError(msg, 'جلب القيم المرجعية');
+        }
+        document.addEventListener('keydown', (e) => {
+            try{ if(e.key === 'Escape'){ const ov = document.getElementById('errModal'); if(ov && !ov.classList.contains('hidden')) closeErrorModal(); } }catch(ee){}
+        });
+        async function loadFml(name) {
+            try {
+                const res = await fetch(`/api/fmlk/metadata?fml=${encodeURIComponent(name)}&app=${encodeURIComponent(currentApp)}`);
+                if(!res.ok) throw new Error('metadata fetch failed');
+                const data = await res.json();
+                fmlMeta = data;
+                customActions = Array.isArray(data.actions) ? data.actions : [];
+                renderFormActions();
+                // الفئات = التبويبات: تُبنى التبويبات من فئات الحقول لا من <tabs>
+                const cats = [];
+                (data.fields || []).forEach(f => {
+                    if(f.destination && f.destination !== 'main') return;
+                    const c = f.category || 'عام';
+                    if(!cats.includes(c)) cats.push(c);
+                });
+                fmlMeta.cats = cats.length ? cats : ['عام'];
+                const metaEl = document.getElementById('fml-meta');
+                if(metaEl) metaEl.textContent = `${fmlMeta.cats.length} تبويب`;
+                renderTabs(fmlMeta.cats.map((c, i) => ({id: 'cat' + i, alias: c})));
+                renderForm(data);
+                await loadAllRecords();
+            } catch(e) {
+                showError(e, 'تحميل النموذج: ' + (name || '') + ' — ' + (currentApp || ''));
+                renderTabs([{id:"basic", alias:"البيانات الأساسية"}, {id:"work", alias:"العمل"}]);
+                renderFormMock();
+            }
+        }
+
+        function renderTabs(tabs) {
+            const bar = document.getElementById('tabsBar');
+            bar.innerHTML = `
+                ${tabs.map((t, i) => `
+                    <button onclick="switchTab('${t.id}')" data-tab="${t.id}" class="tab-btn px-4 py-1.5 rounded-full text-xs font-medium border whitespace-nowrap ${i===0?'fmlk-tab-active bg-indigo-600 text-white':'bg-white border-slate-200 text-slate-600'}">
+                        ${t.alias || t.name}
+                    </button>
+                    ${i < tabs.length-1 ? '<span class="text-slate-300">›</span>' : ''}
+                `).join('')}
+            `;
+        }
+
+        function actionBtn(a, rid) {
+            const color = a.badge_color || a.badgeColor || '#4f46e5';
+            const isHex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(color);
+            const extra = isHex ? `style="background:${color}"` : '';
+            const colorCls = isHex ? '' : escAttr(color);
+            return `<button type="button" title="${escAttr(a.label)}" onclick="runCustomAction('${escAttr(a.name)}','${String(rid).replace(/'/g, "\\'")}')" ${extra} class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold text-white hover:opacity-90 ${colorCls}"><i class="fa-solid ${escAttr(a.icon || 'fa-bolt')} text-[10px]"></i>${escHtml(a.label)}</button>`;
+        }
+
+        async function runCustomAction(actionName, rid) {
+            const a = customActions.find(x => x.name === actionName);
+            if(!a) return notify('إجراء غير معروف', 'error');
+            const ep = a.endpoint || '';
+            if(!/^\/[A-Za-z0-9_\-./]*$/.test(ep)) return notify('مسار الإجراء غير صالح (يجب أن يبدأ بـ /)', 'error');
+            const rec = (pagedRowsCache || []).find(r => String(r.__rid) === String(rid));
+            if(!rec) return notify('تعذر تحديد السجل', 'error');
+            const clean = {...rec}; delete clean.__rid;
+            try {
+                const res = await fetch(ep, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({app: currentApp, fml: currentFml, action: a.name, record: clean})});
+                const data = await res.json().catch(() => ({}));
+                if(a.render) { await showActionModal(a, data || {}, clean); await loadAllRecords(); return; }
+                if(res.ok && (data.ok === undefined || data.ok)) { notify(data.message || `تم تنفيذ: ${a.label}`, 'success'); await loadAllRecords(); }
+                else notify(data.error || data.message || 'فشل التنفيذ', 'error');
+            } catch(e) { notify('تعذر الاتصال بالمسار: ' + ep, 'error'); }
+        }
+
+        function closeDynamicModal() {
+            const m = document.getElementById('dynamicActionModal');
+            if(m.classList.contains('hidden')) return;
+            m.classList.add('hidden');
+            if(typeof unlockScroll === 'function') unlockScroll();
+        }
+        function dynGet(ctx, path) {
+            return String(path || '').split('.').reduce((o, k) => (o !== null && o !== undefined) ? o[k] : undefined, ctx);
+        }
+        function renderModalHtml(tpl, ctx) {
+            // صيغة القوالب: each blocks ثم path.to.val — كل القيم مُهرَّبة
+            let out = String(tpl || '').replace(/\{\{#each\s+([\w.]+)\}\}([\s\S]*?)\{\{\/each\}\}/g, (m, p, inner) => {
+                const arr = dynGet(ctx, p);
+                if(!Array.isArray(arr) || !arr.length) return '';
+                return arr.map(it => inner.replace(/\{\{this(\.[\w.]+)?\}\}/g, (mm, sp) => {
+                    const v = sp ? dynGet(it, sp.slice(1)) : it;
+                    return escHtml(v === undefined || v === null ? '' : (typeof v === 'object' ? JSON.stringify(v) : String(v)));
+                })).join('');
+            });
+            out = out.replace(/\{\{([\w.]+)\}\}/g, (m, p) => {
+                const v = dynGet(ctx, p);
+                return escHtml(v === undefined || v === null ? '' : (typeof v === 'object' ? JSON.stringify(v) : String(v)));
+            });
+            return out;
+        }
+        async function showActionModal(a, data, record) {
+            try {
+                const res = await fetch(`/api/apps/${encodeURIComponent(currentApp)}/modals/${a.render}`);
+                if(!res.ok) throw new Error('modal file not found: ' + a.render);
+                const tpl = await res.text();
+                const ctx = Object.assign({}, data, data.stats || {}, {record});
+                const html = renderModalHtml(tpl, ctx);
+                const body = document.getElementById('dynamicActionBody');
+                body.innerHTML = html;
+                body.querySelectorAll('.dyn-hide-empty').forEach(el => {
+                    if(!el.textContent.trim()) el.remove();
+                });
+                document.getElementById('dynamicActionModal').classList.remove('hidden');
+                if(typeof lockScroll === 'function') lockScroll();
+            } catch(e) { notify(data.message || data.error || ('تعذر تحميل المودال: ' + a.render), 'error'); }
+        }
+        document.addEventListener('keydown', (e) => {
+            if(e.key === 'Escape' && !document.getElementById('dynamicActionModal').classList.contains('hidden')) closeDynamicModal();
+        });
+
+        function toggleSideCats(open) {
+            document.querySelectorAll('details[data-side-cat]').forEach(d => { d.open = !!open; });
+        }
+        function switchTab(tabId) {
+            document.querySelectorAll('.tab-btn').forEach(b => {
+                const on = b.dataset.tab === tabId;
+                b.classList.toggle('fmlk-tab-active', on);
+                // تبديل صريح لكلاسات Tailwind (ترتيب الحقن قد يغلب .fmlk-tab-active)
+                b.classList.remove('bg-indigo-600', 'text-white', 'border-indigo-600', 'bg-white', 'text-slate-600', 'border-slate-200');
+                if(on) b.classList.add('bg-indigo-600', 'text-white', 'border-indigo-600');
+                else b.classList.add('bg-white', 'text-slate-600', 'border-slate-200');
+            });
+            document.querySelectorAll('[data-tab-content]').forEach(el => {
+                el.style.display = el.dataset.tabContent === tabId ? 'block' : 'none';
+            });
+        }
+
+        function renderForm(data) {
+            const root = document.getElementById('formRoot');
+            const fields = data.fields || [];
+            const cats = fmlMeta.cats && fmlMeta.cats.length ? fmlMeta.cats : ['عام'];
+            let html = '';
+            cats.forEach((catName, ci) => {
+                // مدخلات الوجهات المتفرعة تُعرض في شبكة التفاصيل لا في النموذج الرئيسي
+                const catFields = fields.filter(f => (f.category || 'عام') === catName && (!f.destination || f.destination === 'main'));
+                html += `<div data-tab-content="cat${ci}" style="${ci !== 0 ? 'display:none' : ''}">`;
+                html += `<div class="fmlk-category p-4 mb-4">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">`;
+                catFields.forEach(f => {
+                    const span = f.colSpan > 1 ? 'fmlk-field-full' : 'fmlk-field-left';
+                    const input = renderInput(f);
+                    html += `<div class="${span}" data-vis-field="${escAttr(f.name)}">${input}</div>`;
+                });
+                if(!catFields.length) html += `<div class="col-span-full text-center py-6 text-slate-400 text-xs">لا توجد حقول في هذه الفئة</div>`;
+                html += `</div></div>`;
+                html += `</div>`;
+            });
+            if(!html) html = '<div class="text-center py-8 text-gray-400 text-sm">لا توجد حقول</div>';
+            root.innerHTML = html;
+            try{ if(typeof uiEnhanceDates === 'function') uiEnhanceDates(root); }catch(e){}
+            try{ connTypeHook(); }catch(e){}
+            try{ fmlkVisibleApply(); }catch(e){}
+        }
+
+        // ── تبويبة التفاصيل: الجداول المتفرعة one-to-many كشبكة أسفل النموذج ──
+        let fwDetailRows = []; // per-detail array of row objects
+        function fwDetails(){ return (fmlMeta && fmlMeta.details) || []; }
+        function fwMasterKey(){
+            if(currentRecordId && !String(currentRecordId).startsWith('__row')) return currentRecordId;
+            const pkf = (fmlMeta.fields || []).find(f=>f.primary_key || f.primaryKey);
+            if(pkf){ try{ const v = fmlkGet(pkf.name); if(v !== '' && v != null) return v; }catch(e){} }
+            return '';
+        }
+        async function renderDetailSection(){
+            document.querySelectorAll('#tabsBar [data-tab="cat_details"]').forEach(b=>b.remove());
+            document.querySelectorAll('[data-tab-content="cat_details"]').forEach(b=>b.remove());
+            const dets = fwDetails();
+            if(!dets.length){ fwDetailRows = []; return; }
+            const bar = document.getElementById('tabsBar');
+            if(bar) bar.insertAdjacentHTML('beforeend', `<span class="text-slate-300">›</span><button onclick="switchTab('cat_details')" data-tab="cat_details" class="tab-btn px-4 py-1.5 rounded-full text-xs font-medium border whitespace-nowrap bg-white border-slate-200 text-slate-600">التفاصيل</button>`);
+            const root = document.getElementById('formRoot');
+            if(root) root.insertAdjacentHTML('beforeend', `<div data-tab-content="cat_details" style="display:none"><div id="fwDetailWrap" class="space-y-4"></div></div>`);
+            fwDetailRows = dets.map(()=>[]);
+            const key = fwMasterKey();
+            for(let i = 0; i < dets.length; i++){
+                if(key === '' || key == null){
+                    fwDetailRows[i] = [];
+                } else {
+                    try{
+                        const res = await fetch(`/api/fmlk/branch?fml=${encodeURIComponent(currentFml)}&app=${encodeURIComponent(currentApp)}&detail=${i}&key=${encodeURIComponent(key)}`);
+                        const d = await res.json();
+                        fwDetailRows[i] = Array.isArray(d.rows) ? d.rows : [];
+                    }catch(e){ fwDetailRows[i] = []; }
+                }
+            }
+            paintDetailGrids();
+        }
+        function paintDetailGrids(){
+            const wrap = document.getElementById('fwDetailWrap');
+            if(!wrap) return;
+            const dets = fwDetails();
+            wrap.innerHTML = dets.map((d, i)=>{
+                const cols = (d.columns || []).filter(c=>c.name !== d.detail);
+                const rows = fwDetailRows[i] || [];
+                return `<div class="fmlk-category p-4">
+                    <div class="flex items-center justify-between mb-2">
+                        <div class="text-xs font-bold text-slate-700 flex items-center gap-2"><i class="fa-solid fa-diagram-project text-violet-600"></i> ${escHtml(d.alias || d.table)} <span class="text-[10px] text-slate-400 font-normal">(${rows.length})</span></div>
+                        <button onclick="fwDetailAddRow(${i})" class="px-2.5 py-1 bg-violet-50 hover:bg-violet-100 text-violet-700 rounded-lg text-[11px] font-bold"><i class="fa-solid fa-plus"></i> إضافة سطر</button>
+                    </div>
+                    <div class="overflow-x-auto border border-slate-200 rounded-xl"><table class="w-full text-[11px]">
+                        <thead class="bg-slate-50 text-slate-600"><tr>${cols.map(c=>`<th class="p-1.5 text-right whitespace-nowrap">${escHtml(c.alias || c.name)}</th>`).join('')}<th class="w-10"></th></tr></thead>
+                        <tbody>${rows.map((r, ri)=>`<tr class="border-t border-slate-100">${cols.map(c=>{
+                            const t = String(c.data_type || '').toUpperCase();
+                            const inp = /INT|NUMERIC|DECIMAL|FLOAT|DOUBLE|REAL|NUMBER/.test(t) ? 'number' : 'text';
+                            return `<td class="p-1"><input type="${inp}" data-drow="${i}" data-dcol="${escAttr(c.name)}" data-didx="${ri}" value="${escAttr(r[c.name] ?? '')}" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5"></td>`; }).join('')}<td class="p-1 text-center"><button onclick="fwDetailDelRow(${i},${ri})" class="text-rose-400 hover:text-rose-600 px-1"><i class="fa-solid fa-trash"></i></button></td></tr>`).join('') || `<tr><td colspan="${cols.length + 1}" class="p-3 text-center text-slate-400">لا سطور — أضف سطراً</td></tr>`}</tbody>
+                    </table></div>
+                </div>`;
+            }).join('');
+        }
+        function fwDetailAddRow(i){ (fwDetailRows[i] = fwDetailRows[i] || []).push({}); paintDetailGrids(); }
+        function fwDetailDelRow(i, ri){ fwDetailRows[i].splice(ri, 1); paintDetailGrids(); }
+        function collectDetailRows(){
+            document.querySelectorAll('[data-drow]').forEach(el=>{
+                const i = +el.dataset.drow, ri = +el.dataset.didx, col = el.dataset.dcol;
+                fwDetailRows[i] = fwDetailRows[i] || [];
+                fwDetailRows[i][ri] = fwDetailRows[i][ri] || {};
+                fwDetailRows[i][ri][col] = el.value;
+            });
+        }
+        async function saveDetailRows(key){
+            const dets = fwDetails();
+            if(!dets.length) return true;
+            if(key === '' || key == null){ notify('حُفظ السجل الأساسي — أعد فتحه لحفظ التفاصيل', 'info'); return true; }
+            collectDetailRows();
+            for(let i = 0; i < dets.length; i++){
+                const rows = (fwDetailRows[i] || []).filter(r=>Object.values(r || {}).some(v=>v !== '' && v != null));
+                try{
+                    const res = await fetch('/api/fmlk/branch/save', {method:'POST', headers:{'Content-Type':'application/json'},
+                        body: JSON.stringify({fml: currentFml, app: currentApp, detail: i, key: key, rows: rows})});
+                    const d = await res.json();
+                    if(!res.ok || d.error) throw new Error(d.error || 'فشل حفظ التفاصيل');
+                }catch(e){ showError(e, 'حفظ التفاصيل: ' + (dets[i].alias || dets[i].table)); return false; }
+            }
+            return true;
+        }
+
+        // ── visibleIf: إظهار/إخفاء الحقول والتبويبات حسب قيم النموذج ──
+        // الصيغة: field==value && field2!=v2 || field3==v3 (قيم نصية، علامات تنصيص اختيارية)
+        function fmlkVisibleCheck(cond){
+            const c = String(cond || '').trim();
+            if(!c) return true;
+            const evalOr = (expr) => String(expr).split('||').map(s=>s.trim()).filter(Boolean).some(evalAnd);
+            const evalAnd = (expr) => String(expr).split('&&').map(s=>s.trim()).filter(Boolean).every(evalOne);
+            const evalOne = (expr) => {
+                const m = String(expr).match(/^([A-Za-z0-9_]+)\s*(==|!=)\s*(?:"([^"]*)"|'([^']*)'|(.+))$/);
+                if(!m) return true;
+                const fname = m[1], op = m[2];
+                const want = (m[3] !== undefined ? m[3] : (m[4] !== undefined ? m[4] : (m[5] || '').trim()));
+                let got = '';
+                try{ got = String(fmlkGet(fname) ?? ''); }catch(e){ got = ''; }
+                // القيم المخزنة JSON للمصفوفات تُقارن كنص أيضاً
+                const eq = got.trim() === want;
+                return op === '==' ? eq : !eq;
+            };
+            try{ return evalOr(c); }catch(e){ return true; }
+        }
+        function fmlkVisibleApply(){
+            (fmlMeta.fields || []).forEach(f => {
+                const cond = f.visibleIf || f.visible_if;
+                if(!cond) return;
+                const show = fmlkVisibleCheck(cond);
+                document.querySelectorAll(`[data-vis-field="${CSS.escape(f.name)}"]`).forEach(el => {
+                    el.style.display = show ? '' : 'none';
+                });
+            });
+            // التبويبات: تُطابق id/name/alias التبويب مع اسم الفئة
+            const tabs = fmlMeta.tabs || [];
+            const cats = fmlMeta.cats || [];
+            let firstVisible = -1;
+            cats.forEach((catName, ci) => {
+                const t = tabs.find(x => x.id === catName || x.name === catName || x.alias === catName);
+                const cond = t && (t.visibleIf || t.visible_if);
+                const show = cond ? fmlkVisibleCheck(cond) : true;
+                const btn = document.querySelector(`#tabsBar [data-tab="cat${ci}"]`);
+                const body = document.querySelector(`[data-tab-content="cat${ci}"]`);
+                if(btn) btn.style.display = show ? '' : 'none';
+                if(!body) { if(show && firstVisible < 0) firstVisible = ci; return; }
+                if(!show){
+                    body.dataset.visHidden = '1';
+                    body.style.display = 'none';
+                } else if(body.dataset.visHidden){
+                    delete body.dataset.visHidden;
+                    // أعد العرض فقط إن لم يكن المستخدم على تبويب آخر ظاهر
+                    const otherOpen = cats.some((_, cj) => {
+                        if(cj === ci) return false;
+                        const ob = document.querySelector(`[data-tab-content="cat${cj}"]`);
+                        return ob && ob.style.display !== 'none' && !ob.dataset.visHidden;
+                    });
+                    if(!otherOpen) body.style.display = 'block';
+                }
+                if(show && firstVisible < 0) firstVisible = ci;
+            });
+            const anyOpen = cats.some((_, ci) => {
+                const b = document.querySelector(`[data-tab-content="cat${ci}"]`);
+                return b && b.style.display !== 'none';
+            });
+            if(!anyOpen && firstVisible >= 0) switchTab('cat' + firstVisible);
+        }
+
+        // ── نموذج الاتصالات: نوع الاتصال يقود قائمة المحركات والمنفذ ──
+        // (إظهار/إخفاء الحقول والتبويبات تصريحي عبر visibleIf في connections.fmlk)
+        const CONN_DB_ENGINES = ['postgres', 'oracle', 'sqlserver', 'mysql'];
+        const CONN_IOT_ENGINES = ['zk'];
+        function connTypeHook(){
+            try{
+                const meta = fmlMeta.metadata || {};
+                const isConn = (meta.table === 'urs_connection') ||
+                    (typeof currentFml === 'string' && currentFml.indexOf('connections') !== -1);
+                if(!isConn) return;
+                const typeSel = document.querySelector('select[data-field="conn_type"]');
+                if(!typeSel) return;
+                if(!typeSel.dataset.connHook){
+                    typeSel.dataset.connHook = '1';
+                    typeSel.addEventListener('change', applyConnType);
+                }
+                applyConnType();
+            }catch(e){}
+        }
+        function applyConnType(){
+            const typeSel = document.querySelector('select[data-field="conn_type"]');
+            const engSel = document.querySelector('select[data-field="engine"]');
+            const t = typeSel ? typeSel.value : 'database';
+            const allowed = (t === 'iot') ? CONN_IOT_ENGINES : CONN_DB_ENGINES;
+            if(engSel){
+                const cur = engSel.value;
+                engSel.innerHTML = allowed.map(e=>`<option value="${e}" ${e===cur?'selected':''}>${e}</option>`).join('');
+                if(!allowed.includes(cur)) engSel.value = allowed[0];
+            }
+            const portInp = document.querySelector('[data-field="port"]');
+            if(portInp && portInp.tagName === 'INPUT'){
+                if(t === 'iot' && portInp.value === '5432') portInp.value = '4370';
+                if(t === 'database' && portInp.value === '4370') portInp.value = '5432';
+            }
+        }
+
+        function escAttr(s){ return String(s ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
+        function escHtml(s){ return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+        function splitList(s){ return String(s || '').split(',').map(x=>x.trim()).filter(Boolean); }
+        function parseJsonVal(v, fb){ if(v===undefined||v===null||v==='') return fb; if(typeof v!=='string') return v; try{ const p=JSON.parse(v); return p; }catch(e){ return fb; } }
+        function fieldVal(field){ const v = currentData[field.name]; return (v===undefined||v===null) ? (field.default ?? '') : v; }
+        function cfg(field, key){ return ((field.config||{})[key] ?? '').toString().trim(); }
+        function fxId(field){ return 'fx_' + field.name.replace(/[^A-Za-z0-9_]/g, '_'); }
+        function hiddenField(field, val){
+            const v = (typeof val === 'string') ? val : JSON.stringify(val ?? '');
+            return `<input type="hidden" data-field="${field.name}" value="${escAttr(v)}"/>`;
+        }
+
+        function renderInput(field) {
+            const req = field.required ? '<span class="text-rose-600">*</span>' : '';
+            const ico = field.icon ? `<i class="fa-solid ${escAttr(field.icon)} text-indigo-500 ml-1"></i>` : '';
+            const label = `<label class="block text-xs font-medium text-slate-700 mb-1">${ico}${escHtml(field.alias)} ${req}</label>`;
+            let input = '';
+            const ph = field.placeholder || '';
+            const val = fieldVal(field);
+            const validation = field.validation || {};
+            const patternAttr = validation.pattern ? `pattern="${escAttr(validation.pattern)}"` : '';
+            const minLenAttr = validation.min_length ? `minlength="${validation.min_length}"` : '';
+            const maxLenAttr = validation.max_length ? `maxlength="${validation.max_length}"` : '';
+            const minAttr = validation.min !== undefined ? `min="${validation.min}"` : '';
+            const maxAttr = validation.max !== undefined ? `max="${validation.max}"` : '';
+            const baseCls = "w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm";
+            const t = field.inputType || 'text';
+            // Handle FK select: if refTable exists, we will enhance via lookup
+            if(t === 'select' && field.refTable){
+                const opts = (field.options || []).map(o=>`<option ${o==val?'selected':''}>${escHtml(o)}</option>`).join('');
+                input = `<select data-field="${field.name}" ${patternAttr} class="${baseCls} lookup-select" data-ref-table="${escAttr(field.refTable)}">${opts || '<option value="">— جاري التحميل —</option>'}</select>`;
+                // trigger async lookup
+                setTimeout(()=> hydLookupSelect(field.name, field.refTable), 0);
+            } else {
+                switch(t) {
+                    case 'select': {
+                        const opts2 = (field.options || []).map(o=>{
+                            const vv = (o && typeof o === 'object') ? (o.value ?? '') : o;
+                            const ll = (o && typeof o === 'object') ? (o.label ?? o.value ?? '') : o;
+                            return `<option value="${escAttr(vv)}" ${String(vv)==String(val)?'selected':''}>${escHtml(ll)}</option>`;
+                        }).join('');
+                        input = `<select data-field="${field.name}" class="${baseCls}">${opts2 || '<option value="">— اختر —</option>'}</select>`;
+                        if((field.options_source || field.optionsSource || []).length) setTimeout(()=> hydOptionsSource(field), 0);
+                        break;
+                    }
+                    case 'textarea':
+                        input = `<textarea data-field="${field.name}" placeholder="${escAttr(ph)}" ${patternAttr} ${minLenAttr} ${maxLenAttr} rows="3" class="${baseCls}">${escHtml(val)}</textarea>`;
+                        break;
+                    case 'number':
+                        input = `<input type="number" data-field="${field.name}" value="${escAttr(val)}" placeholder="${escAttr(ph)}" ${minAttr} ${maxAttr} class="${baseCls}"/>`;
+                        break;
+                    case 'datetime': {
+                        const vs = String(val ?? '');
+                        const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(vs);
+                        input = `<input type="${dateOnly ? 'date' : 'datetime-local'}" data-uidate="single" data-field="${field.name}" value="${escAttr(vs)}" ${patternAttr} ${minAttr} ${maxAttr} class="${baseCls}"/>`;
+                        break;
+                    }
+                    case 'boolean': {
+                        const on = (String(val).toLowerCase() === 'true' || val === '1' || val === 1);
+                        input = `<label class="inline-flex items-center gap-2 cursor-pointer"><input type="checkbox" ${on?'checked':''} onchange="FMLK.boolSync('${field.name}', this.checked)" class="w-5 h-5 rounded text-indigo-600"/><span class="text-xs text-slate-600">${on ? 'مفعّل' : 'معطّل'}</span></label>` + hiddenField(field, on ? 'true' : 'false');
+                        break;
+                    }
+                    case 'phone':
+                        input = `<div class="flex gap-1"><input data-field="${field.name}" value="${escAttr(val)}" placeholder="+966 12 345 6789" ${patternAttr} ${minLenAttr} ${maxLenAttr} class="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm" dir="ltr"/><span class="px-2 py-2 bg-emerald-600 text-white rounded-lg text-xs">🇸🇦</span></div>`;
+                        break;
+                    case 'email':
+                        input = `<div class="flex gap-1"><input type="email" data-field="${field.name}" value="${escAttr(val)}" placeholder="example@domain.com" ${patternAttr} class="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm" dir="ltr"/></div>`;
+                        break;
+                    case 'file':
+                        input = `<div class="w-full h-24 bg-slate-50 border-2 border-dashed border-slate-200 rounded-lg flex items-center justify-center text-slate-400 text-xs"><i class="fa-solid fa-image"></i> ${escHtml(ph) || 'صورة'}</div>`;
+                        break;
+                    case 'cascading_select': {
+                        const parent = cfg(field, 'parent_field');
+                        const opts = (field.options || []).map(o=>`<option ${o==val?'selected':''}>${escHtml(o)}</option>`).join('');
+                        input = `<select data-cascade-child="${escAttr(parent)}" data-field="${field.name}" class="${baseCls}">${opts || '<option value="">— اختر —</option>'}</select>`;
+                        setTimeout(()=> FMLK.cascadeReload(field.name), 0);
+                        break;
+                    }
+                    case 'multiselect': {
+                        const arr = parseJsonVal(val, Array.isArray(val) ? val : (String(val).trim() !== '' ? [String(val)] : []));
+                        input = `<div id="${fxId(field)}_chips" class="flex flex-wrap gap-1.5 mb-1.5"></div><div id="${fxId(field)}_box" class="space-y-1 max-h-40 overflow-y-auto border border-slate-200 rounded-lg p-2 bg-white" data-multi-box="${field.name}"></div>` + hiddenField(field, arr);
+                        setTimeout(()=> FMLK.multiLoad(field.name), 0);
+                        break;
+                    }
+                    case 'list-input': {
+                        const sep = cfg(field, 'separator') || ',';
+                        let larr = parseJsonVal(val, null);
+                        if(!Array.isArray(larr)){
+                            const s = String(val ?? '').trim();
+                            larr = s ? (s.startsWith('[') ? [] : s.split(/[\n;,]+/).map(x=>x.trim()).filter(Boolean)) : [];
+                        }
+                        input = `<div id="${fxId(field)}_list" class="flex flex-wrap gap-1.5 items-center border border-slate-200 rounded-lg p-2 bg-white min-h-[42px]"></div>` + hiddenField(field, larr) + `<div class="flex gap-1 mt-1"><input id="${fxId(field)}_new" placeholder="${escAttr(field.placeholder || 'أضف قيمة + Enter')}" class="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs" dir="ltr" onkeydown="if(event.key==='Enter'){event.preventDefault();FMLK.listAdd('${field.name}')}" /><button type="button" onclick="FMLK.listAdd('${field.name}')" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold"><i class="fa-solid fa-plus"></i></button></div>`;
+                        setTimeout(()=> FMLK.listRender(field.name), 0);
+                        break;
+                    }
+                    case 'lookup': {
+                        input = `<div class="relative"><input type="text" id="${fxId(field)}_q" value="${escAttr(val)}" placeholder="ابحث..." autocomplete="off" oninput="FMLK.lookupSearch('${field.name}')" class="${baseCls}"/><div id="${fxId(field)}_res" class="hidden absolute z-20 w-full bg-white border border-slate-200 rounded-lg mt-1 max-h-40 overflow-y-auto shadow-lg"></div></div>` + hiddenField(field, val);
+                        setTimeout(()=> FMLK.lookupLabel(field.name), 0);
+                        break;
+                    }
+                    case 'subform': {
+                        const subs = splitList(cfg(field, 'sub_fields'));
+                        const rows = parseJsonVal(val, []);
+                        input = `<div id="${fxId(field)}_rows" class="space-y-2"></div><button type="button" onclick="FMLK.subAdd('${field.name}')" class="mt-2 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-xs font-semibold"><i class="fa-solid fa-plus"></i> إضافة سطر</button>` + hiddenField(field, rows);
+                        setTimeout(()=> FMLK.subRender(field.name), 0);
+                        break;
+                    }
+                    case 'grid': {
+                        const rows = parseJsonVal(val, []);
+                        input = `<div id="${fxId(field)}_grid" class="overflow-x-auto"></div><button type="button" onclick="FMLK.gridAdd('${field.name}')" class="mt-2 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-xs font-semibold"><i class="fa-solid fa-plus"></i> إضافة صف</button>` + hiddenField(field, rows);
+                        setTimeout(()=> FMLK.gridRender(field.name), 0);
+                        break;
+                    }
+                    case 'reorder': {
+                        const items = parseJsonVal(val, Array.isArray(field.options) && field.options.length ? [...field.options] : []);
+                        input = `<div id="${fxId(field)}_list" class="space-y-1"></div>` + hiddenField(field, items);
+                        setTimeout(()=> FMLK.reorderRender(field.name), 0);
+                        break;
+                    }
+                    case 'tree': {
+                        input = `<div id="${fxId(field)}_tree" class="border border-slate-200 rounded-lg p-2 bg-white max-h-44 overflow-y-auto text-sm"></div>` + hiddenField(field, val);
+                        setTimeout(()=> FMLK.treeRender(field.name), 0);
+                        break;
+                    }
+                    case 'badges': {
+                        const arr = parseJsonVal(val, Array.isArray(val) ? val : (String(val).trim() !== '' ? [String(val)] : []));
+                        input = `<div id="${fxId(field)}_badges" class="flex flex-wrap gap-1.5"></div>` + hiddenField(field, arr);
+                        setTimeout(()=> FMLK.badgesRender(field.name), 0);
+                        break;
+                    }
+                    case 'polymorphic': {
+                        const types = splitList(cfg(field, 'poly_types'));
+                        const pv = parseJsonVal(val, {});
+                        const ptype = pv.type || types[0] || '';
+                        const pid = pv.id || (typeof pv === 'string' ? pv : '');
+                        const typeOpts = types.map(x=>`<option ${x===ptype?'selected':''}>${escHtml(x)}</option>`).join('') || '<option value="">—</option>';
+                        input = `<div class="flex gap-1"><select onchange="FMLK.polySync('${field.name}')" id="${fxId(field)}_t" class="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm">${typeOpts}</select><input id="${fxId(field)}_v" value="${escAttr(pid)}" oninput="FMLK.polySync('${field.name}')" placeholder="المعرف" class="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm"/></div>` + hiddenField(field, pv && pv.type ? pv : '');
+                        break;
+                    }
+                    case 'livesync':
+                    case 'autopopulate': {
+                        const src = cfg(field, 'sync_source');
+                        input = `<div class="flex gap-1"><input data-field="${field.name}" value="${escAttr(val)}" readonly class="flex-1 bg-slate-100 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-600"/><span class="px-2 py-2 bg-slate-200 text-slate-600 rounded-lg text-xs" title="تعبئة تلقائية"><i class="fa-solid fa-rotate"></i></span></div><input type="hidden" data-sync-target="${field.name}" data-sync-source="${escAttr(src)}" data-sync-mode="${t}"/>`;
+                        setTimeout(()=> FMLK.syncFill(field.name, t === 'livesync'), 0);
+                        break;
+                    }
+                    case 'calculated': {
+                        const expr = cfg(field, 'calc_expr');
+                        input = `<div class="flex gap-1"><input data-field="${field.name}" value="${escAttr(val)}" readonly class="flex-1 bg-slate-100 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 font-semibold"/><span class="px-2 py-2 bg-indigo-100 text-indigo-700 rounded-lg text-xs" title="محسوب تلقائياً"><i class="fa-solid fa-calculator"></i></span></div><input type="hidden" data-calc="${field.name}" data-calc-expr="${escAttr(expr)}"/>`;
+                        setTimeout(()=> FMLK.calcRefresh(), 0);
+                        break;
+                    }
+                    case 'matrix': {
+                        input = `<div id="${fxId(field)}_mx" class="overflow-x-auto"></div>` + hiddenField(field, parseJsonVal(val, {}));
+                        setTimeout(()=> FMLK.matrixRender(field.name), 0);
+                        break;
+                    }
+                    case 'restricted_tags': {
+                        const allowNew = String(cfg(field, 'allow_new')).toLowerCase() === 'true';
+                        const arr = parseJsonVal(val, Array.isArray(val) ? val : []);
+                        input = `<div id="${fxId(field)}_tags" class="flex flex-wrap gap-1.5 items-center border border-slate-200 rounded-lg p-2 bg-white min-h-[42px]"></div>` + hiddenField(field, arr) + (allowNew ? `<div class="flex gap-1 mt-1"><input id="${fxId(field)}_new" placeholder="وسم جديد" class="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs"/><button type="button" onclick="FMLK.tagAdd('${field.name}')" class="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs">إضافة</button></div>` : '');
+                        setTimeout(()=> FMLK.tagsRender(field.name), 0);
+                        break;
+                    }
+                    case 'cascade_grid': {
+                        input = `<div id="${fxId(field)}_cg" class="space-y-2"></div>` + hiddenField(field, parseJsonVal(val, []));
+                        setTimeout(()=> FMLK.cascadeRender(field.name, 0), 0);
+                        break;
+                    }
+                    case 'status': {
+                        // الحالات: أزرار radio ملونة بدل المنسدلة
+                        const opts = (field.options || []).map(o=>{
+                            const vv = (o && typeof o === 'object') ? (o.value ?? '') : o;
+                            const ll = (o && typeof o === 'object') ? (o.label ?? o.value ?? '') : o;
+                            const cc = (o && typeof o === 'object' && o.color) ? o.color : '#64748b';
+                            const on = String(vv) === String(val);
+                            return `<label class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-bold cursor-pointer transition ${on?'text-white border-transparent':'bg-white text-slate-600 border-slate-200 hover:border-slate-400'}" ${on?`style="background:${escAttr(cc)}"`:''}>
+                                <input type="radio" name="st_${field.name}" value="${escAttr(vv)}" ${on?'checked':''} onchange="FMLK.statusSync('${field.name}', this.value)" class="hidden">
+                                <span class="w-2 h-2 rounded-full" style="background:${on?'#fff':escAttr(cc)}"></span>${escHtml(ll)}</label>`;
+                        }).join('');
+                        input = `<div class="flex flex-wrap gap-1.5" data-status-box="${field.name}">${opts || '<span class="text-slate-400 text-xs">لا حالات معرفة</span>'}</div>` + hiddenField(field, val);
+                        break;
+                    }
+                    case 'datamodal': {
+                        // القوائم الكبيرة: شبكة منبثقة قابلة للبحث
+                        input = `<div class="flex gap-1"><input id="${fxId(field)}_lbl" value="${escAttr(fmlkDataLabel(field, val))}" readonly placeholder="— اختر من الشبكة —" class="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700"/><button type="button" onclick="fmlkDataModalOpen('${field.name}')" title="استعراض الشبكة" class="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold whitespace-nowrap"><i class="fa-solid fa-table-cells"></i> شبكة</button></div>` + hiddenField(field, val);
+                        break;
+                    }
+                    case 'password': {
+                        const isMask = /^\*+$/.test(String(val ?? '')) || val === '' || val == null;
+                        input = `<div class="flex gap-1"><input type="password" data-field="${field.name}" value="${isMask ? '' : escAttr(val)}" placeholder="••••••••" ${patternAttr} ${minLenAttr} ${maxLenAttr} class="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm" dir="ltr" autocomplete="new-password"/><button type="button" onclick="togglePw(this)" title="إظهار/إخفاء" class="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-500 rounded-lg text-xs"><i class="fa-solid fa-eye"></i></button></div>`;
+                        break;
+                    }
+                    default:
+                        input = `<input type="text" data-field="${field.name}" value="${escAttr(val)}" placeholder="${escAttr(ph)}" ${patternAttr} ${minLenAttr} ${maxLenAttr} class="${baseCls}"/>`;
+                }
+            }
+            return `<div>${label}${input}</div>`;
+        }
+        function togglePw(btn){
+            try{
+                const inp = btn.parentElement ? btn.parentElement.querySelector('input[data-field]') : null;
+                if(!inp) return;
+                const show = inp.type === 'password';
+                inp.type = show ? 'text' : 'password';
+                btn.innerHTML = `<i class="fa-solid ${show ? 'fa-eye-slash' : 'fa-eye'}"></i>`;
+            }catch(e){}
+        }
+
+        async function loadLookupOptions(fieldName, refTable, search){
+            try{
+                let url = `/api/fmlk/lookup?fml=${encodeURIComponent(currentFml)}&field=${encodeURIComponent(fieldName)}&app=${encodeURIComponent(currentApp)}&limit=100`;
+                if(search) url += `&search=${encodeURIComponent(search)}`;
+                const res = await fetch(url);
+                const data = await res.json();
+                return data.options || [];
+            }catch(e){ showLookupError('تعذر جلب القيم المرجعية: ' + String((e && e.message) || e).slice(0, 150)); return []; }
+        }
+        async function loadOptionsSource(table, column, schema, search){
+            let url = `/api/fmlk/options?table=${encodeURIComponent(table)}&column=${encodeURIComponent(column)}&limit=500`;
+            if(schema) url += `&schema=${encodeURIComponent(schema)}`;
+            if(search) url += `&search=${encodeURIComponent(search)}`;
+            try{
+                const res = await fetch(url);
+                const data = await res.json();
+                return data.options || [];
+            }catch(e){ showLookupError('تعذر جلب الخيارات: ' + String((e && e.message) || e).slice(0, 150)); return []; }
+        }
+        function hydOptionsSource(field){
+            const srcs = field.options_source || field.optionsSource || [];
+            if(!srcs.length) return;
+            Promise.all(srcs.map(s => loadOptionsSource(s.table, s.column, s.schema).catch(()=>[]))).then(lists => {
+                const seen = new Set((field.options || []).map(String));
+                const merged = [...(field.options || [])];
+                lists.flat().forEach(o => {
+                    const v = String(o.value ?? o);
+                    if(!seen.has(v)){ seen.add(v); merged.push(v); }
+                });
+                const sel = document.querySelector(`select[data-field="${CSS.escape(field.name)}"]`);
+                if(sel){
+                    const cur = sel.value || fieldVal(field);
+                    sel.innerHTML = '<option value="">— اختر —</option>' + merged.map(o=>`<option value="${escAttr(o)}" ${String(o)===String(cur)?'selected':''}>${escHtml(o)}</option>`).join('');
+                    if(cur) sel.value = String(cur);
+                }
+            });
+        }
+        function hydLookupSelect(fieldName, refTable){
+            loadLookupOptions(fieldName, refTable).then(opts => {
+                const sel = document.querySelector(`select[data-field="${CSS.escape(fieldName)}"]`);
+                if(sel && opts){
+                    const currentVal = currentData[fieldName] || '';
+                    sel.innerHTML = '<option value="">— اختر —</option>' + opts.map(o=>`<option value="${escAttr(o.value)}" ${String(o.value)===String(currentVal)?'selected':''}>${escHtml(o.label)}</option>`).join('');
+                }
+            });
+        }
+
+        // ── datamodal: اختيار القوائم من شبكة منبثقة قابلة للبحث ──
+        function fmlkOptPair(o){ return (o && typeof o === 'object') ? {value: String(o.value ?? ''), label: String(o.label ?? o.value ?? '')} : {value: String(o ?? ''), label: String(o ?? '')}; }
+        function fmlkDataLabel(field, val){
+            const hit = (field.options || []).map(fmlkOptPair).find(o=>String(o.value) === String(val ?? ''));
+            return hit ? hit.label : String(val ?? '');
+        }
+        let _fmlkDmField = '', _fmlkDmRows = [];
+        async function fmlkDataModalOpen(name){
+            const f = fmlkField(name);
+            _fmlkDmField = name;
+            _fmlkDmRows = (f.options || []).map(fmlkOptPair);
+            document.getElementById('fmlkDataModalTitle').innerHTML = '<i class="fa-solid fa-table-cells text-indigo-600"></i> ' + escHtml(f.alias || name);
+            document.getElementById('fmlkDataModalSearch').value = '';
+            document.getElementById('fmlkDataModalList').innerHTML = '<p class="text-slate-400 text-center py-6 text-xs">جاري التحميل...</p>';
+            document.getElementById('fmlkDataModal').classList.remove('hidden');
+            if(typeof lockScroll === 'function') lockScroll();
+            try{
+                const srcs = f.options_source || f.optionsSource || [];
+                if(srcs.length){
+                    const lists = await Promise.all(srcs.map(s => loadOptionsSource(s.table, s.column, s.schema).catch(()=>[])));
+                    const seen = new Set(_fmlkDmRows.map(o=>o.value));
+                    lists.flat().forEach(o=>{
+                        const p = fmlkOptPair(o.value ?? o);
+                        if(!seen.has(p.value)){ seen.add(p.value); _fmlkDmRows.push(p); }
+                    });
+                } else if(f.refTable){
+                    const opts = await loadLookupOptions(name, f.refTable);
+                    (opts || []).forEach(o=>{ _fmlkDmRows.push(fmlkOptPair(o)); });
+                }
+            }catch(e){}
+            fmlkDataModalRender();
+        }
+        function fmlkDataModalClose(){ document.getElementById('fmlkDataModal').classList.add('hidden'); if(typeof unlockScroll === 'function') unlockScroll(); _fmlkDmField = ''; }
+        function fmlkDataModalRender(){
+            const box = document.getElementById('fmlkDataModalList');
+            const q = (document.getElementById('fmlkDataModalSearch').value || '').trim().toLowerCase();
+            const rows = q ? _fmlkDmRows.filter(o=>(o.label + ' ' + o.value).toLowerCase().includes(q)) : _fmlkDmRows;
+            box.innerHTML = rows.length ? `<div class="overflow-auto bg-white border border-slate-200 rounded-xl"><table class="w-full text-xs"><thead class="bg-slate-50"><tr><th class="px-3 py-2 text-right font-bold text-slate-600">القيمة</th><th class="px-3 py-2 text-right font-bold text-slate-600">التسمية</th><th class="w-16"></th></tr></thead><tbody>${rows.slice(0, 500).map(o=>`<tr class="border-t border-slate-100 hover:bg-indigo-50/50"><td class="px-3 py-1.5 font-mono text-slate-600" dir="ltr">${escHtml(o.value)}</td><td class="px-3 py-1.5 text-slate-800">${escHtml(o.label)}</td><td class="px-3 py-1.5"><button onclick="fmlkDataModalPick('${escAttr(o.value).replace(/'/g, "\\'")}', '${escAttr(o.label).replace(/'/g, "\\'")}')" class="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[11px] font-bold">اختيار</button></td></tr>`).join('')}</tbody></table></div>` : '<p class="text-slate-400 text-center py-6 text-xs">لا نتائج</p>';
+        }
+        function fmlkDataModalPick(value, label){
+            if(!_fmlkDmField) return fmlkDataModalClose();
+            fmlkSetHidden(_fmlkDmField, value);
+            const lbl = document.getElementById('fx_' + _fmlkDmField.replace(/[^A-Za-z0-9_]/g, '_') + '_lbl');
+            if(lbl) lbl.value = label || value;
+            fmlkDataModalClose();
+        }
+
+        // ── Relational widgets behavior (FMLK) ──
+        function fmlkField(name){ return (fmlMeta.fields || []).find(f => f.name === name) || {}; }
+        function fmlkHidden(name){
+            return document.querySelector(`input[type="hidden"][data-field="${CSS.escape(name)}"]`);
+        }
+        function fmlkSetHidden(name, val){
+            const h = fmlkHidden(name);
+            if(h) h.value = (typeof val === 'string') ? val : JSON.stringify(val ?? '');
+        }
+        function fmlkGet(name){
+            const els = document.querySelectorAll(`[data-field="${CSS.escape(name)}"]`);
+            for(const el of els){ if(el.type !== 'hidden') return el.value; }
+            const h = fmlkHidden(name);
+            return h ? h.value : '';
+        }
+        window.FMLK = {
+            boolSync(name, checked){
+                fmlkSetHidden(name, checked ? 'true' : 'false');
+                const h = fmlkHidden(name);
+                const wrap = h ? h.closest('div') : null;
+                const lbl = wrap ? wrap.querySelector('span.text-xs') : null;
+                if(lbl) lbl.textContent = checked ? 'مفعّل' : 'معطّل';
+            },
+            statusSync(name, value){
+                // الحالات radio: حدّث القيمة المخفية وأعد تلوين الأزرار
+                fmlkSetHidden(name, value);
+                const f = fmlkField(name);
+                const box = document.querySelector(`[data-status-box="${CSS.escape(name)}"]`);
+                if(!box) return;
+                box.querySelectorAll('label').forEach(lb=>{
+                    const inp = lb.querySelector('input[type="radio"]');
+                    const on = inp && String(inp.value) === String(value);
+                    const opt = (f.options || []).find(o=>String((o && typeof o === 'object' ? o.value : o)) === String(inp ? inp.value : ''));
+                    const cc = (opt && typeof opt === 'object' && opt.color) ? opt.color : '#64748b';
+                    lb.className = 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-bold cursor-pointer transition ' + (on ? 'text-white border-transparent' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400');
+                    if(on) lb.style.background = cc; else lb.style.background = '';
+                    const dot = lb.querySelector('span');
+                    if(dot) dot.style.background = on ? '#fff' : cc;
+                });
+            },
+            pathsOf(field){
+                const f = (typeof field === 'string') ? fmlkField(field) : field;
+                const paths = [];
+                (f.options || []).forEach(o => {
+                    const parts = String(o).split('>').map(x=>x.trim()).filter(Boolean);
+                    if(parts.length > 1) paths.push(parts);
+                });
+                return paths;
+            },
+            async cascadeReload(name){
+                const f = fmlkField(name);
+                const parent = (f.config || {}).parent_field;
+                const target = document.querySelector(`select[data-field="${CSS.escape(name)}"]`);
+                if(!target) return;
+                const live = target.value;
+                const cur = (live !== undefined && live !== '') ? live : (currentData[name] ?? f.default ?? '');
+                const paths = this.pathsOf(f);
+                if(paths.length && parent){
+                    const pv = String(fmlkGet(parent) ?? '');
+                    const kids = [...new Set(paths.filter(p => p[0] === pv).map(p => p[1]).filter(Boolean))];
+                    target.innerHTML = '<option value="">— اختر —</option>' + kids.map(k=>`<option ${k===cur?'selected':''}>${escHtml(k)}</option>`).join('');
+                    return;
+                }
+                if(f.refTable){
+                    const parentVal = parent ? fmlkGet(parent) : '';
+                    const opts = await loadLookupOptions(name, f.refTable, parentVal || undefined);
+                    target.innerHTML = '<option value="">— اختر —</option>' + opts.map(o=>`<option value="${escAttr(o.value)}" ${String(o.value)===String(cur)?'selected':''}>${escHtml(o.label)}</option>`).join('');
+                }
+            },
+            async multiLoad(name){
+                const slug = name.replace(/[^A-Za-z0-9_]/g,'_');
+                const f = fmlkField(name);
+                const box = document.getElementById('fx_' + slug + '_box');
+                if(!box) return;
+                let opts = (f.options || []).map(o=>({value:o, label:o}));
+                if(!opts.length && f.refTable){
+                    opts = await loadLookupOptions(name, f.refTable);
+                }
+                let cur = currentData[name];
+                if(cur === undefined || cur === null || cur === '') cur = f.default ?? [];
+                if(!Array.isArray(cur)) cur = String(cur).split(',').map(x=>x.trim()).filter(Boolean);
+                cur = cur.map(String);
+                box.innerHTML = opts.length ? opts.map(o=>`<label class="flex items-center gap-2 px-2 py-1 hover:bg-slate-50 rounded cursor-pointer text-xs"><input type="checkbox" value="${escAttr(o.value)}" ${cur.includes(String(o.value))?'checked':''} onchange="FMLK.multiSync('${name}')" class="rounded text-indigo-600"><span class="text-slate-700">${escHtml(o.label)}</span></label>`).join('') : '<p class="text-slate-400 text-xs p-1">لا توجد خيارات</p>';
+                fmlkSetHidden(name, cur);
+                FMLK.multiChips(name, cur);
+            },
+            multiSync(name){
+                const slug = name.replace(/[^A-Za-z0-9_]/g,'_');
+                const box = document.getElementById('fx_' + slug + '_box');
+                const sel = [...box.querySelectorAll('input[type="checkbox"]:checked')].map(c=>c.value);
+                fmlkSetHidden(name, sel);
+                this.multiChips(name, sel);
+            },
+            multiChips(name, sel){
+                const slug = name.replace(/[^A-Za-z0-9_]/g,'_');
+                const chips = document.getElementById('fx_' + slug + '_chips');
+                if(!chips) return;
+                const vals = sel ?? (()=>{ try{ const p = JSON.parse(fmlkHidden(name)?.value || '[]'); return Array.isArray(p) ? p.map(String) : []; }catch(e){ return []; } })();
+                chips.innerHTML = vals.length ? vals.map(v=>`<span class="inline-flex items-center gap-1 px-2.5 py-1 bg-indigo-600 text-white rounded-full text-xs font-semibold">${escHtml(v)}<button type="button" onclick="FMLK.multiUncheck('${name}','${escAttr(v)}')" class="hover:text-rose-200"><i class="fa-solid fa-xmark text-[10px]"></i></button></span>`).join('') : '<span class="text-slate-400 text-xs">لم يُحدد شيء بعد</span>';
+            },
+            multiUncheck(name, value){
+                const slug = name.replace(/[^A-Za-z0-9_]/g,'_');
+                const box = document.getElementById('fx_' + slug + '_box');
+                if(box) box.querySelectorAll('input[type="checkbox"]').forEach(c=>{ if(String(c.value)===String(value)) c.checked = false; });
+                this.multiSync(name);
+            },
+            listVals(name){
+                try{ const p = JSON.parse(fmlkHidden(name)?.value || '[]'); if(Array.isArray(p)) return p.map(String); }catch(e){}
+                const h = fmlkHidden(name);
+                const s = String(h?.value ?? '').trim();
+                return s ? (s.startsWith('[') ? [] : s.split(/[\n;,]+/).map(x=>x.trim()).filter(Boolean)) : [];
+            },
+            listRender(name){
+                const slug = name.replace(/[^A-Za-z0-9_]/g,'_');
+                const box = document.getElementById('fx_' + slug + '_list');
+                if(!box) return;
+                const vals = this.listVals(name);
+                box.innerHTML = vals.length ? vals.map((v,i)=>`<span class="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-xs font-semibold" dir="ltr">${escHtml(v)}<button type="button" onclick="FMLK.listDel('${name}',${i})" class="hover:text-rose-600"><i class="fa-solid fa-xmark text-[10px]"></i></button></span>`).join('') : '<span class="text-slate-400 text-xs">لا قيم بعد — أضف قيمة ثم Enter</span>';
+                fmlkSetHidden(name, vals);
+            },
+            listAdd(name){
+                const slug = name.replace(/[^A-Za-z0-9_]/g,'_');
+                const inp = document.getElementById('fx_' + slug + '_new');
+                const raw = ((inp && inp.value) || '').trim();
+                if(!raw) return;
+                const vals = this.listVals(name);
+                raw.split(/[\n;,]+/).map(x=>x.trim()).filter(Boolean).forEach(v=>{ if(!vals.includes(v)) vals.push(v); });
+                fmlkSetHidden(name, vals);
+                if(inp) inp.value = '';
+                this.listRender(name);
+                FMLK.syncDependents(name);
+            },
+            listDel(name, idx){
+                const vals = this.listVals(name);
+                vals.splice(idx, 1);
+                fmlkSetHidden(name, vals);
+                this.listRender(name);
+            },
+            widgetsRefresh(){
+                (fmlMeta.fields || []).forEach(f=>{
+                    const t = f.inputType;
+                    try{
+                        if(t === 'list-input') this.listRender(f.name);
+                        else if(t === 'multiselect'){ this.multiLoad(f.name); }
+                        else if(t === 'restricted_tags') this.tagsRender(f.name);
+                    }catch(e){}
+                });
+                fmlkVisibleApply();
+            },
+            async lookupSearch(name){
+                const f = fmlkField(name);
+                const slug = name.replace(/[^A-Za-z0-9_]/g,'_');
+                const q = document.getElementById('fx_' + slug + '_q');
+                const res = document.getElementById('fx_' + slug + '_res');
+                if(!q || !res) return;
+                if(!q.value.trim()){ res.classList.add('hidden'); return; }
+                const opts = f.refTable ? await loadLookupOptions(name, f.refTable, q.value.trim()) : (f.options||[]).filter(o=>String(o).includes(q.value.trim())).map(o=>({value:o,label:o}));
+                res.innerHTML = opts.length ? opts.slice(0,20).map(o=>`<div onclick="FMLK.lookupPick('${name}','${escAttr(o.value)}','${escAttr(o.label)}')" class="px-3 py-2 hover:bg-indigo-50 cursor-pointer text-xs text-slate-700">${escHtml(o.label)}</div>`).join('') : '<div class="px-3 py-2 text-xs text-slate-400">لا نتائج</div>';
+                res.classList.remove('hidden');
+            },
+            lookupPick(name, value, label){
+                fmlkSetHidden(name, value);
+                const slug = name.replace(/[^A-Za-z0-9_]/g,'_');
+                const q = document.getElementById('fx_' + slug + '_q');
+                const res = document.getElementById('fx_' + slug + '_res');
+                if(q) q.value = label;
+                if(res) res.classList.add('hidden');
+                FMLK.syncDependents(name);
+            },
+            lookupLabel(name){
+                const f = fmlkField(name);
+                if(!f.refTable) return;
+                const cur = currentData[name] ?? f.default ?? '';
+                if(cur === '') return;
+                loadLookupOptions(name, f.refTable).then(opts => {
+                    const hit = (opts||[]).find(o=>String(o.value)===String(cur));
+                    const q = document.getElementById('fx_' + name.replace(/[^A-Za-z0-9_]/g,'_') + '_q');
+                    if(hit && q && !q.value) q.value = hit.label;
+                });
+            },
+            subRows(name){
+                const v = fmlkHidden(name)?.value;
+                try{ const p = JSON.parse(v); return Array.isArray(p) ? p : []; }catch(e){ return []; }
+            },
+            subFields(name){
+                const f = fmlkField(name);
+                const subs = String((f.config||{}).sub_fields || '').split(',').map(x=>x.trim()).filter(Boolean);
+                return subs.length ? subs : ['value'];
+            },
+            subRender(name){
+                const slug = name.replace(/[^A-Za-z0-9_]/g,'_');
+                const box = document.getElementById('fx_' + slug + '_rows');
+                if(!box) return;
+                const subs = this.subFields(name);
+                const rows = this.subRows(name);
+                box.innerHTML = rows.map((r, i)=>`<div class="flex gap-1 items-center bg-white border border-slate-200 rounded-lg p-2">${subs.map(s=>`<input value="${escAttr(r[s] ?? '')}" oninput="FMLK.subSync('${name}')" data-sub-row="${i}" data-sub-key="${escAttr(s)}" placeholder="${escAttr(s)}" class="flex-1 min-w-0 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-xs"/>`).join('')}<button type="button" onclick="FMLK.subDel('${name}',${i})" class="w-7 h-7 text-rose-500 hover:bg-rose-50 rounded-lg shrink-0"><i class="fa-solid fa-trash text-xs"></i></button></div>`).join('') || '<p class="text-slate-400 text-xs">لا سطور بعد — اضغط إضافة سطر</p>';
+            },
+            subAdd(name){
+                const rows = this.subRows(name);
+                const obj = {}; this.subFields(name).forEach(s=>obj[s]='');
+                rows.push(obj); fmlkSetHidden(name, rows); this.subRender(name);
+            },
+            subDel(name, idx){
+                const rows = this.subRows(name); rows.splice(idx,1); fmlkSetHidden(name, rows); this.subRender(name);
+            },
+            subSync(name){
+                const slug = name.replace(/[^A-Za-z0-9_]/g,'_');
+                const box = document.getElementById('fx_' + slug + '_rows');
+                const rows = [...box.querySelectorAll('[data-sub-row]')].reduce((acc, el)=>{
+                    const i = +el.dataset.subRow;
+                    acc[i] = acc[i] || {}; acc[i][el.dataset.subKey] = el.value; return acc;
+                }, []);
+                fmlkSetHidden(name, rows);
+                this.calcRefresh();
+            },
+            gridCols(name){
+                const f = fmlkField(name);
+                const cols = String((f.config||{}).grid_columns || '').split(',').map(x=>x.trim()).filter(Boolean);
+                return cols.length ? cols : ['col1', 'col2'];
+            },
+            gridRender(name){
+                const slug = name.replace(/[^A-Za-z0-9_]/g,'_');
+                const box = document.getElementById('fx_' + slug + '_grid');
+                if(!box) return;
+                const cols = this.gridCols(name);
+                const rows = this.subRows(name);
+                let html = `<table class="w-full text-xs border-collapse"><thead><tr>${cols.map(c=>`<th class="bg-slate-50 border border-slate-200 px-2 py-1.5 font-semibold text-slate-600">${escHtml(c)}</th>`).join('')}<th class="w-10 bg-slate-50 border border-slate-200"></th></tr></thead><tbody>`;
+                rows.forEach((r, i)=>{
+                    html += `<tr>${cols.map(c=>`<td class="border border-slate-200 p-0"><input value="${escAttr(r[c] ?? '')}" oninput="FMLK.gridSync('${name}')" data-grid-row="${i}" data-grid-key="${escAttr(c)}" class="w-full px-2 py-1.5 text-xs focus:outline-none"/></td>`).join('')}<td class="border border-slate-200 text-center"><button type="button" onclick="FMLK.gridDel('${name}',${i})" class="text-rose-500 hover:bg-rose-50 rounded p-1"><i class="fa-solid fa-trash text-xs"></i></button></td></tr>`;
+                });
+                html += `</tbody></table>`;
+                if(!rows.length) html += '<p class="text-slate-400 text-xs py-2">لا صفوف بعد</p>';
+                box.innerHTML = html;
+            },
+            gridAdd(name){
+                const rows = this.subRows(name);
+                const obj = {}; this.gridCols(name).forEach(c=>obj[c]='');
+                rows.push(obj); fmlkSetHidden(name, rows); this.gridRender(name);
+            },
+            gridDel(name, idx){
+                const rows = this.subRows(name); rows.splice(idx,1); fmlkSetHidden(name, rows); this.gridRender(name);
+            },
+            gridSync(name){
+                const slug = name.replace(/[^A-Za-z0-9_]/g,'_');
+                const box = document.getElementById('fx_' + slug + '_grid');
+                const cols = this.gridCols(name);
+                const rows = [...box.querySelectorAll('[data-grid-row]')].reduce((acc, el)=>{
+                    const i = +el.dataset.gridRow;
+                    acc[i] = acc[i] || {}; acc[i][el.dataset.gridKey] = el.value; return acc;
+                }, []);
+                fmlkSetHidden(name, rows);
+                this.calcRefresh();
+            },
+            reorderRender(name){
+                const slug = name.replace(/[^A-Za-z0-9_]/g,'_');
+                const box = document.getElementById('fx_' + slug + '_list');
+                if(!box) return;
+                let items = this.subRows(name);
+                if(!items.length){
+                    const f = fmlkField(name);
+                    items = [...(f.options || [])];
+                    fmlkSetHidden(name, items);
+                }
+                box.innerHTML = items.map((it, i)=>`<div draggable="true" ondragstart="FMLK.reorderDrag(event,'${name}',${i})" ondragover="event.preventDefault()" ondrop="FMLK.reorderDrop(event,'${name}',${i})" class="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs cursor-move"><i class="fa-solid fa-grip-vertical text-slate-400"></i><span class="flex-1 text-slate-700">${escHtml(typeof it === 'object' ? JSON.stringify(it) : it)}</span><button type="button" onclick="FMLK.reorderMove('${name}',${i},-1)" class="text-slate-400 hover:text-indigo-600"><i class="fa-solid fa-chevron-up"></i></button><button type="button" onclick="FMLK.reorderMove('${name}',${i},1)" class="text-slate-400 hover:text-indigo-600"><i class="fa-solid fa-chevron-down"></i></button></div>`).join('');
+            },
+            reorderDrag(e, name, idx){ e.dataTransfer.setData('text/plain', String(idx)); },
+            reorderDrop(e, name, idx){
+                e.preventDefault();
+                const from = parseInt(e.dataTransfer.getData('text/plain'), 10);
+                if(isNaN(from) || from === idx) return;
+                const items = this.subRows(name);
+                const mv = items.splice(from, 1)[0];
+                items.splice(idx, 0, mv);
+                fmlkSetHidden(name, items); this.reorderRender(name);
+            },
+            reorderMove(name, idx, dir){
+                const items = this.subRows(name);
+                const j = idx + dir;
+                if(j < 0 || j >= items.length) return;
+                const tmp = items[idx]; items[idx] = items[j]; items[j] = tmp;
+                fmlkSetHidden(name, items); this.reorderRender(name);
+            },
+            treeBuild(paths){
+                const root = {};
+                paths.forEach(p=>{
+                    let node = root;
+                    p.forEach(part=>{ node[part] = node[part] || {}; node = node[part]; });
+                });
+                return root;
+            },
+            treeRender(name){
+                const slug = name.replace(/[^A-Za-z0-9_]/g,'_');
+                const box = document.getElementById('fx_' + slug + '_tree');
+                if(!box) return;
+                const f = fmlkField(name);
+                const cur = currentData[name] ?? f.default ?? '';
+                const paths = this.pathsOf(f);
+                const renderNode = (node, prefix)=>{
+                    return Object.keys(node).map(k=>{
+                        const full = prefix ? prefix + ' > ' + k : k;
+                        const kids = Object.keys(node[k] || {});
+                        return `<details class="mr-2" ${String(cur).startsWith(full)?'open':''}><summary class="cursor-pointer list-none flex items-center gap-2 py-1"><input type="radio" name="tree_${escAttr(name)}" value="${escAttr(full)}" ${String(cur)===full?'checked':''} onchange="FMLK.treePick('${name}', this.value)" class="text-indigo-600" onclick="event.stopPropagation()"><span class="text-slate-700">${escHtml(k)}</span>${kids.length?'<i class="fa-solid fa-chevron-down text-[10px] text-slate-400"></i>':''}</summary>${kids.length?`<div class="mr-4 border-r border-slate-200 pr-1">${renderNode(node[k], full)}</div>`:''}</details>`;
+                    }).join('');
+                };
+                if(paths.length){
+                    box.innerHTML = renderNode(this.treeBuild(paths), '');
+                } else if((f.options||[]).length){
+                    box.innerHTML = f.options.map(o=>`<label class="flex items-center gap-2 px-2 py-1 hover:bg-slate-50 rounded cursor-pointer text-xs"><input type="radio" name="tree_${escAttr(name)}" value="${escAttr(o)}" ${String(cur)===String(o)?'checked':''} onchange="FMLK.treePick('${name}', this.value)" class="text-indigo-600"><span class="text-slate-700">${escHtml(o)}</span></label>`).join('');
+                } else {
+                    box.innerHTML = '<p class="text-slate-400 text-xs">لا توجد عناصر</p>';
+                }
+            },
+            treePick(name, value){ fmlkSetHidden(name, value); },
+            async badgesRender(name){
+                const slug = name.replace(/[^A-Za-z0-9_]/g,'_');
+                const box = document.getElementById('fx_' + slug + '_badges');
+                if(!box) return;
+                const f = fmlkField(name);
+                let opts = (f.options || []).map(o=>({value:o, label:o}));
+                if(!opts.length && f.refTable) opts = await loadLookupOptions(name, f.refTable);
+                let cur = currentData[name];
+                if(cur === undefined || cur === null || cur === '') cur = f.default ?? [];
+                if(!Array.isArray(cur)) cur = String(cur).split(',').map(x=>x.trim()).filter(Boolean);
+                cur = cur.map(String);
+                box.innerHTML = opts.length ? opts.map(o=>`<button type="button" onclick="FMLK.badgeToggle('${name}','${escAttr(o.value)}')" class="px-3 py-1.5 rounded-full text-xs font-semibold border transition ${cur.includes(String(o.value))?'bg-indigo-600 text-white border-indigo-600':'bg-white text-slate-600 border-slate-200 hover:border-indigo-300'}">${escHtml(o.label)}</button>`).join('') : '<p class="text-slate-400 text-xs">لا توجد عناصر</p>';
+                fmlkSetHidden(name, cur);
+            },
+            badgeToggle(name, value){
+                let cur = [];
+                try{ const raw = fmlkHidden(name)?.value || '[]'; cur = JSON.parse(raw); if(!Array.isArray(cur)) cur = []; }catch(e){ cur = []; }
+                cur = cur.map(String);
+                value = String(value);
+                cur = cur.includes(value) ? cur.filter(x=>x!==value) : [...cur, value];
+                fmlkSetHidden(name, cur);
+                this.badgesRender(name);
+            },
+            polySync(name){
+                const slug = name.replace(/[^A-Za-z0-9_]/g,'_');
+                const t = document.getElementById('fx_' + slug + '_t');
+                const v = document.getElementById('fx_' + slug + '_v');
+                fmlkSetHidden(name, ((t && t.value) || '') + ':' + ((v && v.value) || '').trim());
+            },
+            async syncFill(name, force){
+                const tgt = document.querySelector(`input[data-field="${CSS.escape(name)}"]`);
+                const cfgEl = document.querySelector(`[data-sync-target="${CSS.escape(name)}"]`);
+                if(!tgt || !cfgEl) return;
+                const src = cfgEl.dataset.syncSource;
+                if(!src) return;
+                if(!force && tgt.value.trim() !== '') return;
+                const f = fmlkField(name);
+                const sv = fmlkGet(src);
+                if(!sv || !f.refTable) return;
+                const opts = await loadLookupOptions(name, f.refTable);
+                const hit = (opts||[]).find(o=>String(o.value)===String(sv));
+                if(hit){ tgt.value = hit.label; }
+            },
+            syncDependents(changedName){
+                document.querySelectorAll('[data-sync-target]').forEach(el=>{
+                    if(el.dataset.syncSource === changedName){
+                        const t = (fmlkField(el.dataset.syncTarget).inputType === 'livesync');
+                        this.syncFill(el.dataset.syncTarget, t);
+                    }
+                });
+                document.querySelectorAll('select[data-cascade-child]').forEach(sel=>{
+                    if(sel.dataset.cascadeChild === changedName){
+                        const fname = sel.getAttribute('data-field');
+                        if(fname) this.cascadeReload(fname);
+                    }
+                });
+                this.calcRefresh();
+                try{ fmlkVisibleApply(); }catch(e){}
+            },
+            calcRefresh(){
+                document.querySelectorAll('[data-calc]').forEach(h=>{
+                    const target = h.dataset.calc;
+                    const expr = h.dataset.calcExpr || '';
+                    if(!expr) return;
+                    const withVals = expr.replace(/\[([A-Za-z0-9_]+)\]/g, (m, k)=>{
+                        const rv = fmlkGet(k);
+                        const n = parseFloat(rv);
+                        return isNaN(n) ? '0' : String(n);
+                    });
+                    if(!/^[0-9+\-*/().\s]+$/.test(withVals)) return;
+                    try{
+                        const r = Function('"use strict";return (' + withVals + ')')();
+                        const out = (typeof r === 'number' && isFinite(r)) ? Math.round(r * 100) / 100 : '';
+                        h.value = out;
+                        const vis = document.querySelector(`input[data-field="${CSS.escape(target)}"]`);
+                        if(vis) vis.value = out;
+                    }catch(e){}
+                });
+            },
+            async tagsRender(name){
+                const slug = name.replace(/[^A-Za-z0-9_]/g,'_');
+                const box = document.getElementById('fx_' + slug + '_tags');
+                if(!box) return;
+                const f = fmlkField(name);
+                let opts = (f.options || []).map(String);
+                if(!opts.length && f.refTable) opts = (await loadLookupOptions(name, f.refTable)).map(o=>String(o.label ?? o.value));
+                let cur = currentData[name];
+                if(cur === undefined || cur === null || cur === '') cur = f.default ?? [];
+                if(!Array.isArray(cur)) cur = String(cur).split(',').map(x=>x.trim()).filter(Boolean);
+                cur = cur.map(String);
+                box.innerHTML = cur.map(v=>`<span class="inline-flex items-center gap-1 px-2.5 py-1 bg-indigo-50 text-indigo-700 rounded-full text-xs font-semibold">${escHtml(v)}<button type="button" onclick="FMLK.tagDel('${name}','${escAttr(v)}')" class="hover:text-rose-600"><i class="fa-solid fa-xmark text-[10px]"></i></button></span>`).join('') || '<span class="text-slate-400 text-xs">لا وسوم</span>';
+                box.dataset.allowed = JSON.stringify(opts);
+                fmlkSetHidden(name, cur);
+            },
+            tagDel(name, value){
+                let cur = [];
+                try{ cur = JSON.parse(fmlkHidden(name)?.value || '[]'); }catch(e){}
+                fmlkSetHidden(name, cur.filter(x=>String(x)!==String(value)));
+                this.tagsRender(name);
+            },
+            tagAdd(name){
+                const slug = name.replace(/[^A-Za-z0-9_]/g,'_');
+                const inp = document.getElementById('fx_' + slug + '_new');
+                const v = ((inp && inp.value) || '').trim();
+                if(!v) return;
+                const box = document.getElementById('fx_' + slug + '_tags');
+                let allowed = [];
+                try{ allowed = JSON.parse(box?.dataset.allowed || '[]'); }catch(e){}
+                if(allowed.length && !allowed.includes(v)) { notify('القيمة غير موجودة في القائمة المعتمدة', 'error'); return; }
+                let cur = [];
+                try{ cur = JSON.parse(fmlkHidden(name)?.value || '[]'); }catch(e){}
+                if(!cur.map(String).includes(v)) cur.push(v);
+                fmlkSetHidden(name, cur);
+                if(inp) inp.value = '';
+                this.tagsRender(name);
+            },
+            cascadePaths(name){
+                const f = fmlkField(name);
+                const paths = [];
+                (f.options || []).forEach(o=>{
+                    const parts = String(o).split('>').map(x=>x.trim()).filter(Boolean);
+                    if(parts.length > 1) paths.push(parts);
+                });
+                return paths;
+            },
+            cascadeRender(name, level){
+                const slug = name.replace(/[^A-Za-z0-9_]/g,'_');
+                const box = document.getElementById('fx_' + slug + '_cg');
+                if(!box) return;
+                const paths = this.cascadePaths(name);
+                let cur = currentData[name];
+                if(!Array.isArray(cur)) cur = [];
+                if(!paths.length){
+                    box.innerHTML = '<p class="text-slate-400 text-xs">عرّف المسارات بصيغة: مستوى أول &gt; مستوى ثانٍ &gt; مستوى ثالث</p>';
+                    return;
+                }
+                const depth = Math.max(...paths.map(p=>p.length));
+                let html = '';
+                let prefix = [];
+                for(let l=0; l<depth; l++){
+                    const opts = [...new Set(paths.filter(p=>prefix.every((v,i)=>p[i]===v)).map(p=>p[l]).filter(Boolean))];
+                    if(!opts.length) break;
+                    const sel = cur[l] || '';
+                    html += `<select onchange="FMLK.cascadePick('${name}',${l},this.value)" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm"><option value="">— اختر المستوى ${l+1} —</option>${opts.map(o=>`<option ${o===sel?'selected':''}>${escHtml(o)}</option>`).join('')}</select>`;
+                    if(!sel) break;
+                    prefix.push(sel);
+                }
+                box.innerHTML = html;
+                fmlkSetHidden(name, cur.slice(0, depth));
+            },
+            cascadePick(name, level, value){
+                let cur = [];
+                try{ cur = JSON.parse(fmlkHidden(name)?.value || '[]'); if(!Array.isArray(cur)) cur = []; }catch(e){}
+                cur = cur.slice(0, level);
+                if(value) cur[level] = value;
+                currentData[name] = cur;
+                fmlkSetHidden(name, cur);
+                this.cascadeRender(name, level);
+            },
+        };
+        document.addEventListener('change', function(e){
+            const el = e.target;
+            if(el && el.matches && el.matches('[data-field]')){
+                FMLK.syncDependents(el.getAttribute('data-field'));
+            }
+        });
+        document.addEventListener('input', function(e){
+            const el = e.target;
+            if(el && el.matches && el.matches('[data-field]') && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')){
+                try{ fmlkVisibleApply(); }catch(err){}
+            }
+        });
+
+        function renderFormMock() {
+            document.getElementById('formRoot').innerHTML = `
+                <div class="text-center py-8 text-slate-400 text-sm">تعذر تحميل الحقول</div>
+            `;
+        }
+
+        function rowId(r, idx) {
+            const v = r.__pk_id ?? r.id ?? r.ID;
+            return (v === undefined || v === null || v === '') ? `__row${idx}` : String(v);
+        }
+        function fieldDef(name) {
+            return (fmlMeta.fields || []).find(f => f.name === name) || {};
+        }
+        // قراءة خلية مع تجاهل حالة الأحرف: الخادم يُرجع المفاتيح بحالة صغيرة
+        // (d[0].lower) بينما المسميات قد تحوي حروفاً لاتينية كبيرة (IP/SID)
+        function rowGet(r, key){
+            if(!r || key === undefined || key === null) return undefined;
+            if(r[key] !== undefined) return r[key];
+            const lk = String(key).toLowerCase();
+            for(const k of Object.keys(r)){ if(String(k).toLowerCase() === lk) return r[k]; }
+            return undefined;
+        }
+        function cellVal(r, name) {
+            const f = fieldDef(name);
+            let v = (f.alias) ? rowGet(r, f.alias) : undefined;
+            if(v === undefined) v = rowGet(r, name);
+            const out = (v === undefined || v === null) ? '' : v;
+            // Translate coded select values to their Arabic labels
+            try{
+                const opts = (f && f.options) || [];
+                const hit = opts.find(o => o && typeof o === 'object' && String(o.value) === String(out));
+                if(hit && hit.label !== undefined) return hit.label;
+            }catch(e){}
+            // Pretty-print JSON arrays (list-input / multiselect / tags)
+            try{
+                const s = String(out).trim();
+                if(s.startsWith('[')){
+                    const p = JSON.parse(s);
+                    if(Array.isArray(p)) return p.map(String).join('، ');
+                }
+            }catch(e){}
+            return out;
+        }
+        function rowLabel(r) {
+            for (const f of (fmlMeta.fields || [])) {
+                const v = cellVal(r, f.name);
+                if (String(v).trim() !== '') return String(v).slice(0, 40);
+            }
+            return 'سجل ' + (r.__pk_id ?? r.id ?? r.ID ?? '');
+        }
+        function visibleFields() {
+            return (fmlMeta.fields || []).filter(f => !hiddenCols.has(f.name) && (!f.destination || f.destination === 'main'));
+        }
+
+        let loadError = '';
+        async function loadAllRecords() {
+            try {
+                const res = await fetch('/api/fmlk/records?fml=' + encodeURIComponent(currentFml) + '&app=' + encodeURIComponent(currentApp) + '&page=1&pageSize=1000');
+                const data = await res.json();
+                if (data.error) throw new Error(data.error);
+                loadError = '';
+                allRows = data.rows || [];
+                formKindCache = {};
+                selectedIds = new Set([...selectedIds].filter(id => allRows.some((r, i) => rowId(r, i) === id)));
+                currentPage = 1;
+                refreshNav();
+                renderGrid();
+            } catch(e) {
+                loadError = String((e && e.message) || e).split('\n')[0].slice(0, 200);
+                showError(e, 'تحميل السجلات: ' + (currentFml || ''));
+                allRows = [];
+                refreshNav();
+                renderGrid();
+            }
+        }
+
+        function refreshNav() {
+            const sel = document.getElementById('recordSelector');
+            if (sel) {
+                sel.innerHTML = '<option value="">-- اختر سجل --</option>' + allRows.map((r, i) => `<option value="${rowId(r, i)}">${rowLabel(r)}</option>`).join('');
+                if (currentRecordId && allRows.some((r, i) => rowId(r, i) === String(currentRecordId))) sel.value = String(currentRecordId);
+            }
+            const cnt = document.getElementById('recordCount');
+            if (cnt) cnt.textContent = allRows.length + ' سجل';
+        }
+
+        async function loadRecord(id) {
+            if(!id) return;
+            const rid = String(id).startsWith('__row') ? null : id;
+            if (rid) {
+                let _recErr = '';
+                try {
+                    const res = await fetch(`/api/fmlk/record?fml=${currentFml}&id=${encodeURIComponent(rid)}&app=${encodeURIComponent(currentApp)}`);
+                    const data = await res.json();
+                    if (data.row) { openEditPanel(rid, data.row); return; }
+                    if (data.error) _recErr = data.error;
+                } catch(e) { _recErr = String((e && e.message) || e); }
+                const idx = allRows.findIndex((r, i) => rowId(r, i) === String(id));
+                if (idx >= 0) openEditPanel(String(id), {...allRows[idx]});
+                else if (_recErr) showError(_recErr, 'فتح السجل: ' + (currentFml || ''));
+                return;
+            }
+            const idx = allRows.findIndex((r, i) => rowId(r, i) === String(id));
+            if (idx >= 0) openEditPanel(String(id), {...allRows[idx]});
+        }
+
+        function collectData() {
+            const data = {};
+            document.querySelectorAll('[data-field]').forEach(el => {
+                data[el.dataset.field] = el.value;
+            });
+            return data;
+        }
+
+        function isModelsRegistry() {
+            return ((fmlMeta.metadata || {}).table === 'sys_models');
+        }
+        function openAddPanel() {
+            if(isModelsRegistry()){ location.href = `/app/${currentApp}/forms-designer/`; return; }
+            currentRecordId = null;
+            currentData = {};
+            renderForm(fmlMeta);
+            document.querySelectorAll('[data-field]').forEach(el => { el.value = ''; });
+            document.getElementById('formPanelTitle').textContent = 'سجل جديد';
+            document.getElementById('formPanel').classList.remove('hidden');
+            if(typeof lockScroll === 'function') lockScroll();
+            if(window.FMLK) try{ FMLK.widgetsRefresh(); }catch(e){}
+            try{ renderDetailSection(); }catch(e){}
+        }
+        function openEditPanel(id, row) {
+            if(isModelsRegistry()){
+                const _app = row['التطبيق'] || row['app'] || currentApp;
+                const _file = row['الملف'] || row['file'] || '';
+                location.href = `/app/${_app}/forms-designer/` + (_file ? ('?file=' + encodeURIComponent(_file)) : '');
+                return;
+            }
+            currentRecordId = id;
+            // الصفوف تُرجع بالمسميات العربية (AS alias) وبحالة صغيرة من الخادم —
+            // تُحوَّل لأسماء الحقول البرمجية بمطابقة غير حساسة لحالة الأحرف (IP/SID...)
+            const byAlias = {};
+            (fmlMeta.fields || []).forEach(f => {
+                if(f.alias) byAlias[String(f.alias).toLowerCase()] = f.name;
+                if(f.name) byAlias[String(f.name).toLowerCase()] = f.name;
+            });
+            currentData = {};
+            Object.entries(row || {}).forEach(([k, v]) => {
+                if(k === '__rid' || k === '__pk_id') return;
+                currentData[byAlias[String(k).toLowerCase()] || k] = v;
+            });
+            renderForm(fmlMeta);
+            Object.entries(currentData).forEach(([k, v]) => {
+                if(v === undefined || v === null) return;
+                const f = fmlkField(k);
+                document.querySelectorAll(`[data-field="${CSS.escape(k)}"]`).forEach(el => {
+                    if(el.type === 'checkbox' && (f.inputType === 'boolean' || el.hasAttribute('onchange') && el.getAttribute('onchange').includes('boolSync'))) {
+                        el.checked = (String(v).toLowerCase() === 'true' || v === '1' || v === 1 || v === true);
+                        if(window.FMLK) FMLK.boolSync(k, el.checked);
+                    } else if(el.tagName === 'SELECT') {
+                        el.value = String(v);
+                    } else if(el.type !== 'hidden') {
+                        el.value = v;
+                    } else {
+                        el.value = (typeof v === 'string') ? v : JSON.stringify(v ?? '');
+                    }
+                });
+            });
+            document.getElementById('formPanelTitle').textContent = 'تعديل السجل';
+            document.getElementById('formPanel').classList.remove('hidden');
+            if(typeof lockScroll === 'function') lockScroll();
+            refreshNav();
+            if(window.FMLK) try{ FMLK.widgetsRefresh(); }catch(e){}
+            try{ renderDetailSection(); }catch(e){}
+        }
+        function closePanel() {
+            const p = document.getElementById('formPanel');
+            if(p.classList.contains('hidden')) return;
+            p.classList.add('hidden');
+            if(typeof unlockScroll === 'function') unlockScroll();
+        }
+
+        async function saveForm() {
+            const data = collectData();
+            const isUpdate = !!currentRecordId && !String(currentRecordId).startsWith('__row');
+            const url = isUpdate ? '/api/fmlk/update' : '/api/fmlk/create';
+            const payload = isUpdate ? {fml: currentFml, app: currentApp, id: currentRecordId, data} : {fml: currentFml, app: currentApp, data};
+            const res = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+            const j = await res.json();
+            if (!j.ok && !j.rowcount || j.error) { showError(j.error || JSON.stringify(j), 'حفظ السجل: ' + (currentFml || '')); return false; }
+            const _mkey = isUpdate ? currentRecordId : (j.id ?? '');
+            if(!isUpdate && (j.id === undefined || j.id === null || j.id === '')) currentRecordId = null;
+            else if(!isUpdate) currentRecordId = j.id;
+            const dok = await saveDetailRows(_mkey);
+            if(dok === false) return false;
+            notify('تم الحفظ', 'success');
+            await loadAllRecords();
+            return true;
+        }
+        async function saveAndNew() {            const ok = await saveForm();
+            if (ok === false) return;
+            currentRecordId = null;
+            currentData = {};
+            renderForm(fmlMeta);
+            document.querySelectorAll('[data-field]').forEach(el => { el.value = ''; });
+            document.getElementById('formPanelTitle').textContent = 'سجل جديد';
+        }
+        function toggleBlankPanel(){ const p = document.getElementById('blankPanel'); if(!p) return; const show = p.classList.contains('hidden'); p.classList.toggle('hidden', !show); p.classList.toggle('flex', show); }
+        async function saveAndClose() {
+            const ok = await saveForm();
+            if (ok === false) return;
+            closePanel();
+        }
+        function playerModelGo(sel) {
+            const opt = sel.options[sel.selectedIndex];
+            if(!opt || !opt.value){ return; }
+            if(opt.value === '__designer__'){ sel.value = ''; location.href = `/app/${currentApp}/forms-designer/?file=` + encodeURIComponent(currentFml); return; }
+            if(opt.dataset.url){ location.href = opt.dataset.url; return; }
+            location.href = `/app/${currentApp}/form/${encodeURIComponent(opt.value)}/`;
+        }
+        async function migrateCurrentModel() {
+            if(!confirm(`ترحيل جدول الموديل الحالي (${currentFml}) إلى قاعدة البيانات؟`)) return;
+            notify('جارٍ الترحيل...', 'info');
+            try {
+                const res = await fetch(`/api/apps/${encodeURIComponent(currentApp)}/models/migrate/`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({file: currentFml})});
+                const data = await res.json();
+                if(res.ok) notify(`تم الترحيل ✓ ${data.schema}.${data.table} (${(data.columns || []).length} عمود)`, 'success');
+                else notify(data.error || 'فشل الترحيل', 'error');
+            } catch(e) { notify('تعذر الاتصال', 'error'); }
+        }
+        const FORM_BTN_IDS = {add: 'addToolbarBtn', edit: 'editToolbarBtn', delete: 'deleteToolbarBtn', save: 'saveToolbarBtn'};
+        let replacedBtns = new Set();
+        function renderFormActions() {
+            const bar = document.getElementById('formActionsBar');
+            if(bar) bar.innerHTML = '';
+            const fbar = document.getElementById('formPanelActionsBar');
+            if(fbar) fbar.innerHTML = '';
+            replacedBtns = new Set();
+            Object.values(FORM_BTN_IDS).forEach(id => {
+                const t = document.getElementById(id);
+                if(t && (id === 'editToolbarBtn' || id === 'saveToolbarBtn' || id === 'deleteToolbarBtn')) { t.classList.add('hidden'); t.classList.remove('flex'); }
+            });
+            // form-level: أزرار داخل الفورم نفسه (هيدر الدرج) — تصلها قيم الفورم الحالية
+            (customActions || []).filter(a => (a.level || 'record') === 'form').forEach(a => {
+                const target = FORM_BTN_IDS[a.replace] ? document.getElementById(FORM_BTN_IDS[a.replace]) : null;
+                if(target && a.replace && a.replace !== 'new') { target.classList.add('hidden'); target.classList.remove('flex'); replacedBtns.add(target.id); }
+                const b = document.createElement('button');
+                b.type = 'button';
+                b.title = a.label || a.name;
+                const color = a.badge_color || a.badgeColor || '#4f46e5';
+                b.className = 'px-4 py-1.5 rounded-xl text-xs font-semibold text-white hover:opacity-90 transition whitespace-nowrap';
+                if(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(color)) b.style.background = color;
+                else b.classList.add('bg-indigo-600');
+                b.innerHTML = `<i class="fa-solid ${CSS.escape(a.icon || 'fa-bolt')}"></i> ${a.label || a.name}`;
+                b.onclick = () => runFormAction(a.name, {fromForm: true});
+                (fbar || bar).appendChild(b);
+            });
+            // view-level: أزرار عامة في الشريط العلوي (بدون سجل)
+            const vbar = document.getElementById('viewActionsBar');
+            if(vbar){
+                vbar.innerHTML = '';
+                (customActions || []).filter(a => (a.level || 'record') === 'view').forEach(a => {
+                    const b = document.createElement('button');
+                    b.type = 'button';
+                    b.title = a.label || a.name;
+                    const color = a.badge_color || a.badgeColor || '#4f46e5';
+                    b.className = 'h-9 px-3 rounded-full hidden md:flex items-center gap-1.5 text-xs font-bold text-white hover:opacity-90 transition';
+                    if(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(color)) b.style.background = color;
+                    b.innerHTML = `<i class="fa-solid ${CSS.escape(a.icon || 'fa-bolt')}"></i><span class="hidden lg:inline">${a.label || a.name}</span>`;
+                    b.onclick = () => runFormAction(a.name);
+                    vbar.appendChild(b);
+                });
+            }
+        }
+        // ── مرايا IoT: إنشاء جدول iot_<engine>_<endpoint> + مزامنة خلفية بتقدم ──
+        let iotPollTimer = null;
+        async function openIotMirrorModal(formData){
+            let ov = document.getElementById('iotMirrorModal');
+            if(!ov){
+                ov = document.createElement('div');
+                ov.id = 'iotMirrorModal';
+                ov.className = 'hidden fixed inset-0 z-[70] bg-slate-900/50 backdrop-blur-sm flex items-start justify-center p-4 overflow-y-auto';
+                ov.setAttribute('onclick', 'if(event.target===this)closeIotMirrorModal()');
+                document.body.appendChild(ov);
+            }
+            ov.innerHTML = '<div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-8 p-5 text-xs"><p class="text-slate-400 text-center py-6">جاري التحميل...</p></div>';
+            ov.classList.remove('hidden');
+            if(typeof lockScroll === 'function') lockScroll();
+            try{
+                const [connsR, mirrorsR] = await Promise.all([
+                    fetch('/api/connections/').then(r=>r.json()),
+                    fetch('/api/iot/mirrors/').then(r=>r.json()).catch(()=>({mirrors:[]})),
+                ]);
+                const conns = connsR.connections || [];
+                const iotConns = conns.filter(c => (c.conn_type || c.connType) === 'iot');
+                const locals = conns.filter(c => (c.conn_type || c.connType || 'database') === 'database' && String(c.engine || '').toLowerCase() === 'postgres');
+                const mirrors = mirrorsR.mirrors || [];
+                // ── نطاق الاتصال المحدد فقط: المودال مقفل على سجل IoT المفتوح/المحدد ──
+                let selConn = null;
+                let isNewForm = false;
+                try{
+                    const rec = (allRows || []).find((r,i) => String(rowId(r,i)) === String(currentRecordId));
+                    // rowId (يغطي __pk_id) — مفاتيح الصف مسميات عربية وليست id مباشرة
+                    const rid = rec ? rowId(rec, (allRows || []).indexOf(rec)) : '';
+                    selConn = rid ? iotConns.find(c => String(c.id) === String(rid)) : null;
+                    if(!selConn && formData){
+                        // احتياطي: مطابقة قيم الفورم (جديد غير محفوظ، أو سجل خارج الشبكة)
+                        const fn = String(formData.name || '').trim();
+                        const fh = String(formData.host || '').trim();
+                        selConn = (fn ? iotConns.find(c => String(c.name || '').trim() === fn) : null)
+                            || (fh ? iotConns.find(c => String(c.host || '').trim() === fh) : null) || null;
+                        if(!selConn && !currentRecordId) isNewForm = true;
+                    }
+                }catch(e){}
+                const curIot = selConn ? String(selConn.id) : '';
+                const myMirrors = selConn ? mirrors.filter(m => String(m.connection_id) === String(selConn.id)) : [];
+                if(!selConn){
+                    ov.firstElementChild.innerHTML = `
+                        <div class="flex items-center justify-between mb-3">
+                            <h3 class="text-sm font-bold text-slate-800 flex items-center gap-2"><i class="fa-solid fa-database text-violet-600"></i> جدول مرآة الاتصال المحدد</h3>
+                            <button onclick="closeIotMirrorModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+                        </div>
+                        <div class="px-3 py-3 bg-amber-50 border border-amber-200 text-amber-700 rounded-xl text-[11px]">لا يوجد اتصال IoT محدد — افتح سجل اتصال IoT محفوظ ثم اضغط «إنشاء جدول المرآة». المزامنة تعمل على القيم المحفوظة (IP:Port + نقطة البيانات) وليس مسودة الفورم.</div>`;
+                    return;
+                }
+                const _fmtDev = (d) => {
+                    if(typeof d === 'string'){ const s = d.trim(); return s.includes(':') ? s : (s + ':4370'); }
+                    if(d && typeof d === 'object'){ const h = String(d.host || d.ip || '').trim(); const p = parseInt(d.port || '4370', 10) || 4370; return h ? (h + ':' + p) : ''; }
+                    return '';
+                };
+                // المصدر الموثوق: device_list من الخادم (IoT = قائمة الأجهزة فقط بلا المضيف/المنفذ المخفيين)
+                const _dl = Array.isArray(selConn.device_list) ? selConn.device_list.map(p => `${p[0]}:${p[1]}`) : [];
+                const _mainDev = `${String(selConn.host || '').trim()}:${parseInt(selConn.port || '4370', 10) || 4370}`;
+                const _extraDevs = Array.isArray(selConn.devices) ? selConn.devices.map(_fmtDev).filter(Boolean) : [];
+                const _allDevs = _dl.length ? _dl : ([_mainDev, ..._extraDevs].filter(Boolean));
+                const _isIot = (selConn.conn_type || selConn.connType) === 'iot';
+                const _connSub = _isIot ? `${_allDevs.length} جهاز` : `<span class="font-mono" dir="ltr">(${String(selConn.host || '')}:${parseInt(selConn.port || '4370', 10) || 4370})</span>`;
+                const _defEp = String(selConn.endpoint || 'att').trim().toLowerCase() || 'att';
+                ov.firstElementChild.innerHTML = `
+                    <div class="flex items-center justify-between mb-3">
+                        <h3 class="text-sm font-bold text-slate-800 flex items-center gap-2"><i class="fa-solid fa-database text-violet-600"></i> جدول مرآة: ${selConn.name} — <span class="font-mono" dir="ltr">iot_${String(selConn.engine || 'zk').toLowerCase()}_&lt;endpoint&gt;</span></h3>
+                        <button onclick="closeIotMirrorModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+                    </div>
+                    <div class="mb-2 px-3 py-2 bg-violet-50/60 border border-violet-100 rounded-xl text-[11px] text-slate-600">
+                        <b>الاتصال المحدد:</b> ${selConn.name} ${_connSub}
+                        <input type="hidden" id="iotMConn" value="${selConn.id}">
+                        <div class="mt-1 flex flex-wrap gap-1">${_allDevs.map(d=>`<span class="px-1.5 py-0.5 bg-white border border-violet-200 rounded-md font-mono" dir="ltr">${d}</span>`).join('')}<span class="text-slate-400">• ${_allDevs.length} جهاز</span></div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2 bg-violet-50/60 border border-violet-100 rounded-xl p-3">
+                        <div><label class="block text-[11px] font-semibold text-slate-600 mb-1">نقطة البيانات (افتراضي: ${selConn.endpoint || 'att'})</label><select id="iotMEp" data-defep="${_defEp}" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5"></select></div>
+                        <div><label class="block text-[11px] font-semibold text-slate-600 mb-1">الاتصال المحلي (postgres)</label><select id="iotMLocal" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5">${locals.map(c=>`<option value="${c.id}">${c.name}</option>`).join('') || '<option value="">— لا يوجد —</option>'}</select></div>
+                        <div><label class="block text-[11px] font-semibold text-slate-600 mb-1">الفاصل (دقيقة)</label><input id="iotMInterval" type="number" min="1" max="1440" value="15" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5" dir="ltr"></div>
+                        <label class="flex items-center gap-2 text-[11px] font-semibold text-slate-600 cursor-pointer"><input id="iotMAuto" type="checkbox" checked class="rounded text-violet-600"> مزامنة تلقائية دورية</label>
+                        <label class="flex items-center gap-2 text-[11px] font-semibold text-slate-600 cursor-pointer"><input id="iotMClear" type="checkbox" checked class="rounded text-violet-600"> مسح سجل الجهاز بعد المزامنة (تسريع)</label>
+                    </div>
+                    <button onclick="iotMirrorStart()" class="mt-2 w-full py-2 bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-xs font-bold"><i class="fa-solid fa-plus"></i> إنشاء الجدول وبدء المزامنة</button>
+                    <div id="iotMProg" class="hidden mt-2 bg-slate-50 border border-slate-200 rounded-xl p-3">
+                        <div class="flex items-center justify-between text-[11px] font-bold text-slate-600 mb-1"><span id="iotMProgLabel">...</span><span id="iotMProgPct">0%</span></div>
+                        <div class="h-2.5 bg-slate-200 rounded-full overflow-hidden"><div id="iotMProgBar" class="h-full bg-violet-600 rounded-full transition-all" style="width:0%"></div></div>
+                        <div id="iotMProgInfo" class="mt-1 text-[11px] text-slate-500"></div>
+                    </div>
+                    <h4 class="mt-4 mb-2 text-xs font-bold text-slate-700">مرايا هذا الاتصال (${myMirrors.length})</h4>
+                    <div id="iotMList" class="space-y-1.5 max-h-56 overflow-y-auto custom-scroll">${myMirrors.length ? myMirrors.map(m=>`
+                        <div class="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-2 py-1.5">
+                            <span class="font-mono text-[11px] font-bold text-slate-700" dir="ltr">${m.table_name}</span>
+                            <span class="text-[10px] px-1.5 py-0.5 rounded-full ${m.status==='running'?'bg-amber-100 text-amber-700':(m.status==='error'?'bg-rose-100 text-rose-700':(m.status==='done'?'bg-emerald-100 text-emerald-700':'bg-slate-100 text-slate-500'))}">${m.status}</span>
+                            <span class="text-[10px] text-slate-400">${m.rows_new ?? 0} جديد${m.last_sync_at ? ' • ' + String(m.last_sync_at).slice(0,16).replace('T',' ') : ''}</span>
+                            <span class="mr-auto"></span>
+                            <button onclick="iotMirrorSyncNow(${m.id})" class="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-[11px] font-bold"><i class="fa-solid fa-rotate"></i> مزامنة</button>
+                        </div>`).join('') : '<p class="text-slate-400 text-center py-3">لا مرايا بعد</p>'}</div>
+                    <p class="mt-2 text-[11px] text-slate-500">مصمم التقارير يستخدم <b>الاتصال المحلي + الجدول المرآة</b> مباشرة (SQL عادي) — بلا كسر للتقارير.</p>`;
+                iotMirrorEndpoints();
+            }catch(e){ ov.firstElementChild.innerHTML = '<p class="text-rose-500 text-center py-6">تعذر التحميل: ' + String((e && e.message) || e).slice(0,200) + '</p>'; }
+        }
+        function closeIotMirrorModal(){
+            const ov = document.getElementById('iotMirrorModal');
+            if(ov) ov.classList.add('hidden');
+            if(iotPollTimer){ clearInterval(iotPollTimer); iotPollTimer = null; }
+            if(typeof unlockScroll === 'function') unlockScroll();
+        }
+        async function iotMirrorEndpoints(){
+            const cid = (document.getElementById('iotMConn') || {}).value;
+            const sel = document.getElementById('iotMEp');
+            if(!cid || !sel) return;
+            sel.innerHTML = '<option>جاري التحميل...</option>';
+            try{
+                const res = await fetch('/api/iot/endpoints/', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({connection_id: cid})});
+                const data = await res.json();
+                const eps = data.endpoints || [];
+                const defEp = (sel && sel.dataset && sel.dataset.defep) || ((data.connection || {}).endpoint) || 'att';
+                sel.innerHTML = eps.length ? eps.map(e=>`<option value="${e.endpoint}" ${String(e.endpoint)===String(defEp)?'selected':''}>${e.label}</option>`).join('') : '<option value="">— لا نقاط —</option>';
+            }catch(e){ sel.innerHTML = '<option value="">تعذر التحميل</option>'; }
+        }
+        async function iotMirrorStart(){
+            const body = {
+                connection_id: (document.getElementById('iotMConn') || {}).value,
+                endpoint: (document.getElementById('iotMEp') || {}).value || 'att',
+                local_connection_id: (document.getElementById('iotMLocal') || {}).value,
+                auto_sync: !!((document.getElementById('iotMAuto') || {}).checked),
+                interval_min: parseInt(((document.getElementById('iotMInterval') || {}).value) || '15', 10),
+                clear_device: !!((document.getElementById('iotMClear') || {}).checked),
+            };
+            if(!body.connection_id || !body.local_connection_id) return notify('اختر اتصال IoT والاتصال المحلي', 'error');
+            notify('جارٍ إنشاء الجدول وبدء المزامنة...', 'info');
+            try{
+                const res = await fetch('/api/iot/mirror/', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+                const data = await res.json();
+                if(!res.ok || data.error) throw new Error(data.error || 'فشل الإنشاء');
+                notify('تم إنشاء الجدول ' + data.table + ' — المزامنة الأولى جارية', 'success');
+                const mid = data.mirror && data.mirror.id;
+                if(mid) iotMirrorPoll(mid);
+                else openIotMirrorModal();
+            }catch(e){ notify('تعذر الإنشاء: ' + String((e && e.message) || e).slice(0,250), 'error'); }
+        }
+        async function iotMirrorSyncNow(mid){
+            try{
+                await fetch('/api/iot/mirror/sync/', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({mirror_id: mid})});
+                iotMirrorPoll(mid);
+            }catch(e){ notify('تعذر بدء المزامنة', 'error'); }
+        }
+        function iotMirrorPoll(mid){
+            const box = document.getElementById('iotMProg');
+            if(box) box.classList.remove('hidden');
+            if(iotPollTimer) clearInterval(iotPollTimer);
+            const tick = async ()=>{
+                try{
+                    const res = await fetch('/api/iot/mirror/status/?mirror_id=' + encodeURIComponent(mid));
+                    const data = await res.json();
+                    const m = data.mirror || {};
+                    const pct = m.progress_pct ?? 0;
+                    const bar = document.getElementById('iotMProgBar');
+                    const pl = document.getElementById('iotMProgLabel');
+                    const pp = document.getElementById('iotMProgPct');
+                    const pi = document.getElementById('iotMProgInfo');
+                    if(bar) bar.style.width = pct + '%';
+                    if(pp) pp.textContent = pct + '%';
+                    if(pl) pl.textContent = 'الحالة: ' + (m.status || '');
+                    if(pi) pi.textContent = `أجهزة: ${m.devices_done ?? 0}/${m.devices_total ?? 0} • مسحوب: ${m.rows_pulled ?? 0} • جديد: ${m.rows_new ?? 0}` + (m.last_error ? ` • خطأ: ${String(m.last_error).slice(0,150)}` : '');
+                    if(m.status === 'done' || m.status === 'error'){
+                        clearInterval(iotPollTimer); iotPollTimer = null;
+                        notify(m.status === 'done' ? `اكتملت المزامنة ✓ جديد: ${m.rows_new ?? 0}` : ('انتهت بخطأ: ' + String(m.last_error || '').slice(0,200)), m.status === 'done' ? 'success' : 'error');
+                        setTimeout(openIotMirrorModal, 1200);
+                    }
+                }catch(e){}
+            };
+            tick();
+            iotPollTimer = setInterval(tick, 2000);
+        }
+        async function runFormAction(actionName, opts) {
+            const a = (customActions || []).find(x => x.name === actionName);
+            if(!a) return;
+            const isFormLevel = (a.level || 'record') === 'form';
+            const formOpen = !document.getElementById('formPanel').classList.contains('hidden');
+            let formData = null;
+            if((isFormLevel || (opts && opts.fromForm)) && formOpen){
+                try{ formData = collectData(); }catch(e){ formData = null; }
+            }
+            if(a.name === 'iot_mirror' && typeof currentFml === 'string' && currentFml.indexOf('connections') !== -1){ openIotMirrorModal(formData); return; }
+            const ep = a.endpoint || '';
+            if(!/^\/[A-Za-z0-9_\-./]*$/.test(ep)) return;
+            try {
+                const payload = {app: currentApp, fml: currentFml, action: a.name};
+                if(formData){ payload.form = formData; payload.record_id = currentRecordId; }
+                const res = await fetch(ep, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)});
+                const data = await res.json().catch(() => ({}));
+                if(a.render && res.ok) { await showActionModal(a, data || {}, {}); await loadAllRecords(); return; }
+                if(res.ok && (data.ok === undefined || data.ok)) notify(data.message || ('تم: ' + a.label), 'success');
+                else notify(data.error || data.message || 'فشل التنفيذ', 'error');
+                await loadAllRecords();
+            } catch(e) { notify('تعذر الاتصال', 'error'); }
+        }
+        document.addEventListener('keydown', (e) => {
+            if(e.key === 'Escape' && !document.getElementById('formPanel').classList.contains('hidden')) closePanel();
+        });
+        (function(){
+            const dq = new URLSearchParams(location.search).get('design');
+            if(dq){ try{ history.replaceState(null, '', location.pathname); }catch(e){} location.href = `/app/${currentApp}/forms-designer/` + (dq !== '__new__' ? ('?file=' + encodeURIComponent(dq)) : ''); }
+        })();
+
+        function selectedRealIds() {
+            return [...selectedIds].filter(id => !String(id).startsWith('__row'));
+        }
+        function editSelected() {
+            const ids = selectedRealIds();
+            if (ids.length !== 1) return notify(ids.length === 0 ? 'حدد سجلاً واحداً للتعديل' : 'حدد سجلاً واحداً فقط للتعديل', 'info');
+            loadRecord(ids[0]);
+        }
+        async function deleteSelected() {
+            const ids = selectedRealIds();
+            if (!ids.length) return notify('حدد سجلاً واحداً على الأقل للحذف', 'info');
+            if (!confirm(`هل أنت متأكد من حذف ${ids.length} سجل؟`)) return;
+            let ok = 0;
+            for (const id of ids) {
+                try {
+                    const res = await fetch('/api/fmlk/delete', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({fml: currentFml, app: currentApp, id})});
+                    const j = await res.json();
+                    if (j.ok) ok++;
+                } catch(e) {}
+            }
+            notify(`تم حذف ${ok} من ${ids.length}`, ok === ids.length ? 'success' : (ok > 0 ? 'info' : 'error'));
+            if (currentRecordId && ids.includes(String(currentRecordId))) { currentRecordId = null; closePanel(); }
+            await loadAllRecords();
+        }
+
+        function prevRecord() {
+            if (!allRows.length) return;
+            let idx = allRows.findIndex((r, i) => rowId(r, i) === String(currentRecordId));
+            idx = idx <= 0 ? 0 : idx - 1;
+            loadRecord(rowId(allRows[idx], idx));
+        }
+        function nextRecord() {
+            if (!allRows.length) return;
+            let idx = allRows.findIndex((r, i) => rowId(r, i) === String(currentRecordId));
+            idx = (idx < 0 || idx >= allRows.length - 1) ? allRows.length - 1 : idx + 1;
+            loadRecord(rowId(allRows[idx], idx));
+        }
+
+        // ── البحث الذكي: نفس مصنف مشغل التقارير (رقم/نص/تاريخ مدمج/نطاق/وقت) ──
+        function smartParseDate(s){
+            try{
+                s = String(s || '').trim();
+                let y, m, d, mt;
+                if((mt = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/))){ y=+mt[1]; m=+mt[2]; d=+mt[3]; }
+                else if((mt = s.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4})$/))){ d=+mt[1]; m=+mt[2]; y=+mt[3]; }
+                else if((mt = s.match(/^(\d{8})$/))){
+                    const a = mt[1], y1 = +a.slice(0,4);
+                    if(y1 >= 1900 && y1 <= 2100){ y=y1; m=+a.slice(4,6); d=+a.slice(6,8); }
+                    else { d=+a.slice(0,2); m=+a.slice(2,4); y=+a.slice(4,8); }
+                }
+                else return null;
+                if(!(y>=1900&&y<=2100)||!(m>=1&&m<=12)||!(d>=1&&d<=31)) return null;
+                const dt = new Date(y, m-1, d);
+                if(dt.getFullYear()!==y||dt.getMonth()!==m-1||dt.getDate()!==d) return null;
+                return y+'-'+String(m).padStart(2,'0')+'-'+String(d).padStart(2,'0');
+            }catch(e){ return null; }
+        }
+        function smartClassify(raw){
+            const q = String(raw||'').trim();
+            const rm = q.match(/^(.+?)\s*(?:-|–|—|\.\.|إلى|الى)\s*(.+)$/);
+            if(rm){
+                const a = smartParseDate(rm[1].trim()), b = smartParseDate(rm[2].trim());
+                if(a && b){ const f = a<=b?a:b, t = a<=b?b:a; return {kind:'daterange', from:f, to:t, label:f+' - '+t}; }
+            }
+            const tm = q.match(/^([01]?\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?$/);
+            if(tm) return {kind:'time', value:String(tm[1]).padStart(2,'0')+':'+tm[2], label:q};
+            const dt = smartParseDate(q);
+            if(dt) return {kind:'date', value:dt, label:dt};
+            if(/^-?\d+(\.\d+)?$/.test(q)) return {kind:'number', value:q, label:q};
+            return {kind:'text', value:q, label:q};
+        }
+        let formKindCache = {};
+        function formFieldKind(f){
+            try{
+                if(formKindCache[f.name]) return formKindCache[f.name];
+                let k = '';
+                const t = String((f && (f.type || f.dataType || f.data_type)) || '').toLowerCase();
+                if(/timestamp|datetime/.test(t)) k = 'datetime';
+                else if(/(^|[^a-z])date([^a-z]|$)/.test(t)) k = 'date';
+                else if(/time/.test(t)) k = 'time';
+                else if(/number|int|float|double|decimal|numeric|amount|qty|quantity|price|salary|count|total/.test(t)) k = 'number';
+                if(!k){
+                    const vals = (allRows||[]).map(r=>cellVal(r, f.name)).filter(v=>v!==undefined&&v!==null&&String(v).trim()!=='').slice(0,8).map(v=>String(v).trim());
+                    if(vals.length){
+                        if(vals.every(v=>/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(v))) k = 'datetime';
+                        else if(vals.every(v=>/^\d{4}-\d{2}-\d{2}/.test(v))) k = 'date';
+                        else if(vals.every(v=>/^([01]?\d|2[0-3]):[0-5]\d/.test(v))) k = 'time';
+                        else if(vals.every(v=>!isNaN(parseFloat(v)))) k = 'number';
+                        else k = 'text';
+                    } else k = 'text';
+                }
+                formKindCache[f.name] = k;
+                return k;
+            }catch(e){ return 'text'; }
+        }
+
+        // ── Grid (table with report-player features) ──
+        function filteredRows() {
+            const rawQ = gridSearch.trim();
+            // الفواصل (، ,) = أو — و (&) = و — كل جزء يُصنّف ذكياً على حدة
+            const orGroups = rawQ ? rawQ.split(/[,،]/).map(s=>s.trim()).filter(Boolean)
+                .map(seg=>seg.split('&').map(p=>p.trim()).filter(Boolean).map(p=>smartClassify(p))) : [];
+            const cols = visibleFields();
+            const kindOf = {};
+            cols.forEach(f=>{ kindOf[f.name] = formFieldKind(f); });
+            const cellStr = (r, n)=>String(cellVal(r, n) ?? '');
+            const matchPart = (r, sc)=>{
+                if(sc.kind === 'number')
+                    return cols.some(f=>kindOf[f.name]==='number' && cellStr(r, f.name).includes(sc.value));
+                if(sc.kind === 'text')
+                    return cols.some(f=>kindOf[f.name]==='text' && cellStr(r, f.name).toLowerCase().includes(sc.value.toLowerCase()));
+                if(sc.kind === 'date')
+                    return cols.some(f=>(kindOf[f.name]==='date'||kindOf[f.name]==='datetime') && cellStr(r, f.name).includes(sc.value));
+                if(sc.kind === 'daterange')
+                    return cols.some(f=>{
+                        if(kindOf[f.name]!=='date'&&kindOf[f.name]!=='datetime') return false;
+                        const m = cellStr(r, f.name).match(/\d{4}-\d{2}-\d{2}/);
+                        return !!m && m[0] >= sc.from && m[0] <= sc.to;
+                    });
+                if(sc.kind === 'time')
+                    return cols.some(f=>kindOf[f.name]!=='number' && cellStr(r, f.name).includes(sc.value));
+                return false;
+            };
+            const matchSmart = (r)=>{
+                if(!orGroups.length) return true;
+                return orGroups.some(parts=>parts.every(sc=>matchPart(r, sc)));
+            };
+            return allRows.filter(r => {
+                if (groupCol && groupVal !== null) {
+                    const gv = cellVal(r, groupCol);
+                    const key = String(gv === '' ? '(فارغ)' : gv);
+                    if (key !== String(groupVal)) return false;
+                }
+                for (const col in columnFilters) {
+                    const sel = columnFilters[col];
+                    if (sel && sel.length && !sel.includes(String(cellVal(r, col)))) return false;
+                }
+                if (rawQ) {
+                    if (!matchSmart(r)) return false;
+                }
+                return true;
+            });
+        }
+        function sortedRows(rows) {
+            if (!activeSort.column) return rows;
+            const col = activeSort.column, dir = activeSort.direction === 'desc' ? -1 : 1;
+            return [...rows].sort((a, b) => {
+                const va = cellVal(a, col), vb = cellVal(b, col);
+                const na = parseFloat(va), nb = parseFloat(vb);
+                if (!isNaN(na) && !isNaN(nb) && String(va).trim() !== '' && String(vb).trim() !== '') return (na - nb) * dir;
+                const sa = String(va ?? ''), sb = String(vb ?? '');
+                return sa.localeCompare(sb, 'ar') * dir;
+            });
+        }
+        function onGridSearch(v) {
+            gridSearch = v;
+            currentPage = 1;
+            renderGrid();
+        }
+        function changePageSize(v) {
+            pageSize = v;
+            currentPage = 1;
+            renderGrid();
+        }
+        function changePage(d) {
+            currentPage += d;
+            renderGrid();
+        }
+        function toggleView(mode) {
+            viewMode = mode;
+            document.getElementById('viewListBtn').className = 'w-8 h-8 rounded-full flex items-center justify-center transition ' + (mode === 'list' ? 'text-indigo-600 bg-indigo-50' : 'text-slate-500 hover:bg-slate-100');
+            document.getElementById('viewGridBtn').className = 'w-8 h-8 rounded-full flex items-center justify-center transition ' + (mode === 'grid' ? 'text-indigo-600 bg-indigo-50' : 'text-slate-500 hover:bg-slate-100');
+            renderGrid();
+        }
+        function toggleSelect(id, checked) {
+            id = String(id);
+            if (checked) selectedIds.add(id);
+            else selectedIds.delete(id);
+            updateSelectedCount();
+            renderGrid();
+        }
+        function toggleSelectPage(checked) {
+            pagedRowsCache.forEach(r => {
+                const id = String(r.__rid);
+                if (checked) selectedIds.add(id);
+                else selectedIds.delete(id);
+            });
+            updateSelectedCount();
+            renderGrid();
+        }
+        function updateSelectedCount() {
+            const el = document.getElementById('selectedCount');
+            if (el) el.textContent = selectedIds.size ? `${selectedIds.size} محدد` : '';
+            // التعديل والحفظ لسجل واحد فقط — الحذف لأي تحديد — مع أنيميشن ظهور
+            const single = selectedIds.size === 1;
+            const any = selectedIds.size >= 1;
+            [['editToolbarBtn', single], ['saveToolbarBtn', single], ['deleteToolbarBtn', any]].forEach(([id, show]) => {
+                const b = document.getElementById(id);
+                if(!b) return;
+                if(typeof replacedBtns !== 'undefined' && replacedBtns.has(id)) return;
+                const wasHidden = b.classList.contains('hidden');
+                b.classList.toggle('hidden', !show);
+                b.classList.toggle('flex', show);
+                if(show && wasHidden) {
+                    b.classList.remove('toolbar-btn-pop');
+                    void b.offsetWidth;
+                    b.classList.add('toolbar-btn-pop');
+                }
+            });
+        }
+        let pagedRowsCache = [];
+        function renderGrid() {
+            const cols = visibleFields();
+            const rows = sortedRows(filteredRows());
+            const total = rows.length;
+            const pSize = pageSize === 'all' ? Math.max(total, 1) : parseInt(pageSize);
+            const totalPages = Math.max(1, Math.ceil(total / pSize));
+            if (currentPage > totalPages) currentPage = totalPages;
+            const start = (currentPage - 1) * pSize;
+            const paged = pageSize === 'all' ? rows : rows.slice(start, start + pSize);
+            pagedRowsCache = paged.map((r, i) => ({...r, __rid: rowId(r, allRows.indexOf(r))}));
+            document.getElementById('totalRecordsCount').innerText = total;
+            document.getElementById('currentPageNum').innerText = currentPage;
+            document.getElementById('totalPagesNum').innerText = totalPages;
+            renderGroupSidebar(rows);
+            updateSelectedCount();
+            const isList = viewMode === 'list';
+            document.getElementById('dataTable').style.display = isList ? '' : 'none';
+            document.getElementById('cardsView').style.display = isList ? 'none' : '';
+            if (isList) renderTable(cols, paged, start);
+            else renderCards(cols, paged, start);
+        }
+        function renderTable(cols, paged, start) {
+            const allChecked = paged.length > 0 && paged.every((r, i) => selectedIds.has(String(rowId(r, allRows.indexOf(r)))));
+            let head = `<tr><th class="freeze-col-head w-10 px-2 py-1 text-center border-b border-slate-200"><input type="checkbox" ${allChecked ? 'checked' : ''} onchange="toggleSelectPage(this.checked)" class="rounded text-indigo-600"></th><th class="w-12 px-2 py-1 text-center border-b border-slate-200 bg-slate-100 font-bold">#</th>`;
+            cols.forEach(f => {
+                const hasF = columnFilters[f.name] && columnFilters[f.name].length;
+                head += `<th class="px-2 py-1 font-bold border-b border-slate-200 ${hasF ? '!bg-indigo-50' : 'bg-slate-50'} text-slate-700 cursor-pointer hover:bg-slate-100 select-none" onclick="openColMenu(event, '${f.name}')"><div class="flex items-center justify-between gap-1"><span class="truncate">${f.alias}</span><span class="text-slate-400 text-[10px]">${activeSort.column === f.name ? (activeSort.direction === 'asc' ? '▲' : '▼') : ''}<i class="fa-solid fa-chevron-down"></i>${hasF ? '<i class="fa-solid fa-filter text-indigo-600" title="مصفّى"></i>' : ''}</span></div></th>`;
+            });
+            const recordActions = (customActions || []).filter(a => (a.level || 'record') === 'record');
+            if(recordActions.length) head += `<th class="px-2 py-1 font-bold border-b border-slate-200 bg-slate-50 text-slate-700 text-center">إجراءات</th>`;
+            head += '</tr>';
+            document.getElementById('tableHeader').innerHTML = head;
+            let body = '';
+            if (!paged.length) {
+                body = loadError
+                    ? `<tr><td colspan="${cols.length + 2}" class="text-center py-12 text-rose-500 text-xs">تعذر تحميل السجلات: ${loadError}</td></tr>`
+                    : `<tr><td colspan="${cols.length + 2}" class="text-center py-12 text-slate-400">لا توجد بيانات مطابقة</td></tr>`;
+            } else {
+                paged.forEach((r, i) => {
+                    const id = String(rowId(r, allRows.indexOf(r)));
+                    const checked = selectedIds.has(id) ? 'checked' : '';
+                    const hl = String(currentRecordId) === id ? 'bg-indigo-50/60' : (i % 2 ? 'bg-slate-50/60' : 'bg-white');
+                    body += `<tr class="${hl} hover:bg-indigo-50/50 transition" ondblclick="loadRecord('${id.replace(/'/g, "\\'")}')">`;
+                    body += `<td class="freeze-col ${hl} px-2 py-1 text-center excel-cell" onclick="event.stopPropagation()"><input type="checkbox" ${checked} onchange="toggleSelect('${id.replace(/'/g, "\\'")}', this.checked)" class="rounded text-indigo-600"></td>`;
+                    body += `<td class="px-2 py-1 text-center text-slate-400 excel-cell">${start + i + 1}</td>`;
+                    cols.forEach(f => {
+                        body += `<td class="px-2 py-1 text-slate-800 excel-cell whitespace-nowrap">${cellVal(r, f.name)}</td>`;
+                    });
+                    if(customActions.length) {
+                        body += `<td class="px-2 py-1 text-center whitespace-nowrap" onclick="event.stopPropagation()">${recordActions.map(a => actionBtn(a, id)).join('')}</td>`;
+                    }
+                    body += '</tr>';
+                });
+            }
+            document.getElementById('tableBody').innerHTML = body;
+        }
+        function renderCards(cols, paged, start) {
+            const show = cols.slice(0, 4);
+            const recordActions = (customActions || []).filter(a => (a.level || 'record') === 'record');
+            let html = '';
+            if (!paged.length) html = '<div class="col-span-full text-center py-12 text-slate-400 text-sm">لا توجد بيانات مطابقة</div>';
+            paged.forEach((r, i) => {
+                const id = String(rowId(r, allRows.indexOf(r)));
+                const checked = selectedIds.has(id) ? 'checked' : '';
+                html += `<div class="bg-white border ${String(currentRecordId) === id ? 'border-indigo-400 ring-1 ring-indigo-200' : 'border-slate-200'} rounded-xl p-3 shadow-sm hover:shadow-md transition cursor-pointer" ondblclick="loadRecord('${id.replace(/'/g, "\\'")}')">
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="text-[11px] text-slate-400">#${start + i + 1}</span>
+                        <input type="checkbox" ${checked} onchange="toggleSelect('${id.replace(/'/g, "\\'")}', this.checked)" onclick="event.stopPropagation()" class="rounded text-indigo-600">
+                    </div>
+                    ${show.map(f => `<div class="flex items-center justify-between gap-2 py-1 border-b border-slate-50 last:border-0"><span class="text-[11px] text-slate-500">${f.alias}</span><span class="text-xs font-semibold text-slate-800 truncate">${cellVal(r, f.name)}</span></div>`).join('')}
+                    ${recordActions.length ? `<div class="flex items-center gap-1.5 flex-wrap pt-2" onclick="event.stopPropagation()">${recordActions.map(a => actionBtn(a, id)).join('')}</div>` : ''}
+                </div>`;
+            });
+            document.getElementById('cardsView').innerHTML = html;
+        }
+        function renderGroupSidebar(rows) {
+            const bar = document.getElementById('groupSidebar');
+            const box = document.getElementById('groupSidebarContent');
+            if (!groupCol) { bar.classList.add('hidden'); bar.classList.remove('flex'); return; }
+            bar.classList.remove('hidden'); bar.classList.add('flex');
+            const groups = {};
+            rows.forEach(r => {
+                const gv = cellVal(r, groupCol);
+                const k = String(gv === '' ? '(فارغ)' : gv);
+                groups[k] = (groups[k] || 0) + 1;
+            });
+            const alias = (visibleFields().find(f => f.name === groupCol) || {}).alias || groupCol;
+            box.innerHTML = Object.entries(groups).map(([k, n]) => `
+                <div onclick="selectGroup('${k.replace(/'/g, "\\'")}')" class="p-2.5 rounded-xl cursor-pointer transition flex items-center justify-between ${String(groupVal) === k ? 'bg-indigo-600 text-white shadow-sm' : 'bg-slate-50 hover:bg-slate-100 text-slate-700'}">
+                    <span class="font-semibold truncate">${k}</span>
+                    <span class="px-2 py-0.5 rounded-full text-[10px] ${String(groupVal) === k ? 'bg-indigo-500 text-white' : 'bg-slate-200 text-slate-600'}">${n}</span>
+                </div>`).join('') || '<p class="text-slate-400 text-center">لا توجد مجموعات</p>';
+            void alias;
+        }
+        function selectGroup(val) {
+            groupVal = val;
+            currentPage = 1;
+            const ind = document.getElementById('activeGroupIndicator');
+            ind.classList.remove('hidden'); ind.classList.add('flex');
+            const f = (visibleFields().find(x => x.name === groupCol) || {});
+            document.getElementById('activeGroupColName').innerText = f.alias || groupCol;
+            document.getElementById('activeGroupVal').innerText = val;
+            renderGrid();
+        }
+        function clearGroupFilter() {
+            groupCol = null; groupVal = null; currentPage = 1;
+            const ind = document.getElementById('activeGroupIndicator');
+            ind.classList.add('hidden'); ind.classList.remove('flex');
+            renderGrid();
+        }
+        function toggleGroupSidebar() { clearGroupFilter(); }
+        function openColMenu(event, colName) {
+            event.stopPropagation();
+            menuCol = colName;
+            const menu = document.getElementById('columnDropdownMenu');
+            menu.classList.remove('hidden');
+            const rect = event.currentTarget.getBoundingClientRect();
+            menu.style.top = Math.min(rect.bottom + 4, window.innerHeight - 320) + 'px';
+            menu.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - 280)) + 'px';
+            const seen = new Map();
+            allRows.forEach(r => {
+                const k = String(cellVal(r, colName));
+                seen.set(k, (seen.get(k) || 0) + 1);
+            });
+            const unique = [...seen.keys()].sort((a, b) => a.localeCompare(b, 'ar')).slice(0, 200);
+            const cntEl = document.getElementById('colValuesCount');
+            if(cntEl) cntEl.textContent = seen.size > 200 ? ('أول 200 من ' + seen.size + ' قيمة') : (seen.size + ' قيمة');
+            document.getElementById('colValuesCheckboxesList').innerHTML = unique.length ? unique.map(val => {
+                const safe = String(val).replace(/"/g, '&quot;');
+                const checked = (!columnFilters[colName] || columnFilters[colName].includes(val)) ? 'checked' : '';
+                return `<label class="flex items-center gap-2 px-2 py-1 hover:bg-slate-50 rounded cursor-pointer"><input type="checkbox" value="${safe}" ${checked} class="col-filter-chk rounded text-indigo-600 focus:ring-0"><span class="text-slate-700 truncate">${val === '' ? '(فارغ)' : safe}</span><span class="mr-auto text-[10px] text-slate-400">${seen.get(val)}</span></label>`;
+            }).join('') : '<p class="text-slate-400 text-center py-4">لا توجد قيم</p>';
+            document.getElementById('colSearchInput').value = '';
+        }
+        function closeColumnMenu() { document.getElementById('columnDropdownMenu').classList.add('hidden'); menuCol = null; }
+        function filterColumnCheckboxes(q) {
+            document.querySelectorAll('#colValuesCheckboxesList label').forEach(el => {
+                el.style.display = el.innerText.toLowerCase().includes(q.toLowerCase()) ? '' : 'none';
+            });
+        }
+        function execColumnSort(dir) {
+            if (!menuCol) return;
+            activeSort = {column: menuCol, direction: dir};
+            closeColumnMenu(); renderGrid();
+        }
+        function execColumnGroup() {
+            if (!menuCol) return;
+            groupCol = menuCol; groupVal = null; currentPage = 1;
+            closeColumnMenu(); renderGrid();
+        }
+        function clearColumnFilter() {
+            if (!menuCol) return;
+            delete columnFilters[menuCol];
+            closeColumnMenu(); currentPage = 1; renderGrid();
+        }
+        function colFilterCheckAll(on) {
+            document.querySelectorAll('#colValuesCheckboxesList .col-filter-chk').forEach(chk => {
+                if(chk.closest('label').style.display !== 'none') chk.checked = !!on;
+            });
+        }
+        function applyColumnFilter() {
+            if (!menuCol) return;
+            const sel = [];
+            document.querySelectorAll('#colValuesCheckboxesList .col-filter-chk').forEach(chk => { if (chk.checked) sel.push(chk.value); });
+            columnFilters[menuCol] = sel;
+            closeColumnMenu(); currentPage = 1; renderGrid();
+        }
+        window.addEventListener('click', function(e) {
+            const menu = document.getElementById('columnDropdownMenu');
+            if (menu && !menu.classList.contains('hidden') && !menu.contains(e.target) && !e.target.closest('[onclick*="openColMenu"]')) menu.classList.add('hidden');
+        });
+        // ── لوحة مستندات DML (نفس حكاية التقارير — مربوطة بتبويبة المستندات في المصمم) ──
+        function toggleDocPanel(){ const p = document.getElementById('docPrintPanel'); if(!p) return; const show = p.classList.contains('hidden'); p.classList.toggle('hidden', !show); p.classList.toggle('flex', show); if(show){ loadFormDocs(); } }
+        let printDocMeta = {};
+        let printLastHtml = '';
+        let printLastPayload = null;
+        function printSelDoc(){ const sel = document.getElementById('printDocSel'); return (sel && sel.value) ? sel.value : ''; }
+        function printSelMeta(){ return printDocMeta[printSelDoc()] || {}; }
+        function printFormBase(){ return String(currentFml || '').split('/').pop().replace(/\.fmlk$/i, '').replace(/\.fml$/i, '').replace(/[^A-Za-z0-9_\-]/g, '_'); }
+        function formPrintRecord(){
+            // السجل الحالي: المفتوح في اللوحة أولاً ثم المحدد ثم الأول
+            try{
+                const open = !document.getElementById('formPanel').classList.contains('hidden');
+                if(open){ collectData(); collectDetailRows(); return Object.assign({}, currentData); }
+            }catch(e){}
+            try{
+                const sel = document.getElementById('recordSelector');
+                if(sel && sel.value){
+                    const idx = allRows.findIndex((r, i) => rowId(r, i) === String(sel.value));
+                    if(idx >= 0) return Object.assign({}, allRows[idx]);
+                }
+            }catch(e){}
+            return Object.assign({}, (allRows && allRows[0]) || {});
+        }
+        function loadFormDocs(){
+            const sel = document.getElementById('printDocSel');
+            if(!sel) return;
+            const base = printFormBase();
+            sel.innerHTML = '<option value="">جاري التحميل...</option>';
+            fetch('/api/apps/' + encodeURIComponent(currentApp) + '/dml/list/?source=' + encodeURIComponent(base))
+                .then(r=>r.json()).then(d=>{
+                    const docs = d.docs || [];
+                    printDocMeta = {};
+                    docs.forEach(x=>{ printDocMeta[x.file] = (x.metadata || {}); });
+                    if(!docs.length){
+                        sel.innerHTML = '<option value="">لا توجد مستندات مرتبطة</option>';
+                        const fr = document.getElementById('printPreviewFrame');
+                        if(fr) fr.srcdoc = '<div style="padding:30px;text-align:center;color:#64748b;font-size:12px">لا توجد مستندات طباعة مرتبطة بهذا النموذج — أنشئها من تبويبة «المستندات» في مصمم النماذج<br><br><a href="/app/' + encodeURIComponent(currentApp) + '/forms-designer/?file=' + encodeURIComponent(currentFml || '') + '" style="color:#4f46e5;font-weight:bold">فتح مصمم النماذج</a></div>';
+                        document.getElementById('printPageCount').textContent = '—';
+                        return;
+                    }
+                    sel.innerHTML = docs.map(x=>'<option value="' + String(x.file).replace(/"/g, '&quot;') + '">' + String((x.metadata && (x.metadata.title || x.metadata.name)) || x.file).replace(/</g, '&lt;') + '</option>').join('');
+                    renderFormPrintPreview();
+                }).catch(()=>{ sel.innerHTML = '<option value="">تعذر التحميل</option>'; });
+        }
+        function onPrintDocChanged(){ renderFormPrintPreview(); }
+        function renderFormPrintPreview(){
+            const sel = document.getElementById('printDocSel');
+            const frame = document.getElementById('printPreviewFrame');
+            if(!sel || !frame || !sel.value) return;
+            frame.srcdoc = '<div style="padding:40px;text-align:center;color:#64748b;font-size:12px">جاري توليد المعاينة...</div>';
+            document.getElementById('printPageCount').textContent = '...';
+            const row = formPrintRecord();
+            const cols = (fmlMeta.fields || []).filter(f=>!f.destination || f.destination==='main').map(f=>({name:f.name || '', alias:f.alias || f.name || ''}));
+            const dets = fwDetails();
+            const detPayload = dets.length ? {columns: ((dets[0].columns || []).map(c=>({name:c.name, alias:c.alias || c.name}))), rows: (fwDetailRows[0] || [])} : {columns: [], rows: []};
+            const data = Object.assign({}, row, {row_count:'1', form_title:((fmlMeta.metadata || {}).displayName || currentFml), app_name:currentApp});
+            printLastPayload = {dml: sel.value, app: currentApp, data: data,
+                table: {columns: cols, rows: [row]}, detail: detPayload};
+            fetch('/api/dml/render', {method:'POST', headers:{'Content-Type':'application/json'},
+                body:JSON.stringify({dml:sel.value, app:currentApp, data:data, table:{columns:cols, rows:[row]}, detail:detPayload})})
+                .then(r=>r.text()).then(html=>{
+                    printLastHtml = html;
+                    frame.srcdoc = html;
+                    frame.onload = function(){ updatePrintPageCount(); };
+                    setTimeout(updatePrintPageCount, 1200);
+                }).catch(()=>{ frame.srcdoc = '<div style="padding:20px;color:#e11d48;font-size:12px">تعذر توليد المعاينة</div>'; });
+        }
+        const PRINT_PAPER_PX = {'A4|portrait':1123, 'A4|landscape':794, 'A5|portrait':794, 'A5|landscape':559, 'A3|portrait':1587, 'A3|landscape':1123, 'Letter|portrait':1056, 'Letter|landscape':816, 'Legal|portrait':1346, 'Legal|landscape':816};
+        function updatePrintPageCount(){
+            const frame = document.getElementById('printPreviewFrame');
+            const el = document.getElementById('printPageCount');
+            if(!frame || !el) return;
+            try{
+                const doc = frame.contentDocument;
+                if(!doc || !doc.body){ el.textContent = '—'; return; }
+                const sel = document.getElementById('printDocSel');
+                const meta = (sel && printDocMeta[sel.value]) || {};
+                const key = ((meta.paper || 'A4') + '|' + (meta.orientation || 'portrait'));
+                const pagePx = PRINT_PAPER_PX[key] || 1123;
+                const h = doc.body.scrollHeight || doc.documentElement.scrollHeight || 0;
+                el.textContent = String(Math.max(1, Math.ceil(h / pagePx))) + ' (تقديري)';
+            }catch(e){ el.textContent = '—'; }
+        }
+        function printPreviewDoc(){
+            const frame = document.getElementById('printPreviewFrame');
+            if(!frame) return;
+            try{ frame.contentWindow.print(); }catch(e){ notify('لا توجد معاينة للطباعة', 'info'); }
+        }
+        function openSaveDocModal(){
+            if(!printLastHtml){ notify('لا توجد معاينة للحفظ — اختر مستنداً وانتظر المعاينة أولاً', 'info'); return; }
+            document.getElementById('saveDocName').value = ((fmlMeta.metadata || {}).displayName || currentFml || '') + ' — ' + new Date().toLocaleDateString('en-CA');
+            document.getElementById('saveDocModal').classList.remove('hidden');
+            setTimeout(()=>{ try{ document.getElementById('saveDocName').focus(); }catch(e){} }, 50);
+        }
+        function closeSaveDocModal(){ document.getElementById('saveDocModal').classList.add('hidden'); }
+        async function confirmSaveDoc(){
+            const name = (document.getElementById('saveDocName').value || '').trim();
+            if(!name){ notify('أدخل اسم المستند', 'info'); return; }
+            try{
+                const res = await fetch('/api/my-docs/save/', {method:'POST', headers:{'Content-Type':'application/json'},
+                    body: JSON.stringify({name: name, app: currentApp, fml: currentFml, title: name, html: printLastHtml})});
+                const data = await res.json();
+                if(!res.ok || data.error) throw new Error((data && data.error) || 'فشل الحفظ');
+                closeSaveDocModal();
+                notify('حُفظ في مستنداتي ✓', 'success');
+            }catch(e){ showError(e, 'حفظ المستند'); }
+        }
+        function fmlkDownload(blob, fname){
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = fname;
+            document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        }
+        async function downloadPreviewPdf(){
+            if(!printLastPayload || !printLastPayload.dml){ notify('لا توجد معاينة للحفظ — اختر مستنداً أولاً', 'info'); return; }
+            const meta = printSelMeta();
+            const body = Object.assign({}, printLastPayload, {paper: meta.paper || 'A4', orientation: meta.orientation || 'portrait'});
+            const fname = String(printLastPayload.dml || 'document').replace(/\.dml$/i, '') + '.pdf';
+            notify('جارٍ حفظ المستند PDF...', 'info');
+            try{
+                const res = await fetch('/api/dml/doc-pdf', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+                if(!res.ok) throw new Error('فشل التوليد');
+                fmlkDownload(await res.blob(), fname);
+                notify('تم حفظ المستند PDF', 'success');
+            }catch(e){ showError(e, 'حفظ المستند: ' + (printLastPayload.dml || '')); }
+        }
+
+        function exportGrid() {
+            const rows = sortedRows(filteredRows());
+            const cols = visibleFields();
+            if (!rows.length) return notify('لا توجد بيانات للتصدير', 'info');
+            let csv = '\ufeff' + cols.map(c => `"${String(c.alias).replace(/"/g, '""')}"`).join(',') + '\n';
+            rows.forEach(r => { csv += cols.map(c => `"${String(cellVal(r, c.name)).replace(/"/g, '""')}"`).join(',') + '\n'; });
+            const blob = new Blob([csv], {type: 'text/csv;charset=utf-8;'});
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = (currentFml || 'records') + '.csv';
+            document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        }
+        function shareGrid() {
+            const url = window.location.href;
+            if (navigator.share) { navigator.share({title: document.title, url}).catch(() => {}); }
+            else if (navigator.clipboard) { navigator.clipboard.writeText(url).then(() => notify('تم نسخ الرابط', 'success')).catch(() => notify(url, 'info')); }
+            else { notify(url, 'info'); }
+        }
+        function openGridSettings() {
+            const box = document.getElementById('colsVisibilityList');
+            box.innerHTML = (fmlMeta.fields || []).map(f => `
+                <label class="flex items-center gap-2 px-2 py-1.5 hover:bg-slate-50 rounded-lg cursor-pointer text-xs">
+                    <input type="checkbox" ${hiddenCols.has(f.name) ? '' : 'checked'} onchange="toggleColVisibility('${f.name}', this.checked)" class="rounded text-indigo-600">
+                    <span class="text-slate-700">${f.alias}</span>
+                </label>`).join('') || '<p class="text-slate-400">لا توجد حقول</p>';
+            document.getElementById('gridSettingsModal').classList.remove('hidden');
+            if(typeof lockScroll === 'function') lockScroll();
+        }
+        function closeGridSettings() { document.getElementById('gridSettingsModal').classList.add('hidden'); if(typeof unlockScroll === 'function') unlockScroll(); }
+        function toggleColVisibility(name, show) {
+            if (show) hiddenCols.delete(name);
+            else hiddenCols.add(name);
+            renderGrid();
+        }
+        function parseCSV(text) {
+            const rows = [];
+            let cur = [''], inQ = false;
+            const pushRow = () => { rows.push(cur); cur = ['']; };
+            for (let i = 0; i < text.length; i++) {
+                const ch = text[i];
+                if (inQ) {
+                    if (ch === '"') {
+                        if (text[i + 1] === '"') { cur[cur.length - 1] += '"'; i++; }
+                        else inQ = false;
+                    } else cur[cur.length - 1] += ch;
+                } else {
+                    if (ch === '"') inQ = true;
+                    else if (ch === ',') cur.push('');
+                    else if (ch === '\n') { if (cur.length > 1 || cur[0] !== '') pushRow(); else cur = ['']; }
+                    else if (ch === '\r') {}
+                    else cur[cur.length - 1] += ch;
+                }
+            }
+            if (cur.length > 1 || cur[0] !== '') pushRow();
+            return rows.filter(r => r.some(c => String(c).trim() !== ''));
+        }
+        async function readCsvText(file) {
+            // كشف الترميز: BOM ثم UTF-8 ثم Windows-1256 (إكسل العربي)
+            const buf = await file.arrayBuffer();
+            const b = new Uint8Array(buf);
+            if(b.length >= 3 && b[0] === 0xEF && b[1] === 0xBB && b[2] === 0xBF) return new TextDecoder('utf-8').decode(buf.slice(3));
+            if(b.length >= 2 && b[0] === 0xFF && b[1] === 0xFE) return new TextDecoder('utf-16le').decode(buf.slice(2));
+            try { return new TextDecoder('utf-8', {fatal: true}).decode(buf); }
+            catch(e) {
+                try { return new TextDecoder('windows-1256').decode(buf); }
+                catch(e2) { return new TextDecoder('utf-8').decode(buf); }
+            }
+        }
+        async function importCSV(input) {
+            const file = input.files && input.files[0];
+            input.value = '';
+            if (!file) return;
+            const text = await readCsvText(file);
+            // strip BOM
+            const clean = text.replace(/^\ufeff/, '');
+            const parsed = parseCSV(clean);
+            if (parsed.length < 2) return notify('ملف فارغ — الصف الأول يجب أن يحتوي أسماء الحقول', 'error');
+            const headers = parsed[0].map(h => String(h).trim());
+            const fields = fmlMeta.fields || [];
+            const mapIdx = headers.map(h => {
+                const low = h.toLowerCase();
+                return fields.find(f => f.name.toLowerCase() === low || (f.alias && f.alias.trim() === h));
+            });
+            if (!mapIdx.some(Boolean)) return notify('لم يتم التعرف على أي عمود — يجب أن تطابق الترويسات أسماء الحقول', 'error');
+            let ok = 0, fail = 0;
+            for (let i = 1; i < parsed.length; i++) {
+                const data = {};
+                mapIdx.forEach((f, j) => { if (f) data[f.name] = parsed[i][j] ?? ''; });
+                if (!Object.values(data).some(v => String(v).trim() !== '')) continue;
+                try {
+                    const res = await fetch('/api/fmlk/create', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({fml: currentFml, app: currentApp, data})});
+                    const j = await res.json();
+                    if (j.ok || j.rowcount) ok++;
+                    else fail++;
+                } catch(e) { fail++; }
+            }
+            notify(`تم استيراد ${ok} سجل${fail ? ` — فشل ${fail}` : ''}`, fail ? (ok ? 'info' : 'error') : 'success');
+            await loadAllRecords();
+        }
+
+        loadFml(currentFml);
+    </script>
+{% endblock %}

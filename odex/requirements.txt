@@ -1,0 +1,13 @@
+# odex engines - dynamic CRUD (50 funcs each)
+# Oracle
+oracledb>=2.0.0
+# SQL Server
+pyodbc>=5.0.0
+# ZK Teco
+pyzk>=0.9
+# Postgres
+psycopg2-binary>=2.9.0
+# Core
+Django>=4.1,<5.0
+python-dotenv>=1.0
+djangorestframework>=3.14

@@ -1,0 +1,51 @@
+{
+  "file": "emp_report.rml",
+  "file_type": "rml",
+  "owner": "user:admin",
+  "inherit": true,
+  "aces": [
+    {
+      "principal": "*",
+      "actions": [
+        "view",
+        "execute"
+      ],
+      "effect": "allow",
+      "conditions": null
+    },
+    {
+      "principal": "role:admin",
+      "actions": [
+        "view",
+        "edit",
+        "delete",
+        "create",
+        "execute",
+        "export",
+        "share",
+        "admin"
+      ],
+      "effect": "allow",
+      "conditions": null
+    },
+    {
+      "principal": "role:manager",
+      "actions": [
+        "view",
+        "execute",
+        "export"
+      ],
+      "effect": "allow",
+      "conditions": null
+    },
+    {
+      "principal": "role:hr_manager",
+      "actions": [
+        "view",
+        "execute"
+      ],
+      "effect": "allow",
+      "conditions": null
+    }
+  ]
+}

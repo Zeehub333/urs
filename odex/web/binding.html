@@ -1,0 +1,41 @@
+<!doctype html><html><head><meta charset='utf-8'><title>Binding Demo — UI x Data</title><link rel="stylesheet" href="/static/shared.css"></head><body>
+    <h2>Binding UI (375) with Data (4 engines) — without 'render' in name</h2>
+    <p>Each Python def == JS class name. Example: <code>ui.DataView1(props)</code> ↔ <code>DataView1.js → export class DataView1</code></p>
+    <h3>A. Direct prop binding</h3>
+    <div style="display:grid;gap:16px">
+      <div><div id="odex-views-DataView1-feb90dbc" data-component="views/DataView1" data-props='{"title": "DataView1 \u2014 Direct", "description": "Direct props", "count": 42}'></div>
+<script type="module">import { DataView1 } from '/static/components/views/DataView1.js'; document.getElementById('odex-views-DataView1-feb90dbc').innerHTML = new DataView1({"title": "DataView1 \u2014 Direct", "description": "Direct props", "count": 42}).render();</script></div>
+      <div><div id="odex-charts-BarChart1-996175f5" data-component="charts/BarChart1" data-props='{"data": [{"x": "Q1", "y": 30}, {"x": "Q2", "y": 50}, {"x": "Q3", "y": 80}], "opts": {"title": "BarChart1 \u2014 Direct"}}'></div>
+<script type="module">import { BarChart1 } from '/static/components/charts/BarChart1.js'; document.getElementById('odex-charts-BarChart1-996175f5').innerHTML = new BarChart1({"data": [{"x": "Q1", "y": 30}, {"x": "Q2", "y": 50}, {"x": "Q3", "y": 80}], "opts": {"title": "BarChart1 \u2014 Direct"}}).render();</script></div>
+      <div style="display:flex;gap:8px"><div id="odex-buttons-PrimaryButton1-a221d34b" data-component="buttons/PrimaryButton1" data-props='{"label": "\u062d\u0641\u0638", "onClick": "alert('saved')"}'></div>
+<script type="module">import { PrimaryButton1 } from '/static/components/buttons/PrimaryButton1.js'; document.getElementById('odex-buttons-PrimaryButton1-a221d34b').innerHTML = new PrimaryButton1({"label": "\u062d\u0641\u0638", "onClick": "alert('saved')"}).render();</script> <div id="odex-buttons-SecondaryButton1-c2d1dbd6" data-component="buttons/SecondaryButton1" data-props='{"label": "\u0625\u0644\u063a\u0627\u0621", "onClick": ""}'></div>
+<script type="module">import { SecondaryButton1 } from '/static/components/buttons/SecondaryButton1.js'; document.getElementById('odex-buttons-SecondaryButton1-c2d1dbd6').innerHTML = new SecondaryButton1({"label": "\u0625\u0644\u063a\u0627\u0621", "onClick": ""}).render();</script></div>
+      <div><div id="odex-fields-TextField1-0a5b8174" data-component="fields/TextField1" data-props='{"value": "\u0646\u0635 \u062a\u062c\u0631\u064a\u0628\u064a", "cfg": {"label": "\u0627\u0633\u0645 \u0627\u0644\u0645\u0633\u062a\u062e\u062f\u0645", "placeholder": "\u0623\u062f\u062e\u0644..."}}'></div>
+<script type="module">import { TextField1 } from '/static/components/fields/TextField1.js'; document.getElementById('odex-fields-TextField1-0a5b8174').innerHTML = new TextField1({"value": "\u0646\u0635 \u062a\u062c\u0631\u064a\u0628\u064a", "cfg": {"label": "\u0627\u0633\u0645 \u0627\u0644\u0645\u0633\u062a\u062e\u062f\u0645", "placeholder": "\u0623\u062f\u062e\u0644..."}}).render();</script></div>
+      <div><div id="odex-search-SearchBar1-6f5eaf76" data-component="search/SearchBar1" data-props='{"query": "demo query"}'></div>
+<script type="module">import { SearchBar1 } from '/static/components/search/SearchBar1.js'; document.getElementById('odex-search-SearchBar1-6f5eaf76').innerHTML = new SearchBar1({"query": "demo query"}).render();</script></div>
+      <div><div id="odex-tables-DataTable1-2b3f5932" data-component="tables/DataTable1" data-props='{"rows": [{"id": 1, "name": "Alice", "value": 100}, {"id": 2, "name": "Bob", "value": 200}, {"id": 3, "name": "Carol", "value": 150}], "cols": ["id", "name", "value"]}'></div>
+<script type="module">import { DataTable1 } from '/static/components/tables/DataTable1.js'; document.getElementById('odex-tables-DataTable1-2b3f5932').innerHTML = new DataTable1({"rows": [{"id": 1, "name": "Alice", "value": 100}, {"id": 2, "name": "Bob", "value": 200}, {"id": 3, "name": "Carol", "value": 150}], "cols": ["id", "name", "value"]}).render();</script></div>
+      <div><div id="odex-grids-DataGrid1-45280506" data-component="grids/DataGrid1" data-props='{"items": [{"id": 1, "name": "Alice", "value": 100}, {"id": 2, "name": "Bob", "value": 200}, {"id": 3, "name": "Carol", "value": 150}], "cols": 3}'></div>
+<script type="module">import { DataGrid1 } from '/static/components/grids/DataGrid1.js'; document.getElementById('odex-grids-DataGrid1-45280506').innerHTML = new DataGrid1({"items": [{"id": 1, "name": "Alice", "value": 100}, {"id": 2, "name": "Bob", "value": 200}, {"id": 3, "name": "Carol", "value": 150}], "cols": 3}).render();</script></div>
+    </div>
+    <h3>B. Via build() (generic, no 'render')</h3>
+    <div><div id="odex-views-DataView1-2d0564af" data-component="views/DataView1" data-props='{"title": "Via build()", "count": 99}'></div>
+<script type="module">import { DataView1 } from '/static/components/views/DataView1.js'; document.getElementById('odex-views-DataView1-2d0564af').innerHTML = new DataView1({"title": "Via build()", "count": 99}).render();</script></div>
+    <h3>C. Via engine bind (dynamic table/cols)</h3>
+    <div><div id="odex-tables-DataTable1-bb75adf5" data-component="tables/DataTable1" data-props='{"rows": [{"id": 1, "name": "Alice", "value": 100}, {"id": 2, "name": "Bob", "value": 200}, {"id": 3, "name": "Carol", "value": 150}], "cols": []}'></div>
+<script type="module">import { DataTable1 } from '/static/components/tables/DataTable1.js'; document.getElementById('odex-tables-DataTable1-bb75adf5').innerHTML = new DataTable1({"rows": [{"id": 1, "name": "Alice", "value": 100}, {"id": 2, "name": "Bob", "value": 200}, {"id": 3, "name": "Carol", "value": 150}], "cols": []}).render();</script></div>
+    <div><div id="odex-views-DataView1-95f63cee" data-component="views/DataView1" data-props='{"title": "odex_demo (3)", "description": "From OracleEngine via bind_engine"}'></div>
+<script type="module">import { DataView1 } from '/static/components/views/DataView1.js'; document.getElementById('odex-views-DataView1-95f63cee').innerHTML = new DataView1({"title": "odex_demo (3)", "description": "From OracleEngine via bind_engine"}).render();</script></div>
+    <pre style="background:#f5f5f5;padding:12px;border-radius:8px;overflow:auto">
+# Oracle dynamic
+rows = UIEngine().bind_engine(OracleEngine(...), table="odex_demo", filters={"status":"نشط"}, limit=50)
+html = UIEngine().DataTable1(rows, cols=["id","name"])
+# Postgres
+rows = UIEngine().bind_engine(PostgresEngine(...), table="users")
+html = UIEngine().BarChart1([{"x":r["name"],"y":r["value"]} for r in rows], {"title":"Users"})
+# ZK device
+rows = UIEngine().bind_engine(ZKEngine(ip="192.168.1.201"), table="users")
+html = UIEngine().DataGrid1(rows, cols=3)
+    </pre>
+    <script>function search(v){console.log('search',v)}</script></body></html>

@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>مشغل النماذج الديناميكي (FMLK Forms Player)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/shared.css">
+    <style>
+        body { font-family: 'Cairo', sans-serif; background: #f8fafc; }
+        .fmlk-tab-active { background: #4f46e5; color: white; border-color: #4f46e5; }
+        .fmlk-category { border: 1px solid #e2e8f0; border-radius: 12px; background: white; }
+        .fmlk-field-left { grid-column: span 1; }
+        .fmlk-field-full { grid-column: 1 / -1; }
+        @media (max-width: 768px) { .fmlk-field-left { grid-column: 1 / -1; } }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col">
+    <!-- Header -->
+    <header class="bg-white border-b border-slate-200 px-4 py-2 flex items-center justify-between sticky top-0 z-30">
+        <div class="flex items-center gap-2">
+            <button class="w-8 h-8 rounded-lg bg-white border flex items-center justify-center"><i class="fa-solid fa-gear text-slate-600"></i></button>
+            <div class="hidden md:flex items-center gap-1 text-xs">
+                <button class="w-8 h-8 bg-slate-100 rounded flex items-center justify-center"><i class="fa-solid fa-list"></i></button>
+                <button class="w-8 h-8 bg-slate-100 rounded flex items-center justify-center"><i class="fa-solid fa-table-columns"></i></button>
+            </div>
+            <span class="text-xs bg-slate-100 px-2 py-1 rounded">FMLK Engine — Tabs & Categories</span>
+        </div>
+        <div class="flex items-center gap-2">
+            <span id="fml-meta" class="text-xs bg-indigo-50 text-indigo-700 px-3 py-1 rounded-full">fml: hr_form • 0 حقول</span>
+            <button onclick="saveForm()" class="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-xs"><i class="fa-solid fa-floppy-disk"></i> حفظ</button>
+            <button onclick="addNewRecord()" class="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs"><i class="fa-solid fa-plus"></i> إضافة</button>
+            <button onclick="deleteRecord()" class="px-3 py-1.5 bg-white border text-rose-600 rounded-lg text-xs"><i class="fa-solid fa-trash"></i> حذف</button>
+        </div>
+    </header>
+
+    <!-- Records Bar (like Odoo) -->
+    <div class="bg-white border-b border-slate-200 px-4 py-2 flex items-center gap-2 text-xs">
+        <span class="text-slate-500">السجلات:</span>
+        <select id="recordSelector" onchange="loadRecord(this.value)" class="bg-slate-50 border border-slate-200 rounded-lg px-3 py-1 text-xs">
+            <option value="">-- اختر سجل --</option>
+        </select>
+        <span id="recordCount" class="text-slate-400">0 سجل</span>
+        <div class="mr-auto flex items-center gap-1">
+            <button onclick="prevRecord()" class="w-7 h-7 bg-slate-100 rounded flex items-center justify-center"><i class="fa-solid fa-chevron-right text-xs"></i></button>
+            <button onclick="nextRecord()" class="w-7 h-7 bg-slate-100 rounded flex items-center justify-center"><i class="fa-solid fa-chevron-left text-xs"></i></button>
+        </div>
+        <div class="flex items-center gap-1 bg-slate-100 rounded-full p-1">
+            <button class="w-7 h-7 bg-white rounded-full shadow flex items-center justify-center text-indigo-600"><i class="fa-solid fa-pen text-xs"></i></button>
+            <span class="text-[11px] px-2">وضع التعديل</span>
+        </div>
+    </div>
+
+    <!-- Tabs (like image: Basic information, عقد العمل, etc.) -->
+    <div class="bg-white border-b border-slate-200 px-2 py-2 overflow-x-auto">
+        <div id="tabsBar" class="flex items-center gap-1 min-w-max">
+            <!-- Tabs injected here -->
+            <div class="text-xs text-slate-400 px-4">جاري تحميل التبويبات...</div>
+        </div>
+    </div>
+
+    <!-- Form Content -->
+    <main class="flex-1 overflow-auto p-4 bg-slate-50">
+        <div id="formRoot" class="max-w-6xl mx-auto space-y-4">
+            <!-- Categories and fields injected here -->
+            <div class="text-center py-12 text-slate-400 text-sm">جاري تحميل النموذج...</div>
+        </div>
+
+        <!-- SQL Preview (for insert/update) -->
+        <div class="max-w-6xl mx-auto mt-6">
+            <details class="bg-slate-900 rounded-xl overflow-hidden">
+                <summary class="px-4 py-2 text-emerald-400 font-mono text-xs cursor-pointer">SQL Preview — INSERT / UPDATE</summary>
+                <pre id="sqlPreview" class="p-4 text-emerald-300 font-mono text-[11px] overflow-auto max-h-40" dir="ltr">-- سيظهر هنا استعلام الإدخال</pre>
+            </details>
+        </div>
+    </main>
+
+    <script>
+        let currentFml = "hr_form";
+        let currentRecordId = null;
+        let currentData = {};
+
+        async function loadFml(name) {
+            try {
+                const res = await fetch(`/api/fmlk/metadata?fml=${encodeURIComponent(name)}`);
+                const data = await res.json();
+                document.getElementById('fml-meta').textContent = `fml: ${data.metadata.name} • ${data.fields.length} حقل • ${data.tabs.length} تبويب`;
+                renderTabs(data.tabs);
+                renderForm(data);
+                loadRecords();
+            } catch(e) {
+                console.log("FML load fallback", e);
+                // Fallback mock
+                renderTabs([{id:"basic", alias:"البيانات الأساسية"}, {id:"work", alias:"العمل"}]);
+                renderFormMock();
+            }
+        }
+
+        function renderTabs(tabs) {
+            const bar = document.getElementById('tabsBar');
+            // Add navigation arrows like image
+            bar.innerHTML = `
+                <button class="w-8 h-8 bg-blue-600 text-white rounded flex items-center justify-center"><i class="fa-solid fa-play"></i></button>
+                ${tabs.map((t, i) => `
+                    <button onclick="switchTab('${t.id}')" data-tab="${t.id}" class="tab-btn px-4 py-1.5 rounded-full text-xs font-medium border whitespace-nowrap ${i===0?'fmlk-tab-active bg-indigo-600 text-white':'bg-white border-slate-200 text-slate-600'}">
+                        ${t.alias || t.name}
+                    </button>
+                    ${i < tabs.length-1 ? '<span class="text-slate-300">›</span>' : ''}
+                `).join('')}
+                <button class="w-8 h-8 bg-blue-600 text-white rounded flex items-center justify-center"><i class="fa-solid fa-play fa-flip-horizontal"></i></button>
+            `;
+        }
+
+        function switchTab(tabId) {
+            document.querySelectorAll('.tab-btn').forEach(b => {
+                b.classList.toggle('fmlk-tab-active', b.dataset.tab === tabId);
+                b.classList.toggle('bg-indigo-600', b.dataset.tab === tabId);
+                b.classList.toggle('text-white', b.dataset.tab === tabId);
+            });
+            document.querySelectorAll('[data-tab-content]').forEach(el => {
+                el.style.display = el.dataset.tabContent === tabId ? 'block' : 'none';
+            });
+        }
+
+        function renderForm(data) {
+            const root = document.getElementById('formRoot');
+            // Group fields by tab and category
+            const tabs = data.tabs;
+            const fields = data.fields;
+            let html = '';
+            // Create tab contents
+            tabs.forEach(tab => {
+                const tabFields = fields.filter(f => (f.tab || 'basic') === tab.id);
+                // Group by category within tab
+                const cats = {};
+                tabFields.forEach(f => {
+                    const cat = f.category || 'عام';
+                    if(!cats[cat]) cats[cat] = [];
+                    cats[cat].push(f);
+                });
+                html += `<div data-tab-content="${tab.id}" style="${tab.id !== tabs[0].id ? 'display:none' : ''}">`;
+                for (const [catName, catFields] of Object.entries(cats)) {
+                    html += `<div class="fmlk-category p-4 mb-4">
+                        <h3 class="font-bold text-sm text-slate-800 mb-3 flex items-center gap-2">
+                            <span class="w-1 h-4 bg-indigo-600 rounded-full"></span>
+                            ${catName}
+                        </h3>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">`;
+                    catFields.forEach(f => {
+                        const span = f.colSpan > 1 ? 'fmlk-field-full' : 'fmlk-field-left';
+                        const input = renderInput(f);
+                        html += `<div class="${span}">${input}</div>`;
+                    });
+                    html += `</div></div>`;
+                }
+                html += `</div>`;
+            });
+            // Handle fields without tab
+            const untabbed = fields.filter(f => !f.tab);
+            if(untabbed.length) {
+                html += `<div data-tab-content="general"><div class="fmlk-category p-4"><div class="grid grid-cols-1 md:grid-cols-2 gap-4">`;
+                untabbed.forEach(f => {
+                    html += `<div class="fmlk-field-left">${renderInput(f)}</div>`;
+                });
+                html += `</div></div></div>`;
+            }
+            root.innerHTML = html;
+            updateSqlPreview();
+        }
+
+        function renderInput(field) {
+            const req = field.required ? '<span class="text-rose-600">*</span>' : '';
+            const label = `<label class="block text-xs font-medium text-slate-700 mb-1">${field.alias} ${req} <span class="text-[10px] text-slate-400">(${field.name})</span></label>`;
+            let input = '';
+            const ph = field.placeholder || '';
+            const val = currentData[field.name] || field.default || '';
+            switch(field.inputType) {
+                case 'select':
+                    const opts = (field.options || []).map(o=>`<option ${o==val?'selected':''}>${o}</option>`).join('');
+                    input = `<select data-field="${field.name}" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm">${opts || '<option>— اختر —</option>'}</select>`;
+                    break;
+                case 'date':
+                    input = `<input type="date" data-field="${field.name}" value="${val}" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm"/>`;
+                    break;
+                case 'number':
+                    input = `<input type="number" data-field="${field.name}" value="${val}" placeholder="${ph}" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm"/>`;
+                    break;
+                case 'phone':
+                    input = `<div class="flex gap-1"><input data-field="${field.name}" value="${val}" placeholder="+966 12 345 6789" class="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm" dir="ltr"/><span class="px-2 py-2 bg-emerald-600 text-white rounded-lg text-xs">🇸🇦</span></div>`;
+                    break;
+                case 'email':
+                    input = `<div class="flex gap-1"><input type="email" data-field="${field.name}" value="${val}" placeholder="example@domain.com" class="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm" dir="ltr"/><span class="text-slate-400 text-xs">+ <i class="fa-solid fa-plus"></i></span></div>`;
+                    break;
+                case 'file':
+                    input = `<div class="w-full h-24 bg-slate-50 border-2 border-dashed border-slate-200 rounded-lg flex items-center justify-center text-slate-400 text-xs"><i class="fa-solid fa-image"></i> ${ph || 'صورة'}</div>`;
+                    break;
+                default:
+                    input = `<input type="text" data-field="${field.name}" value="${val}" placeholder="${ph}" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm"/>`;
+            }
+            // Handle positioning: left/right
+            return `<div>${label}${input}</div>`;
+        }
+
+        function renderFormMock() {
+            // Fallback if no FML
+            document.getElementById('formRoot').innerHTML = `
+                <div class="fmlk-category p-4"><h3 class="font-bold text-sm mb-3">Work phones</h3><div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div><label class="block text-xs mb-1">Work mobile phone</label><input value="+966 12 345 6789" class="w-full bg-slate-50 border rounded-lg px-3 py-2 text-sm" dir="ltr"/></div>
+                    <div><label class="block text-xs mb-1">Work fixed phone</label><input value="+966 12 345 6789" class="w-full bg-slate-50 border rounded-lg px-3 py-2 text-sm" dir="ltr"/></div>
+                </div></div>
+                <div class="fmlk-category p-4"><h3 class="font-bold text-sm mb-3">Personal information</h3><div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div><label class="block text-xs mb-1">اسم First</label><input class="w-full bg-slate-50 border rounded-lg px-3 py-2 text-sm"/></div>
+                    <div><label class="block text-xs mb-1">Civility</label><select class="w-full bg-slate-50 border rounded-lg px-3 py-2 text-sm"><option>السيد</option></select></div>
+                </div></div>
+            `;
+        }
+
+        async function loadRecords() {
+            try {
+                const res = await fetch('/api/fmlk/records?fml=' + encodeURIComponent(currentFml));
+                const data = await res.json();
+                const sel = document.getElementById('recordSelector');
+                sel.innerHTML = '<option value="">-- اختر سجل --</option>' + data.rows.map(r => `<option value="${r.id || r.ID}">${r.name || r.اسم || 'Record ' + (r.id||'')}</option>`).join('');
+                document.getElementById('recordCount').textContent = data.total + ' سجل';
+            } catch(e) { console.log(e); }
+        }
+
+        async function loadRecord(id) {
+            if(!id) return;
+            currentRecordId = id;
+            const res = await fetch(`/api/fmlk/record?fml=${currentFml}&id=${id}`);
+            const data = await res.json();
+            currentData = data.row || {};
+            // Re-render form with data
+            const fmlRes = await fetch(`/api/fmlk/metadata?fml=${currentFml}`);
+            const fmlData = await fmlRes.json();
+            // Update currentData and re-render
+            renderForm(fmlData);
+            // Fill values
+            Object.entries(currentData).forEach(([k,v]) => {
+                const el = document.querySelector(`[data-field="${k}"]`);
+                if(el) el.value = v;
+            });
+            updateSqlPreview();
+        }
+
+        function collectData() {
+            const data = {};
+            document.querySelectorAll('[data-field]').forEach(el => {
+                data[el.dataset.field] = el.value;
+            });
+            return data;
+        }
+
+        function updateSqlPreview() {
+            const data = collectData();
+            fetch('/api/fmlk/preview_insert', {
+                method: 'POST',
+                headers: {'Content-Type':'application/json'},
+                body: JSON.stringify({fml: currentFml, data})
+            }).then(r=>r.json()).then(j=>{
+                document.getElementById('sqlPreview').textContent = j.sql || JSON.stringify(j, null, 2);
+            });
+        }
+
+        async function saveForm() {
+            const data = collectData();
+            const url = currentRecordId ? '/api/fmlk/update' : '/api/fmlk/create';
+            const payload = currentRecordId ? {fml: currentFml, id: currentRecordId, data} : {fml: currentFml, data};
+            const res = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+            const j = await res.json();
+            alert(j.ok ? 'تم الحفظ: ' + j.sql.slice(0,80) : 'خطأ: ' + j.error);
+            if(j.ok) loadRecords();
+        }
+
+        async function addNewRecord() {
+            currentRecordId = null;
+            currentData = {};
+            document.querySelectorAll('[data-field]').forEach(el=>el.value='');
+            updateSqlPreview();
+        }
+
+        async function deleteRecord() {
+            if(!currentRecordId) return alert('اختر سجلاً أولاً');
+            if(!confirm('هل أنت متأكد من حذف السجل؟')) return;
+            const res = await fetch('/api/fmlk/delete', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({fml: currentFml, id: currentRecordId})});
+            const j = await res.json();
+            alert(j.ok ? 'تم الحذف' : 'خطأ: '+j.error);
+            if(j.ok) { currentRecordId=null; loadRecords(); addNewRecord(); }
+        }
+
+        function prevRecord() {
+            const sel = document.getElementById('recordSelector');
+            if(sel.selectedIndex > 1) { sel.selectedIndex--; loadRecord(sel.value); }
+        }
+        function nextRecord() {
+            const sel = document.getElementById('recordSelector');
+            if(sel.selectedIndex < sel.options.length-1) { sel.selectedIndex++; loadRecord(sel.value); }
+        }
+
+        // Init
+        loadFml(currentFml);
+        // Live SQL preview on input
+        document.addEventListener('input', (e)=>{
+            if(e.target.matches('[data-field]')) updateSqlPreview();
+        });
+    </script>
+</body>
+</html>

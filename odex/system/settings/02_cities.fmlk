@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<fml>
+  <fml_metadata name="cities" displayName="المدن" table="urs_city" category="النظام" description="مدن كل دولة" connection="urs_local" schema="main_hq_2026"/>
+  <tabs>
+    <tab id="main" name="بيانات المدينة" alias="بيانات المدينة" sort_order="1"/>
+  </tabs>
+  <fields>
+    <field id="1" name="name" alias="اسم المدينة" inputType="text" required="true" tab="main" category="أساسية"/>
+    <field id="2" name="name_en" alias="الاسم بالإنجليزية" inputType="text" tab="main" category="أساسية"/>
+    <field id="3" name="country_id" alias="الدولة" inputType="select" required="true" tab="main" category="الارتباط" refTable="urs_country" refFk="id" refDisplay="name"/>
+    <field id="4" name="is_active" alias="نشطة" inputType="boolean" tab="main" category="الحالة"/>
+  </fields>
+</fml>

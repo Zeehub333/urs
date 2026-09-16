@@ -1,0 +1,339 @@
+﻿{% extends "base.html" %}
+{% block title %}{{ app.ar }} — مصمم المستندات{% endblock %}
+{% block head_css %}
+{% block topbar %}{% endblock %}
+        body { background-color: #f8fafc; }
+        .custom-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+        .custom-scroll::-webkit-scrollbar-track { background: #f1f5f9; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        .dml-prop input[type=range] { width: 100%; }
+        .dml-seg button.on { background: #4f46e5; color: #fff; }
+        .dml-paper { background: #fff; margin: 0 auto; box-shadow: 0 2px 14px rgba(0,0,0,.25); padding: 12mm; }
+        .dml-zone-label { font-size: 10px; font-weight: bold; color: #8b5cf6; background: #f5f3ff; border: 1px dashed #c4b5fd; border-radius: 8px; padding: 2px 10px; margin: 8px 0 4px; display: inline-block; }
+        .dml-zone { min-height: 80px; border: 1.5px dashed #cbd5e1; border-radius: 10px; padding: 8px; outline: none; line-height: 2; position: relative; }
+        .dml-zone:focus { border-color: #8b5cf6; background: #faf9ff; }
+        .dml-sec-card { transition: box-shadow .15s ease; }
+        .dml-sec-sel { box-shadow: 0 0 0 2px #8b5cf6, 0 6px 18px rgba(139,92,246,.22) !important; border-color: #8b5cf6 !important; }
+        .dml-tb-sel { outline: 2px solid #10b981 !important; outline-offset: 1px; }
+        .dml-paper hr.dml-div { border: none; border-top: 1px solid #e9edf3; margin: 6px 0; }
+        .dml-tabpage { display: flex; gap: 8px; flex-wrap: wrap; align-items: stretch; }
+        .dml-tabpage > div { flex: 1 1 300px; min-width: 280px; }
+        .dml-tabpage-flow { display: flex; gap: 8px; overflow-x: auto; align-items: stretch; padding-bottom: 2px; }
+        .dml-tabpage-flow > div { flex: 0 0 auto; width: 300px; }
+        .dml-tabpage-flow > div.dml-wide { width: 420px; }
+        #dmlRibbonStrip select { max-width: 135px; padding: 4px 6px !important; font-size: 11px !important; }
+        #dmlRibbonStrip input[type=text] { max-width: 135px; padding: 4px 6px !important; font-size: 11px !important; }
+        #dmlRibbonStrip input[type=range] { max-width: 90px; }
+        #dmlRibbonStrip input[type=color] { width: 1.75rem !important; height: 1.75rem !important; padding: 2px !important; }
+        #dmlRibbonStrip textarea { font-size: 11px !important; }
+        #dmlRibbonStrip { scrollbar-width: thin; }
+#dmlLiveOverlay { position: fixed; top: 0; left: 16rem; bottom: 0; right: 0; z-index: 90; background: rgba(15,23,42,.85); display: flex; flex-direction: column; }
+#dmlLiveOverlay.hidden { display: none; }
+#dmlLiveOverlay.side-mini { left: 3rem; right: 10rem; }
+#dmlLiveOverlay.preview-visible { right: 20rem; }
+#dmlSideMini { display: none; }
+aside.dml-side-collapsed { width: 3rem !important; }
+aside.dml-side-collapsed #dmlSideBody, aside.dml-side-collapsed #dmlSideHeadTxt { display: none; }
+aside.dml-side-collapsed #dmlSideMini { display: flex; }
+.dml-zone.dml-drop-hint { border-color: #4f46e5; background: #eef2ff; }
+
+/* Design row fills full screen: flexible canvas + props sidebar */
+#dmlDesignRow { display: flex; flex-direction: row; height: 100%; flex: 1; min-height: 0; }
+#dmlDesignScroll { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+#dmlSideBar { width: 16rem; flex-shrink: 0; }
+
+/* Live overlay positioning for dual sidebar */
+#dmlLiveOverlay { position: fixed; top: 0; left: 16rem; right: 20rem; bottom: 0; z-index: 90; background: rgba(15,23,42,.85); display: flex; flex-direction: column; }
+#dmlLiveOverlay.hidden { display: none; }
+#dmlLiveOverlay.side-mini { left: 3rem; right: 10rem; }
+#dmlLiveOverlay.preview-visible { right: 20rem; }
+
+@media (max-width: 1200px) {
+    #dmlLiveOverlay { right: 16rem; }
+}
+@media (max-width: 900px) {
+    #dmlLiveOverlay { right: 16rem; }
+    #dmlLiveOverlay.preview-visible { right: 16rem; }
+}
+        .dml-chip-var, .dml-chip-field, .dml-chip-filter { display: inline-block; padding: 1px 8px; margin: 0 2px; border-radius: 999px; font-family: monospace; font-size: 11px; font-weight: bold; cursor: grab; user-select: none; }
+        .dml-chip-var { background: #ede9fe; color: #5b21b6; border: 1px solid #c4b5fd; }
+        .dml-chip-field { background: #d1fae5; color: #065f46; border: 1px solid #6ee7b7; }
+        .dml-chip-filter { background: #cffafe; color: #0e7490; border: 1px solid #67e8f9; }
+        .dml-textbox { border: 1.5px solid #8b5cf6; border-radius: 8px; background: #fff; box-shadow: 0 2px 8px rgba(79,70,229,.18); }
+        .dml-tb-bar { display: flex; align-items: center; gap: 4px; background: #ede9fe; border-bottom: 1px solid #c4b5fd; border-radius: 7px 7px 0 0; padding: 2px 6px; cursor: move; user-select: none; }
+        .dml-tb-body { padding: 6px 8px; min-height: 30px; outline: none; }
+        .dml-zone img { cursor: move; }
+        .dml-zone img.dml-img-sel { outline: 2px solid #4f46e5; outline-offset: 2px; }
+{% endblock %}
+{% block sidebar %}
+    <aside class="w-64 bg-white border-l border-gray-200 flex flex-col overflow-hidden shrink-0">
+        <div class="p-4 border-b border-gray-100">
+            <a href="/app/{{ app_name }}/" class="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-800 mb-3"><i class="fa-solid fa-arrow-right"></i> العودة للتطبيق</a>
+            <div class="flex items-center gap-3">
+                <div class="w-12 h-12 bg-violet-600 text-white rounded-2xl flex items-center justify-center text-xl">
+                    <i class="fa-solid fa-file-lines"></i>
+                </div>
+                <div>
+                    <h1 class="font-bold text-gray-800">مصمم المستندات</h1>
+                    <p class="text-xs text-gray-500" id="dmlDocName">مستند جديد</p>
+                </div>
+            </div>
+        </div>
+        <div class="p-3 border-b border-gray-100 space-y-2">
+            <label class="block text-[11px] font-bold text-slate-600">المصدر (تقرير / نموذج)</label>
+            <select id="dmlSourceSel" onchange="dmlSourceChanged()" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-2 py-1.5 text-xs">
+                <option value="">— اختر المصدر —</option>
+                <optgroup label="التقارير (RML)">
+                {% for f in rml_files %}<option value="{{ f.file }}">{{ f.metadata.displayName|default:f.file }}</option>{% endfor %}
+                </optgroup>
+                <optgroup label="النماذج (FMLK)">
+                {% for f in fml_files %}<option value="{{ f.file }}">{{ f.file }}</option>{% endfor %}
+                </optgroup>
+            </select>
+            <div class="flex gap-1">
+                <button onclick="dmlNewDoc()" class="flex-1 py-1.5 bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-xs font-bold"><i class="fa-solid fa-plus"></i> مستند جديد</button>
+                <button onclick="dmlSuggestName()" title="اقتراح اسم حسب القاعدة" class="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs"><i class="fa-solid fa-wand-magic-sparkles"></i></button>
+            </div>
+        </div>
+        <div class="flex-1 overflow-y-auto p-3 space-y-1 custom-scroll">
+            <h3 class="text-xs font-bold text-gray-700 mb-2">المستندات <span id="dmlDocsCount" class="text-violet-600"></span></h3>
+            <div id="dmlDocsList" class="space-y-1"></div>
+        </div>
+    </aside>
+{% endblock %}
+{% block main %}
+    <div class="flex-1 flex flex-col min-w-0 min-h-0">
+        <header class="bg-white border-b border-slate-200 px-4 py-2 flex items-center gap-2 shrink-0 flex-wrap">
+            <div class="flex items-center gap-1 bg-slate-100 border border-slate-200 rounded-xl p-1">
+                <button onclick="dmlShowTab('info')" data-dmltab="info" class="px-2 py-1 rounded-lg text-[11px] font-bold transition whitespace-nowrap"><i class="fa-solid fa-circle-info"></i> معلومات المستند</button>
+                <button onclick="dmlShowTab('ribbon')" data-dmltab="ribbon" class="px-2 py-1 rounded-lg text-[11px] font-bold transition whitespace-nowrap"><i class="fa-solid fa-palette"></i> الشريط الرئيسي</button>
+                <button onclick="dmlShowTab('insert')" data-dmltab="insert" class="px-2 py-1 rounded-lg text-[11px] font-bold transition whitespace-nowrap"><i class="fa-solid fa-plus"></i> إدخال</button>
+                <button onclick="dmlShowTab('design')" data-dmltab="design" class="px-2 py-1 rounded-lg text-[11px] font-bold transition whitespace-nowrap"><i class="fa-solid fa-pen-nib"></i> منطقة التصميم</button>
+            </div>
+            <span class="mr-auto"></span>
+            <button onclick="dmlLivePreview()" class="px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-xs font-bold"><i class="fa-solid fa-expand"></i> معاينة ملء الشاشة</button>
+            <button onclick="dmlSave()" class="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold"><i class="fa-solid fa-floppy-disk"></i> حفظ المستند</button>
+        </header>
+        <div class="flex-1 flex overflow-hidden min-h-0">
+            <div class="flex-1 min-w-0 flex flex-col overflow-hidden">
+            <div id="dmlRibbonStrip" class="shrink-0 max-h-[15vh] overflow-y-auto custom-scroll p-2 border-b border-slate-200 bg-slate-50/70">
+                <!-- doc info + type -->
+                <div id="dmlTab-info" class="dml-tabpage">
+                    <div class="bg-white border border-slate-200 rounded-xl p-3 space-y-2 text-xs">
+                        <div class="grid grid-cols-2 gap-2">
+                            <div><label class="block text-[11px] font-semibold text-slate-600">اسم الملف * (القاعدة: المصدر_رقم.dml)</label><input id="dmlFileName" dir="ltr" placeholder="invoice_report_1.dml" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 font-mono"></div>
+                            <div><label class="block text-[11px] font-semibold text-slate-600">عنوان المستند</label><input id="dmlTitle" placeholder="فاتورة مبيعات" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5"></div>
+                        </div>
+                        <div class="grid grid-cols-4 gap-2">
+                            <div><label class="block text-[11px] font-semibold text-slate-600">الاسم الداخلي</label><input id="dmlName" dir="ltr" placeholder="invoice_doc" onchange="dmlSettingsChanged()" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 font-mono"></div>
+                            <div><label class="block text-[11px] font-semibold text-slate-600">الورق</label><select id="dmlPaper" onchange="dmlSettingsChanged()" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5"><option>A4</option><option>A5</option><option>A3</option><option>Letter</option><option>Legal</option></select></div>
+                            <div><label class="block text-[11px] font-semibold text-slate-600">الاتجاه</label><select id="dmlOrient" onchange="dmlSettingsChanged()" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5"><option value="portrait">عمودي</option><option value="landscape">أفقي</option></select></div>
+                            <div><label class="block text-[11px] font-semibold text-slate-600">الهوامش</label><input id="dmlMargin" dir="ltr" placeholder="12mm" value="12mm" onchange="dmlSettingsChanged()" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 font-mono"></div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2">
+                            <div><label class="block text-[11px] font-semibold text-slate-600">نوع المستند</label><select id="dmlDocType" onchange="dmlDocTypeChanged()" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5"><option value="kashf">كشف — جدول إجمالي</option><option value="sanad">سند — مستند منفرد برقم</option><option value="daftar">دفتر — دفتر حساب</option></select></div>
+                            <div id="dmlKeyColWrap" class="hidden"><label class="block text-[11px] font-semibold text-slate-600">العمود الأساسي للبحث (للسند)</label><select id="dmlKeyColumn" onchange="dmlCollectMetaLite()" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 font-mono" dir="ltr"></select></div>
+                        </div>
+                    </div>
+                    <div class="bg-white border border-slate-200 rounded-xl p-3 text-xs">
+                        <div class="flex items-center justify-between mb-2">
+                            <h4 class="font-bold text-slate-800">المتغيرات المخصصة</h4>
+                            <button onclick="dmlAddVar()" class="px-3 py-1.5 bg-violet-50 hover:bg-violet-100 text-violet-700 rounded-xl font-semibold"><i class="fa-solid fa-plus"></i> إضافة متغير</button>
+                        </div>
+                        <div id="dmlVarsList" class="space-y-2"></div>
+                        <div class="mt-3">
+                            <h4 class="font-bold text-slate-800 mb-1">متغيرات النظام </h4>
+                       <select id="dmlSysVarsList" class="w-full bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-amber-500">
+</select>
+                        </div>
+                    </div>
+                </div>
+                <!-- main ribbon -->
+                <div id="dmlTab-ribbon" class="hidden dml-tabpage-flow">
+                    <div class="bg-white border border-slate-200 rounded-xl p-2 text-xs">
+                        <div class="text-[10px] font-bold text-slate-400 px-1 mb-1">1 — أدوات النص والحدود (تُطبق على العنصر المحدد في لوحة الخصائص)</div>
+                        <div class="flex items-center gap-1.5 flex-wrap">
+                            <select id="rbFont" onchange="dmlRbSet('font-family',this.value)" title="نوع الخط" class="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 w-32"></select>
+                            <select id="rbSize" onchange="dmlRbSet('font-size',this.value)" title="حجم الخط" class="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 w-20 font-mono" dir="ltr"></select>
+                            <button onclick="dmlRbToggle('font-weight','bold','normal')" title="عريض" class="w-7 h-7 rounded-lg bg-transparent hover:bg-slate-200 text-slate-500 inline-flex items-center justify-center font-bold">B</button>
+                            <button onclick="dmlRbToggle('font-style','italic','normal')" title="مائل" class="w-7 h-7 rounded-lg bg-transparent hover:bg-slate-200 text-slate-500 inline-flex items-center justify-center italic">I</button>
+                            <button onclick="dmlRbToggle('text-decoration-line','underline','none')" title="تحته خط" class="w-7 h-7 rounded-lg bg-transparent hover:bg-slate-200 text-slate-500 inline-flex items-center justify-center underline">U</button>
+                            <input id="rbColor" type="color" value="#000000" onchange="dmlRbSet('color',this.value)" title="لون النص" class="w-8 h-8 p-0.5 border border-slate-200 rounded-lg cursor-pointer">
+                            <input id="rbBg" type="color" value="#ffffff" onchange="dmlRbBg(this.value)" title="لون الخلفية" class="w-8 h-8 p-0.5 border border-slate-200 rounded-lg cursor-pointer">
+                            <div class="dml-seg flex gap-0.5">
+                                <button onclick="dmlRbSet('text-align','right')" title="يمين" class="w-7 h-7 rounded-lg bg-transparent hover:bg-slate-200 text-slate-500 inline-flex items-center justify-center"><i class="fa-solid fa-align-right text-[11px]"></i></button>
+                                <button onclick="dmlRbSet('text-align','center')" title="وسط" class="w-7 h-7 rounded-lg bg-transparent hover:bg-slate-200 text-slate-500 inline-flex items-center justify-center"><i class="fa-solid fa-align-center text-[11px]"></i></button>
+                                <button onclick="dmlRbSet('text-align','left')" title="يسار" class="w-7 h-7 rounded-lg bg-transparent hover:bg-slate-200 text-slate-500 inline-flex items-center justify-center"><i class="fa-solid fa-align-left text-[11px]"></i></button>
+                                <button onclick="dmlRbSet('text-align','justify')" title="ضبط" class="w-7 h-7 rounded-lg bg-transparent hover:bg-slate-200 text-slate-500 inline-flex items-center justify-center"><i class="fa-solid fa-align-justify text-[11px]"></i></button>
+                            </div>
+                            <select id="rbBorderW" onchange="dmlRbBorder()" title="عرض الحد" class="bg-slate-50 border border-slate-200 rounded-lg px-1 py-1.5 w-16 font-mono" dir="ltr"><option value="">حد</option><option>0px</option><option>1px</option><option>2px</option><option>3px</option><option>5px</option></select>
+                            <select id="rbBorderS" onchange="dmlRbBorder()" title="نمط الحد" class="bg-slate-50 border border-slate-200 rounded-lg px-1 py-1.5 w-20"><option value="solid">متصل</option><option value="dashed">متقطع</option><option value="dotted">منقط</option><option value="double">مزدوج</option></select>
+                            <input id="rbBorderC" type="color" value="#cbd5e1" onchange="dmlRbBorder()" title="لون الحد" class="w-8 h-8 p-0.5 border border-slate-200 rounded-lg cursor-pointer">
+                        </div>
+                    </div>
+                    <div class="bg-white border border-slate-200 rounded-xl p-2 text-xs">
+                        <div class="text-[10px] font-bold text-slate-400 px-1 mb-1">2 — أدوات الفقرة</div>
+                        <div class="flex items-center gap-1.5 flex-wrap">
+                            <label class="text-[11px] text-slate-500">ارتفاع السطر</label>
+                            <input id="rbLineH" type="range" min="1" max="3" step="0.1" value="1.6" oninput="dmlRbSet('line-height',this.value)" class="w-24">
+                            <label class="text-[11px] text-slate-500">مسافة أول السطر</label>
+                            <input id="rbIndent" type="range" min="0" max="100" step="2" value="0" oninput="dmlRbSet('text-indent',this.value+'px')" class="w-24">
+                            <div class="dml-seg flex gap-0.5">
+                                <button onclick="dmlRbSet('direction','rtl')" title="يمين-يسار" class="w-7 h-7 rounded-lg bg-transparent hover:bg-slate-200 text-slate-500 inline-flex items-center justify-center text-[11px] font-bold">يمين</button>
+                                <button onclick="dmlRbSet('direction','ltr')" title="يسار-يمين" class="w-7 h-7 rounded-lg bg-transparent hover:bg-slate-200 text-slate-500 inline-flex items-center justify-center text-[11px] font-bold">يسار</button>
+                            </div>
+                            <select onchange="if(this.value)dmlRbSet('white-space',this.value);this.value=''" title="التفاف النص" class="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5"><option value="">التفاف...</option><option value="normal">طبيعي</option><option value="nowrap">بدون التفاف</option><option value="pre-line">أسطر</option></select>
+                        </div>
+                    </div>
+                    <div class="bg-white border border-slate-200 rounded-xl p-2 text-xs">
+                        <div class="text-[10px] font-bold text-slate-400 px-1 mb-1">3 — حفظ وتعيين الأنماط</div>
+                        <div class="flex items-center gap-1.5 flex-wrap">
+                            <input id="rbStyleName" placeholder="اسم النمط..." class="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 w-32">
+                            <button onclick="dmlStyleSave()" title="حفظ النمط الحالي" class="w-7 h-7 rounded-lg bg-transparent hover:bg-slate-200 text-slate-500 inline-flex items-center justify-center"><i class="fa-solid fa-floppy-disk text-[11px]"></i></button>
+                            <select id="rbStyleSel" class="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 w-36"><option value="">— الأنماط —</option></select>
+                            <button onclick="dmlStyleApply()" title="تعيين النمط" class="w-7 h-7 rounded-lg bg-transparent hover:bg-slate-200 text-slate-500 inline-flex items-center justify-center"><i class="fa-solid fa-check text-[11px]"></i></button>
+                            <button onclick="dmlStyleDelete()" title="حذف النمط" class="w-7 h-7 rounded-lg bg-transparent hover:bg-slate-200 text-slate-500 inline-flex items-center justify-center hover:!text-rose-600"><i class="fa-solid fa-trash text-[11px]"></i></button>
+                        </div>
+                    </div>
+                    <div class="bg-white border border-slate-200 rounded-xl p-2 text-xs dml-wide">
+                        <div class="text-[10px] font-bold text-slate-400 px-1 mb-1">4 — معاينة كود CSS (للعنصر المحدد — قابل للتحرير)</div>
+                        <div class="flex gap-1.5">
+                            <textarea id="dmlCssCode" rows="3" dir="ltr" spellcheck="false" class="flex-1 min-w-0 bg-slate-900 text-emerald-300 rounded-lg px-2 py-1.5 font-mono text-[11px] leading-5"></textarea>
+                            <div class="flex flex-col gap-1.5">
+                                <button onclick="dmlCssCodeApply()" title="تطبيق CSS" class="w-7 h-7 rounded-lg bg-transparent hover:bg-slate-200 text-slate-500 inline-flex items-center justify-center whitespace-nowrap"><i class="fa-solid fa-check text-[11px]"></i></button>
+                                <button onclick="dmlCssCodeCopy()" title="نسخ CSS" class="w-7 h-7 rounded-lg bg-transparent hover:bg-slate-200 text-slate-500 inline-flex items-center justify-center whitespace-nowrap"><i class="fa-solid fa-copy text-[11px]"></i></button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="bg-white border border-slate-200 rounded-xl p-2 text-xs">
+                        <div class="text-[10px] font-bold text-slate-400 px-1 mb-1">5 — التحديد والنسخ واللصق والحذف</div>
+                        <div class="flex items-center gap-1.5 flex-wrap">
+                            <button onclick="dmlClipSelectAll()" title="تحديد المنطقة" class="w-7 h-7 rounded-lg bg-transparent hover:bg-slate-200 text-slate-500 inline-flex items-center justify-center"><i class="fa-solid fa-expand text-[11px]"></i></button>
+                            <button onclick="dmlClipCopy()" title="نسخ" class="w-7 h-7 rounded-lg bg-transparent hover:bg-slate-200 text-slate-500 inline-flex items-center justify-center"><i class="fa-solid fa-copy text-[11px]"></i></button>
+                            <button onclick="dmlClipCut()" title="قص" class="w-7 h-7 rounded-lg bg-transparent hover:bg-slate-200 text-slate-500 inline-flex items-center justify-center"><i class="fa-solid fa-scissors text-[11px]"></i></button>
+                            <button onclick="dmlClipPaste()" title="لصق" class="w-7 h-7 rounded-lg bg-transparent hover:bg-slate-200 text-slate-500 inline-flex items-center justify-center"><i class="fa-solid fa-paste text-[11px]"></i></button>
+                            <button onclick="dmlClipDelete()" title="حذف المحدد" class="w-7 h-7 rounded-lg bg-transparent hover:bg-slate-200 text-slate-500 inline-flex items-center justify-center hover:!text-rose-600"><i class="fa-solid fa-trash text-[11px]"></i></button>
+                        </div>
+                    </div>
+                </div>
+                <!-- insert -->
+                <div id="dmlTab-insert" class="hidden dml-tabpage-flow">
+                    <div class="bg-white border border-slate-200 rounded-xl p-3 text-xs space-y-2">
+                        <h4 class="font-bold text-slate-800">إدراج الجداول <span id="dmlInsertDocType" class="text-violet-600"></span></h4>
+                        <div id="dmlInsertTables" class="flex items-center gap-1.5 flex-wrap"></div>
+                        <p class="text-[10px] text-slate-400">جدول الكشف يعكس الجدول الأساسي • السند: شبكة أفقية للرئيسي + جدول عادي للتفاصيل — حدد الجدول من البطاقة لعرض خصائصه</p>
+                    </div>
+                    <div class="bg-white border border-slate-200 rounded-xl p-3 text-xs space-y-2">
+                        <h4 class="font-bold text-slate-800">إدراج حقل كمربع نص (في مسار محدد — يمين / وسط / يسار)</h4>
+                        <div class="grid grid-cols-2 gap-2">
+                            <div><label class="block text-[10px] font-semibold text-slate-600">الفئة</label><select id="dmlInsCat" onchange="dmlInsCatChanged()" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5"><option value="report">حقول التقرير</option><option value="system">حقول النظام</option><option value="filter">حقول الفلترة</option></select></div>
+                            <div><label class="block text-[10px] font-semibold text-slate-600">الحقل</label><select id="dmlInsField" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 font-mono" dir="ltr"></select></div>
+                            <div><label class="block text-[10px] font-semibold text-slate-600">القسم</label><select id="dmlInsSection" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5"></select></div>
+                            <div><label class="block text-[10px] font-semibold text-slate-600">المسار</label><select id="dmlInsLane" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5"><option value="right">يمين</option><option value="center">وسط</option><option value="left">يسار</option></select></div>
+                        </div>
+                        <button onclick="dmlInsFieldBox()" title="إدراج كمربع نص في المسار" class="w-full py-1.5 bg-transparent hover:bg-violet-100 text-violet-600 rounded-xl font-bold"><i class="fa-solid fa-plus text-[11px]"></i> إدراج في المسار</button>
+                    </div>
+                    <div class="bg-white border border-slate-200 rounded-xl p-3 text-xs space-y-2">
+                        <h4 class="font-bold text-slate-800">الصور</h4>
+                        <div class="flex items-center gap-1.5 flex-wrap">
+                            <label title="صورة من الجهاز" class="w-7 h-7 rounded-lg bg-transparent hover:bg-slate-200 text-slate-500 inline-flex items-center justify-center cursor-pointer"><i class="fa-solid fa-image text-[11px]"></i><input id="dmlImgFile2" type="file" accept="image/*" class="hidden" onchange="dmlImageFile(this)"></label>
+                            <button onclick="dmlImageUrl()" title="صورة برابط" class="w-7 h-7 rounded-lg bg-transparent hover:bg-slate-200 text-slate-500 inline-flex items-center justify-center"><i class="fa-solid fa-link text-[11px]"></i></button>
+                            <button onclick="dmlAddTextbox()" title="مربع نص حر" class="w-7 h-7 rounded-lg bg-transparent hover:bg-slate-200 text-slate-500 inline-flex items-center justify-center hover:!text-violet-700"><i class="fa-solid fa-text-slash text-[11px]"></i></button>
+                        </div>
+                    </div>
+                </div>
+                <!-- design zone: Word-like paper page with separated header / sections / footer -->
+                <div id="dmlTab-design" class="hidden space-y-2">
+                    <div class="bg-white border border-slate-200 rounded-xl p-3 text-xs space-y-2">
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <h4 class="font-bold text-slate-800">لوحة العناصر — اسحب وأفلت داخل الصفحة</h4>
+                            <span class="mr-auto"></span>
+                            <select id="dmlZoom" onchange="dmlApplyPaper()" class="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5" title="التكبير">
+                                <option value="50%">50%</option>
+                                <option value="75%">75%</option>
+                                <option value="100%" selected>100%</option>
+                                <option value="125%">125%</option>
+                            </select>
+                        </div>
+                        <div id="dmlPalette"></div>
+                    </div>
+                </div>
+            </div>
+            <div id="dmlDesignRow" class="flex-1 flex overflow-hidden min-h-0">
+                <!-- Design Canvas (flexible) -->
+                <div id="dmlDesignScroll" class="flex-1 overflow-auto custom-scroll bg-slate-200/60 p-4 min-w-0">
+                    <div class="overflow-auto custom-scroll bg-slate-200/60 rounded-xl p-4">
+                        <div id="dmlPaperPage" class="dml-paper text-xs">
+                            <div><span class="dml-zone-label"><i class="fa-solid fa-heading"></i> الترويسة</span></div>
+                            <div id="dzone-header" class="dml-zone bg-white" contenteditable="true" spellcheck="false"
+                                onfocus="dmlZoneFocus('header')" onclick="dmlZoneFocus('header')"
+                                oninput="dmlZoneInput('header')" ondragover="dmlZoneOver(event)" ondragleave="dmlZoneLeave(event)" ondrop="dmlZoneDrop(event,'header')"
+                                ondblclick="dmlZoneDblClick(event,'header')"></div>
+                            <div><span class="dml-zone-label"><i class="fa-solid fa-layer-group"></i> الأقسام</span></div>
+                            <div id="dmlSectionsList" class="space-y-2"></div>
+                            <div class="mt-2">
+                                <button onclick="dmlAddSection()" class="px-3 py-1.5 bg-violet-50 hover:bg-violet-100 text-violet-700 rounded-xl text-xs font-semibold border border-dashed border-violet-300 w-full"><i class="fa-solid fa-plus"></i> إضافة قسم</button>
+                            </div>
+                            <div><span class="dml-zone-label"><i class="fa-solid fa-shoe-prints"></i> التذييل</span></div>
+                            <div id="dzone-footer" class="dml-zone bg-white" contenteditable="true" spellcheck="false"
+                                onfocus="dmlZoneFocus('footer')" onclick="dmlZoneFocus('footer')"
+                                oninput="dmlZoneInput('footer')" ondragover="dmlZoneOver(event)" ondragleave="dmlZoneLeave(event)" ondrop="dmlZoneDrop(event,'footer')"
+                                ondblclick="dmlZoneDblClick(event,'footer')"></div>
+                        </div>
+                    </div>
+                </div>
+
+
+                <!-- CSS Style Panel (Properties Sidebar) -->
+                <aside id="dmlSideBar" class="w-64 shrink-0 bg-white border-r border-slate-200 flex flex-col overflow-hidden transition-all">
+                <div id="dmlSideMini" class="flex-col items-center gap-2 py-3">
+                    <button onclick="dmlToggleSidebar()" title="توسيع اللوحة" class="w-8 h-8 rounded-lg bg-violet-100 hover:bg-violet-200 text-violet-700"><i class="fa-solid fa-palette text-xs"></i></button>
+                    <button onclick="dmlLivePreview()" title="معاينة ملء الشاشة" class="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600"><i class="fa-solid fa-expand text-xs"></i></button>
+                </div>
+                <div id="dmlSideBody" class="flex flex-col overflow-hidden flex-1 min-h-0">
+                <div class="p-2 border-b border-slate-100 space-y-2">
+                    <div class="flex items-center justify-between">
+                        <h4 id="dmlSideHeadTxt" class="text-xs font-bold text-slate-800"><i class="fa-solid fa-palette text-violet-600"></i> التنسيق المرئي <span id="dmlPropsCount" class="text-violet-600"></span></h4>
+                        <div class="flex items-center gap-1">
+                            <button onclick="dmlToggleSidebar()" title="تصغير اللوحة" class="text-slate-400 hover:text-slate-600 text-xs px-1"><i class="fa-solid fa-angles-left"></i></button>
+                            <button onclick="dmlClearTargetStyle()" title="مسح تنسيق العنصر" class="text-slate-400 hover:text-rose-600 text-xs"><i class="fa-solid fa-eraser"></i></button>
+                        </div>
+                    </div>
+                    <select id="dmlTargetSel" onchange="dmlTargetChanged()" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-xs"></select>
+                    <div id="dmlCssCats" class="flex flex-wrap gap-1"></div>
+                    <div id="dmlSecExtra" class="hidden space-y-1.5 bg-amber-50/60 border border-amber-200 rounded-lg p-2">
+                        <div class="text-[10px] font-bold text-amber-700">نصوص إضافية للطباعة (للقسم المحدد)</div>
+                        <div><label class="block text-[10px] font-semibold text-slate-600">نص قبل القسم</label><input id="dmlPrintBefore" oninput="dmlSecExtraChanged()" placeholder="مثال: كشف بأصناف الفاتورة [BILL_NO]" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1 text-[11px]"></div>
+                        <div><label class="block text-[10px] font-semibold text-slate-600">نص بعد القسم</label><input id="dmlPrintAfter" oninput="dmlSecExtraChanged()" placeholder="مثال: الإجمالي [total]" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1 text-[11px]"></div>
+                    </div>
+                </div>
+                <div id="dmlPropsList" class="flex-1 overflow-y-auto custom-scroll p-2 space-y-2 text-xs"></div>
+                <div class="p-2 border-t border-slate-100">
+                    <label class="block text-[10px] font-bold text-slate-500 mb-1">CSS الناتج (للعنصر المحدد)</label>
+                    <textarea id="dmlCssOut" rows="3" dir="ltr" readonly class="w-full bg-slate-900 text-emerald-300 rounded-lg px-2 py-1.5 font-mono text-[10px] leading-5"></textarea>
+                </div>
+                </div>
+            </aside>
+        </div>
+    </div>
+    <div id="dmlLiveOverlay" class="hidden">
+        <div class="flex items-center gap-2 px-4 py-2 text-white text-xs shrink-0">
+            <i class="fa-solid fa-eye text-violet-300"></i>
+            <strong>معاينة حية — ملء الشاشة</strong>
+            <span id="dmlLiveDims" class="text-slate-300"></span>
+            <span class="mr-auto"></span>
+            <button onclick="dmlPrintLive()" class="px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-xl font-bold"><i class="fa-solid fa-print"></i> طباعة</button>
+            <button onclick="dmlCloseLivePreview()" class="px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-xl font-bold"><i class="fa-solid fa-xmark"></i> إغلاق (Esc)</button>
+        </div>
+        <div class="flex-1 overflow-auto custom-scroll p-4 min-h-0">
+            <iframe id="dmlLiveFrame" class="mx-auto bg-white rounded-lg shadow-2xl border-0" style="height:88vh" title="معاينة حية"></iframe>
+        </div>
+    </div>
+    <script>
+        const APP_NAME = "{{ app_name|escapejs }}";
+        const DML_DOCS = {{ dml_files_json|safe }};
+    </script>
+    <script>
+{% include "dml_designer_script.html" %}
+    </script>
+{% endblock %}

@@ -1,0 +1,32 @@
+<!-- مودال إحصائيات الاتصال — ملف منفصل يُعرض عبر خاصية render في custom_actions.
+     المتغيرات: {{name}} {{engine}} {{host}} {{port}} {{status}} {{detail}}
+     {{last_check_at}} {{last_check_by}} {{last_check_ok}} {{tables_count}} {{tables_error}}
+     والقائمة: {{#each tables}} ... {{this}} ... {{/each}} -->
+<div class="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col max-h-[85vh]">
+    <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+        <h3 class="text-sm font-bold text-slate-800 flex items-center gap-2"><i class="fa-solid fa-chart-simple text-indigo-600"></i> إحصائيات الاتصال</h3>
+        <button onclick="closeDynamicModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div class="p-5 space-y-3 text-xs overflow-y-auto custom-scroll">
+        <div class="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5">
+            <span class="font-bold text-slate-800 text-sm">{{name}} <span class="font-mono text-[11px] text-slate-500" dir="ltr">{{engine}}://{{host}}:{{port}}</span></span>
+            <span class="px-2.5 py-1 rounded-full text-[11px] font-bold">{{status}}</span>
+        </div>
+        <div class="text-slate-500 dyn-hide-empty">{{detail}}</div>
+        <div class="grid grid-cols-2 gap-2">
+            <div class="bg-slate-50 border border-slate-200 rounded-xl p-3"><div class="text-slate-500 mb-1">آخر اتصال (وقت/تاريخ)</div><div class="font-bold text-slate-800" dir="ltr">{{last_check_at}}</div></div>
+            <div class="bg-slate-50 border border-slate-200 rounded-xl p-3"><div class="text-slate-500 mb-1">بواسطة / النتيجة</div><div class="font-bold text-slate-800">{{last_check_by}} {{last_check_ok}}</div></div>
+        </div>
+        <div class="bg-indigo-50 border border-indigo-200 rounded-xl p-3 flex items-center justify-between">
+            <span class="font-bold text-indigo-800">عدد الجداول في هذا الاتصال</span>
+            <span class="text-xl font-extrabold text-indigo-700">{{tables_count}}</span>
+        </div>
+        <div class="text-amber-600 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 dyn-hide-empty">{{tables_error}}</div>
+        <div class="space-y-1 max-h-44 overflow-y-auto custom-scroll">
+            {{#each tables}}<div class="font-mono px-2 py-1 bg-slate-50 border border-slate-100 rounded-lg" dir="ltr">{{this}}</div>{{/each}}
+        </div>
+    </div>
+    <div class="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-end">
+        <button onclick="closeDynamicModal()" class="px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs">إغلاق</button>
+    </div>
+</div>

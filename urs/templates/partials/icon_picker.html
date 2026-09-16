@@ -1,0 +1,130 @@
+{# Shared icon picker modal — generic: openIconPicker(current, onPick, opts{upload}) #}
+<div id="iconPickerModal" class="hidden fixed inset-0 z-[95] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4" onclick="if(event.target===this)closeIconPicker()">
+    <div class="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden">
+        <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-indigo-50 shrink-0">
+            <h3 class="text-sm font-bold text-slate-800 flex items-center gap-2"><i class="fa-solid fa-icons text-indigo-600"></i> اختر الأيقونة</h3>
+            <button type="button" onclick="closeIconPicker()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div class="p-4 space-y-3 overflow-y-auto custom-scroll">
+            <input type="text" id="iconPickerSearch" oninput="renderIconPicker()" placeholder="بحث بالاسم (cube) أو العربي أو التصنيف..." class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-indigo-500">
+            <div id="iconPickerUploadRow" class="hidden flex items-center gap-2">
+                <button type="button" onclick="document.getElementById('iconPickerFile').click()" class="flex-1 py-2 border-2 border-dashed border-indigo-300 hover:border-indigo-500 text-indigo-700 rounded-xl text-xs font-bold"><i class="fa-solid fa-upload"></i> رفع مخصص (SVG/PNG ≤512KB)</button>
+                <input type="file" id="iconPickerFile" accept=".svg,.png,.jpg,.jpeg,.webp" class="hidden" onchange="uploadPickerIcon(this)">
+                <span id="iconPickerUpMsg" class="text-[11px] text-slate-500"></span>
+            </div>
+            <div id="iconPickerCats" class="flex flex-wrap gap-1.5"></div>
+            <div id="iconPickerGrid" class="grid grid-cols-4 sm:grid-cols-6 gap-2"></div>
+        </div>
+        <div class="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between shrink-0">
+            <span class="text-[11px] text-slate-500">المحدد: <span id="iconPickerNameM" class="font-mono" dir="ltr">fa-cube</span></span>
+            <button type="button" onclick="closeIconPicker()" class="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold">تم</button>
+        </div>
+    </div>
+</div>
+<script>
+const ICON_PICKER_CHOICES = [
+    {c:'fa-cube',ar:'مكعب',cat:'عام'},{c:'fa-folder-open',ar:'مجلد',cat:'عام'},
+    {c:'fa-gear',ar:'إعدادات',cat:'عام'},{c:'fa-boxes-stacked',ar:'مخزون',cat:'عام'},
+    {c:'fa-chart-line',ar:'مخطط',cat:'مالية'},{c:'fa-coins',ar:'عملات',cat:'مالية'},
+    {c:'fa-calculator',ar:'حاسبة',cat:'مالية'},{c:'fa-wallet',ar:'محفظة',cat:'مالية'},
+    {c:'fa-industry',ar:'صناعة',cat:'عمليات'},{c:'fa-truck',ar:'نقل',cat:'عمليات'},
+    {c:'fa-warehouse',ar:'مستودع',cat:'عمليات'},{c:'fa-file-contract',ar:'عقود',cat:'عمليات'},
+    {c:'fa-server',ar:'خادم',cat:'تقنية'},{c:'fa-database',ar:'بيانات',cat:'تقنية'},
+    {c:'fa-bolt',ar:'طاقة',cat:'تقنية'},{c:'fa-clipboard-list',ar:'مهام',cat:'تقنية'},
+    {c:'fa-users',ar:'أفراد',cat:'موارد'},{c:'fa-heart-pulse',ar:'صحة',cat:'موارد'},
+    {c:'fa-shield-halved',ar:'حماية',cat:'موارد'},{c:'fa-store',ar:'متجر',cat:'موارد'},
+    {c:'fa-screwdriver-wrench',ar:'صيانة',cat:'صيانة'},{c:'fa-wrench',ar:'مفتاح',cat:'صيانة'},
+    {c:'fa-car',ar:'مركبة',cat:'صيانة'},{c:'fa-helmet-safety',ar:'سلامة',cat:'صيانة'},
+];
+let iconPickerCb = null, iconPickerCat = '', iconPickerUpload = false, iconPickerCurrent = 'fa-cube';
+function openIconPicker(current, cb, opts){
+    iconPickerCb = (typeof cb === 'function') ? cb : null;
+    iconPickerCat = '';
+    iconPickerUpload = !!(opts && opts.upload);
+    iconPickerCurrent = current || 'fa-cube';
+    const si = document.getElementById('iconPickerSearch');
+    if(si) si.value = '';
+    const up = document.getElementById('iconPickerUploadRow');
+    if(up) up.classList.toggle('hidden', !iconPickerUpload), up.classList.toggle('flex', !!iconPickerUpload);
+    renderIconPicker();
+    document.getElementById('iconPickerModal').classList.remove('hidden');
+    if(si) setTimeout(()=>{ try{ si.focus(); }catch(e){} }, 50);
+}
+function closeIconPicker(){
+    document.getElementById('iconPickerModal').classList.add('hidden');
+    iconPickerCb = null;
+}
+function setIconPickerCat(cat){
+    iconPickerCat = (iconPickerCat === cat) ? '' : cat;
+    renderIconPicker();
+}
+function renderIconPicker(){
+    const q = ((document.getElementById('iconPickerSearch') || {}).value || '').trim().toLowerCase();
+    const cats = [...new Set(ICON_PICKER_CHOICES.map(i=>i.cat))];
+    document.getElementById('iconPickerCats').innerHTML = cats.map(c=>`<button type="button" onclick="setIconPickerCat('${c}')" class="text-[10px] px-2 py-0.5 rounded-full border font-bold ${iconPickerCat===c?'bg-indigo-600 text-white border-indigo-600':'bg-slate-50 text-slate-500 border-slate-200'}">${c}</button>`).join('');
+    const list = ICON_PICKER_CHOICES.filter(i=>(!iconPickerCat || i.cat===iconPickerCat) && (!q || i.c.toLowerCase().includes(q) || i.ar.includes(q) || i.cat.includes(q)));
+    document.getElementById('iconPickerGrid').innerHTML = list.length ? list.map(i=>`<button type="button" onclick="pickIcon('${i.c}')" title="${i.c}" class="flex flex-col items-center gap-1.5 p-3 rounded-2xl border-2 ${iconPickerCurrent===i.c?'border-indigo-500 bg-indigo-50':'border-slate-100 hover:border-indigo-300'}"><i class="fa-solid ${i.c} text-2xl ${iconPickerCurrent===i.c?'text-indigo-600':'text-slate-600'}"></i><span class="text-[10px] text-slate-500">${i.ar}</span><span class="font-mono text-[8px] text-slate-400" dir="ltr">${i.c}</span></button>`).join('') : '<p class="col-span-4 sm:col-span-6 text-center text-slate-400 text-sm py-8">لا نتائج مطابقة</p>';
+    const nm = document.getElementById('iconPickerNameM');
+    if(nm) nm.textContent = iconPickerCurrent;
+}
+function pickIcon(cls){
+    iconPickerCurrent = cls;
+    try{ if(iconPickerCb) iconPickerCb(cls, null); }catch(e){}
+    closeIconPicker();
+}
+/* ربط حقل مخفي بزر معاينة: أي كتابة برمجية في الحقل تحدث المعاينة تلقائياً */
+function syncHiddenIconPrev(inputId, prevId, nameId){
+    try{
+        const el = document.getElementById(inputId);
+        let v = el ? el.value : 'fa-cube';
+        if(/^(upload|file):/.test(v)) v = 'fa-cube';
+        const pv = document.getElementById(prevId);
+        const nm = nameId ? document.getElementById(nameId) : null;
+        if(pv) pv.innerHTML = '<i class="fa-solid ' + String(v).replace(/"/g, '') + '"></i>';
+        if(nm) nm.textContent = el ? el.value : v;
+    }catch(e){}
+}
+function hookHiddenIcon(inputId, prevId, nameId){
+    try{
+        const el = document.getElementById(inputId);
+        if(!el || el.dataset.iconHook) return;
+        el.dataset.iconHook = '1';
+        let cur = el.value;
+        Object.defineProperty(el, 'value', {
+            configurable: true,
+            get(){ return cur; },
+            set(nv){ cur = String(nv ?? ''); try{ el.setAttribute('value', cur); }catch(e){} syncHiddenIconPrev(inputId, prevId, nameId); }
+        });
+        syncHiddenIconPrev(inputId, prevId, nameId);
+    }catch(e){}
+}
+async function uploadPickerIcon(input){
+    const msg = document.getElementById('iconPickerUpMsg');
+    const f = input && input.files && input.files[0];
+    if(!f) return;
+    if(msg) msg.textContent = 'جارٍ الرفع...';
+    try{
+        const fd = new FormData();
+        fd.append('file', f);
+        const res = await fetch('/api/apps/icon/upload/', {method:'POST', body: fd});
+        const data = await res.json();
+        if(res.ok && data.token){
+            const url = URL.createObjectURL(f);
+            try{ if(iconPickerCb) iconPickerCb('upload:' + data.token, {name: f.name, url: url}); }catch(e){}
+            closeIconPicker();
+        } else {
+            if(msg) msg.textContent = data.error || 'فشل الرفع';
+        }
+    }catch(e){
+        if(msg) msg.textContent = 'تعذر الاتصال';
+    }
+    input.value = '';
+}
+document.addEventListener('click', function(e){
+    const p = document.getElementById('iconPickerModal');
+    if(!p || p.classList.contains('hidden')) return;
+    if(!e.target || !document.contains(e.target)) return;
+    const box = p.querySelector('.bg-white.rounded-3xl');
+    if(box && !box.contains(e.target)) closeIconPicker();
+});
+</script>

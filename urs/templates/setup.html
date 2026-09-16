@@ -1,0 +1,356 @@
+{% extends "base.html" %}
+{% block title %}معالج الإعداد الأول — Odex ERP{% endblock %}
+{% block topbar %}{% endblock %}
+{% block sidebar %}{% endblock %}
+{% block main %}
+<div class="flex-1 flex flex-col h-screen overflow-y-auto">
+    <main class="p-6 max-w-3xl mx-auto w-full space-y-5">
+        <div class="bg-gradient-to-l from-indigo-900 via-indigo-800 to-blue-800 rounded-3xl p-7 text-white text-center shadow-lg">
+            <h1 class="text-xl font-extrabold">معالج الإعداد الأول</h1>
+            <p class="text-xs mt-1 text-indigo-200">الشركة ← قاعدة البيانات ← الاتصال الافتراضي ← الجداول ← تم</p>
+        </div>
+
+        <!-- Stepper -->
+        <div id="wzSteps" class="grid grid-cols-5 gap-2 text-center text-[11px] font-bold">
+            <div data-step="1" class="wz-step rounded-2xl border px-2 py-2.5">1. الشركة</div>
+            <div data-step="2" class="wz-step rounded-2xl border px-2 py-2.5">2. قاعدة البيانات</div>
+            <div data-step="3" class="wz-step rounded-2xl border px-2 py-2.5">3. الاتصال الافتراضي</div>
+            <div data-step="4" class="wz-step rounded-2xl border px-2 py-2.5">4. الجداول</div>
+            <div data-step="5" class="wz-step rounded-2xl border px-2 py-2.5">5. تم</div>
+        </div>
+
+        <!-- STEP 1: company -->
+        <div id="wzPanel1" class="wz-panel bg-white rounded-3xl border border-gray-200 shadow-sm p-6 space-y-4 text-xs">
+            <h2 class="font-bold text-slate-800 text-sm">الخطوة 1 — بيانات الشركة والفرع</h2>
+            <div id="wzCompanyDone" class="hidden rounded-xl px-3 py-2 bg-emerald-50 text-emerald-700 border border-emerald-200"></div>
+            <div class="grid grid-cols-2 gap-3">
+                <div><label class="block font-semibold text-slate-700 mb-1">رمز الشركة *</label><input id="suCode" placeholder="CMP" dir="ltr" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono"></div>
+                <div><label class="block font-semibold text-slate-700 mb-1">اسم الشركة *</label><input id="suName" placeholder="شركة المثال" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"></div>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+                <div><label class="block font-semibold text-slate-700 mb-1">السنة المالية *</label><input id="suYear" type="number" value="2026" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2" dir="ltr"></div>
+                <div><label class="block font-semibold text-slate-700 mb-1">الرقم الضريبي</label><input id="suTax" placeholder="اختياري" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2" dir="ltr"></div>
+            </div>
+            <div id="suGeoRow" class="grid grid-cols-3 gap-3">
+                <div><label class="block font-semibold text-slate-700 mb-1">الدولة</label><select id="suCountry" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"><option value="">—</option>{% for c in countries %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}</select></div>
+                <div><label class="block font-semibold text-slate-700 mb-1">المدينة</label><select id="suCity" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"><option value="">—</option>{% for c in cities %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}</select></div>
+                <div><label class="block font-semibold text-slate-700 mb-1">العملة</label><select id="suCurrency" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"><option value="">—</option>{% for c in currencies %}<option value="{{ c.id }}">{{ c.code }}</option>{% endfor %}</select></div>
+            </div>
+            <div class="grid grid-cols-2 gap-3 border-t border-slate-100 pt-4">
+                <div><label class="block font-semibold text-slate-700 mb-1">رمز الفرع *</label><input id="suBCode" placeholder="MAIN" value="MAIN" dir="ltr" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono"></div>
+                <div><label class="block font-semibold text-slate-700 mb-1">اسم الفرع *</label><input id="suBName" placeholder="الفرع الرئيسي" value="الفرع الرئيسي" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"></div>
+            </div>
+            <div id="suMsg" class="hidden rounded-xl px-3 py-2"></div>
+            <div class="flex gap-2">
+                <button onclick="suSubmit()" class="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-bold">حفظ الشركة والفرع</button>
+                <button onclick="wzGo(2)" class="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-bold">التالي ←</button>
+            </div>
+        </div>
+
+        <!-- STEP 2: db init + migrate -->
+        <div id="wzPanel2" class="wz-panel hidden bg-white rounded-3xl border border-gray-200 shadow-sm p-6 space-y-4 text-xs">
+            <h2 class="font-bold text-slate-800 text-sm">الخطوة 2 — تهيئة قاعدة البيانات والترحيل</h2>
+            <p class="text-slate-500">ينفذ ترحيلات Django. السكيما <span id="wzSchema" class="font-mono" dir="ltr"></span> تتعبأ تلقائياً من الفرع وتُنشأ على قاعدة البيانات <span class="font-mono" dir="ltr">urs</span> عبر الاتصال الافتراضي (الخطوة 3).</p>
+            <div id="wzMigList" class="space-y-1.5"></div>
+            <div class="flex gap-2">
+                <button onclick="wzGo(1)" class="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-2xl font-bold">→ السابق</button>
+                <button id="wzMigBtn" onclick="wzMigrate()" class="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-bold">تنفيذ الترحيل وإنشاء السكيما</button>
+                <button onclick="wzGo(3)" class="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-bold">التالي ←</button>
+            </div>
+        </div>
+
+        <!-- STEP 3: default connection (engine + params) + retarget FMLK -->
+        <div id="wzPanel3" class="wz-panel hidden bg-white rounded-3xl border border-gray-200 shadow-sm p-6 space-y-4 text-xs">
+            <h2 class="font-bold text-slate-800 text-sm">الخطوة 3 — نوع القاعدة وباراميترات الاتصال الافتراضي <span class="font-mono" dir="ltr">urs_local</span></h2>
+            <div id="wzLockedNote" class="hidden rounded-xl px-3 py-2 bg-slate-100 text-slate-600 border border-slate-200">الاتصال محفوظ في <span class="font-mono" dir="ltr">app.conf</span> — الحقول مقفلة وتعكس ملف الإعداد. <button onclick="wzUnlockConn()" class="text-indigo-600 hover:text-indigo-800 font-bold">فتح التحرير اليدوي</button></div>
+            <div class="grid grid-cols-2 gap-3">
+                <div><label class="block font-semibold text-slate-700 mb-1">نوع قاعدة البيانات *</label>
+                    <select id="wzEng" onchange="wzEngChanged()" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
+                        <option value="postgres">PostgreSQL</option>
+                        <option value="oracle">Oracle</option>
+                        <option value="sqlserver">SQL Server</option>
+                        <option value="mysql">MySQL</option>
+                    </select></div>
+                <div><label class="block font-semibold text-slate-700 mb-1">المضيف *</label><input id="wzHost" dir="ltr" placeholder="172.16.10.101" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono"></div>
+            </div>
+            <div class="grid grid-cols-3 gap-3">
+                <div><label class="block font-semibold text-slate-700 mb-1">المنفذ *</label><input id="wzPort" type="number" dir="ltr" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono"></div>
+                <div><label class="block font-semibold text-slate-700 mb-1">المستخدم</label><input id="wzUser" dir="ltr" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono"></div>
+                <div><label class="block font-semibold text-slate-700 mb-1">كلمة المرور (فارغ = إبقاء)</label><input id="wzPass" type="password" dir="ltr" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono"></div>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+                <div><label class="block font-semibold text-slate-700 mb-1">القاعدة / SID</label><input id="wzInst" dir="ltr" placeholder="urs" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono"></div>
+                <div><label class="block font-semibold text-slate-700 mb-1">سكيما وجهة التكامل</label><input id="wzConnSchema" dir="ltr" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono"></div>
+            </div>
+            <div id="wzInstNameWrap" class="hidden">
+                <label class="block font-semibold text-slate-700 mb-1">اسم المثيل (SQL Server) * <span class="text-[10px] text-slate-400 font-normal">SQLEXPRESS أو بالصيغة الكاملة SERVER\INSTANCE</span></label>
+                <input id="wzInstName" dir="ltr" placeholder="SQLEXPRESS" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono">
+            </div>
+            <div id="wzConnMsg" class="hidden rounded-xl px-3 py-2"></div>
+            <div class="flex gap-2">
+                <button id="wzConnBtn" onclick="wzConnSave()" class="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-bold">حفظ واختبار الاتصال</button>
+            </div>
+            <div class="border-t border-slate-100 pt-4 space-y-2">
+                <div class="flex items-center justify-between">
+                    <h3 class="font-bold text-slate-800">توحيد ملفات FMLK على <span class="font-mono" dir="ltr">urs_local</span> <span id="wzFmlkCount" class="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-bold"></span></h3>
+                    <div class="flex gap-2">
+                        <button onclick="wzFmlkCheck(false)" class="text-[11px] text-indigo-600 hover:text-indigo-800 font-bold">غير الموحدة فقط</button>
+                        <button onclick="wzFmlkCheck(true)" class="text-[11px] text-slate-500 hover:text-slate-700 font-bold">تحديد الكل</button>
+                    </div>
+                </div>
+                <div id="wzFmlkList" class="space-y-1.5 max-h-64 overflow-y-auto"></div>
+                <button id="wzRetargetBtn" onclick="wzRetarget()" class="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-bold">توحيد المحدد على urs_local</button>
+            </div>
+            <div class="flex gap-2">
+                <button onclick="wzGo(2)" class="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-2xl font-bold">→ السابق</button>
+                <button onclick="wzGo(4)" class="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-bold">التالي ←</button>
+            </div>
+        </div>
+
+        <!-- STEP 4: seed local connection + FMLK tables -->
+        <div id="wzPanel4" class="wz-panel hidden bg-white rounded-3xl border border-gray-200 shadow-sm p-6 space-y-4 text-xs">
+            <h2 class="font-bold text-slate-800 text-sm">الخطوة 4 — الاتصال المحلي وجداول النماذج</h2>
+            <p class="text-slate-500">ينشئ الاتصال <span class="font-mono" dir="ltr">urs_local</span> ثم يبني الجداول من ملفات FMLK. سكيما الوجهة الافتراضية من الاتصال — حدد غيرها مع التفعيل للترحيل إليها وتوحيد سكيما الملفات.</p>
+            <div id="wzConnBox" class="rounded-2xl bg-slate-50 border border-slate-200 px-3 py-2">الاتصال: —</div>
+            <div class="grid grid-cols-2 gap-3 items-end">
+                <div><label class="block font-semibold text-slate-700 mb-1">سكيما الوجهة</label><input id="wzDstSchema" dir="ltr" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono"></div>
+                <label class="flex items-center gap-2 pb-2 cursor-pointer"><input type="checkbox" id="wzRewriteSchema"> توحيد سكيما الملفات مع الوجهة</label>
+            </div>
+            <div id="wzTables" class="space-y-1.5"></div>
+            <div class="flex gap-2">
+                <button onclick="wzGo(3)" class="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-2xl font-bold">→ السابق</button>
+                <button id="wzSeedBtn" onclick="wzSeed()" class="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-bold">إنشاء الاتصال والجداول</button>
+                <button onclick="wzGo(5)" class="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-bold">إنهاء ←</button>
+            </div>
+        </div>
+
+        <!-- STEP 5: done -->
+        <div id="wzPanel5" class="wz-panel hidden bg-white rounded-3xl border border-gray-200 shadow-sm p-6 space-y-4 text-xs text-center">
+            <div class="w-14 h-14 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center text-2xl mx-auto"><i class="fa-solid fa-check"></i></div>
+            <h2 class="font-bold text-slate-800 text-base">اكتمل الإعداد</h2>
+            <div id="wzSummary" class="text-right space-y-1.5"></div>
+            <a href="/" class="block w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-bold">دخول النظام ←</a>
+        </div>
+    </main>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+let WZ = {};
+try { WZ = {{ wizard_json|safe }}; } catch(e) { WZ = {}; }
+let wzStep = 1;
+let wzUnlocked = false;
+function wzUnlockConn(){ wzUnlocked = true; wzApplyLock(); }
+function wzApplyLock(){
+    const locked = !!WZ.appconf_has_db && !wzUnlocked;
+    ['wzEng','wzHost','wzPort','wzUser','wzPass','wzInst','wzConnSchema'].forEach(id=>{
+        const el = document.getElementById(id); if(el) el.disabled = locked;
+    });
+    const btn = document.getElementById('wzConnBtn'); if(btn) btn.disabled = locked;
+    const note = document.getElementById('wzLockedNote'); if(note) note.classList.toggle('hidden', !locked);
+}
+const WZ_ENG_PORTS = {postgres: 5432, oracle: 1521, sqlserver: 1433, mysql: 3306};
+
+function wzPaintSteps(){
+    document.querySelectorAll('.wz-step').forEach(el=>{
+        const n = parseInt(el.dataset.step);
+        const done = (n === 1 && WZ.has_company) || (n === 2 && WZ._mig) || (n === 3 && !!WZ.urs_local) || (n === 4 && WZ.tables_ready);
+        const active = (n === wzStep);
+        el.className = 'wz-step rounded-2xl border px-2 py-2.5 ' + (active ? 'bg-indigo-600 text-white border-indigo-600' : (done ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-white text-slate-500 border-slate-200'));
+    });
+    document.querySelectorAll('.wz-panel').forEach(el=>el.classList.add('hidden'));
+    const p = document.getElementById('wzPanel' + wzStep);
+    if(p) p.classList.remove('hidden');
+}
+function wzGo(n){
+    if(n >= 3 && !WZ.has_company){ try{ notify('أنشئ الشركة أولاً (الخطوة 1)', 'error'); }catch(e){} return; }
+    wzStep = n; wzPaintSteps();
+    if(n === 3) wzFmlkLoad();
+    if(n === 5) wzSummary();
+    window.scrollTo(0, 0);
+}
+
+async function wzRefresh(){
+    try{
+        const r = await fetch('/api/setup/wizard/status/');
+        WZ = await r.json();
+    }catch(e){}
+    const cd = document.getElementById('wzCompanyDone');
+    if(WZ.has_company && WZ.company){
+        cd.classList.remove('hidden');
+        cd.textContent = 'الشركة: ' + (WZ.company.name || '') + ' (' + (WZ.company.code || '') + ')' + (WZ.branch ? ' — الفرع: ' + (WZ.branch.name || '') : '');
+    }
+    document.getElementById('wzSchema').textContent = WZ.schema || '—';
+    wzConnFill();
+    const ml = document.getElementById('wzMigList');
+    ml.innerHTML = '<div class="rounded-xl px-3 py-2 ' + (WZ.has_company ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-amber-50 text-amber-700 border border-amber-200') + '">ترحيلات Django: ' + (WZ.has_company ? 'جاهزة للتنفيذ' : 'بانتظار الخطوة 1') + '</div>'
+        + '<div class="rounded-xl px-3 py-2 bg-slate-50 text-slate-600 border border-slate-200">السكيما: ' + (WZ.schema || '—') + '</div>';
+    const cb = document.getElementById('wzConnBox');
+    cb.textContent = 'الاتصال: ' + (WZ.urs_local ? ('urs_local #' + (WZ.urs_local.id || '?') + ' — ' + (WZ.urs_local.engine || '') + ' / ' + (WZ.urs_local.schema || '')) : 'غير موجود بعد');
+    const dst = document.getElementById('wzDstSchema');
+    if(dst && dst.value === '') dst.value = (WZ.urs_local && WZ.urs_local.schema) || WZ.schema || '';
+    const tb = document.getElementById('wzTables');
+    tb.innerHTML = (WZ.tables || []).map(t=>{
+        const miss = (t.missing || []).length;
+        const st = !t.exists ? '<span class="text-slate-400">غير موجود</span>' : (miss ? '<span class="text-amber-600 font-bold">ناقص ' + miss + ' عمود</span>' : '<span class="text-emerald-600 font-bold">موجود</span>');
+        const cols = (t.ncols != null) ? ' — ' + t.ncols + ' عمود' : (t.fields != null ? ' — ' + t.fields + ' حقل' : '');
+        return '<div class="flex items-center justify-between rounded-xl px-3 py-2 bg-slate-50 border border-slate-200"><span class="font-mono" dir="ltr">' + (t.schema || '') + '.' + (t.table || t.file) + '</span><span>' + st + cols + '</span></div>';
+    }).join('');
+    wzApplyLock();
+    wzPaintSteps();
+}
+function wzSummary(){
+    const rows = [
+        ['الشركة', WZ.company ? (WZ.company.name + ' (' + WZ.company.code + ')') : '—'],
+        ['الفرع / السكيما', (WZ.branch ? WZ.branch.name + ' / ' : '') + (WZ.schema || '—')],
+        ['الخلفية', WZ.backend || '—'],
+        ['الاتصال الافتراضي', WZ.urs_local ? ('urs_local #' + (WZ.urs_local.id || '?') + ' — ' + (WZ.urs_local.engine || '') + ' @ ' + (WZ.urs_local.host || '') + ':' + (WZ.urs_local.port || '')) : '—'],
+        ['الجداول', (WZ.tables || []).filter(t=>t.exists).length + ' / ' + (WZ.tables || []).length + ' جاهزة'],
+    ];
+    document.getElementById('wzSummary').innerHTML = rows.map(r=>'<div class="flex items-center justify-between rounded-xl px-3 py-2 bg-slate-50 border border-slate-200"><span class="text-slate-500">' + r[0] + '</span><strong>' + r[1] + '</strong></div>').join('');
+}
+async function suSubmit(){
+    const box = document.getElementById('suMsg');
+    box.classList.add('hidden');
+    const body = {company_code: document.getElementById('suCode').value.trim(), company_name: document.getElementById('suName').value.trim(), fiscal_year: parseInt(document.getElementById('suYear').value || '2026'), tax_number: document.getElementById('suTax').value.trim(), country: document.getElementById('suCountry').value || null, city: document.getElementById('suCity').value || null, currency: document.getElementById('suCurrency').value || null, branch_code: document.getElementById('suBCode').value.trim() || 'MAIN', branch_name: document.getElementById('suBName').value.trim() || 'الفرع الرئيسي'};
+    if(!body.company_code || !body.company_name){ box.textContent = 'أدخل رمز الشركة واسمها'; box.className = 'rounded-xl px-3 py-2 bg-rose-50 text-rose-600 border border-rose-200 text-xs'; return; }
+    const res = await fetch('/api/setup/create/', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    const data = await res.json();
+    if(res.ok){ try{ notify('تم حفظ الشركة ✓', 'success'); }catch(e){} await wzRefresh(); }
+    else { box.textContent = data.error || 'فشل الإنشاء'; box.className = 'rounded-xl px-3 py-2 bg-rose-50 text-rose-600 border border-rose-200 text-xs'; }
+}
+async function wzMigrate(){
+    const btn = document.getElementById('wzMigBtn');
+    btn.disabled = true; btn.textContent = 'جارٍ التنفيذ...';
+    try{
+        const res = await fetch('/api/setup/wizard/migrate/', {method:'POST'});
+        const data = await res.json();
+        if(res.ok){ WZ._mig = true; try{ notify('تم الترحيل ✓ ' + (data.note || ''), 'success'); }catch(e){} }
+        else { try{ notify(data.error || 'فشل الترحيل', 'error'); }catch(e){} }
+    }catch(e){ try{ notify('تعذر الاتصال', 'error'); }catch(e2){} }
+    btn.disabled = false; btn.textContent = 'تنفيذ الترحيل وإنشاء السكيما';
+    await wzRefresh();
+}
+/* ---- step 3: default connection ---- */
+function wzEngChanged(){
+    const e = document.getElementById('wzEng').value;
+    document.getElementById('wzPort').value = WZ_ENG_PORTS[e] || '';
+    const w = document.getElementById('wzInstNameWrap');
+    if(w) w.classList.toggle('hidden', e !== 'sqlserver');
+}
+function wzConnFill(){
+    const c = WZ.urs_local || {};
+    const eng = document.getElementById('wzEng');
+    if(c.engine) eng.value = c.engine;
+    const set = (id, v)=>{ const el = document.getElementById(id); if(el && el.value === '') el.value = v || ''; };
+    set('wzHost', c.host || ''); set('wzUser', c.user || '');
+    set('wzInst', c.instance || ''); set('wzConnSchema', c.schema || WZ.schema || '');
+    set('wzInstName', c.instance_name || '');
+    const w = document.getElementById('wzInstNameWrap');
+    if(w) w.classList.toggle('hidden', (document.getElementById('wzEng').value || '') !== 'sqlserver');
+    const p = document.getElementById('wzPort');
+    if(p && (p.value === '' || p.value === '0')) p.value = c.port || WZ_ENG_PORTS[eng.value] || '';
+}
+async function wzConnSave(){
+    const box = document.getElementById('wzConnMsg');
+    box.classList.add('hidden');
+    const btn = document.getElementById('wzConnBtn');
+    const body = {engine: document.getElementById('wzEng').value, host: document.getElementById('wzHost').value.trim(), port: parseInt(document.getElementById('wzPort').value || '0'), user: document.getElementById('wzUser').value.trim(), password: document.getElementById('wzPass').value, instance: document.getElementById('wzInst').value.trim(), instance_name: (document.getElementById('wzInstName').value || '').trim(), schema: document.getElementById('wzConnSchema').value.trim(), description: 'default connection (wizard)'};
+    if(!body.host){ box.textContent = 'أدخل المضيف'; box.className = 'rounded-xl px-3 py-2 bg-rose-50 text-rose-600 border border-rose-200 text-xs'; return; }
+    if(body.engine === 'sqlserver' && !body.instance_name){ box.textContent = 'اسم المثيل مطلوب لـ SQL Server (مثال SQLEXPRESS)'; box.className = 'rounded-xl px-3 py-2 bg-rose-50 text-rose-600 border border-rose-200 text-xs'; return; }
+    btn.disabled = true; btn.textContent = 'جارٍ الحفظ والاختبار...';
+    try{
+        const res = await fetch('/api/setup/wizard/connection/', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+        const data = await res.json();
+        if(res.ok){
+            WZ.urs_local = data.connection;
+            const t = data.tested || {};
+            const sch = data.schema_ok ? ' — السكيما جاهزة ✓' : (' — السكيما: ' + (data.schema_note || '').slice(0, 160));
+            box.textContent = (t.ok ? ('تم الحفظ والاختبار ✓ (' + (t.user || body.engine) + ')') : ('تم الحفظ — تعذر الوصول: ' + (t.error || '').slice(0, 200))) + sch;
+            box.className = 'rounded-xl px-3 py-2 text-xs ' + (t.ok ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-amber-50 text-amber-700 border border-amber-200');
+            document.getElementById('wzPass').value = '';
+            try{ notify(t.ok ? 'الاتصال يعمل ✓' : 'حُفظ الاتصال (الاختبار فشل)', t.ok ? 'success' : 'info'); }catch(e){}
+        } else { box.textContent = data.error || 'فشل الحفظ'; box.className = 'rounded-xl px-3 py-2 bg-rose-50 text-rose-600 border border-rose-200 text-xs'; }
+    }catch(e){ box.textContent = 'تعذر الاتصال'; box.className = 'rounded-xl px-3 py-2 bg-rose-50 text-rose-600 border border-rose-200 text-xs'; }
+    btn.disabled = false; btn.textContent = 'حفظ واختبار الاتصال';
+    await wzRefresh();
+}
+async function wzFmlkLoad(){
+    const box = document.getElementById('wzFmlkList');
+    box.innerHTML = '<div class="text-slate-400 text-center py-2">جارٍ المسح...</div>';
+    try{
+        const r = await fetch('/api/setup/wizard/fmlk/');
+        const data = await r.json();
+        const items = data.items || [];
+        document.getElementById('wzFmlkCount').textContent = items.length + ' ملف';
+        box.innerHTML = items.map((t, i)=>{
+            const uni = (t.connection || '') === 'urs_local';
+            const badge = uni ? '<span class="text-[10px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-bold">موحد</span>' : '<span class="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-bold font-mono" dir="ltr">' + String(t.connection || '—').replace(/</g, '&lt;') + '</span>';
+            return '<label class="flex items-center gap-2 rounded-xl px-3 py-2 bg-slate-50 border border-slate-200 cursor-pointer">'
+                + '<input type="checkbox" class="wz-fmlk-chk" data-app="' + String(t.app).replace(/"/g, '&quot;') + '" data-file="' + String(t.file).replace(/"/g, '&quot;') + '"' + (uni ? '' : ' checked') + '>'
+                + '<span class="font-mono" dir="ltr">' + String(t.app).replace(/</g, '&lt;') + '/' + String(t.file).replace(/</g, '&lt;') + '</span>'
+                + '<span class="mr-auto">' + badge + '</span></label>';
+        }).join('') || '<div class="text-slate-400 text-center py-2">لا ملفات</div>';
+    }catch(e){ box.innerHTML = '<div class="text-rose-500 text-center py-2">تعذر المسح</div>'; }
+}
+function wzFmlkCheck(all){
+    document.querySelectorAll('.wz-fmlk-chk').forEach(ch=>{
+        if(all){ ch.checked = true; return; }
+        const lbl = ch.closest('label').textContent || '';
+        ch.checked = !/موحد/.test(lbl);
+    });
+}
+async function wzRetarget(){
+    const files = Array.from(document.querySelectorAll('.wz-fmlk-chk:checked')).map(ch=>({app: ch.dataset.app, file: ch.dataset.file}));
+    if(!files.length){ try{ notify('حدد ملفاً واحداً على الأقل', 'error'); }catch(e){} return; }
+    const btn = document.getElementById('wzRetargetBtn');
+    btn.disabled = true; btn.textContent = 'جارٍ التوحيد...';
+    try{
+        const res = await fetch('/api/setup/wizard/retarget/', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({files: files, connection: 'urs_local'})});
+        const data = await res.json();
+        if(res.ok){ try{ notify('تم توحيد ' + (data.updated || 0) + ' / ' + files.length, 'success'); }catch(e){} }
+        else { try{ notify(data.error || 'فشل التوحيد', 'error'); }catch(e){} }
+    }catch(e){ try{ notify('تعذر الاتصال', 'error'); }catch(e2){} }
+    btn.disabled = false; btn.textContent = 'توحيد المحدد على urs_local';
+    await wzFmlkLoad();
+}
+async function wzSeed(){
+    const btn = document.getElementById('wzSeedBtn');
+    btn.disabled = true; btn.textContent = 'جارٍ الإنشاء...';
+    const body = {};
+    const dst = (document.getElementById('wzDstSchema').value || '').trim();
+    if(dst){ body.schema = dst; body.rewrite_files = document.getElementById('wzRewriteSchema').checked; }
+    try{
+        const res = await fetch('/api/setup/wizard/seed/', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+        const data = await res.json();
+        if(res.ok){
+            WZ.tables = (data.results || []).map(r=>({file: r.file, table: r.table, schema: r.schema, fields: r.fields, exists: !!r.created, ncols: r.ncols, missing: []}));
+            const nAdded = (data.results || []).reduce((s, r)=>s + ((r.added || []).length), 0);
+            const nRew = (data.results || []).filter(r=>r.schema_rewritten).length;
+            const nData = (data.results || []).reduce((s, r)=>s + (r.data || 0), 0);
+            const tgt = data.target ? ' — الهدف: ' + data.target : '';
+            WZ.urs_local = data.connection; WZ.tables_ready = !!data.ready;
+            try{ notify('تم إنشاء الاتصال والجداول ✓' + (nAdded ? ' + إضافة ' + nAdded + ' عمود ناقص' : '') + (nRew ? ' + توحيد سكيما ' + nRew + ' ملف' : '') + (nData ? ' + تعبئة ' + nData + ' سجل' : '') + tgt, 'success'); }catch(e){}
+        }
+        else { try{ notify(data.error || 'فشل الإنشاء', 'error'); }catch(e){} }
+    }catch(e){ try{ notify('تعذر الاتصال', 'error'); }catch(e2){} }
+    btn.disabled = false; btn.textContent = 'إنشاء الاتصال والجداول';
+    await wzRefresh();
+}
+document.addEventListener('DOMContentLoaded', async ()=>{
+    try{
+        let visible = 0;
+        ['suCountry', 'suCity', 'suCurrency'].forEach(id=>{
+            const sel = document.getElementById(id);
+            if(!sel) return;
+            if(sel.options.length <= 1){ sel.closest('div').style.display = 'none'; }
+            else visible++;
+        });
+        if(!visible){ const row = document.getElementById('suGeoRow'); if(row) row.style.display = 'none'; }
+    }catch(e){}
+    await wzRefresh();
+    wzStep = WZ.has_company ? 2 : 1;
+    wzPaintSteps();
+});
+</script>
+{% endblock %}

@@ -1,0 +1,503 @@
+{% extends "base.html" %}
+{% block title %}{{ app.ar }} — مخطط البيانات{% endblock %}
+{% block head_css %}
+{% block topbar %}{% endblock %}
+        body { background-color: #f8fafc; }
+        .custom-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+        .custom-scroll::-webkit-scrollbar-track { background: #f1f5f9; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        .diag-card { position: absolute; user-select: none; }
+        .diag-card.dragging { opacity: .85; box-shadow: 0 10px 25px rgba(0,0,0,.18); z-index: 30; }
+        .diag-row.sel { background: #eef2ff; }
+        .diag-card.drop-hint { outline: 2px dashed #6366f1; outline-offset: 2px; }
+{% endblock %}
+{% block sidebar %}
+    <aside class="w-72 bg-white border-l border-gray-200 flex flex-col overflow-hidden shrink-0">
+        <div class="p-4 border-b border-gray-100">
+            <a href="/app/{{ app_name }}/" class="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-800 mb-3"><i class="fa-solid fa-arrow-right"></i> العودة للتطبيق</a>
+            <div class="flex items-center gap-3">
+                <div class="w-12 h-12 bg-indigo-600 text-white rounded-2xl flex items-center justify-center text-xl">
+                    <i class="fa-solid fa-diagram-project"></i>
+                </div>
+                <div>
+                    <h1 class="font-bold text-gray-800">مخطط البيانات</h1>
+                    <p class="text-xs text-gray-500" id="diagReportName">—</p>
+                </div>
+            </div>
+        </div>
+        <div class="flex-1 overflow-y-auto p-3 space-y-3 custom-scroll">
+            <div>
+                <h3 class="text-xs font-bold text-gray-700 mb-2">الجداول</h3>
+                <div id="diagTableList" class="space-y-1"></div>
+                <button onclick="openDiagAddTable()" class="mt-2 w-full py-2 border-2 border-dashed border-indigo-300 hover:border-indigo-500 text-indigo-700 rounded-xl text-xs font-bold"><i class="fa-solid fa-plus"></i> إضافة جدول</button>
+            </div>
+            <div>
+                <h3 class="text-xs font-bold text-gray-700 mb-2">الروابط <span id="diagLinksCount" class="text-indigo-600"></span></h3>
+                <div id="diagSideLinks" class="space-y-1"></div>
+            </div>
+            <div class="text-[10px] text-slate-400 leading-5 px-1">اسحب البطاقة من عنوانها للتحريك • اسحب أيقونة الربط <i class="fa-solid fa-link"></i> من عمود وأفلتها على عمود آخر • انقر عموداً لتحديده</div>
+        </div>
+        <div class="p-3 border-t border-gray-100 space-y-2">
+            <button onclick="saveDiagram()" class="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold"><i class="fa-solid fa-floppy-disk"></i> حفظ الروابط في التقرير</button>
+            <a id="diagBackDesigner" href="#" class="block text-center w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold">عودة للمصمم</a>
+        </div>
+    </aside>
+{% endblock %}
+{% block main %}
+    <div class="flex-1 flex flex-col overflow-hidden min-w-0">
+        <header class="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between shrink-0">
+            <div class="text-xs text-slate-500">لوحة الرسم — <span id="diagCanvasInfo">0 جدول • 0 رابط</span></div>
+            <div class="flex items-center gap-2">
+                <button onclick="autoLayoutDiagram()" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold"><i class="fa-solid fa-wand-magic-sparkles"></i> ترتيب تلقائي</button>
+                <button onclick="saveDiagram()" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold"><i class="fa-solid fa-floppy-disk"></i> حفظ</button>
+            </div>
+        </header>
+        <div id="diagScroll" class="flex-1 overflow-auto custom-scroll bg-slate-100 relative">
+            <div id="diagCanvas" class="relative" style="width:2400px;height:1600px;background-image:radial-gradient(#cbd5e1 1px, transparent 1px);background-size:22px 22px;">
+                <svg id="diagSvg" class="absolute inset-0" width="2400" height="1600">
+                    <defs>
+                        <marker id="crowfoot" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
+                            <circle cx="10" cy="6" r="1.6" fill="#64748b"/>
+                            <path d="M10,6 L2,1 M10,6 L2,6 M10,6 L2,11" stroke="#64748b" stroke-width="1.4" fill="none"/>
+                        </marker>
+                    </defs>
+                    <g id="diagLinks"></g>
+                    <g id="diagTemp"></g>
+                </svg>
+                <div id="diagCards"></div>
+            </div>
+        </div>
+    </div>
+    <!-- Add-table modal -->
+    <div id="diagAddModal" class="hidden fixed inset-0 bg-slate-900/60 z-[80] overflow-y-auto p-4" onclick="if(event.target===this) this.classList.add('hidden')">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg m-auto overflow-hidden flex flex-col max-h-[85vh]">
+            <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+                <h3 class="text-sm font-bold text-slate-800">إضافة جدول للمخطط</h3>
+                <button onclick="document.getElementById('diagAddModal').classList.add('hidden')" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="px-5 pt-3 shrink-0">
+                <input id="diagAddSearch" oninput="renderDiagAddList()" placeholder="ابحث عن جدول..." autocomplete="off" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono" dir="ltr">
+            </div>
+            <div id="diagAddList" class="flex-1 min-h-0 overflow-y-auto custom-scroll p-3 space-y-1 text-xs"></div>
+        </div>
+    </div>
+    <!-- Link editor modal -->
+    <div id="diagLinkModal2" class="hidden fixed inset-0 bg-slate-900/60 z-[85] overflow-y-auto p-4" onclick="if(event.target===this) this.classList.add('hidden')">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md m-auto overflow-hidden">
+            <div class="px-5 py-3 border-b border-slate-200 bg-slate-50">
+                <h3 class="text-sm font-bold text-slate-800">مرجع الربط</h3>
+                <div id="diagLinkTables2" class="text-xs text-indigo-700 font-mono mt-1" dir="ltr"></div>
+            </div>
+            <div class="p-5 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                <div><label class="block text-[11px] font-semibold text-slate-600">عمود المصدر</label><select id="diagLinkFrom2" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 font-mono" dir="ltr"></select></div>
+                <div><label class="block text-[11px] font-semibold text-slate-600">عمود الهدف</label><select id="diagLinkTo2" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 font-mono" dir="ltr"></select></div>
+                <div class="sm:col-span-2"><label class="block text-[11px] font-semibold text-slate-600">نوع الربط</label><select id="diagLinkRel2" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5"><option value="one_to_one">واحد لواحد — نفس المستوى (باتجاهين)</option><option value="one_to_many">واحد لمتعدد — مستويات مختلفة (رئيسي ← فرعي)</option></select></div>
+            </div>
+            <div class="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2">
+                <button onclick="document.getElementById('diagLinkModal2').classList.add('hidden')" class="px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs">إلغاء</button>
+                <button onclick="saveDiagLink2()" class="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold">حفظ الربط</button>
+            </div>
+        </div>
+    </div>
+{% endblock %}
+{% block scripts %}
+    <script>
+        const APP_NAME = "{{ app_name|escapejs }}";
+    </script>
+    <script>
+        // ── Data diagram state ──
+        let DG = {file: '', meta: {}, fields: [], columns: [], connections: [], charts: [], rules: [], detail: null,
+                  tables: {}, links: [], connId: '', connNames: {}, sel: null, dragCard: null, linkDrag: null, linkDraft: null};
+        function dgConnId(){
+            if(DG.connId) return DG.connId;
+            const c = (DG.connections || [])[0];
+            return c ? String(c.connection_id || c.connectionId || '') : '';
+        }
+        function dgAllConns(){
+            return (DG.connections || []).map(c=>({
+                id: String(c.connection_id || c.connectionId || ''),
+                name: '',
+            })).filter(c=>c.id);
+        }
+        function dgTableKey(conn, schema, table){ return `${conn}::${schema ? schema + '.' : ''}${table}`; }
+        function dgParseKey(key){
+            const m = String(key).match(/^([^:]+)::(.*)$/);
+            if(!m) return {conn: dgConnId(), schema: '', table: String(key)};
+            const st = m[2]; const dot = st.indexOf('.');
+            if(dot >= 0) return {conn: m[1], schema: st.slice(0, dot), table: st.slice(dot + 1)};
+            return {conn: m[1], schema: '', table: st};
+        }
+        async function dgLoadConnNames(){
+            try{
+                const res = await fetch('/api/connections/');
+                const data = await res.json();
+                (data.connections || []).forEach(c=>{ DG.connNames[String(c.id)] = c.name; });
+            }catch(e){}
+        }
+        function linkSideKey(l, side){
+            const conn = side === 'from' ? (l.from_conn || '') : (l.to_conn || '');
+            const tbl = side === 'from' ? (l.from_table || '') : (l.to_table || '');
+            return Object.keys(DG.tables).find(k=>{
+                const p = dgParseKey(k);
+                return p.table.toUpperCase() === tbl.toUpperCase() && (!conn || p.conn === conn);
+            }) || null;
+        }
+        async function dgTables(){
+            const conns = dgAllConns();
+            const all = [];
+            for(const cn of conns){
+                try{
+                    const res = await fetch(`/api/connections/${encodeURIComponent(cn.id)}/tables/`);
+                    const data = await res.json();
+                    (data.tables || []).forEach(t=>{
+                        const nm = t.name || t;
+                        const sc = t.schema || '';
+                        all.push({key: dgTableKey(cn.id, sc, nm), conn: cn.id, schema: sc, table: nm,
+                                  label: (sc ? sc + '.' : '') + nm});
+                    });
+                }catch(e){}
+            }
+            return all;
+        }
+        async function dgCols(tableKey){
+            // tableKey may be composite (conn::schema.table) or legacy bare name
+            let conn = dgConnId(), schema = '', table = tableKey;
+            const m = String(tableKey).match(/^([^:]+)::(.*)$/);
+            if(m){ conn = m[1]; const st = m[2]; const dot = st.indexOf('.'); if(dot >= 0){ schema = st.slice(0, dot); table = st.slice(dot + 1); } }
+            const res = await fetch(`/api/connections/${encodeURIComponent(conn)}/tables/${encodeURIComponent(schema ? schema + '.' + table : table)}/columns/`);
+            const data = await res.json();
+            return (data.columns || []).map(c=>({name: c.name || c, type: c.type || c.db_type || ''}));
+        }
+        async function loadDiagram(){
+            const q = new URLSearchParams(location.search);
+            DG.file = q.get('file') || '';
+            const back = document.getElementById('diagBackDesigner');
+            if(back) back.href = DG.file ? `/app/${APP_NAME}/report-designer/?file=${encodeURIComponent(DG.file)}` : `/app/${APP_NAME}/report-designer/`;
+            if(!DG.file){
+                document.getElementById('diagReportName').textContent = 'بدون تقرير — للعرض فقط';
+                return;
+            }
+            try{
+                const res = await fetch(`/api/rml/metadata?rml=${encodeURIComponent(DG.file)}&app=${encodeURIComponent(APP_NAME)}`);
+                const data = await res.json();
+                if(data.error) throw new Error(data.error);
+                DG.meta = data.metadata || {};
+                DG.fields = data.fields || [];
+                DG.columns = data.columns || [];
+                DG.connections = data.connections || [];
+                DG.charts = data.charts || [];
+                DG.rules = data.rules || [];
+                DG.detail = data.detail || null;
+                DG.links = (data.links || []).map(l=>({from_conn: l.from_conn || '', from_table: l.from_table, from_col: l.from_col, to_conn: l.to_conn || '', to_table: l.to_table, to_col: l.to_col, rel_type: (l.rel_type || l.relType || l.rel || 'one_to_one'), inferred: false}));
+                // الجوينات المستدلة من التقرير نفسه (غير المحفوظة)
+                try{
+                    const rj = await fetch(`/api/rml/joins?rml=${encodeURIComponent(DG.file)}&app=${encodeURIComponent(APP_NAME)}`);
+                    const dj = await rj.json();
+                    (dj.joins || []).forEach(j=>{
+                        const dup = DG.links.some(l=>(l.from_table || '').toUpperCase() === (j.from_table || '').toUpperCase() && (l.to_table || '').toUpperCase() === (j.to_table || '').toUpperCase());
+                        if(!dup) DG.links.push({from_conn: j.from_conn || '', from_table: j.from_table, from_col: j.from_col, to_conn: j.to_conn || '', to_table: j.to_table, to_col: j.to_col, rel_type: (j.rel_type || j.relType || 'one_to_one'), inferred: true});
+                    });
+                }catch(e){}
+                document.getElementById('diagReportName').textContent = DG.meta.displayName || DG.file;
+                await dgLoadConnNames();
+                // tables (conn-aware): from fields, detail, links
+                const ft = {};
+                DG.fields.forEach(f=>{
+                    const ts = (f.table_source || f.tableSource || '').split('.').pop();
+                    const cid = String(f.conn_id || f.connection_id || '');
+                    if(ts && !ft[ts.toUpperCase()]) ft[ts.toUpperCase()] = {conn: cid, table: ts};
+                });
+                const want = {};
+                const addWanted = (conn, table)=>{
+                    if(!table) return;
+                    want[dgTableKey(conn || '', '', table)] = {conn: conn || '', table};
+                };
+                Object.values(ft).forEach(v=>addWanted(v.conn, v.table));
+                if(DG.detail) addWanted((ft[(DG.detail.table || '').toUpperCase()] || {}).conn || '', DG.detail.table);
+                DG.links.forEach(l=>{
+                    addWanted(l.from_conn || ((ft[(l.from_table || '').toUpperCase()] || {}).conn || ''), l.from_table);
+                    addWanted(l.to_conn || ((ft[(l.to_table || '').toUpperCase()] || {}).conn || ''), l.to_table);
+                });
+                const byConn = {};
+                Object.values(want).forEach(w=>{ (byConn[w.conn] = byConn[w.conn] || []).push(w); });
+                DG.tables = {};
+                let i = 0;
+                for(const cid of Object.keys(byConn)){
+                    let tl = [];
+                    try{
+                        const r2 = await fetch(`/api/connections/${encodeURIComponent(cid || dgConnId())}/tables/`);
+                        const dd = await r2.json();
+                        tl = dd.tables || [];
+                    }catch(e){}
+                    for(const w of byConn[cid]){
+                        const hit = tl.find(t=>(t.name || t).toUpperCase() === w.table.toUpperCase());
+                        const schema = hit ? (hit.schema || '') : '';
+                        const key = dgTableKey(w.conn, schema, w.table);
+                        if(!DG.tables[key]){
+                            DG.tables[key] = {conn: w.conn, schema, table: w.table, cols: [], x: 60 + (i % 3) * 420, y: 60 + Math.floor(i / 3) * 340};
+                            i++;
+                        }
+                    }
+                }
+                renderDiagram();
+                for(const k of Object.keys(DG.tables)){ dgCols(k).then(cols=>{ if(DG.tables[k]){ DG.tables[k].cols = cols; renderDiagram(); } }); }
+            }catch(e){
+                const stk = String((e && e.stack) || e).slice(0, 400);
+                document.getElementById('diagReportName').textContent = 'تعذر التحميل: ' + String((e && e.message) || e).slice(0, 80);
+                console.error('DIAG LOAD FAILED:', stk);
+                const dbg = document.getElementById('diagCanvasInfo');
+                if(dbg) dbg.textContent = 'خطأ: ' + stk;
+            }
+        }
+        function linkedCols(key){
+            const s = new Set();
+            DG.links.forEach(l=>{
+                if(linkSideKey(l, 'from') === key && l.from_col) s.add(l.from_col);
+                if(linkSideKey(l, 'to') === key && l.to_col) s.add(l.to_col);
+            });
+            return s;
+        }
+        function connBadge(conn){
+            if(!conn) return '';
+            const nm = ((typeof DG !== 'undefined' && DG.connNames) || {})[conn] || ('#' + conn);
+            return `<span class="text-[9px] bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded-full font-bold shrink-0">${nm}</span>`;
+        }
+        function renderDiagram(){
+            const host = document.getElementById('diagCards');
+            const keys = Object.keys(DG.tables);
+            host.innerHTML = keys.map(k=>{
+                const T = DG.tables[k];
+                const keys2 = linkedCols(k);
+                const rows = (T.cols || []).map(c=>{
+                    const isKey = keys2.has(c.name);
+                    const sel = DG.sel && DG.sel.table === k && DG.sel.col === c.name;
+                    return `<div class="diag-row flex items-center gap-1.5 px-2 py-[3px] border-b border-amber-100/60 last:border-0 ${sel ? 'sel' : ''}" data-table="${k}" data-col="${c.name}">
+                        <i class="fa-solid ${isKey ? 'fa-key text-amber-500' : 'fa-minus text-slate-200'} text-[9px] w-3 text-center"></i>
+                        <span class="font-mono font-bold text-[11px] ${isKey ? 'text-slate-800' : 'text-slate-600'}" dir="ltr">${c.name}</span>
+                        <span class="mr-auto text-[10px] text-slate-400 font-mono" dir="ltr">${c.type || ''}</span>
+                        <i class="fa-solid fa-link text-[9px] text-slate-300 hover:text-indigo-600 cursor-grab link-handle" title="اسحب للربط"></i>
+                    </div>`;
+                }).join('') || '<div class="px-2 py-3 text-[10px] text-slate-400 text-center">جاري تحميل الأعمدة...</div>';
+                return `<div class="diag-card bg-[#F5E4C3] border border-[#C9A96A] rounded-xl shadow-md w-64" data-table="${k}" style="left:${T.x}px;top:${T.y}px">
+                    <div class="diag-head px-2 py-1.5 border-b border-[#C9A96A] flex items-center gap-1.5 cursor-move bg-[#EFDDB4] rounded-t-xl">
+                        <div class="min-w-0"><div class="font-bold text-[12px] text-slate-800 truncate" dir="ltr">${T.table}</div><div class="flex items-center gap-1">${T.schema ? `<span class="text-[9px] text-slate-500 font-mono" dir="ltr">${T.schema}</span>` : ''}${connBadge(T.conn)}</div></div>
+                        <button onclick="removeDiagTable2('${k.replace(/'/g, "\\'")}')" class="mr-auto text-slate-400 hover:text-rose-600 text-xs shrink-0"><i class="fa-solid fa-xmark"></i></button>
+                    </div>
+                    <div class="max-h-64 overflow-y-auto custom-scroll">${rows}</div>
+                </div>`;
+            }).join('');
+            // sidebar lists + info
+            document.getElementById('diagCanvasInfo').textContent = `${keys.length} جدول • ${DG.links.length} رابط`;
+            document.getElementById('diagLinksCount').textContent = DG.links.length ? `(${DG.links.length})` : '';
+            document.getElementById('diagTableList').innerHTML = keys.length ? keys.map(k=>{ const T = DG.tables[k]; return `<div class="flex items-center gap-2 text-xs bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5"><code class="font-mono font-bold truncate" dir="ltr">${T.table}</code>${connBadge(T.conn)}<button onclick="removeDiagTable2('${k.replace(/'/g, "\\'")}')" class="mr-auto text-slate-300 hover:text-rose-600 shrink-0"><i class="fa-solid fa-xmark text-[10px]"></i></button></div>`; }).join('') : '<p class="text-[11px] text-slate-400">لا توجد جداول</p>';
+            const _relLbl = (r)=>((r === 'one_to_many') ? '1-م' : '1-1');
+            document.getElementById('diagSideLinks').innerHTML = DG.links.length ? DG.links.map((l, i)=>{ const fk = linkSideKey(l, 'from'), tk = linkSideKey(l, 'to'); const fn = fk ? DG.tables[fk].table : l.from_table; const tn = tk ? DG.tables[tk].table : l.to_table; return `<div class="flex items-center gap-1.5 text-[11px] bg-indigo-50/60 border border-indigo-100 rounded-lg px-2 py-1.5"><i class="fa-solid fa-link text-indigo-500 shrink-0"></i><code class="font-mono truncate" dir="ltr">${fn}.${l.from_col} ← ${tn}.${l.to_col}</code><span class="text-[9px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded-full font-bold shrink-0">${_relLbl(l.rel_type)}</span>${l.inferred ? '<span class="text-[9px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-bold shrink-0">تلقائي</span>' : ''}<button onclick="removeDiagLink2(${i})" class="mr-auto text-slate-300 hover:text-rose-600 shrink-0"><i class="fa-solid fa-xmark text-[10px]"></i></button></div>`; }).join('') : '<p class="text-[11px] text-slate-400">لا توجد روابط</p>';
+            bindDiagramEvents();
+            drawDiagramLinks();
+        }
+        function removeDiagTable2(k){
+            delete DG.tables[k];
+            DG.links = DG.links.filter(l=>linkSideKey(l, 'from') !== k && linkSideKey(l, 'to') !== k);
+            if(DG.sel && DG.sel.table === k) DG.sel = null;
+            renderDiagram();
+        }
+        function removeDiagLink2(i){ DG.links.splice(i, 1); renderDiagram(); }
+        // ── Card moving ──
+        function bindDiagramEvents(){
+            document.querySelectorAll('#diagCards .diag-card').forEach(card=>{
+                const head = card.querySelector('.diag-head');
+                head.onmousedown = (e)=>{
+                    if(e.target.closest('button')) return;
+                    e.preventDefault();
+                    const t = card.getAttribute('data-table');
+                    DG.dragCard = {t, dx: e.clientX - DG.tables[t].x, dy: e.clientY - DG.tables[t].y};
+                    card.classList.add('dragging');
+                };
+                card.querySelectorAll('.diag-row').forEach(row=>{
+                    row.onclick = ()=>{
+                        DG.sel = {table: row.getAttribute('data-table'), col: row.getAttribute('data-col')};
+                        document.querySelectorAll('#diagCards .diag-row').forEach(r=>r.classList.remove('sel'));
+                        row.classList.add('sel');
+                    };
+                    const h = row.querySelector('.link-handle');
+                    if(h) h.onmousedown = (e)=>{
+                        e.preventDefault(); e.stopPropagation();
+                        DG.linkDrag = {table: row.getAttribute('data-table'), col: row.getAttribute('data-col'), x1: 0, y1: 0, x2: 0, y2: 0};
+                    };
+                });
+            });
+            document.onmousemove = (e)=>{
+                const cv = document.getElementById('diagCanvas');
+                const r = cv.getBoundingClientRect();
+                if(DG.dragCard){
+                    const T = DG.tables[DG.dragCard.t];
+                    T.x = Math.max(0, e.clientX - r.left - DG.dragCard.dx);
+                    T.y = Math.max(0, e.clientY - r.top - DG.dragCard.dy);
+                    const el = document.querySelector(`#diagCards .diag-card[data-table="${DG.dragCard.t}"]`);
+                    if(el){ el.style.left = T.x + 'px'; el.style.top = T.y + 'px'; }
+                    drawDiagramLinks();
+                }
+                if(DG.linkDrag){
+                    DG.linkDrag.x2 = e.clientX - r.left;
+                    DG.linkDrag.y2 = e.clientY - r.top;
+                    const src = rowCenter(DG.linkDrag.table, DG.linkDrag.col, 'right');
+                    DG.linkDrag.x1 = src.x; DG.linkDrag.y1 = src.y;
+                    drawTempLink();
+                }
+            };
+            document.onmouseup = (e)=>{
+                if(DG.dragCard){ DG.dragCard = null; document.querySelectorAll('#diagCards .dragging').forEach(c=>c.classList.remove('dragging')); }
+                if(DG.linkDrag){
+                    const d = DG.linkDrag; DG.linkDrag = null;
+                    document.getElementById('diagTemp').innerHTML = '';
+                    const el = document.elementFromPoint(e.clientX, e.clientY);
+                    const row = el ? el.closest('.diag-row') : null;
+                    if(row && row.getAttribute('data-table') !== d.table){
+                        openDiagLink2(d.table, d.col, row.getAttribute('data-table'), row.getAttribute('data-col'));
+                    }
+                }
+            };
+        }
+        function rowCenter(table, col, side){
+            const cv = document.getElementById('diagCanvas');
+            const cr = cv.getBoundingClientRect();
+            const card = document.querySelector(`#diagCards .diag-card[data-table="${CSS.escape(table)}"]`);
+            const row = card ? card.querySelector(`.diag-row[data-col="${CSS.escape(col)}"]`) : null;
+            const anchor = row || (card ? card.querySelector('.diag-head') : null);
+            if(!anchor || !card) return {x: 0, y: 0};
+            const ar = anchor.getBoundingClientRect();
+            const right = (side === 'right');
+            return {x: ar.left - cr.left + (right ? ar.width : 0), y: ar.top - cr.top + ar.height / 2};
+        }
+        function linkPath(x1, y1, x2, y2){
+            const mx = (x1 + x2) / 2;
+            return `M ${x1} ${y1} H ${mx} V ${y2} H ${x2}`;
+        }
+        function drawDiagramLinks(){
+            const g = document.getElementById('diagLinks');
+            if(!g) return;
+            g.innerHTML = DG.links.map(l=>{
+                const fk = linkSideKey(l, 'from'), tk = linkSideKey(l, 'to');
+                if(!fk || !tk) return '';
+                const a = rowCenter(fk, l.from_col, 'right');
+                const b = rowCenter(tk, l.to_col, 'left');
+                let p1 = a, p2 = b;
+                if(b.x < a.x - 40){ p1 = rowCenter(fk, l.from_col, 'left'); p2 = rowCenter(tk, l.to_col, 'right'); }
+                return `<path d="${linkPath(p1.x, p1.y, p2.x, p2.y)}" stroke="#64748b" stroke-width="1.6" stroke-dasharray="6 4" fill="none" marker-end="url(#crowfoot)"/>`;
+            }).join('');
+        }
+        function drawTempLink(){
+            const g = document.getElementById('diagTemp');
+            if(!g || !DG.linkDrag) return;
+            const d = DG.linkDrag;
+            g.innerHTML = `<path d="${linkPath(d.x1, d.y1, d.x2, d.y2)}" stroke="#6366f1" stroke-width="1.6" stroke-dasharray="6 4" fill="none"/>`;
+        }
+        // ── Link editor (keys carry connection context) ──
+        async function openDiagLink2(fromKey, fromCol, toKey, toCol){
+            const fp = dgParseKey(fromKey), tp = dgParseKey(toKey);
+            DG.linkDraft = {fromKey, toKey};
+            document.getElementById('diagLinkTables2').textContent = fp.table + '  ←  ' + tp.table;
+            const fill = async (id, key, guess)=>{
+                const sel = document.getElementById(id);
+                let cols = (DG.tables[key] && DG.tables[key].cols) || [];
+                if(!cols.length) cols = await dgCols(key);
+                sel.innerHTML = cols.map(c=>`<option value="${c.name}">${c.name} — ${c.type || ''}</option>`).join('');
+                if(guess && cols.some(c=>c.name === guess)) sel.value = guess;
+            };
+            await fill('diagLinkFrom2', fromKey, fromCol);
+            await fill('diagLinkTo2', toKey, toCol);
+            const _ex = DG.links.find(l=>l.from_table === fp.table && l.to_table === tp.table && (l.from_conn || '') === fp.conn && (l.to_conn || '') === tp.conn);
+            document.getElementById('diagLinkRel2').value = (_ex && _ex.rel_type) || 'one_to_one';
+            // تخمين: أول عمود مشترك
+            const fc = ((DG.tables[fromKey] || {}).cols || []).map(c=>c.name);
+            const tc = ((DG.tables[toKey] || {}).cols || []);
+            const common = tc.map(c=>c.name).find(n=>fc.includes(n));
+            if(common && !fromCol){ document.getElementById('diagLinkFrom2').value = common; }
+            if(common && !toCol){ document.getElementById('diagLinkTo2').value = common; }
+            document.getElementById('diagLinkModal2').classList.remove('hidden');
+        }
+        function saveDiagLink2(){
+            if(!DG.linkDraft) return;
+            const fc = document.getElementById('diagLinkFrom2').value;
+            const tc = document.getElementById('diagLinkTo2').value;
+            const rc = document.getElementById('diagLinkRel2').value || 'one_to_one';
+            if(!fc || !tc) return;
+            const fp = dgParseKey(DG.linkDraft.fromKey), tp = dgParseKey(DG.linkDraft.toKey);
+            DG.links = DG.links.filter(l=>!(l.from_table === fp.table && l.to_table === tp.table && (l.from_conn || '') === fp.conn && (l.to_conn || '') === tp.conn));
+            DG.links.push({from_conn: fp.conn, from_table: fp.table, from_col: fc, to_conn: tp.conn, to_table: tp.table, to_col: tc, rel_type: rc});
+            document.getElementById('diagLinkModal2').classList.add('hidden');
+            DG.linkDraft = null;
+            renderDiagram();
+        }
+        // ── Add table (merged from ALL report connections) ──
+        async function openDiagAddTable(){
+            if(!dgAllConns().length){ alert('لا يوجد اتصال — احفظ التقرير باتصال أولاً'); return; }
+            DG._addTables = await dgTables();
+            document.getElementById('diagAddModal').classList.remove('hidden');
+            renderDiagAddList();
+            setTimeout(()=>{ const s = document.getElementById('diagAddSearch'); if(s){ s.value=''; s.focus(); } }, 60);
+        }
+        function connShort(conn){
+            return DG.connNames[conn] ? `${DG.connNames[conn]} (#${conn})` : ('#' + conn);
+        }
+        function renderDiagAddList(){
+            const q = ((document.getElementById('diagAddSearch') || {}).value || '').trim().toUpperCase();
+            const list = document.getElementById('diagAddList');
+            const matches = (DG._addTables || []).filter(t=>!q || t.table.toUpperCase().includes(q) || (t.label || '').toUpperCase().includes(q)).slice(0, 100);
+            list.innerHTML = matches.length ? matches.map((t, i)=>`<div onmousedown="pickDiagAddTable(${i})" class="px-3 py-2 hover:bg-indigo-50 cursor-pointer rounded-lg flex items-center gap-2"><code class="font-mono font-bold text-xs" dir="ltr">${t.label}</code><span class="text-[10px] text-indigo-500 mr-auto">${connShort(t.conn)}</span>${DG.tables[t.key] ? '<span class="text-[10px] text-emerald-600">مضاف</span>' : ''}</div>`).join('') : '<p class="text-slate-400 text-center py-6 text-xs">لا نتائج</p>';
+            DG._addMatches = matches;
+        }
+        async function pickDiagAddTable(i){
+            const t = (DG._addMatches || [])[i];
+            document.getElementById('diagAddModal').classList.add('hidden');
+            if(!t || DG.tables[t.key]) return;
+            const n = Object.keys(DG.tables).length;
+            DG.tables[t.key] = {conn: t.conn, schema: t.schema, table: t.table, cols: [], x: 60 + (n % 3) * 420, y: 60 + Math.floor(n / 3) * 340};
+            renderDiagram();
+            const cols = await dgCols(t.key);
+            if(DG.tables[t.key]){ DG.tables[t.key].cols = cols; renderDiagram(); }
+        }
+        function removeDiagTable2(t){
+            delete DG.tables[t];
+            DG.links = DG.links.filter(l=>l.from_table !== t && l.to_table !== t);
+            if(DG.sel && DG.sel.table === t) DG.sel = null;
+            renderDiagram();
+        }
+        function removeDiagLink2(i){ DG.links.splice(i, 1); renderDiagram(); }
+        function autoLayoutDiagram(){
+            Object.keys(DG.tables).forEach((t, i)=>{ DG.tables[t].x = 60 + (i % 3) * 420; DG.tables[t].y = 60 + Math.floor(i / 3) * 340; });
+            renderDiagram();
+        }
+        // ── Save links into the report ──
+        async function saveDiagram(){
+            if(!DG.file){ alert('افتح المخطط من تقرير محدد (?file=) للحفظ فيه'); return; }
+            try{
+                const md = DG.meta || {};
+                const payload = {
+                    file: DG.file,
+                    name: md.name || DG.file.replace(/\.rml$/i, ''),
+                    displayName: md.displayName || md.displayname || DG.file,
+                    icon: md.icon || 'fa-chart-bar',
+                    category: md.category || 'عام',
+                    schema: md.schema || '',
+                    description: md.description || '',
+                    namespace: md.namespace || '',
+                    report_type: md.type || md.reportType || 'master',
+                    detail: DG.detail,
+                    links: DG.links,
+                    connections: (DG.connections || []).map(c=>String(c.connection_id || c.connectionId || '')),
+                    fields: DG.fields,
+                    columns: DG.columns,
+                    charts: DG.charts,
+                    rules: (await (async ()=>{ try{ const r = await fetch(`/api/rml/metadata?rml=${encodeURIComponent(DG.file)}&app=${encodeURIComponent(APP_NAME)}`); const d = await r.json(); return d.rules || []; }catch(e){ return []; } })()),
+                };
+                const res = await fetch(`/api/apps/${encodeURIComponent(APP_NAME)}/rml/update/`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)});
+                const data = await res.json();
+                if(data.error) throw new Error(data.error);
+                alert('تم حفظ الروابط في التقرير');
+            }catch(e){ alert('تعذر الحفظ: ' + String((e && e.message) || e).slice(0, 200)); }
+        }
+        window.addEventListener('resize', ()=>drawDiagramLinks());
+        loadDiagram();
+    </script>
+{% endblock %}

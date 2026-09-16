@@ -1,0 +1,340 @@
+{
+  "user": "admin",
+  "roles": [
+    "admin"
+  ],
+  "generated_at": "2026-09-02T13:19:46.973774",
+  "rml": [
+    {
+      "file": "emp_report.rml",
+      "path": "C:\\urs2\\rml_python\\examples\\emp_report.rml",
+      "type": "rml",
+      "metadata": {
+        "name": "emp_report",
+        "displayName": "تقرير بيانات الموظفين المتقدم",
+        "displayname": "تقرير بيانات الموظفين المتقدم",
+        "category": "HR",
+        "connection": "ORCL_PROD",
+        "schema": "HR_SYS"
+      },
+      "allowed_actions": [
+        "view",
+        "create",
+        "edit",
+        "delete",
+        "execute",
+        "export",
+        "share"
+      ],
+      "columns": [
+        {
+          "id": "1",
+          "name": "id",
+          "alias": "المعرف",
+          "dataType": "NUMBER",
+          "data_type": "NUMBER",
+          "expr": "id",
+          "refTable": null,
+          "ref_table": null,
+          "refFk": null,
+          "ref_fk": null,
+          "refDisplay": null,
+          "ref_display": null,
+          "type": "direct",
+          "col_type": "direct"
+        },
+        {
+          "id": "2",
+          "name": "name",
+          "alias": "اسم الموظف",
+          "dataType": null,
+          "data_type": null,
+          "expr": "name",
+          "refTable": null,
+          "ref_table": null,
+          "refFk": null,
+          "ref_fk": null,
+          "refDisplay": null,
+          "ref_display": null,
+          "type": "direct",
+          "col_type": "direct"
+        },
+        {
+          "id": "3",
+          "name": "department",
+          "alias": "القسم",
+          "dataType": null,
+          "data_type": null,
+          "expr": "department",
+          "refTable": null,
+          "ref_table": null,
+          "refFk": null,
+          "ref_fk": null,
+          "refDisplay": null,
+          "ref_display": null,
+          "type": "direct",
+          "col_type": "direct"
+        },
+        {
+          "id": "4",
+          "name": "salary",
+          "alias": "الراتب (ر.س)",
+          "dataType": "NUMBER",
+          "data_type": "NUMBER",
+          "expr": "salary",
+          "refTable": null,
+          "ref_table": null,
+          "refFk": null,
+          "ref_fk": null,
+          "refDisplay": null,
+          "ref_display": null,
+          "type": "direct",
+          "col_type": "direct"
+        },
+        {
+          "id": "5",
+          "name": "dept_display",
+          "alias": "القسم (عرض)",
+          "dataType": null,
+          "data_type": null,
+          "expr": "department",
+          "refTable": "departments",
+          "ref_table": "departments",
+          "refFk": "dept_id",
+          "ref_fk": "dept_id",
+          "refDisplay": "dept_name",
+          "ref_display": "dept_name",
+          "type": "fk_lookup",
+          "col_type": "fk_lookup"
+        },
+        {
+          "id": "6",
+          "name": "total",
+          "alias": "العدد",
+          "dataType": null,
+          "data_type": null,
+          "expr": "COUNT(*)",
+          "refTable": null,
+          "ref_table": null,
+          "refFk": null,
+          "ref_fk": null,
+          "refDisplay": null,
+          "ref_display": null,
+          "type": "aggregated",
+          "col_type": "aggregated"
+        }
+      ],
+      "column_count": 6
+    }
+  ],
+  "fml": [
+    {
+      "file": "hr_form.fmlk",
+      "path": "C:\\urs2\\fmlk_engine\\examples\\hr_form.fmlk",
+      "type": "fmlk",
+      "metadata": {
+        "name": "hr_form",
+        "displayName": "نموذج الموظف",
+        "displayname": "نموذج الموظف",
+        "category": "HR",
+        "connection": "ORCL_PROD",
+        "schema": "HR_SYS",
+        "table": "employees"
+      },
+      "allowed_actions": [
+        "view",
+        "create",
+        "edit",
+        "delete",
+        "execute",
+        "export",
+        "share"
+      ],
+      "fields": [
+        {
+          "id": "1",
+          "name": "first_name",
+          "alias": "اسم First",
+          "dataType": null,
+          "inputType": "text",
+          "required": true,
+          "default": null,
+          "placeholder": null,
+          "tab": "basic",
+          "category": "Personal information",
+          "position": "left",
+          "colSpan": 1,
+          "refTable": null,
+          "refDisplay": null,
+          "options": []
+        },
+        {
+          "id": "2",
+          "name": "last_name",
+          "alias": "اسم",
+          "dataType": null,
+          "inputType": "text",
+          "required": false,
+          "default": null,
+          "placeholder": null,
+          "tab": "basic",
+          "category": "Personal information",
+          "position": "right",
+          "colSpan": 1,
+          "refTable": null,
+          "refDisplay": null,
+          "options": []
+        },
+        {
+          "id": "3",
+          "name": "civility",
+          "alias": "Civility",
+          "dataType": null,
+          "inputType": "select",
+          "required": false,
+          "default": null,
+          "placeholder": null,
+          "tab": "basic",
+          "category": "Personal information",
+          "position": null,
+          "colSpan": 1,
+          "refTable": null,
+          "refDisplay": null,
+          "options": [
+            "السيد",
+            "السيدة"
+          ]
+        },
+        {
+          "id": "4",
+          "name": "email",
+          "alias": "البريد الإلكتروني",
+          "dataType": null,
+          "inputType": "email",
+          "required": false,
+          "default": null,
+          "placeholder": null,
+          "tab": "basic",
+          "category": "Contact",
+          "position": "full",
+          "colSpan": 1,
+          "refTable": null,
+          "refDisplay": null,
+          "options": []
+        },
+        {
+          "id": "5",
+          "name": "work_mobile",
+          "alias": "Work mobile phone",
+          "dataType": null,
+          "inputType": "phone",
+          "required": false,
+          "default": null,
+          "placeholder": null,
+          "tab": "basic",
+          "category": "Work phones",
+          "position": "left",
+          "colSpan": 1,
+          "refTable": null,
+          "refDisplay": null,
+          "options": []
+        },
+        {
+          "id": "6",
+          "name": "work_fixed",
+          "alias": "Work fixed phone",
+          "dataType": null,
+          "inputType": "phone",
+          "required": false,
+          "default": null,
+          "placeholder": null,
+          "tab": "basic",
+          "category": "Work phones",
+          "position": "right",
+          "colSpan": 1,
+          "refTable": null,
+          "refDisplay": null,
+          "options": []
+        },
+        {
+          "id": "7",
+          "name": "birth_date",
+          "alias": "تاريخ Birth",
+          "dataType": null,
+          "inputType": "date",
+          "required": false,
+          "default": null,
+          "placeholder": null,
+          "tab": "basic",
+          "category": "Personal information",
+          "position": null,
+          "colSpan": 1,
+          "refTable": null,
+          "refDisplay": null,
+          "options": []
+        },
+        {
+          "id": "8",
+          "name": "nationality",
+          "alias": "Citizenship",
+          "dataType": null,
+          "inputType": "select",
+          "required": false,
+          "default": null,
+          "placeholder": null,
+          "tab": "basic",
+          "category": "Personal information",
+          "position": null,
+          "colSpan": 1,
+          "refTable": "countries",
+          "refDisplay": "name",
+          "options": []
+        }
+      ],
+      "tabs": [
+        {
+          "id": "basic",
+          "name": "Basic information",
+          "alias": "البيانات الأساسية",
+          "sortOrder": 1
+        },
+        {
+          "id": "work",
+          "name": "Work",
+          "alias": "العمل",
+          "sortOrder": 2
+        },
+        {
+          "id": "personal",
+          "name": "Personal",
+          "alias": "الشخصية",
+          "sortOrder": 3
+        }
+      ],
+      "field_count": 8
+    }
+  ],
+  "permissions": {
+    "hr_form.fmlk": [
+      "view",
+      "create",
+      "edit",
+      "delete",
+      "execute",
+      "export",
+      "share"
+    ],
+    "emp_report.rml": [
+      "view",
+      "create",
+      "edit",
+      "delete",
+      "execute",
+      "export",
+      "share"
+    ]
+  },
+  "rml_count": 1,
+  "fml_count": 1,
+  "total_files": 2
+}

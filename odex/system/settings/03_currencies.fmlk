@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<fml>
+  <fml_metadata name="currencies" displayName="العملات" table="urs_currency" category="النظام" description="العملات والعملة الافتراضية والسعر" connection="urs_local" schema="main_hq_2026"/>
+  <tabs>
+    <tab id="main" name="بيانات العملة" alias="بيانات العملة" sort_order="1"/>
+  </tabs>
+  <fields>
+    <field id="1" name="code" alias="رمز العملة" inputType="text" required="true" tab="main" category="أساسية" placeholder="SAR">
+      <validation regex="^[A-Z]{3}$" min_length="3" max_length="10"/>
+    </field>
+    <field id="2" name="name" alias="اسم العملة" inputType="text" required="true" tab="main" category="أساسية"/>
+    <field id="3" name="symbol" alias="الرمز المختصر" inputType="text" tab="main" category="أساسية" placeholder="ر.س"/>
+    <field id="4" name="exchange_rate" alias="السعر مقابل الأساسية" inputType="number" required="true" tab="main" category="مالية"/>
+    <field id="5" name="is_default" alias="العملة الافتراضية" inputType="boolean" tab="main" category="الحالة"/>
+    <field id="6" name="is_active" alias="نشطة" inputType="boolean" tab="main" category="الحالة"/>
+  </fields>
+</fml>
