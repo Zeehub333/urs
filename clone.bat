@@ -63,13 +63,13 @@ REM           app.config (per-server secrets - never overwritten by sync).
 echo [3/6] syncing into base (update + append, no deletes) ...
 echo     from: %TEMP_DIR%
 echo     to:   %BASE%
-if not exist "%TEMP_DIR%\install.bat" (
-  echo [X] clone looks empty (no install.bat) - aborting before sync.
-  rmdir /s /q "%TEMP_DIR%" >nul 2>&1
-  pause >nul
-  exit /b 1
-)
-robocopy "%TEMP_DIR%" "%BASE%" /E /NJH /NJS /NDL /NP /R:2 /W:2 /XD .git .urs-temp /XF app.config
+if exist "%TEMP_DIR%\install.bat" goto sync_go
+echo [X] clone looks empty - aborting before sync.
+rmdir /s /q "%TEMP_DIR%" >nul 2>&1
+pause >nul
+exit /b 1
+:sync_go
+"%SystemRoot%\System32\robocopy.exe" "%TEMP_DIR%" "%BASE%" /E /NJH /NJS /NDL /NP /R:2 /W:2 /XD .git .urs-temp /XF app.config
 REM robocopy exit 0-7 = success (1=new files, 3=some updates); 8+ = failure
 if errorlevel 8 (
   echo [X] sync failed.
