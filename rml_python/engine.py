@@ -5335,6 +5335,36 @@ class RMLReportEngine:
             _is_pg = _is_pg_db(plan.get("base_db"))
         except Exception:
             _is_pg = False
+        try:
+            _is_ms = _is_mssql_db(plan.get("base_db"))
+        except Exception:
+            _is_ms = False
+        # Fast path: column backed by ONE base-table field →
+        # SELECT DISTINCT <expr> FROM <base> only (no JOINs over millions of rows).
+        _fast_sel = None
+        _fast_from = None
+        try:
+            if target is not None and str(getattr(target, "col_type", "") or "direct") == "direct":
+                _ftm = self._field_table_map()
+                _rk = self._refs_in_text(
+                    getattr(target, "expr", None) or getattr(target, "name", None) or "", _ftm)
+                _rts = {_ftm[k] for k in _rk if k in _ftm}
+                if len(_rts) == 1 and next(iter(_rts)) == plan.get("base_norm"):
+                    _sel1 = _build_select(
+                        [target], getattr(self, "fields", []), table_map=None,
+                        dialect=("pg" if _is_pg else ("mssql" if _is_ms else "oracle")),
+                        conn_map=self._conn_map(), rules=getattr(self, "rules", []),
+                        alias_by_table=None)
+                    _btmp = self._staged_temp_of(plan.get("base_norm"))
+                    if _btmp:
+                        _bq = _q(_btmp)
+                    else:
+                        _bsch = plan.get("base_schema")
+                        _bdp = plan.get("base_disp") or plan.get("base_norm")
+                        _bq = (f"{_q(_bsch)}." if _bsch else "") + _q(_bdp)
+                    _fast_sel, _fast_from = _sel1, _bq
+        except Exception:
+            _fast_sel = None
         if target is None:
             # fallback: حقل مصدر مباشر (يُستخدم لاختيار قيم المطابقة في سياسات القواعد)
             from .compiler import RMLColumn as _RC
@@ -5366,7 +5396,15 @@ class RMLReportEngine:
         if search is not None and str(search).strip() != "":
             _where = f" WHERE {_aq} LIKE :s"
             params["s"] = f"%{str(search).strip()}%"
-        if _is_pg:
+        if _fast_sel is not None:
+            _where_f = ""
+            if search is not None and str(search).strip() != "":
+                _where_f = f" WHERE {_fast_sel} LIKE :s"
+            if _is_pg:
+                sql = f"SELECT DISTINCT {_fast_sel} FROM {_fast_from}{_where_f} ORDER BY 1" + ("" if n is None else " LIMIT :lim")
+            else:
+                sql = f"SELECT DISTINCT {_fast_sel} FROM {_fast_from}{_where_f} ORDER BY 1" + ("" if n is None else " OFFSET 0 ROWS FETCH NEXT :lim ROWS ONLY")
+        elif _is_pg:
             sql = f"SELECT * FROM ({_inner}) t{_where} ORDER BY 1" + ("" if n is None else " LIMIT :lim")
         else:
             sql = f"SELECT * FROM ({_inner}) t{_where} ORDER BY 1" + ("" if n is None else " OFFSET 0 ROWS FETCH NEXT :lim ROWS ONLY")
