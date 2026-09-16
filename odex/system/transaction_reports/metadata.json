@@ -1,0 +1,10 @@
+{
+  "name": "transaction_reports",
+  "ar": "transaction_reports",
+  "en": "transaction_reports",
+  "icon": "fa-cube",
+  "version": "1.0.0",
+  "category": "General",
+  "description": "",
+  "sort_order": 999
+}
