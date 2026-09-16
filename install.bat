@@ -109,7 +109,9 @@ if not exist "%VPY%" (
         exit /b 1
       )
     ) else (
-      for /f %%n in ('"%VPY%" -m pip freeze 2^>nul ^| find /c /v ""') do echo [ok] existing venv runs - %%n packages frozen.
+      set NFREEZE=0
+      for /f %%n in ('"%VPY%" -m pip freeze 2^>nul') do set /a NFREEZE+=1
+      echo [ok] existing venv runs - !NFREEZE! packages frozen.
     )
   )
 )
