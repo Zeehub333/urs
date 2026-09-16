@@ -24,3 +24,7 @@ Thumbs.db
 # Local config + venv (per-server, never committed)
 app.config
 odex/venv/
+
+# Folder-driven apps: ignore all except settings
+odex/system/*
+!odex/system/settings/
