@@ -1543,7 +1543,6 @@ def api_models_migrate(request, app_name):
         comp = FMLKFormCompiler(path=path)
         eng = FMLKFormEngine(comp, None)
         meta = comp.fml_metadata()
-        ddl = eng.build_create_table_ddl()
         sch = meta.get("schema") or "public"
         tbl = meta.get("table") or meta.get("name")
         conn_name = (meta.get("connection") or "urs_local").strip()
@@ -1567,15 +1566,65 @@ def api_models_migrate(request, app_name):
                                 host=_pg["host"], port=_pg["port"])
         conn.autocommit = True
         cur = conn.cursor()
-        cur.execute(ddl)
-        # أعمدة ناقصة في جدول قائم → إضافة (IF NOT EXISTS آمنة للتكرار)
-        added = []
         try:
             cur.execute("SELECT column_name FROM information_schema.columns WHERE table_schema=%s AND table_name=%s",
                         (sch, tbl))
             have = {r[0].lower() for r in cur.fetchall()}
         except Exception:
             have = set()
+        # إعادة تسمية برمجية قبل الترحيل: {old: new} → اسم الحقل + مراجع [old]
+        # في الصيغ + مفاتيح التفاصيل، ثم يُحفظ الملف ويُعاد تحميله.
+        renames = data.get("renames") or {}
+        renamed = {}
+        if isinstance(renames, dict) and renames:
+            import xml.etree.ElementTree as ET, xml.dom.minidom, re as _re_rn
+            tree = ET.parse(str(path))
+            root = tree.getroot()
+            _fels = [el for el in root.iter("field") if (el.get("name") or "").strip()]
+            _cur = { (el.get("name") or ""): el for el in _fels }
+            _low = { (el.get("name") or "").strip().lower(): (el.get("name") or "") for el in _fels }
+            for _o, _n in renames.items():
+                o, n = str(_o or "").strip(), str(_n or "").strip()
+                if not o or not n or o == n:
+                    continue
+                if o not in _cur and o.lower() not in _low:
+                    return JsonResponse({"error": f"الحقل '{o}' غير موجود في النموذج"}, status=400)
+                if not _re_rn.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", n):
+                    return JsonResponse({"error": f"الاسم البرمجي '{n}' غير صالح (لاتيني + _ فقط)"}, status=400)
+                if n.lower() in _low and _low[n.lower()] != (o if o in _cur else _low[o.lower()]):
+                    return JsonResponse({"error": f"الاسم '{n}' مستخدم لحقل آخر"}, status=400)
+                if n.lower() in have:
+                    return JsonResponse({"error": f"العمود '{n}' موجود أصلاً في الجدول"}, status=400)
+                real_old = o if o in _cur else _low[o.lower()]
+                _cur[real_old].set("name", n)
+                # مراجع الصيغ [old] في كل الحقول
+                for el in _fels:
+                    for _ak in ("formula", "calc_expr"):
+                        _fv = el.get(_ak)
+                        if _fv and f"[{real_old}]" in _fv:
+                            el.set(_ak, _fv.replace(f"[{real_old}]", f"[{n}]"))
+                # مفاتيح التفاصيل
+                for d in root.iter("detail"):
+                    if (d.get("master") or "") == real_old:
+                        d.set("master", n)
+                    if (d.get("detail") or "") == real_old:
+                        d.set("detail", n)
+                    for c in d.iter("column"):
+                        if (c.get("name") or "") == real_old:
+                            c.set("name", n)
+                renamed[real_old] = n
+                del _cur[real_old]
+                _low = { (el.get("name") or "").strip().lower(): (el.get("name") or "") for el in _fels }
+            raw = ET.tostring(root, encoding="utf-8")
+            pretty = xml.dom.minidom.parseString(raw).toprettyxml(indent="  ", encoding="utf-8").decode("utf-8")
+            path.write_text("\n".join([l for l in pretty.split("\n") if l.strip()]), encoding="utf-8")
+            comp = FMLKFormCompiler(path=path)
+            eng = FMLKFormEngine(comp, None)
+            meta = comp.fml_metadata()
+        ddl = eng.build_create_table_ddl()
+        cur.execute(ddl)
+        # أعمدة ناقصة في جدول قائم → إضافة (IF NOT EXISTS آمنة للتكرار)
+        added = []
         for f in (comp.fields() or []):
             nm = (getattr(f, "name", "") or "").strip()
             if not nm or nm.lower() in have:
@@ -1593,6 +1642,7 @@ def api_models_migrate(request, app_name):
         conn.close()
         return JsonResponse({"ok": True, "file": path.name, "schema": sch, "table": tbl,
                              "ddl": ddl, "columns": cols, "added": added,
+                             "renamed": renamed,
                              "primary_keys": eng.primary_key_fields()})
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)

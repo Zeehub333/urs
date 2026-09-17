@@ -1932,6 +1932,8 @@
                 const d = await res.json();
                 if(!res.ok) throw new Error(d.error || 'فشل المعاينة');
                 const news = d.new_inputs || [];
+                window._migPreview = d;
+                window._migLock = false;
                 box.innerHTML = `<div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3 text-center">`
                     + [[d.table || '-', 'الجدول'], [(d.db_columns || []).length, 'عمود بالجدول'], [d.form_fields, 'مدخل بالنموذج'], [news.length, 'جديد']]
                     .map(x=>`<div class="bg-slate-50 border border-slate-200 rounded-xl py-2"><div class="text-base font-extrabold text-slate-800 font-mono" dir="ltr">${escHtml(String(x[0]))}</div><div class="text-[10px] text-slate-500">${x[1]}</div></div>`).join('')
@@ -1939,7 +1941,7 @@
                     + `<div class="text-[11px] text-slate-500 mb-2 font-mono" dir="ltr">${escHtml(d.schema || '')} • ${escHtml(d.connection || '')}</div>`
                     + (d.note ? `<div class="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5 mb-2">${escHtml(d.note)}</div>` : '')
                     + (news.length
-                        ? `<div class="font-bold text-slate-700 mb-1">المدخلات الجديدة (${news.length}) — ستُضاف كأعمدة:</div><div class="space-y-1 mb-2">` + news.map(n=>`<div class="flex items-center gap-2 bg-amber-50/60 border border-amber-200 rounded-lg px-2 py-1.5"><i class="fa-solid fa-plus text-amber-600 text-[10px]"></i><span class="font-mono font-bold text-slate-800" dir="ltr">${escHtml(n.name)}</span><span class="text-slate-500">${escHtml(n.alias || '')}</span><span class="mr-auto text-[10px] bg-white border border-amber-200 rounded px-1.5 py-0.5 font-mono" dir="ltr">${escHtml(n.db_type || n.type || '')}</span></div>`).join('') + `</div>`
+                        ? `<div class="font-bold text-slate-700 mb-1">المدخلات الجديدة (${news.length}) — ستُضاف كأعمدة (عدّل الاسم البرمجي عند الحاجة):</div><div class="space-y-1 mb-2">` + news.map(n=>`<div class="flex items-center gap-2 bg-amber-50/60 border border-amber-200 rounded-lg px-2 py-1.5"><i class="fa-solid fa-plus text-amber-600 text-[10px]"></i><input data-rename="${escAttr(n.name)}" value="${escAttr(n.name)}" dir="ltr" title="الاسم البرمجي (عمود القاعدة)" class="w-36 bg-white border border-amber-300 rounded-lg px-1.5 py-1 text-[11px] font-mono font-bold text-slate-800"/><span class="text-slate-500 text-[11px] truncate">${escHtml(n.alias || '')}</span><span class="mr-auto text-[10px] bg-white border border-amber-200 rounded px-1.5 py-0.5 font-mono" dir="ltr">${escHtml(n.db_type || n.type || '')}</span></div>`).join('') + `</div>`
                         : `<div class="text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 text-center">لا جديد — كل المدخلات موجودة بالجدول ✓</div>`)
                     + ((d.ddl_add || []).length ? `<div class="font-bold text-slate-700 mt-2 mb-1">SQL:</div><pre dir="ltr" class="bg-slate-900 text-emerald-100 rounded-xl p-3 overflow-auto font-mono whitespace-pre-wrap" style="max-height:180px">${escHtml(d.ddl_add.join('\n'))}</pre>` : '');
                 document.getElementById('migrateGoBtn').disabled = false;
@@ -1951,21 +1953,55 @@
             if(typeof unlockScroll === 'function') unlockScroll();
         }
         async function doMigrate(){
+            if(window._migLock) return;
             const btn = document.getElementById('migrateGoBtn');
-            if(btn) btn.disabled = true;
+            // جمع التسميات المعدلة + تحقق محلي
+            const renames = {};
+            try{
+                const origNames = new Set();
+                const dbHave = {};
+                try{ ((window._migPreview || {}).new_inputs || []).forEach(n=>{ if(n && n.name) origNames.add(String(n.name).toLowerCase()); }); }catch(e){}
+                try{ ((window._migPreview || {}).db_columns || []).forEach(c=>{ if(c && c.name) dbHave[String(c.name).toLowerCase()] = 1; }); }catch(e){}
+                const pairs = [];
+                document.querySelectorAll('#migrateModal [data-rename]').forEach(inp=>{
+                    const old = inp.getAttribute('data-rename') || '';
+                    const nw = (inp.value || '').trim();
+                    if(nw && nw !== old) pairs.push([old, nw]);
+                });
+                for(const [old, nw] of pairs){
+                    if(!/^[A-Za-z_][A-Za-z0-9_]*$/.test(nw)) throw new Error(`الاسم '${nw}' غير صالح (لاتيني + _ فقط)`);
+                    if(origNames.has(nw.toLowerCase()) && nw.toLowerCase() !== old.toLowerCase())
+                        throw new Error(`الاسم '${nw}' مستخدم لمدخل آخر`);
+                    if(pairs.filter(p=>p[1].toLowerCase() === nw.toLowerCase()).length > 1)
+                        throw new Error(`الاسم '${nw}' مكرر`);
+                    if(dbHave[nw.toLowerCase()]) throw new Error(`العمود '${nw}' موجود أصلاً في الجدول`);
+                    renames[old] = nw;
+                }
+            }catch(e){ notify(String((e && e.message) || e), 'error'); return; }
+            // قفل التعديل أثناء التنفيذ
+            window._migLock = true;
+            try{
+                document.querySelectorAll('#migrateModal [data-rename]').forEach(inp=>{ inp.disabled = true; });
+            }catch(e){}
+            if(btn){ btn.disabled = true; btn.innerHTML = 'جارٍ الترحيل...'; }
             notify('جارٍ الترحيل...', 'info');
             try {
-                const res = await fetch(`/api/apps/${encodeURIComponent(currentApp)}/models/migrate/`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({file: currentFml})});
+                const res = await fetch(`/api/apps/${encodeURIComponent(currentApp)}/models/migrate/`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({file: currentFml, renames: renames})});
                 const data = await res.json();
                 if(res.ok){
                     const added = (data.added || []).length;
-                    notify(`تم الترحيل ✓ ${data.schema}.${data.table} (${(data.columns || []).length} عمود${added ? '، +' + added + ' جديد' : ''})`, 'success');
+                    const rned = data.renamed ? Object.keys(data.renamed).length : 0;
+                    notify(`تم الترحيل ✓ ${data.schema}.${data.table} (${(data.columns || []).length} عمود${added ? '، +' + added + ' جديد' : ''}${rned ? '، ' + rned + ' مُعاد تسميته' : ''})`, 'success');
                     closeMigrateModal();
                     await loadAllRecords();
                 }
                 else notify(data.error || 'فشل الترحيل', 'error');
             } catch(e) { notify('تعذر الاتصال', 'error'); }
-            if(btn) btn.disabled = false;
+            window._migLock = false;
+            if(btn){ btn.disabled = false; btn.innerHTML = 'ترحيل'; }
+            try{
+                document.querySelectorAll('#migrateModal [data-rename]').forEach(inp=>{ inp.disabled = false; });
+            }catch(e){}
         }
         const FORM_BTN_IDS = {add: 'addToolbarBtn', edit: 'editToolbarBtn', delete: 'deleteToolbarBtn', save: 'saveToolbarBtn'};
         let replacedBtns = new Set();
