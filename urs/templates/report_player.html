@@ -1076,6 +1076,15 @@
             }
         }
         async function postExecuteReport(body){
+            // تنفيذ خلفي أولاً عند العلم المسبق أن المزامن لن يكفي:
+            // تقرير ضخم معروف (إجمالي سابق) أو مهلة سابقة مسجلة — بلا انتظار 45 ثانية
+            const _ak = (()=>{ try{ return 'rml_async_' + currentApp + '_' + currentRml; }catch(e){ return ''; } })();
+            const _wantAsync = (()=>{
+                try{ if(_ak && localStorage.getItem(_ak) === '1') return true; }catch(e){}
+                try{ if((lazyTotal || 0) > 200000) return true; }catch(e){}
+                return false;
+            })();
+            if(_wantAsync) return await runAsyncReport(body);
             const init = {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)};
             try{
                 const ctl = new AbortController();
@@ -1088,6 +1097,7 @@
                 return {ok: res.ok, data: data, status: res.status};
             }catch(e){
                 if(e && (e.name === 'AbortError' || /abort/i.test(String((e && e.message) || '')))){
+                    try{ if(_ak) localStorage.setItem(_ak, '1'); }catch(e2){}
                     return await runAsyncReport(body);
                 }
                 throw e;
