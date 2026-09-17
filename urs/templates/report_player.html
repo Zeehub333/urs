@@ -1196,6 +1196,13 @@
         function fmtCell(v, isAmt, col){
             try{
                 const dt = String((col && (col.dataType || col.data_type)) || '').toLowerCase();
+                if(dt === 'boolean'){
+                    const s = String(v ?? '').trim().toLowerCase();
+                    const on = (s === 'true' || s === '1' || s === 't' || s === 'yes' || v === true || v === 1);
+                    return on
+                        ? '<span class="inline-block px-2.5 py-0.5 rounded-lg bg-emerald-100 text-emerald-700 text-[11px] font-bold">صح</span>'
+                        : '<span class="inline-block px-2.5 py-0.5 rounded-lg bg-slate-100 text-slate-500 text-[11px] font-bold">خطأ</span>';
+                }
                 if(dt === 'image' || dt === 'media'){
                     const s = String(v ?? '').trim();
                     if(!s) return '';

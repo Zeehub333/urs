@@ -1656,6 +1656,17 @@
                 const mk = fieldMediaKind(f);
                 if(mk && String(raw ?? '').trim() !== '') return mediaHtml(raw, mk);
             }catch(e){}
+            try{
+                const bt = String((f && (f.dataType || f.data_type || f.type)) || '').toLowerCase();
+                const it = String((f && f.inputType) || '').toLowerCase();
+                if(bt === 'boolean' || it === 'boolean'){
+                    const v = String(raw ?? '').trim().toLowerCase();
+                    const on = (v === 'true' || v === '1' || v === 't' || v === 'yes' || raw === true || raw === 1);
+                    return on
+                        ? '<span class="inline-block px-2.5 py-0.5 rounded-lg bg-emerald-100 text-emerald-700 text-[11px] font-bold">صح</span>'
+                        : '<span class="inline-block px-2.5 py-0.5 rounded-lg bg-slate-100 text-slate-500 text-[11px] font-bold">خطأ</span>';
+                }
+            }catch(e){}
             return escHtml(raw ?? '');
         }
         function rowLabel(r) {
