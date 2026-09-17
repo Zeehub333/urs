@@ -2029,14 +2029,35 @@
                     currentData[byAlias[String(k).toLowerCase()] || k] = v;
                 });
                 const fields = (fmlMeta.fields || []).filter(f => !f.destination || f.destination === 'main');
+                const cats = (fmlMeta.cats && fmlMeta.cats.length) ? fmlMeta.cats : ['عام'];
+                window._panelTab = 0;
                 let html = `<div id="panelEditBox" class="space-y-2 text-right">`;
-                fields.forEach(f => { html += `<div>${renderInput(f)}</div>`; });
+                if(cats.length > 1){
+                    html += `<div class="flex gap-1 flex-wrap">` + cats.map((c, ci)=>`<button type="button" onclick="panelTabGo(${ci})" class="tab-btn px-3 py-1 rounded-full text-[11px] font-bold border ${ci===0?'bg-indigo-600 text-white border-indigo-600':'bg-white text-slate-600 border-slate-200'}">${escHtml(c)}</button>`).join('') + `</div>`;
+                }
+                cats.forEach((catName, ci)=>{
+                    const catFields = fields.filter(f => (f.category || 'عام') === catName);
+                    html += `<div data-tab-content="cat${ci}" style="${ci!==0?'display:none':''}"><div class="grid grid-cols-1 gap-2">`;
+                    catFields.forEach(f => { html += `<div data-vis-field="${escAttr(f.name)}">${renderInput(f)}</div>`; });
+                    html += `</div></div>`;
+                });
                 html += `<div class="flex gap-2 pt-1"><button type="button" onclick="panelSaveEdit()" class="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold"><i class="fa-solid fa-floppy-disk"></i> حفظ</button><button type="button" onclick="panelCancelEdit()" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs font-bold">إلغاء</button></div></div>`;
                 box.innerHTML = html;
                 window._panelEditing = true;
+                try{
+                    const _peb = document.getElementById('panelEditBox');
+                    if(_peb) _peb.addEventListener('input', ()=>{ try{ fmlkVisibleApply(); }catch(e){} });
+                }catch(e){}
+                try{ fmlkVisibleApply(); }catch(e){}
                 try{ if(window.FMLK) FMLK.widgetsRefresh(); }catch(e){}
                 try{ if(typeof uiEnhanceDates === 'function') uiEnhanceDates(box); }catch(e){}
             }catch(e){ showError(e, 'تحرير من اللوحة'); }
+        }
+        function panelTabGo(ci){
+            try{
+                window._panelTab = ci;
+                switchTab('cat' + ci);
+            }catch(e){}
         }
         function panelCancelEdit(){
             window._panelEditing = false;
