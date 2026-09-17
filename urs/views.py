@@ -3282,10 +3282,32 @@ def api_rml_execute(request):
             return JsonResponse({"error": hint, "missing_column": missing, "available_tables": tables[:30]}, status=500)
         return JsonResponse({"error": msg}, status=500)
 
+def _server_host_name():
+    """اسم جهاز الخادم من بيئة التشغيل (os env)."""
+    try:
+        import os as _os
+        for _k in ("COMPUTERNAME", "HOSTNAME"):
+            _v = (_os.environ.get(_k) or "").strip()
+            if _v:
+                return _v[:200]
+    except Exception:
+        pass
+    try:
+        import socket as _sock
+        return (_sock.gethostname() or "")[:200]
+    except Exception:
+        return ""
+
+
 def _monitor_machine(request, explicit=""):
-    """هوية الجهاز: اسم صريح من العميل، وإلا المستخدم@IP."""
+    """هوية الجهاز: صريح من العميل، وإلا اسم جهاز الخادم (os env).
+
+    - عميل محلي (127.0.0.1) ← اسم الجهاز يكفي (تشغيل فرعي/محلي).
+    - عميل شبكة ← اسم الجهاز + IP العميل للتمييز بين الأجهزة.
+    """
     if (explicit or "").strip():
         return explicit.strip()[:200]
+    host = _server_host_name()
     try:
         fwd = (request.META.get("HTTP_X_FORWARDED_FOR") or "").split(",")[0].strip()
         ip = fwd or request.META.get("REMOTE_ADDR") or ""
@@ -3293,11 +3315,16 @@ def _monitor_machine(request, explicit=""):
         ip = ""
     try:
         u = getattr(request, "user", None)
-        if u is not None and getattr(u, "is_authenticated", False) and getattr(u, "username", ""):
-            return f"{u.username}@{ip}"[:200] if ip else str(u.username)[:200]
+        who = str(getattr(u, "username", "") or "") if u is not None and getattr(u, "is_authenticated", False) else ""
     except Exception:
-        pass
-    return (ip or "جهاز غير معروف")[:200]
+        who = ""
+    if ip in ("127.0.0.1", "::1", "localhost", ""):
+        base = host or "local"
+    else:
+        base = f"{host}/{ip}" if host else ip
+    if who:
+        base = f"{who}@{base}"
+    return (base or "جهاز غير معروف")[:200]
 
 
 @csrf_exempt
