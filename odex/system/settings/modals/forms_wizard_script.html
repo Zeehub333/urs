@@ -771,7 +771,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                     <tbody>${fwInputs.map((r, i)=>`
                         <tr class="border-t border-slate-100">
                             <td class="p-1"><select onchange="fwInputs[${i}].destination=this.value" class="wb-inp !py-1 font-mono" dir="ltr">${destOpts.map(d=>`<option value="${fwEsc(d)}" ${r.destination===d?'selected':''}>${fwEsc(destName(d))}</option>`).join('') || '<option value="main">الأساسي</option>'}</select></td>
-                            <td class="p-1 font-mono text-slate-700" dir="ltr">${fwEsc(r.name) || '<span class="text-slate-300">—</span>'}<div class="text-[9px] text-slate-400">${fwEsc((r.table||'').split('.').pop())}</div></td>
+                            <td class="p-1"><input value="${fwEsc(r.name || '')}" oninput="fwInputs[${i}].name=this.value" placeholder="programmatic_name" class="wb-inp !py-1 font-mono" dir="ltr"><div class="text-[9px] text-slate-400">${fwEsc((r.table||'').split('.').pop())}</div></td>
                             <td class="p-1"><input value="${fwEsc(r.alias || '')}" oninput="fwInputs[${i}].alias=this.value" class="wb-inp !py-1"></td>
                             <td class="p-1"><select onchange="fwInputs[${i}].icon=this.value" class="wb-inp !py-1 font-mono" dir="ltr"><option value="">—</option>${FW_ICONS.map(ic=>`<option value="${ic}" ${r.icon===ic?'selected':''}>${ic}</option>`).join('')}</select></td>
                             <td class="p-1 whitespace-nowrap"><button onclick="fwOpenType(${i})" class="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg font-bold">${fwEsc(fwTypeLabel(r.inputType))}${(r.options||[]).length || (r.options_source||[]).length || r.refTable ? ' •' : ''}</button><div class="text-[9px] text-slate-400">${fwEsc(r.dataType || '')}</div></td>
@@ -1197,6 +1197,14 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             if(!fwMainTable) throw new Error('اختر الجدول الأساسي');
             const mains = fwInputs.filter(x=>!x.destination || x.destination==='main');
             if(!mains.length) throw new Error('أضف مدخلاً واحداً على الأقل للجدول الأساسي');
+            const _seenNames = new Set();
+            for(const x of fwInputs){
+                const nm = (x.name || '').trim();
+                if(!nm) continue;
+                if(!/^[A-Za-z_][A-Za-z0-9_]*$/.test(nm)) throw new Error(`الاسم البرمجي '${nm}' غير صالح (لاتيني + _ فقط)`);
+                if(_seenNames.has(nm.toLowerCase())) throw new Error(`اسم برمجي مكرر: '${nm}'`);
+                _seenNames.add(nm.toLowerCase());
+            }
             for(const b of fwBranches){
                 if(!b.table) throw new Error('أكمل الجدول المتفرع (اختر الجدول)');
                 if(!b.master || !b.detail) throw new Error(`الجدول المتفرع ${b.alias || b.table}: حدد عمود الأساسي وعمود الربط`);
