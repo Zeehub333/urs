@@ -3282,6 +3282,83 @@ def api_rml_execute(request):
             return JsonResponse({"error": hint, "missing_column": missing, "available_tables": tables[:30]}, status=500)
         return JsonResponse({"error": msg}, status=500)
 
+def _monitor_machine(request, explicit=""):
+    """هوية الجهاز: اسم صريح من العميل، وإلا المستخدم@IP."""
+    if (explicit or "").strip():
+        return explicit.strip()[:200]
+    try:
+        fwd = (request.META.get("HTTP_X_FORWARDED_FOR") or "").split(",")[0].strip()
+        ip = fwd or request.META.get("REMOTE_ADDR") or ""
+    except Exception:
+        ip = ""
+    try:
+        u = getattr(request, "user", None)
+        if u is not None and getattr(u, "is_authenticated", False) and getattr(u, "username", ""):
+            return f"{u.username}@{ip}"[:200] if ip else str(u.username)[:200]
+    except Exception:
+        pass
+    return (ip or "جهاز غير معروف")[:200]
+
+
+@csrf_exempt
+def api_monitor_touch(request):
+    """POST /api/monitor/touch/ {record_id*, table?, event: add|edit|print, machine?}."""
+    if request.method != "POST":
+        return JsonResponse({"error": "POST required"}, status=405)
+    try:
+        data = json.loads(request.body.decode() or "{}")
+        rid = str(data.get("record_id") or "").strip()
+        if not rid:
+            return JsonResponse({"error": "record_id required"}, status=400)
+        event = str(data.get("event") or "print").strip().lower()
+        if event not in ("add", "edit", "print"):
+            event = "print"
+        from django.utils import timezone
+        from django.db.models import F as _F
+        from .models import AdMonitorLog
+        machine = _monitor_machine(request, data.get("machine"))
+        now = timezone.now()
+        row, created = AdMonitorLog.objects.get_or_create(
+            record_id=rid[:300],
+            defaults={"table_name": str(data.get("table") or "")[:150]})
+        if data.get("table") and not row.table_name:
+            row.table_name = str(data.get("table"))[:150]
+        if event == "add":
+            if not row.ad_machine:
+                row.ad_machine = machine
+            if not row.ad_date:
+                row.ad_date = now
+            row.save()
+        elif event == "edit":
+            row.edit_machine = machine
+            row.edit_date = now
+            row.save()
+        else:
+            AdMonitorLog.objects.filter(pk=row.pk).update(print_count=_F("print_count") + 1)
+            row.refresh_from_db()
+            if data.get("table") and not row.table_name:
+                row.table_name = str(data.get("table"))[:150]
+                row.save(update_fields=["table_name"])
+        return JsonResponse({"ok": True, "log": row.to_dict(), "created": created})
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+def api_monitor_get(request):
+    """GET /api/monitor/get/?record_id= → سجل المراقبة أو {exists:false}."""
+    try:
+        rid = str(request.GET.get("record_id") or "").strip()
+        if not rid:
+            return JsonResponse({"error": "record_id required"}, status=400)
+        from .models import AdMonitorLog
+        row = AdMonitorLog.objects.filter(record_id=rid[:300]).first()
+        if row is None:
+            return JsonResponse({"exists": False})
+        return JsonResponse({"exists": True, "log": row.to_dict()})
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
 # ── Create FML/RML files from sidebar (Add Form / Add Report) ─────────────────
 @csrf_exempt
 def api_create_fml(request, app_name):

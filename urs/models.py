@@ -575,3 +575,36 @@ class IoTMirror(models.Model):
             "last_sync_at": self.last_sync_at.isoformat() if self.last_sync_at else None,
             "last_error": self.last_error,
         }
+
+class AdMonitorLog(models.Model):
+    """سجل مراقبة لكل سجل: من أدخل/عدّل، متى، وكم مرة طُبع.
+
+    record_id بصيغة: اسم الجدول_اسم العمود_قيمة المعرف الرئيسي.
+    """
+
+    record_id = models.CharField(max_length=300, unique=True, db_index=True, verbose_name="معرف السجل")
+    table_name = models.CharField(max_length=150, blank=True, default="", verbose_name="الجدول")
+    ad_machine = models.CharField(max_length=200, blank=True, default="", verbose_name="جهاز الإدخال")
+    edit_machine = models.CharField(max_length=200, blank=True, default="", verbose_name="جهاز التعديل")
+    print_count = models.IntegerField(default=0, verbose_name="عدد مرات الطباعة")
+    ad_date = models.DateTimeField(null=True, blank=True, verbose_name="تاريخ الإضافة")
+    edit_date = models.DateTimeField(null=True, blank=True, verbose_name="تاريخ آخر تعديل")
+
+    class Meta:
+        ordering = ["-edit_date", "-ad_date"]
+        verbose_name = "سجل مراقبة"
+        verbose_name_plural = "سجلات المراقبة"
+
+    def __str__(self):
+        return f"{self.record_id} (طبع {self.print_count})"
+
+    def to_dict(self):
+        return {
+            "record_id": self.record_id,
+            "table_name": self.table_name,
+            "ad_machine": self.ad_machine,
+            "edit_machine": self.edit_machine,
+            "print_count": self.print_count,
+            "ad_date": self.ad_date.isoformat() if self.ad_date else None,
+            "edit_date": self.edit_date.isoformat() if self.edit_date else None,
+        }

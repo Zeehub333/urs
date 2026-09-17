@@ -1858,6 +1858,39 @@
             if(typeof unlockScroll === 'function') unlockScroll();
         }
 
+        // ── سجل المراقبة لكل سجل: table_column_pkvalue ──
+        function monitorRecordId(rec){
+            try{
+                const tbl = ((fmlMeta.metadata || {}).table) || '';
+                if(!tbl || !rec) return null;
+                const fs = fmlMeta.fields || [];
+                let col = ((fs.find(f=>f.primary_key) || {}).name) || '';
+                let val = col ? cellVal(rec, col) : undefined;
+                if(val === undefined || val === null || String(val) === ''){
+                    if(rec.__pk_id !== undefined && rec.__pk_id !== null && String(rec.__pk_id) !== ''){ col = '__pk_id'; val = rec.__pk_id; }
+                    else if(rec.id !== undefined && rec.id !== null && String(rec.id) !== ''){ col = 'id'; val = rec.id; }
+                    else return null;
+                }
+                return {record_id: `${tbl}_${col}_${val}`, table: tbl};
+            }catch(e){ return null; }
+        }
+        function monitorTouch(event, rec){
+            try{
+                const m = (rec && rec.record_id) ? rec : monitorRecordId(rec);
+                if(!m) return;
+                fetch('/api/monitor/touch/', {method:'POST', headers:{'Content-Type':'application/json'},
+                    body: JSON.stringify({record_id: m.record_id, table: m.table, event: event})}).catch(()=>{});
+            }catch(e){}
+        }
+        function monitorSectionHtml(log){
+            const dt = (s)=>{ try{ return String(s || '').slice(0, 16).replace('T', ' '); }catch(e){ return ''; } };
+            const row = (label, v)=>`<div class="bg-white border border-slate-100 rounded-lg px-2 py-1"><div class="text-[10px] text-slate-400 font-bold">${label}</div><div class="text-xs font-semibold text-slate-700" dir="auto">${v || '—'}</div></div>`;
+            return `<div class="mb-2"><div class="text-[11px] font-bold text-slate-500 mb-1">سجل المراقبة</div><div class="grid grid-cols-2 gap-1 text-right">`
+                + row('جهاز الإدخال', escHtml(log.ad_machine)) + row('جهاز التعديل', escHtml(log.edit_machine))
+                + row('تاريخ الإضافة', escHtml(dt(log.ad_date))) + row('تاريخ آخر تعديل', escHtml(dt(log.edit_date)))
+                + row('عدد مرات الطباعة', log.print_count ?? 0)
+                + `</div></div>`;
+        }
         async function saveForm() {
             const data = collectData();
             const isUpdate = !!currentRecordId && !String(currentRecordId).startsWith('__row');
@@ -1873,6 +1906,12 @@
             if(dok === false) return false;
             notify('تم الحفظ', 'success');
             await loadAllRecords();
+            try{
+                let _mr = null;
+                if(isUpdate && currentRecordId) _mr = allRows.find((r,i)=>String(rowId(r,i))===String(currentRecordId));
+                else if(j && j.id !== undefined && j.id !== null && j.id !== '') _mr = allRows.find((r,i)=>String(rowId(r,i))===String(j.id));
+                monitorTouch(isUpdate ? 'edit' : 'add', _mr);
+            }catch(e){}
             return true;
         }
         async function saveAndNew() {            const ok = await saveForm();
@@ -1900,11 +1939,32 @@
                     return;
                 }
                 const fields = visibleFields();
-                box.innerHTML = `<div class="space-y-1 text-right">` + fields.map(f => {
-                    const s = String(cellVal(rec, f.name) ?? '').trim();
-                    if(s === '') return '';
-                    return `<div class="bg-slate-50 border border-slate-100 rounded-lg px-2 py-1.5"><div class="text-[10px] text-slate-400 font-bold">${escHtml(f.alias)}</div><div class="text-xs font-semibold text-slate-700 break-words flex justify-center">${cellHtml(rec, f.name)}</div></div>`;
-                }).join('') + `</div>`;
+                // الشعار (أول صورة لها قيمة) أولاً، ثم بقية التفاصيل جريد عمودين
+                let logo = '';
+                try{
+                    const lf = fields.find(f => fieldMediaKind(fieldDef(f.name)) === 'image' && String(cellVal(rec, f.name) ?? '').trim() !== '');
+                    if(lf) logo = `<div class="flex justify-center mb-2 rounded-xl overflow-hidden bg-slate-50 border border-slate-100" style="max-height:150px">${mediaHtml(cellVal(rec, lf.name), 'image')}</div>`;
+                }catch(e){}
+                const rest = fields.filter(f => {
+                    try{
+                        if(fieldMediaKind(fieldDef(f.name)) === 'image' && String(cellVal(rec, f.name) ?? '').trim() !== '') return false;
+                    }catch(e){}
+                    return String(cellVal(rec, f.name) ?? '').trim() !== '';
+                });
+                const m0 = monitorRecordId(rec);
+                box.innerHTML = logo + (m0 ? `<div id="monBox"><div class="text-slate-400 text-center py-1 text-[11px]">جارٍ تحميل سجل المراقبة...</div></div>` : '')
+                    + (rest.length ? `<div class="grid grid-cols-2 gap-1 text-right mt-1">` + rest.map(f => {
+                    return `<div class="bg-slate-50 border border-slate-100 rounded-lg px-2 py-1.5"><div class="text-[10px] text-slate-400 font-bold truncate">${escHtml(f.alias)}</div><div class="text-xs font-semibold text-slate-700 break-words">${cellHtml(rec, f.name)}</div></div>`;
+                }).join('') + `</div>` : `<div class="text-slate-400 text-center py-4 text-xs">لا تفاصيل</div>`);
+                if(m0){
+                    fetch('/api/monitor/get/?record_id=' + encodeURIComponent(m0.record_id))
+                        .then(r=>r.json()).then(j=>{
+                            const el = document.getElementById('monBox');
+                            if(!el) return;
+                            if(j && j.exists && j.log) el.innerHTML = monitorSectionHtml(j.log);
+                            else el.innerHTML = '';
+                        }).catch(()=>{ const el = document.getElementById('monBox'); if(el) el.innerHTML = ''; });
+                }
             }catch(e){ box.innerHTML = '<div class="py-6">—</div>'; }
         }
         async function saveAndClose() {
@@ -2751,6 +2811,11 @@
         function printPreviewDoc(){
             const frame = document.getElementById('printPreviewFrame');
             if(!frame) return;
+            try{
+                let _pr = null;
+                if(currentRecordId) _pr = allRows.find((r,i)=>String(rowId(r,i))===String(currentRecordId));
+                monitorTouch('print', _pr);
+            }catch(e){}
             try{ frame.contentWindow.print(); }catch(e){ notify('لا توجد معاينة للطباعة', 'info'); }
         }
         function openSaveDocModal(){
@@ -2788,6 +2853,11 @@
                 const res = await fetch('/api/dml/doc-pdf', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
                 if(!res.ok) throw new Error('فشل التوليد');
                 fmlkDownload(await res.blob(), fname);
+                try{
+                    let _pr2 = null;
+                    if(currentRecordId) _pr2 = allRows.find((r,i)=>String(rowId(r,i))===String(currentRecordId));
+                    monitorTouch('print', _pr2);
+                }catch(e){}
                 notify('تم حفظ المستند PDF', 'success');
             }catch(e){ showError(e, 'حفظ المستند: ' + (printLastPayload.dml || '')); }
         }

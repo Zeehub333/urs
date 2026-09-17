@@ -3094,6 +3094,11 @@
                 if(ed.error) throw new Error(ed.error);
                 const rows = ed.rows || [];
                 if(!rows.length) throw new Error('لا يوجد سند بهذه القيمة');
+                try{
+                    const _tbl = (typeof activeTable !== 'undefined' && activeTable) ? String(activeTable).split('.').pop() : '';
+                    if(_tbl && keyCol && val) fetch('/api/monitor/touch/', {method:'POST', headers:{'Content-Type':'application/json'},
+                        body: JSON.stringify({record_id: `${_tbl}_${keyCol}_${val}`, table: _tbl, event: 'print'})}).catch(()=>{});
+                }catch(e){}
                 const mainRow = rows[0];
                 const mainCols = (ed.columns && ed.columns.length ? ed.columns : ((lastApiData && lastApiData.columns) || [])).map(c=>({name:c.name || '', alias:c.alias || c.name || ''}));
                 let detCols = [], detRows = [];
