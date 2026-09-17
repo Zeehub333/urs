@@ -111,6 +111,7 @@ urlpatterns = [
     path('api/fmlk/data-types', urs_views.api_fmlk_data_types, name='api_fmlk_data_types'),
     path('api/apps/<str:app_name>/models/design/', urs_views.api_models_design_save, name='api_models_design_save'),
     path('api/apps/<str:app_name>/models/migrate/', urs_views.api_models_migrate, name='api_models_migrate'),
+    path('api/apps/<str:app_name>/models/migrate/preview/', urs_views.api_models_migrate_preview, name='api_models_migrate_preview'),
     path('api/apps/<str:app_name>/models/convert-cml/', urs_views.api_models_convert_cml, name='api_models_convert_cml'),
     path('api/apps/<str:app_name>/models/sync/', urs_views.api_models_sync, name='api_models_sync'),
     path('api/apps/<str:app_name>/modals/<path:file>', urs_views.api_app_modal, name='api_app_modal'),

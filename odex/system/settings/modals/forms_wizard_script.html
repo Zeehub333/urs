@@ -780,7 +780,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                             <td class="p-1 text-center"><input type="checkbox" ${r.computed?'checked':''} onchange="fwInputs[${i}].computed=this.checked;fwRenderSheet()" class="w-4 h-4 accent-indigo-600"></td>
                             <td class="p-1 text-center"><input type="checkbox" ${r.editable?'checked':''} onchange="fwInputs[${i}].editable=this.checked" class="w-4 h-4 accent-emerald-600"></td>
                             <td class="p-1"><input value="${fwEsc(r.visibleIf || '')}" oninput="fwInputs[${i}].visibleIf=this.value;fwVisAC(this)" onkeydown="return fwVisACKey(event,this)" onblur="fwVisHideSoon()" data-fwself="${fwEsc(r.name)}" dir="ltr" placeholder="status==active" title="إكمال تلقائي: حقل ← عملية ← قيمة ← رابط. مثال: status==active && city==جدة" class="wb-inp !py-1 font-mono"></td>
-                            <td class="p-1"><button onclick="fwDelInput(${i})" class="text-rose-400 hover:text-rose-600 px-1"><i class="fa-solid fa-trash"></i></button></td>
+                            <td class="p-1"><button onclick="fwDelInput(${i})" class="text-rose-400 hover:text-rose-600 px-1"><i class="fa-solid fa-trash"></i></button><button onclick="fwMoveInput(${i},-1)" title="لأعلى" class="text-slate-400 hover:text-indigo-600 px-1"><i class="fa-solid fa-arrow-up text-[10px]"></i></button><button onclick="fwMoveInput(${i},1)" title="لأسفل" class="text-slate-400 hover:text-indigo-600 px-1"><i class="fa-solid fa-arrow-down text-[10px]"></i></button></td>
                         </tr>
                         ${r.computed ? `<tr class="border-t border-indigo-100 bg-indigo-50/40"><td class="p-1 text-[10px] text-indigo-700 font-bold" colspan="2">تعبير الحساب <span class="font-mono" dir="ltr">[col]</span></td><td class="p-1" colspan="8"><input value="${fwEsc(r.expr || '')}" oninput="fwInputs[${i}].expr=this.value" dir="ltr" placeholder="[qty] * [price]" list="fwInputNames" class="wb-inp !py-1 font-mono"></td></tr>` : ''}`).join('') || '<tr><td colspan="10" class="p-4 text-center text-slate-400">لا مدخلات — استورد أعمدة الجدول الأساسي</td></tr>'}
                     </tbody>
@@ -912,6 +912,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             fwRenderSheet();
         }
         function fwDelInput(i){ fwInputs.splice(i,1); fwRenderSheet(); }
+        function fwMoveInput(i, dir){ const j = i + dir; if(j < 0 || j >= fwInputs.length) return; const t = fwInputs[i]; fwInputs[i] = fwInputs[j]; fwInputs[j] = t; fwRenderSheet(); }
         // ── مودال نوع البيانات ──
         function fwOpenType(i){
             fwTypeIdx = i;

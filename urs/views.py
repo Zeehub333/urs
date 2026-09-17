@@ -1525,7 +1525,8 @@ def api_models_design_save(request, app_name):
 def api_models_migrate(request, app_name):
     """POST /api/apps/<app>/models/migrate/ — ترحيل موديل .fmlk إلى جدول DB.
 
-    Body: {file} → يبني DDL من الحقول (أنواع + PK + قيود + افتراضيات ثابتة) وينفذه.
+    Body: {file} → يبني DDL من الحقول وينفذه على اتصال النموذج (PG)، ثم يضيف
+    الأعمدة الناقصة (ADD COLUMN IF NOT EXISTS) — CREATE وحده لا يكفي للجداول القائمة.
     """
     if request.method != "POST":
         return JsonResponse({"error": "POST required"}, status=405)
@@ -1543,19 +1544,115 @@ def api_models_migrate(request, app_name):
         eng = FMLKFormEngine(comp, None)
         meta = comp.fml_metadata()
         ddl = eng.build_create_table_ddl()
+        sch = meta.get("schema") or "public"
+        tbl = meta.get("table") or meta.get("name")
+        conn_name = (meta.get("connection") or "urs_local").strip()
+        # اتصال النموذج نفسه (PG) بدل المضمّن — يبقى القديم احتياطاً
+        _pg = dict(host="172.16.10.101", dbname="urs", user="postgres", password="postgres", port=5432)
+        try:
+            from .models import Connection
+            _dj = Connection.objects.filter(name=conn_name).first()
+            if _dj is None and conn_name.isdigit():
+                _dj = Connection.objects.filter(id=int(conn_name)).first()
+            if _dj is not None and str(getattr(_dj, "engine", "") or "").lower() == "postgres":
+                _pg = dict(host=getattr(_dj, "host", "") or _pg["host"],
+                           dbname=getattr(_dj, "instance", "") or _pg["dbname"],
+                           user=getattr(_dj, "user", "") or _pg["user"],
+                           password=getattr(_dj, "password", "") or "",
+                           port=int(getattr(_dj, "port", 0) or 0) or _pg["port"])
+        except Exception:
+            pass
         import psycopg2
-        conn = psycopg2.connect(dbname="urs", user="postgres", password="postgres", host="172.16.10.101", port=5432)
+        conn = psycopg2.connect(dbname=_pg["dbname"], user=_pg["user"], password=_pg["password"],
+                                host=_pg["host"], port=_pg["port"])
         conn.autocommit = True
         cur = conn.cursor()
         cur.execute(ddl)
+        # أعمدة ناقصة في جدول قائم → إضافة (IF NOT EXISTS آمنة للتكرار)
+        added = []
+        try:
+            cur.execute("SELECT column_name FROM information_schema.columns WHERE table_schema=%s AND table_name=%s",
+                        (sch, tbl))
+            have = {r[0].lower() for r in cur.fetchall()}
+        except Exception:
+            have = set()
+        for f in (comp.fields() or []):
+            nm = (getattr(f, "name", "") or "").strip()
+            if not nm or nm.lower() in have:
+                continue
+            dt = str(getattr(f, "data_type", "") or "VARCHAR").upper().split("(")[0].strip()
+            pg_t = eng.DATA_TYPE_MAP.get(dt, "TEXT")
+            try:
+                cur.execute(f'ALTER TABLE "{sch}"."{tbl}" ADD COLUMN IF NOT EXISTS "{nm}" {pg_t}')
+                added.append({"name": nm, "type": pg_t})
+            except Exception:
+                pass
         # تحقق من الأعمدة الفعلية
-        sch = meta.get("schema") or "public"
-        tbl = meta.get("table") or meta.get("name")
         cur.execute("SELECT column_name, data_type FROM information_schema.columns WHERE table_schema=%s AND table_name=%s ORDER BY ordinal_position", (sch, tbl))
         cols = [{"name": r[0], "db_type": r[1]} for r in cur.fetchall()]
         conn.close()
         return JsonResponse({"ok": True, "file": path.name, "schema": sch, "table": tbl,
-                             "ddl": ddl, "columns": cols, "primary_keys": eng.primary_key_fields()})
+                             "ddl": ddl, "columns": cols, "added": added,
+                             "primary_keys": eng.primary_key_fields()})
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@csrf_exempt
+def api_models_migrate_preview(request, app_name):
+    """POST /api/apps/<app>/models/migrate/preview/ — معاينة الترحيل بلا تنفيذ.
+
+    Body: {file} → {table, schema, connection, db_columns, new_inputs:[{name,alias,type}],
+    ddl_add:[statements], form_fields}.
+    """
+    if request.method != "POST":
+        return JsonResponse({"error": "POST required"}, status=405)
+    try:
+        data = json.loads(request.body.decode() or "{}")
+        fname = (data.get("file") or "").strip()
+        if not fname:
+            return JsonResponse({"error": "file required"}, status=400)
+        from fmlk_engine.compiler import FMLKFormCompiler
+        from fmlk_engine.engine import FMLKFormEngine
+        path = _find_fml_path(fname, app_name)
+        if not path or not path.exists():
+            return JsonResponse({"error": "model file not found"}, status=404)
+        comp = FMLKFormCompiler(path=path)
+        eng = FMLKFormEngine(comp, None)
+        meta = comp.fml_metadata()
+        sch = meta.get("schema") or "public"
+        tbl = meta.get("table") or meta.get("name")
+        conn_name = (meta.get("connection") or "urs_local").strip()
+        fields = [{"name": (getattr(f, "name", "") or ""),
+                   "alias": (getattr(f, "alias", "") or getattr(f, "name", "")),
+                   "type": str(getattr(f, "data_type", "") or "VARCHAR").upper()}
+                  for f in (comp.fields() or []) if (getattr(f, "name", "") or "").strip()]
+        db_cols = []
+        note = ""
+        try:
+            from .models import Connection
+            _dj = Connection.objects.filter(name=conn_name).first()
+            if _dj is None and conn_name.isdigit():
+                _dj = Connection.objects.filter(id=int(conn_name)).first()
+            if _dj is not None and str(getattr(_dj, "engine", "") or "").lower() == "postgres":
+                for _r in _table_columns_obj(_dj, sch, tbl):
+                    db_cols.append({"name": _r.get("name"), "db_type": _r.get("db_type")})
+            else:
+                note = "الاتصال ليس Postgres — المقارنة غير متاحة"
+        except Exception as e:
+            note = f"تعذر قراءة أعمدة الجدول: {str(e)[:120]}"
+        have = {c["name"].lower() for c in db_cols if c.get("name")}
+        new_inputs, ddl_add = [], []
+        for f in fields:
+            if f["name"].lower() in have:
+                continue
+            pg_t = eng.DATA_TYPE_MAP.get(f["type"].split("(")[0].strip(), "TEXT")
+            new_inputs.append({**f, "db_type": pg_t})
+            ddl_add.append(f'ALTER TABLE "{sch}"."{tbl}" ADD COLUMN IF NOT EXISTS "{f["name"]}" {pg_t};')
+        return JsonResponse({"ok": True, "file": path.name, "table": tbl, "schema": sch,
+                             "connection": conn_name, "db_columns": db_cols, "new_inputs": new_inputs,
+                             "ddl_add": ddl_add, "form_fields": len(fields), "note": note},
+                            json_dumps_params={"ensure_ascii": False})
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 

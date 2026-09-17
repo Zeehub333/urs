@@ -1910,14 +1910,62 @@
             location.href = `/app/${currentApp}/form/${encodeURIComponent(opt.value)}/`;
         }
         async function migrateCurrentModel() {
-            if(!confirm(`ترحيل جدول الموديل الحالي (${currentFml}) إلى قاعدة البيانات؟`)) return;
+            // مودال المعاينة: تفاصيل الترحيل + المدخلات الجديدة قبل التنفيذ
+            let ov = document.getElementById('migrateModal');
+            if(!ov){
+                ov = document.createElement('div');
+                ov.id = 'migrateModal';
+                ov.className = 'hidden fixed inset-0 z-[70] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4';
+                ov.setAttribute('onclick', 'if(event.target===this)closeMigrateModal()');
+                document.body.appendChild(ov);
+            }
+            ov.innerHTML = '<div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[88vh] overflow-hidden flex flex-col">'
+                + '<div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-emerald-50 shrink-0"><h3 class="text-sm font-bold text-slate-800"><i class="fa-solid fa-database text-emerald-600"></i> ترحيل الجدول — معاينة</h3><button onclick="closeMigrateModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button></div>'
+                + '<div id="migrateBody" class="p-5 overflow-y-auto custom-scroll text-xs"><p class="text-slate-400 text-center py-6">جارٍ حساب الفرق...</p></div>'
+                + '<div class="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2 shrink-0"><button onclick="closeMigrateModal()" class="px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs">إلغاء</button><button id="migrateGoBtn" onclick="doMigrate()" disabled class="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold disabled:opacity-40">ترحيل</button></div>'
+                + '</div>';
+            ov.classList.remove('hidden');
+            if(typeof lockScroll === 'function') lockScroll();
+            const box = document.getElementById('migrateBody');
+            try{
+                const res = await fetch(`/api/apps/${encodeURIComponent(currentApp)}/models/migrate/preview/`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({file: currentFml})});
+                const d = await res.json();
+                if(!res.ok) throw new Error(d.error || 'فشل المعاينة');
+                const news = d.new_inputs || [];
+                box.innerHTML = `<div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3 text-center">`
+                    + [[d.table || '-', 'الجدول'], [(d.db_columns || []).length, 'عمود بالجدول'], [d.form_fields, 'مدخل بالنموذج'], [news.length, 'جديد']]
+                    .map(x=>`<div class="bg-slate-50 border border-slate-200 rounded-xl py-2"><div class="text-base font-extrabold text-slate-800 font-mono" dir="ltr">${escHtml(String(x[0]))}</div><div class="text-[10px] text-slate-500">${x[1]}</div></div>`).join('')
+                    + `</div>`
+                    + `<div class="text-[11px] text-slate-500 mb-2 font-mono" dir="ltr">${escHtml(d.schema || '')} • ${escHtml(d.connection || '')}</div>`
+                    + (d.note ? `<div class="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5 mb-2">${escHtml(d.note)}</div>` : '')
+                    + (news.length
+                        ? `<div class="font-bold text-slate-700 mb-1">المدخلات الجديدة (${news.length}) — ستُضاف كأعمدة:</div><div class="space-y-1 mb-2">` + news.map(n=>`<div class="flex items-center gap-2 bg-amber-50/60 border border-amber-200 rounded-lg px-2 py-1.5"><i class="fa-solid fa-plus text-amber-600 text-[10px]"></i><span class="font-mono font-bold text-slate-800" dir="ltr">${escHtml(n.name)}</span><span class="text-slate-500">${escHtml(n.alias || '')}</span><span class="mr-auto text-[10px] bg-white border border-amber-200 rounded px-1.5 py-0.5 font-mono" dir="ltr">${escHtml(n.db_type || n.type || '')}</span></div>`).join('') + `</div>`
+                        : `<div class="text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 text-center">لا جديد — كل المدخلات موجودة بالجدول ✓</div>`)
+                    + ((d.ddl_add || []).length ? `<div class="font-bold text-slate-700 mt-2 mb-1">SQL:</div><pre dir="ltr" class="bg-slate-900 text-emerald-100 rounded-xl p-3 overflow-auto font-mono whitespace-pre-wrap" style="max-height:180px">${escHtml(d.ddl_add.join('\n'))}</pre>` : '');
+                document.getElementById('migrateGoBtn').disabled = false;
+            }catch(e){ box.innerHTML = `<p class="text-rose-500 text-center py-6">تعذر المعاينة: ${escHtml(String((e && e.message) || e)).slice(0, 300)}</p>`; }
+        }
+        function closeMigrateModal(){
+            const ov = document.getElementById('migrateModal');
+            if(ov) ov.classList.add('hidden');
+            if(typeof unlockScroll === 'function') unlockScroll();
+        }
+        async function doMigrate(){
+            const btn = document.getElementById('migrateGoBtn');
+            if(btn) btn.disabled = true;
             notify('جارٍ الترحيل...', 'info');
             try {
-                const res = await fetch(`/api/apps/${encodeURIComponent(currentApp)}/models/migrate/`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({file: currentFml})});
+                const res = await fetch(`/api/apps/${encodeURIComponent(currentApp)}/models/migrate/`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({file: currentFml})});
                 const data = await res.json();
-                if(res.ok) notify(`تم الترحيل ✓ ${data.schema}.${data.table} (${(data.columns || []).length} عمود)`, 'success');
+                if(res.ok){
+                    const added = (data.added || []).length;
+                    notify(`تم الترحيل ✓ ${data.schema}.${data.table} (${(data.columns || []).length} عمود${added ? '، +' + added + ' جديد' : ''})`, 'success');
+                    closeMigrateModal();
+                    await loadAllRecords();
+                }
                 else notify(data.error || 'فشل الترحيل', 'error');
             } catch(e) { notify('تعذر الاتصال', 'error'); }
+            if(btn) btn.disabled = false;
         }
         const FORM_BTN_IDS = {add: 'addToolbarBtn', edit: 'editToolbarBtn', delete: 'deleteToolbarBtn', save: 'saveToolbarBtn'};
         let replacedBtns = new Set();
