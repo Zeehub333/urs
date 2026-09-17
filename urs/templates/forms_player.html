@@ -473,12 +473,16 @@
             `;
         }
 
-        function actionBtn(a, rid) {
+        function actionBtn(a, rid, compact) {
             const color = a.badge_color || a.badgeColor || '#4f46e5';
             const isHex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(color);
             const extra = isHex ? `style="background:${color}"` : '';
             const colorCls = isHex ? '' : escAttr(color);
+            if(compact) return `<button type="button" title="${escAttr(a.label)}" onclick="runCustomAction('${escAttr(a.name)}','${String(rid).replace(/'/g, "\\'")}')" ${extra} class="inline-flex items-center justify-center w-7 h-7 rounded-full text-white hover:opacity-90 ${colorCls}"><i class="fa-solid ${escAttr(a.icon || 'fa-bolt')} text-[11px]"></i></button>`;
             return `<button type="button" title="${escAttr(a.label)}" onclick="runCustomAction('${escAttr(a.name)}','${String(rid).replace(/'/g, "\\'")}')" ${extra} class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold text-white hover:opacity-90 ${colorCls}"><i class="fa-solid ${escAttr(a.icon || 'fa-bolt')} text-[10px]"></i>${escHtml(a.label)}</button>`;
+        }
+        function previewRecord(id){
+            try{ window._panelId = String(id); paintBlankPanel(); }catch(e){}
         }
 
         async function runCustomAction(actionName, rid) {
@@ -1799,6 +1803,7 @@
             if(isModelsRegistry()){ location.href = `/app/${currentApp}/forms-designer/`; return; }
             currentRecordId = null;
             currentData = {};
+            try{ window._panelId = null; }catch(e){}
             renderForm(fmlMeta);
             document.querySelectorAll('[data-field]').forEach(el => { el.value = ''; });
             document.getElementById('formPanelTitle').textContent = 'سجل جديد';
@@ -1933,11 +1938,20 @@
             const box = document.getElementById('blankPanelBody');
             if(!box) return;
             try{
-                let rec = null;
-                if(currentRecordId) rec = allRows.find((r, i) => String(rowId(r, i)) === String(currentRecordId));
+                let rec = null, panelRid = null;
+                if(currentRecordId){
+                    panelRid = String(currentRecordId);
+                    rec = allRows.find((r, i) => String(rowId(r, i)) === panelRid);
+                }
+                if(!rec && window._panelId){
+                    panelRid = String(window._panelId);
+                    rec = allRows.find((r, i) => String(rowId(r, i)) === panelRid);
+                    if(!rec) panelRid = null;
+                }
                 if(!rec && selectedIds.size === 1){
-                    const id = [...selectedIds][0];
-                    rec = allRows.find((r, i) => String(rowId(r, i)) === id);
+                    panelRid = [...selectedIds][0];
+                    rec = allRows.find((r, i) => String(rowId(r, i)) === panelRid);
+                    if(!rec) panelRid = null;
                 }
                 if(!rec){
                     const tbl = ((fmlMeta.metadata || {}).table) || '';
@@ -1958,7 +1972,9 @@
                     return String(cellVal(rec, f.name) ?? '').trim() !== '';
                 });
                 const m0 = monitorRecordId(rec);
+                const panelActs = (customActions || []).filter(a => (a.level || 'record') === 'record');
                 box.innerHTML = logo
+                    + (panelActs.length && panelRid ? `<div class="flex flex-wrap gap-1.5 justify-center mb-2" onclick="event.stopPropagation()">${panelActs.map(a => actionBtn(a, panelRid)).join('')}</div>` : '')
                     + (rest.length ? `<div id="detGrid" class="grid grid-cols-2 gap-1 text-right mt-1">` + rest.map(f => {
                     return `<div class="bg-slate-50 border border-slate-100 rounded-lg px-2 py-1.5"><div class="text-[10px] text-slate-400 font-bold truncate">${escHtml(f.alias)}</div><div class="text-xs font-semibold text-slate-700 break-words">${cellHtml(rec, f.name)}</div></div>`;
                 }).join('') + `</div>` : `<div class="text-slate-400 text-center py-4 text-xs">لا تفاصيل</div>`);
@@ -2587,14 +2603,14 @@
                     const id = String(rowId(r, allRows.indexOf(r)));
                     const checked = selectedIds.has(id) ? 'checked' : '';
                     const hl = String(currentRecordId) === id ? 'bg-indigo-50/60' : (i % 2 ? 'bg-slate-50/60' : 'bg-white');
-                    body += `<tr class="${hl} hover:bg-indigo-50/50 transition" ondblclick="loadRecord('${id.replace(/'/g, "\\'")}')">`;
+                    body += `<tr class="${hl} hover:bg-indigo-50/50 transition" onclick="previewRecord('${id.replace(/'/g, "\\'")}')" ondblclick="loadRecord('${id.replace(/'/g, "\\'")}')">`;
                     body += `<td class="freeze-col ${hl} px-2 py-1 text-center excel-cell" onclick="event.stopPropagation()"><input type="checkbox" ${checked} onchange="toggleSelect('${id.replace(/'/g, "\\'")}', this.checked)" class="rounded text-indigo-600"></td>`;
                     body += `<td class="px-2 py-1 text-center text-slate-400 excel-cell">${start + i + 1}</td>`;
                     cols.forEach(f => {
                         body += `<td class="px-2 py-1 text-slate-800 excel-cell whitespace-nowrap">${cellHtml(r, f.name)}</td>`;
                     });
                     if(customActions.length) {
-                        body += `<td class="px-2 py-1 text-center whitespace-nowrap" onclick="event.stopPropagation()">${recordActions.map(a => actionBtn(a, id)).join('')}</td>`;
+                        body += `<td class="px-2 py-1 text-center whitespace-nowrap" onclick="event.stopPropagation()">${recordActions.map(a => actionBtn(a, id, true)).join('')}</td>`;
                     }
                     body += '</tr>';
                 });
@@ -2629,7 +2645,7 @@
                     ${cover}
                     <div class="font-bold text-slate-800 text-sm truncate" title="${escAttr(nameV)}">${escHtml(nameV) || '—'}</div>
                     ${(secondV !== '' || thirdV !== '') ? `<div class="mt-1 text-[11px] text-slate-600 truncate"><span class="font-semibold">${escHtml(secondV)}</span>${(secondV !== '' && thirdV !== '') ? '<span class="text-slate-300 mx-1">•</span>' : ''}<span>${escHtml(thirdV)}</span></div>` : ''}
-                    ${recordActions.length ? `<div class="flex items-center justify-center gap-1.5 flex-wrap pt-2" onclick="event.stopPropagation()">${recordActions.map(a => actionBtn(a, id)).join('')}</div>` : ''}
+                    ${recordActions.length ? `<div class="flex items-center justify-center gap-1.5 flex-wrap pt-2" onclick="event.stopPropagation()">${recordActions.map(a => actionBtn(a, id, true)).join('')}</div>` : ''}
                 </div>`;
             });
             document.getElementById('cardsView').innerHTML = html;
