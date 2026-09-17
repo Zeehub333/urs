@@ -1878,14 +1878,29 @@
             try{
                 const m = (rec && rec.record_id) ? rec : monitorRecordId(rec);
                 if(!m) return;
+                let label = '';
+                try{ label = localStorage.getItem('device_name') || ''; }catch(e){}
                 fetch('/api/monitor/touch/', {method:'POST', headers:{'Content-Type':'application/json'},
-                    body: JSON.stringify({record_id: m.record_id, table: m.table, event: event})}).catch(()=>{});
+                    body: JSON.stringify({record_id: m.record_id, table: m.table, event: event, machine: label})}).catch(()=>{});
             }catch(e){}
         }
+        function monitorSaveDeviceName(v){
+            try{ localStorage.setItem('device_name', String(v || '').trim()); }catch(e){}
+        }
         function monitorSectionHtml(log){
-            const dt = (s)=>{ try{ return String(s || '').slice(0, 16).replace('T', ' '); }catch(e){ return ''; } };
+            const dt = (s)=>{ try{
+                if(!s) return '';
+                const d = new Date(String(s));
+                if(isNaN(d.getTime())) return String(s).slice(0, 16).replace('T', ' ');
+                const p = (n)=>String(n).padStart(2, '0');
+                return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+            }catch(e){ return ''; } };
+            let devName = '';
+            try{ devName = localStorage.getItem('device_name') || ''; }catch(e){}
             const row = (label, v)=>`<div class="bg-white border border-slate-100 rounded-lg px-2 py-1"><div class="text-[10px] text-slate-400 font-bold">${label}</div><div class="text-xs font-semibold text-slate-700" dir="auto">${v || '—'}</div></div>`;
-            return `<div class="mb-2"><div class="text-[11px] font-bold text-slate-500 mb-1">سجل المراقبة</div><div class="grid grid-cols-2 gap-1 text-right">`
+            return `<div class="mb-2"><div class="text-[11px] font-bold text-slate-500 mb-1">سجل المراقبة</div>`
+                + `<div class="bg-white border border-slate-100 rounded-lg px-2 py-1 mb-1"><div class="text-[10px] text-slate-400 font-bold">اسم هذا الجهاز (يُحفظ بالمتصفح)</div><input value="${escAttr(devName)}" onchange="monitorSaveDeviceName(this.value);try{notify('حُفظ اسم الجهاز ✓','success');}catch(e){}" placeholder="مثال: استقبال-1" class="w-full text-xs font-semibold text-slate-700 bg-transparent outline-none"/></div>`
+                + `<div class="grid grid-cols-2 gap-1 text-right">`
                 + row('جهاز الإدخال', escHtml(log.ad_machine)) + row('جهاز التعديل', escHtml(log.edit_machine))
                 + row('تاريخ الإضافة', escHtml(dt(log.ad_date))) + row('تاريخ آخر تعديل', escHtml(dt(log.edit_date)))
                 + row('عدد مرات الطباعة', log.print_count ?? 0)
