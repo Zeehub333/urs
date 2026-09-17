@@ -844,10 +844,12 @@
                         const mk2 = (t === 'image' || t === 'media') ? t : (fieldMediaKind(field) || 'image');
                         const accept = mk2 === 'image' ? 'image/*' : 'image/*,video/*,audio/*';
                         const hasV = String(val ?? '').trim() !== '';
+                        const isData = /^data:/i.test(String(val ?? '').trim());
                         input = `<div class="space-y-1.5">
                             <div id="${fxId(field)}_prev" class="flex justify-center items-center bg-slate-50 border border-slate-200 rounded-lg p-2 min-h-[64px] overflow-hidden">${hasV ? mediaHtml(val, mk2) : '<span class="text-slate-400 text-xs"><i class="fa-solid fa-image"></i> بلا صورة</span>'}</div>
                             <div class="flex gap-1">
-                                <input data-field-url="${field.name}" value="${escAttr(val)}" placeholder="رابط https://... أو اختر ملفاً" class="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-mono" dir="ltr" oninput="fmlkMediaUrl('${field.name}')"/>
+                                <input data-field-url="${field.name}" value="${isData ? '' : escAttr(val)}" placeholder="رابط https://... أو اختر ملفاً" class="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-mono${isData ? ' hidden' : ''}" dir="ltr" oninput="fmlkMediaUrl('${field.name}')"/>
+                                <span id="${fxId(field)}_chip" class="flex-1 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg px-3 py-1.5 text-xs font-bold text-center${isData ? '' : ' hidden'}">📎 ملف مرفوع (مضمّن)</span>
                                 <label class="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-xs font-bold cursor-pointer whitespace-nowrap"><i class="fa-solid fa-upload"></i> ملف<input type="file" accept="${accept}" class="hidden" onchange="fmlkMediaFile('${field.name}', this)"/></label>
                                 <button type="button" onclick="fmlkMediaClear('${field.name}')" title="مسح" class="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg text-xs"><i class="fa-solid fa-xmark"></i></button>
                             </div>
@@ -1731,6 +1733,13 @@
             const {hid, prev} = fmlkMediaEls(name);
             if(!prev) return;
             const v = hid ? hid.value : '';
+            const isData = /^data:/i.test(String(v || '').trim());
+            try{
+                const url = document.querySelector(`[data-field-url="${CSS.escape(name)}"]`);
+                if(url){ url.classList.toggle('hidden', isData); if(!isData) url.value = v; }
+                const chip = document.getElementById('fx_' + String(name).replace(/[^A-Za-z0-9_]/g, '_') + '_chip');
+                if(chip) chip.classList.toggle('hidden', !isData);
+            }catch(e){}
             let kind = 'image';
             try{
                 const f = (fmlMeta.fields || []).find(x => x.name === name) || {};
