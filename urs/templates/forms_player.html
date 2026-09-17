@@ -1882,7 +1882,7 @@
                     body: JSON.stringify({record_id: m.record_id, table: m.table, event: event})}).catch(()=>{});
             }catch(e){}
         }
-        function monitorSectionHtml(log){
+        function monitorDetailBoxes(log){
             const dt = (s)=>{ try{
                 if(!s) return '';
                 const d = new Date(String(s));
@@ -1890,13 +1890,12 @@
                 const p = (n)=>String(n).padStart(2, '0');
                 return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
             }catch(e){ return ''; } };
-            const row = (label, v)=>`<div class="bg-white border border-slate-100 rounded-lg px-2 py-1"><div class="text-[10px] text-slate-400 font-bold">${label}</div><div class="text-xs font-semibold text-slate-700" dir="auto">${v || '—'}</div></div>`;
-            return `<div class="mb-2"><div class="text-[11px] font-bold text-slate-500 mb-1">سجل المراقبة</div>`
-                + `<div class="grid grid-cols-2 gap-1 text-right">`
-                + row('جهاز الإدخال', escHtml(log.ad_machine)) + row('جهاز التعديل', escHtml(log.edit_machine))
-                + row('تاريخ الإضافة', escHtml(dt(log.ad_date))) + row('تاريخ آخر تعديل', escHtml(dt(log.edit_date)))
-                + row('عدد مرات الطباعة', log.print_count ?? 0)
-                + `</div></div>`;
+            const box = (label, v)=>`<div class="bg-white border border-indigo-100 rounded-lg px-2 py-1.5"><div class="text-[10px] text-indigo-400 font-bold truncate">${label}</div><div class="text-xs font-semibold text-slate-700 break-words">${v || '—'}</div></div>`;
+            return box('جهاز الإدخال', escHtml(log.ad_machine))
+                + box('جهاز التعديل', escHtml(log.edit_machine))
+                + box('تاريخ الإضافة', escHtml(dt(log.ad_date)))
+                + box('تاريخ آخر تعديل', escHtml(dt(log.edit_date)))
+                + box('عدد مرات الطباعة', log.print_count ?? 0);
         }
         async function saveForm() {
             const data = collectData();
@@ -1959,18 +1958,17 @@
                     return String(cellVal(rec, f.name) ?? '').trim() !== '';
                 });
                 const m0 = monitorRecordId(rec);
-                box.innerHTML = logo + (m0 ? `<div id="monBox"><div class="text-slate-400 text-center py-1 text-[11px]">جارٍ تحميل سجل المراقبة...</div></div>` : '')
-                    + (rest.length ? `<div class="grid grid-cols-2 gap-1 text-right mt-1">` + rest.map(f => {
+                box.innerHTML = logo
+                    + (rest.length ? `<div id="detGrid" class="grid grid-cols-2 gap-1 text-right mt-1">` + rest.map(f => {
                     return `<div class="bg-slate-50 border border-slate-100 rounded-lg px-2 py-1.5"><div class="text-[10px] text-slate-400 font-bold truncate">${escHtml(f.alias)}</div><div class="text-xs font-semibold text-slate-700 break-words">${cellHtml(rec, f.name)}</div></div>`;
                 }).join('') + `</div>` : `<div class="text-slate-400 text-center py-4 text-xs">لا تفاصيل</div>`);
                 if(m0){
                     fetch('/api/monitor/get/?record_id=' + encodeURIComponent(m0.record_id))
                         .then(r=>r.json()).then(j=>{
-                            const el = document.getElementById('monBox');
-                            if(!el) return;
-                            if(j && j.exists && j.log) el.innerHTML = monitorSectionHtml(j.log);
-                            else el.innerHTML = '';
-                        }).catch(()=>{ const el = document.getElementById('monBox'); if(el) el.innerHTML = ''; });
+                            const grid = document.getElementById('detGrid');
+                            if(!grid || !j || !j.exists || !j.log) return;
+                            grid.insertAdjacentHTML('beforeend', monitorDetailBoxes(j.log));
+                        }).catch(()=>{});
                 }
             }catch(e){ box.innerHTML = '<div class="py-6">—</div>'; }
         }
