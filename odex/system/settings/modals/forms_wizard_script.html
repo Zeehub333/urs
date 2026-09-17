@@ -237,12 +237,16 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
         function fwRenderSheet(){
             const body = document.getElementById('fwSheetBody');
             if(!body) return;
+            // ثبات موضع التمرير عند إعادة الرسم (نقل/تحرير صف)
+            const sc = (body.scrollHeight > body.clientHeight) ? body : body.parentElement;
+            const st = sc ? sc.scrollTop : 0, sl = sc ? sc.scrollLeft : 0;
             if(fwSheet === 'tables') fwRenderTables(body);
             else if(fwSheet === 'diagram') fwRenderDiagram(body);
             else if(fwSheet === 'inputs') fwRenderInputs(body);
             else if(fwSheet === 'tabs') fwRenderTabsSheet(body);
             else if(fwSheet === 'docs') fwRenderDocs(body);
             fwStat();
+            try{ if(sc) { sc.scrollTop = st; sc.scrollLeft = sl; } }catch(e){}
         }
         // ── ورقة الجداول: أساسي + متفرعة one-to-many ──
         function fwRenderTables(body){
