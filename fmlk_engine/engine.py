@@ -436,6 +436,19 @@ class FMLKFormEngine:
         """List records with pagination — for Records showing."""
         limit = None if page_size == "all" else int(page_size)
         offset = (page - 1) * (limit or 0) if limit else 0
+        # Stable order: without ORDER BY the DB returns heap order,
+        # so an edited row sinks last — default to PK (or first field).
+        auto_order = not order_by
+        if auto_order:
+            try:
+                order_by = (self.primary_key_fields() or [None])[0]
+            except Exception:
+                order_by = None
+            if not order_by:
+                try:
+                    order_by = (getattr(self.fields[0], "name", None) if self.fields else None)
+                except Exception:
+                    order_by = None
         try:
             sql, params = self._build_select(filters, order_by, limit, offset, include_pk=True)
             # Probe: if the table has no id column, fall back to a PK-less select
@@ -444,6 +457,13 @@ class FMLKFormEngine:
             if self._missing_pk_error(e):
                 sql, params = self._build_select(filters, order_by, limit, offset, include_pk=False)
                 return self._list_records_exec(sql, params, filters, page, limit)
+            if auto_order:
+                # عمود الترتيب التلقائي غير موجود — أعد بدون ترتيب
+                try:
+                    sql, params = self._build_select(filters, None, limit, offset, include_pk=True)
+                    return self._list_records_exec(sql, params, filters, page, limit)
+                except Exception:
+                    pass
             raise
 
     # ── Secret masking (passwords never leave the list endpoint in cleartext) ──
