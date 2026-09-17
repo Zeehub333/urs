@@ -1937,6 +1937,7 @@
         function paintBlankPanel(){
             const box = document.getElementById('blankPanelBody');
             if(!box) return;
+            if(window._panelEditing) return;
             try{
                 let rec = null, panelRid = null;
                 if(currentRecordId){
@@ -1953,6 +1954,7 @@
                     rec = allRows.find((r, i) => String(rowId(r, i)) === panelRid);
                     if(!rec) panelRid = null;
                 }
+                try{ window._panelRid = panelRid; window._panelRec = rec; }catch(e){}
                 if(!rec){
                     const tbl = ((fmlMeta.metadata || {}).table) || '';
                     box.innerHTML = `<div class="py-6"><div class="text-3xl mb-2 text-slate-200"><i class="fa-solid fa-circle-info"></i></div><div class="font-bold text-slate-600 mb-1">${escHtml((fmlMeta.metadata || {}).displayName || currentFml || '')}</div><div class="text-slate-400 font-mono" dir="ltr">${escHtml(tbl)}</div><div class="mt-2">${allRows.length} سجل</div><div class="mt-1">اختر سجلاً لعرض تفاصيله هنا</div></div>`;
@@ -1973,8 +1975,14 @@
                 });
                 const m0 = monitorRecordId(rec);
                 const panelActs = (customActions || []).filter(a => (a.level || 'record') === 'record');
+                const _realId = panelRid && !String(panelRid).startsWith('__row');
+                const _sysBtn = (onclick, cls, icon, label)=>`<button type="button" onclick="${onclick}" class="${cls}"><i class="fa-solid ${icon}"></i>${label}</button>`;
                 box.innerHTML = logo
-                    + (panelActs.length && panelRid ? `<div class="flex flex-wrap gap-1.5 justify-center mb-2" onclick="event.stopPropagation()">${panelActs.map(a => actionBtn(a, panelRid)).join('')}</div>` : '')
+                    + ((panelRid && _realId) || panelActs.length ? `<div class="flex flex-wrap gap-1.5 justify-center mb-2" onclick="event.stopPropagation()">`
+                    + ((_realId) ? _sysBtn(`panelEdit()`, 'inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold text-white bg-amber-500 hover:opacity-90', 'fa-pen text-[10px]', 'تعديل')
+                    + _sysBtn(`panelDelete()`, 'inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold text-white bg-rose-500 hover:opacity-90', 'fa-trash text-[10px]', 'حذف') : '')
+                    + (panelRid ? _sysBtn(`panelPrint()`, 'inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold text-white bg-indigo-600 hover:opacity-90', 'fa-print text-[10px]', 'طباعة') : '')
+                    + (panelRid ? panelActs.map(a => actionBtn(a, panelRid)).join('') : '') + `</div>` : '')
                     + (rest.length ? `<div id="detGrid" class="grid grid-cols-2 gap-1 text-right mt-1">` + rest.map(f => {
                     return `<div class="bg-slate-50 border border-slate-100 rounded-lg px-2 py-1.5"><div class="text-[10px] text-slate-400 font-bold truncate">${escHtml(f.alias)}</div><div class="text-xs font-semibold text-slate-700 break-words">${cellHtml(rec, f.name)}</div></div>`;
                 }).join('') + `</div>` : `<div class="text-slate-400 text-center py-4 text-xs">لا تفاصيل</div>`);
@@ -1987,6 +1995,140 @@
                         }).catch(()=>{});
                 }
             }catch(e){ box.innerHTML = '<div class="py-6">—</div>'; }
+        }
+        // ── تحرير/حذف/طباعة من اللوحة (بدل الدرج القديم) ──
+        function panelEditRec(){
+            try{
+                const id = window._panelRid, rec = window._panelRec;
+                if(!id || !rec) return null;
+                if(String(id).startsWith('__row')){ notify('صف غير محفوظ — احفظه أولاً', 'info'); return null; }
+                return {id: String(id), rec};
+            }catch(e){ return null; }
+        }
+        function panelEdit(){
+            const t = panelEditRec();
+            if(!t) return;
+            try{
+                const dp = document.getElementById('formPanel');
+                if(dp && !dp.classList.contains('hidden')){ notify('أغلق درج التحرير أولاً', 'info'); return; }
+            }catch(e){}
+            const box = document.getElementById('blankPanelBody');
+            if(!box) return;
+            try{
+                // تفريغ درج النموذج لتفادي تكرار ids (fx_*) — يُعاد بناؤه عند الفتح
+                const fr = document.getElementById('formRoot');
+                if(fr) fr.innerHTML = '';
+                const byAlias = {};
+                (fmlMeta.fields || []).forEach(f => {
+                    if(f.alias) byAlias[String(f.alias).toLowerCase()] = f.name;
+                    if(f.name) byAlias[String(f.name).toLowerCase()] = f.name;
+                });
+                currentData = {};
+                Object.entries(t.rec || {}).forEach(([k, v]) => {
+                    if(k === '__rid' || k === '__pk_id') return;
+                    currentData[byAlias[String(k).toLowerCase()] || k] = v;
+                });
+                const fields = (fmlMeta.fields || []).filter(f => !f.destination || f.destination === 'main');
+                let html = `<div id="panelEditBox" class="space-y-2 text-right">`;
+                fields.forEach(f => { html += `<div>${renderInput(f)}</div>`; });
+                html += `<div class="flex gap-2 pt-1"><button type="button" onclick="panelSaveEdit()" class="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold"><i class="fa-solid fa-floppy-disk"></i> حفظ</button><button type="button" onclick="panelCancelEdit()" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs font-bold">إلغاء</button></div></div>`;
+                box.innerHTML = html;
+                window._panelEditing = true;
+                try{ if(window.FMLK) FMLK.widgetsRefresh(); }catch(e){}
+                try{ if(typeof uiEnhanceDates === 'function') uiEnhanceDates(box); }catch(e){}
+            }catch(e){ showError(e, 'تحرير من اللوحة'); }
+        }
+        function panelCancelEdit(){
+            window._panelEditing = false;
+            try{ paintBlankPanel(); }catch(e){}
+        }
+        async function panelSaveEdit(){
+            const t = panelEditRec();
+            if(!t) return;
+            const data = {};
+            try{
+                document.querySelectorAll('#blankPanelBody [data-field]').forEach(el => { data[el.dataset.field] = el.value; });
+            }catch(e){}
+            notify('جارٍ الحفظ...', 'info');
+            try{
+                const res = await fetch('/api/fmlk/update', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({fml: currentFml, app: currentApp, id: t.id, data})});
+                const j = await res.json();
+                if(!j.ok && !j.rowcount) throw new Error(j.error || 'فشل الحفظ');
+                try{ monitorTouch('edit', t.rec); }catch(e){}
+                window._panelEditing = false;
+                notify('تم الحفظ ✓', 'success');
+                await loadAllRecords();
+            }catch(e){ showError(e, 'حفظ من اللوحة'); }
+        }
+        async function panelDelete(){
+            const t = panelEditRec();
+            if(!t) return;
+            if(!confirm('حذف هذا السجل؟')) return;
+            try{
+                const res = await fetch('/api/fmlk/delete', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({fml: currentFml, app: currentApp, id: t.id})});
+                const j = await res.json();
+                if(!j.ok) throw new Error(j.error || 'فشل الحذف');
+                if(String(currentRecordId) === t.id){ currentRecordId = null; closePanel(); }
+                try{ window._panelId = null; window._panelEditing = false; }catch(e){}
+                notify('تم الحذف ✓', 'success');
+                await loadAllRecords();
+            }catch(e){ showError(e, 'حذف من اللوحة'); }
+        }
+        async function panelPrint(){
+            const t = panelEditRec();
+            const box = document.getElementById('blankPanelBody');
+            if(!box) return;
+            window._panelEditing = false;
+            box.innerHTML = '<div class="text-slate-400 text-center py-6 text-xs">جارٍ تحميل المستندات...</div>';
+            try{
+                if(!Object.keys(printDocMeta || {}).length){
+                    const base = printFormBase();
+                    const r = await fetch('/api/apps/' + encodeURIComponent(currentApp) + '/dml/list/?source=' + encodeURIComponent(base));
+                    const d = await r.json();
+                    (d.docs || []).forEach(x=>{ printDocMeta[x.file] = (x.metadata || {}); });
+                }
+                const docs = Object.keys(printDocMeta || {});
+                if(!docs.length){ box.innerHTML = '<div class="text-slate-400 text-center py-6 text-xs">لا توجد مستندات مرتبطة بهذا النموذج</div>'; return; }
+                box.innerHTML = `<div class="space-y-2 text-right">
+                    <select id="panelPrintDocSel" onchange="panelRenderPrint()" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-xs">`
+                    + docs.map(f=>`<option value="${String(f).replace(/"/g, '&quot;')}">${escHtml((printDocMeta[f] && (printDocMeta[f].title || printDocMeta[f].name)) || f)}</option>`).join('')
+                    + `</select>
+                    <div class="flex gap-1.5">
+                        <button type="button" onclick="panelDoPrint()" class="flex-1 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold"><i class="fa-solid fa-print"></i> طباعة</button>
+                        <button type="button" onclick="downloadPreviewPdf()" class="flex-1 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold"><i class="fa-solid fa-file-pdf"></i> PDF</button>
+                        <button type="button" onclick="paintBlankPanel()" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs font-bold">رجوع</button>
+                    </div>
+                    <div class="border border-slate-200 rounded-xl overflow-hidden bg-white" style="height:380px"><iframe id="panelPrintFrame" class="w-full h-full" title="معاينة"></iframe></div>
+                </div>`;
+                panelRenderPrint();
+            }catch(e){ box.innerHTML = '<div class="text-rose-500 text-center py-6 text-xs">تعذر التحميل</div>'; }
+        }
+        async function panelRenderPrint(){
+            const sel = document.getElementById('panelPrintDocSel');
+            const frame = document.getElementById('panelPrintFrame');
+            if(!sel || !frame || !sel.value) return;
+            const t = panelEditRec();
+            frame.srcdoc = '<div style="padding:30px;text-align:center;color:#64748b;font-size:12px">جاري التوليد...</div>';
+            try{
+                const row = Object.assign({}, (t && t.rec) || {});
+                const cols = (fmlMeta.fields || []).filter(f=>!f.destination || f.destination==='main').map(f=>({name:f.name || '', alias:f.alias || f.name || ''}));
+                const data = Object.assign({}, row, {row_count:'1', form_title:((fmlMeta.metadata || {}).displayName || currentFml), app_name:currentApp});
+                printLastPayload = {dml: sel.value, app: currentApp, data: data, table: {columns: cols, rows: [row]}, detail: {columns: [], rows: []}};
+                const res = await fetch('/api/dml/render', {method:'POST', headers:{'Content-Type':'application/json'},
+                    body: JSON.stringify({dml: sel.value, app: currentApp, data: data, table: {columns: cols, rows: [row]}, detail: {columns: [], rows: []}})});
+                const html = await res.text();
+                printLastHtml = html;
+                frame.srcdoc = html;
+            }catch(e){ frame.srcdoc = '<div style="padding:20px;color:#e11d48;font-size:12px">تعذر التوليد</div>'; }
+        }
+        function panelDoPrint(){
+            const frame = document.getElementById('panelPrintFrame');
+            if(!frame) return;
+            try{
+                const t = panelEditRec();
+                monitorTouch('print', t && t.rec);
+            }catch(e){}
+            try{ frame.contentWindow.print(); }catch(e){ notify('لا توجد معاينة للطباعة', 'info'); }
         }
         async function saveAndClose() {
             const ok = await saveForm();
