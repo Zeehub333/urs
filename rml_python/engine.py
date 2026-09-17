@@ -5220,6 +5220,7 @@ class RMLReportEngine:
                     base_db.conn.rollback()  # clear any poisoned txn so the REAL error surfaces
             except Exception:
                 pass
+            self._report_progress({"stage": "count", "text": "حساب عدد السجلات..."})
             cur = self._exec_on(base_db, count_sql_simple, count_params_simple)
             try:
                 row = cur.fetchone()
@@ -5243,6 +5244,8 @@ class RMLReportEngine:
                     base_db.conn.rollback()  # clear any poisoned txn so the REAL error surfaces
             except Exception:
                 pass
+            self._report_progress({"stage": "rows", "table": str(exec_plan.get("from_table") or "").lower(),
+                                   "text": "جلب الصفوف..."})
             cur = self._exec_on(base_db, sql, params)
             try:
                 cols = [d[0].lower() for d in cur.description] if cur.description else []
