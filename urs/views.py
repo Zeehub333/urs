@@ -1916,6 +1916,125 @@ def api_fmlk_preview_insert(request):
         return JsonResponse({"error": str(e)}, status=400)
 
 @csrf_exempt
+def api_fmlk_import_xlsx(request, app_name):
+    """POST /api/apps/<app>/models/import-xlsx/ (multipart: file, fml, preview?, mapping?, match_column?).
+
+    preview=1 → {headers, sample_rows(5), total_rows} بلا كتابة.
+    Иначе → يستورد الصفوف: مطابقة عمود المطابقة تحدّث الموجود (upsert) وإلا ينشئ.
+    mapping: {excel_header: field_name}. حد أقصى 2000 صف.
+    """
+    if request.method != "POST":
+        return JsonResponse({"error": "POST required"}, status=405)
+    try:
+        import datetime as _dtm
+        import decimal as _dec
+        fml = (request.POST.get("fml") or "").strip()
+        if not fml:
+            return JsonResponse({"error": "fml required"}, status=400)
+        up = request.FILES.get("file")
+        if up is None:
+            return JsonResponse({"error": "file required (xlsx)"}, status=400)
+        if not str(up.name or "").lower().endswith((".xlsx", ".xlsm", ".xltx", ".xltm")):
+            return JsonResponse({"error": "ملف Excel (.xlsx) فقط"}, status=400)
+        try:
+            import openpyxl
+        except ImportError:
+            return JsonResponse({"error": "openpyxl غير مثبت على الخادم"}, status=500)
+
+        def _norm(v):
+            if v is None:
+                return ""
+            if isinstance(v, bool):
+                return "true" if v else "false"
+            if isinstance(v, (_dtm.datetime,)):
+                return v.isoformat(sep=" ", timespec="seconds")
+            if isinstance(v, (_dtm.date, _dtm.time)):
+                return v.isoformat()
+            if isinstance(v, _dec.Decimal):
+                return int(v) if v == int(v) else float(v)
+            return v
+
+        wb = openpyxl.load_workbook(up, read_only=True, data_only=True)
+        try:
+            ws = wb.active
+            rows = list(ws.iter_rows(values_only=True))
+        finally:
+            try:
+                wb.close()
+            except Exception:
+                pass
+        rows = [r for r in (rows or []) if any(c is not None and str(c).strip() != "" for c in (r or []))]
+        if not rows:
+            return JsonResponse({"error": "الملف فارغ"}, status=400)
+        headers = [str(c or "").strip() for c in (rows[0] or [])]
+        if not any(headers):
+            return JsonResponse({"error": "الصف الأول يجب أن يحتوي الترويسات"}, status=400)
+        data_rows = rows[1:]
+        if request.POST.get("preview"):
+            return JsonResponse({"ok": True, "headers": headers,
+                                 "sample_rows": [[_norm(c) for c in (r or [])] for r in data_rows[:5]],
+                                 "total_rows": len(data_rows)},
+                                json_dumps_params={"ensure_ascii": False})
+        try:
+            mapping = json.loads(request.POST.get("mapping") or "{}")
+        except Exception:
+            mapping = {}
+        if not isinstance(mapping, dict):
+            mapping = {}
+        match_column = (request.POST.get("match_column") or "").strip()
+        eng = _fmlk_get_engine(fml, app_name)
+        fields = {getattr(f, "name", ""): f for f in (eng.compiler.fields() or []) if getattr(f, "name", "")}
+        MAX_ROWS = 2000
+        truncated = len(data_rows) > MAX_ROWS
+        created = updated = skipped = 0
+        errors = []
+        for _ri, _r in enumerate(data_rows[:MAX_ROWS], start=2):
+            try:
+                vals = list(_r or []) + [""] * max(0, len(headers) - len(_r or []))
+                data = {}
+                for _hi, _h in enumerate(headers):
+                    if not _h:
+                        continue
+                    _fn = mapping.get(_h)
+                    if not _fn or _fn not in fields:
+                        continue
+                    _v = _norm(vals[_hi] if _hi < len(vals) else "")
+                    if _v == "" or _v is None:
+                        continue
+                    data[_fn] = _v
+                if not data:
+                    skipped += 1
+                    continue
+                _rid = None
+                if match_column and match_column in data and str(data[match_column]).strip() != "":
+                    try:
+                        _lr = eng.list_records(
+                            filters=[{"field": match_column, "op": "=", "value": data[match_column]}],
+                            page=1, page_size=1)
+                        _rows = _lr.get("rows") or []
+                        if _rows:
+                            _rid = _rows[0].get("__pk_id", _rows[0].get("id"))
+                    except Exception:
+                        _rid = None
+                if _rid is not None and str(_rid).strip() != "":
+                    eng.update_record({"id": _rid}, data)
+                    updated += 1
+                else:
+                    eng.create_record(data)
+                    created += 1
+            except Exception as e:
+                if len(errors) < 10:
+                    errors.append(f"صف {_ri}: {str(e)[:120]}")
+                else:
+                    skipped += 1
+        return JsonResponse({"ok": True, "created": created, "updated": updated, "skipped": skipped,
+                             "total": min(len(data_rows), MAX_ROWS), "truncated": truncated, "errors": errors},
+                            json_dumps_params={"ensure_ascii": False})
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@csrf_exempt
 def api_fmlk_create(request):
     try:
         data = json.loads(request.body.decode() or "{}")

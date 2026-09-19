@@ -105,6 +105,7 @@
                     <span id="formActionsBar" class="flex items-center gap-1"></span>
                     <button id="addToolbarBtn" onclick="openAddPanel()" title="إضافة" class="w-8 h-8 rounded-full flex items-center justify-center text-indigo-600 hover:bg-indigo-50 transition"><i class="fa-solid fa-plus"></i></button>
                     <button onclick="document.getElementById('importFile').click()" title="استيراد" class="w-8 h-8 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-indigo-600 transition"><i class="fa-solid fa-file-import"></i></button>
+                    <button onclick="openXlsxImport()" title="استيراد XLSX" class="w-8 h-8 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-emerald-600 transition"><i class="fa-solid fa-file-excel"></i></button>
                     <input type="file" id="importFile" accept=".csv" class="hidden" onchange="importCSV(this)">
                     <button id="editToolbarBtn" onclick="editSelected()" title="تعديل السجل المحدد" class="hidden w-8 h-8 rounded-full items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-amber-600 transition"><i class="fa-solid fa-pen"></i></button>
                     <button id="deleteToolbarBtn" onclick="deleteSelected()" title="حذف السجلات المحددة" class="hidden w-8 h-8 rounded-full items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-rose-600 transition"><i class="fa-solid fa-trash"></i></button>
@@ -3165,6 +3166,95 @@
             }
             notify(`تم استيراد ${ok} سجل${fail ? ` — فشل ${fail}` : ''}`, fail ? (ok ? 'info' : 'error') : 'success');
             await loadAllRecords();
+        }
+        let _xlsxFile = null, _xlsxHeaders = [];
+        function openXlsxImport(){
+            let m = document.getElementById('xlsxImportModal');
+            if(!m){
+                m = document.createElement('div');
+                m.id = 'xlsxImportModal';
+                m.className = 'hidden fixed inset-0 z-[70] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4';
+                m.setAttribute('onclick', 'if(event.target===this)closeXlsxImport()');
+                m.innerHTML = '<div class="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[88vh] overflow-hidden flex flex-col">'
+                    + '<div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-emerald-50 shrink-0"><h3 class="text-sm font-bold text-slate-800"><i class="fa-solid fa-file-excel text-emerald-600"></i> استيراد من Excel</h3><button onclick="closeXlsxImport()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button></div>'
+                    + '<div class="p-4 space-y-3 overflow-y-auto custom-scroll text-xs">'
+                    + '<div><label class="block text-[11px] font-bold text-slate-500 mb-1">ملف XLSX (الصف الأول = الترويسات)</label><input id="xlsxFileInput" type="file" accept=".xlsx,.xlsm,.xltx,.xltm" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"/></div>'
+                    + '<div><label class="block text-[11px] font-bold text-slate-500 mb-1">عمود المطابقة (لتحديث الموجود بدل التكرار — اتركه فارغاً للإنشاء فقط)</label><select id="xlsxMatchCol" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"></select></div>'
+                    + '<div id="xlsxMapOut" class="text-slate-500">اختر الملف ثم اضغط تحليل.</div>'
+                    + '</div>'
+                    + '<div class="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2 shrink-0"><button onclick="closeXlsxImport()" class="px-4 py-1.5 bg-slate-100 rounded-xl text-xs">إلغاء</button><button onclick="runXlsxParse()" class="px-4 py-1.5 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs font-bold"><i class="fa-solid fa-magnifying-glass"></i> تحليل</button><button id="xlsxImportBtn" onclick="applyXlsxImport()" disabled class="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold disabled:opacity-40">استيراد</button></div>'
+                    + '</div>';
+                document.body.appendChild(m);
+            }
+            const fields = (fmlMeta.fields || []).filter(f => !f.destination || f.destination === 'main');
+            document.getElementById('xlsxMatchCol').innerHTML = '<option value="">— بلا (إنشاء فقط) —</option>' + fields.map(f=>`<option value="${escAttr(f.name)}">${escHtml(f.alias || f.name)} <span class="text-slate-400">(${escHtml(f.name)})</span></option>`).join('');
+            document.getElementById('xlsxMapOut').innerHTML = '<span class="text-slate-400">اختر الملف ثم اضغط تحليل.</span>';
+            document.getElementById('xlsxImportBtn').disabled = true;
+            _xlsxFile = null; _xlsxHeaders = [];
+            m.classList.remove('hidden');
+            if(typeof lockScroll === 'function') lockScroll();
+        }
+        function closeXlsxImport(){
+            document.getElementById('xlsxImportModal').classList.add('hidden');
+            if(typeof unlockScroll === 'function') unlockScroll();
+        }
+        async function runXlsxParse(){
+            const box = document.getElementById('xlsxMapOut');
+            const inp = document.getElementById('xlsxFileInput');
+            _xlsxFile = inp && inp.files && inp.files[0];
+            if(!_xlsxFile){ box.innerHTML = '<span class="text-rose-500">اختر ملف XLSX أولاً</span>'; return; }
+            box.innerHTML = '<span class="text-slate-400">جارٍ التحليل...</span>';
+            document.getElementById('xlsxImportBtn').disabled = true;
+            try{
+                const fd = new FormData();
+                fd.append('file', _xlsxFile);
+                fd.append('fml', currentFml);
+                fd.append('preview', '1');
+                const res = await fetch(`/api/apps/${encodeURIComponent(currentApp)}/models/import-xlsx/`, {method:'POST', body: fd});
+                const data = await res.json();
+                if(!res.ok) throw new Error(data.error || 'فشل التحليل');
+                _xlsxHeaders = data.headers || [];
+                const fields = (fmlMeta.fields || []).filter(f => !f.destination || f.destination === 'main');
+                const autoMap = (h)=>{
+                    const t = String(h || '').trim();
+                    if(!t) return '';
+                    const f = fields.find(f=>String(f.name||'').toLowerCase() === t.toLowerCase()) || fields.find(f=>String(f.alias||'').trim() === t);
+                    return f ? f.name : '';
+                };
+                const opts = '<option value="">— تجاهل —</option>' + fields.map(f=>`<option value="${escAttr(f.name)}">${escHtml(f.alias || f.name)} (${escHtml(f.name)})</option>`).join('');
+                box.innerHTML = `<div class="text-[11px] font-bold text-slate-600 mb-1">${data.total_rows} صف — ماب الأعمدة:</div>`
+                    + `<div class="space-y-1">` + _xlsxHeaders.map((h, i)=>`<div class="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5"><span class="font-mono font-bold text-slate-700 flex-1 truncate" dir="ltr">${escHtml(h) || ('عمود ' + (i+1))}</span><span class="text-slate-400">←</span><select data-xmap="${i}" class="flex-1 bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs">${opts.replace(`value="${autoMap(h)}"`, `value="${autoMap(h)}" selected`)}</select></div>`).join('') + `</div>`
+                    + ((data.sample_rows || []).length ? `<div class="text-[11px] font-bold text-slate-600 mt-2 mb-1">معاينة أول 5 صفوف:</div><div class="overflow-x-auto border border-slate-200 rounded-lg"><table class="w-full text-[10px]"><tr>${_xlsxHeaders.map(h=>`<th class="px-1.5 py-1 bg-slate-50 border-b font-mono" dir="ltr">${escHtml(h)}</th>`).join('')}</tr>` + data.sample_rows.map(r=>`<tr>${_xlsxHeaders.map((h,i)=>`<td class="px-1.5 py-1 border-b truncate max-w-[140px]">${escHtml(String(r[i] ?? ''))}</td>`).join('')}</tr>`).join('') + `</table></div>` : '');
+                const mapped = [...document.querySelectorAll('#xlsxMapOut [data-xmap]')].filter(s=>s.value).length;
+                document.getElementById('xlsxImportBtn').disabled = !mapped;
+                if(!mapped) box.innerHTML += '<div class="text-amber-700 text-[11px] mt-1">لم تُطابق أي ترويسة — اختر يدوياً من القوائم</div>';
+            }catch(e){ box.innerHTML = '<span class="text-rose-500">تعذر التحليل: ' + escHtml(String((e && e.message) || e)).slice(0, 300) + '</span>'; }
+        }
+        async function applyXlsxImport(){
+            const btn = document.getElementById('xlsxImportBtn');
+            if(!_xlsxFile) return;
+            const mapping = {};
+            document.querySelectorAll('#xlsxMapOut [data-xmap]').forEach(s=>{ if(s.value) mapping[_xlsxHeaders[+s.dataset.xmap]] = s.value; });
+            if(!Object.keys(mapping).length) return notify('طابق عموداً واحداً على الأقل', 'error');
+            btn.disabled = true;
+            notify('جارٍ الاستيراد...', 'info');
+            try{
+                const fd = new FormData();
+                fd.append('file', _xlsxFile);
+                fd.append('fml', currentFml);
+                fd.append('mapping', JSON.stringify(mapping));
+                fd.append('match_column', (document.getElementById('xlsxMatchCol') || {}).value || '');
+                const res = await fetch(`/api/apps/${encodeURIComponent(currentApp)}/models/import-xlsx/`, {method:'POST', body: fd});
+                const data = await res.json();
+                if(!res.ok) throw new Error(data.error || 'فشل الاستيراد');
+                let msg = `تم: ${data.created} جديد + ${data.updated} محدّث${data.skipped ? ` (تُجوهل ${data.skipped})` : ''}`;
+                if(data.truncated) msg += ' — اقتصر على أول 2000 صف';
+                if((data.errors || []).length) msg += ' — أخطاء: ' + data.errors.slice(0, 3).join('، ');
+                notify(msg, (data.errors || []).length ? 'info' : 'success');
+                closeXlsxImport();
+                await loadAllRecords();
+            }catch(e){ notify('تعذر الاستيراد: ' + String((e && e.message) || e).slice(0, 250), 'error'); }
+            btn.disabled = false;
         }
 
         loadFml(currentFml);
