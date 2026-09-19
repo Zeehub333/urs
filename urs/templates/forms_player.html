@@ -1820,8 +1820,6 @@
                 }
                 return '<span class="text-slate-300">—</span>';
             }
-            const f = fieldDef(name);
-            const raw = cellVal(r, name);
             try{
                 const mk = fieldMediaKind(f);
                 if(mk && String(raw ?? '').trim() !== '') return mediaHtml(raw, mk);
