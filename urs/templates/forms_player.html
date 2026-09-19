@@ -173,6 +173,10 @@
             <!-- Advanced filter tags (report-player parity) -->
             <div id="advTagsBar" class="hidden px-3 py-1.5 flex-wrap items-center gap-1.5 text-xs shrink-0 bg-indigo-50/50 border-b border-indigo-100">
                 <span class="text-indigo-400 font-bold"><i class="fa-solid fa-filter"></i></span>
+                <span class="inline-flex rounded-lg overflow-hidden border border-indigo-300 text-[11px] font-bold" title="طريقة جمع الشروط المتعددة">
+                    <button id="advModeAnd" onclick="setAdvMode('and')" class="px-2.5 py-1 bg-indigo-600 text-white">و (الكل)</button>
+                    <button id="advModeOr" onclick="setAdvMode('or')" class="px-2.5 py-1 bg-white text-indigo-700">أو (أي شرط)</button>
+                </span>
                 <span id="advTagsList" class="contents"></span>
                 <button onclick="clearAdvFilters()" title="مسح كل عوامل التصفية" class="mr-auto text-[11px] text-rose-600 hover:text-rose-800 font-bold whitespace-nowrap">مسح الكل</button>
             </div>
@@ -286,6 +290,18 @@
                     <div>
                         <label class="block font-semibold text-slate-700 mb-1">إلى:</label>
                         <input type="text" id="advFilterValTo" placeholder="القيمة الكبرى / النهاية" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500">
+                    </div>
+                </div>
+                <div class="border-t border-slate-100 pt-3">
+                    <label class="block font-semibold text-slate-700 mb-1">نماذج محفوظة (الشروط + طريقة الجمع):</label>
+                    <div class="flex gap-1.5">
+                        <select id="advPresetSel" class="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-2 py-2 text-slate-800 focus:outline-none focus:border-indigo-500"><option value="">— نموذج محفوظ —</option></select>
+                        <button onclick="applyAdvPreset()" title="تحميل النموذج المحدد" class="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold">تحميل</button>
+                        <button onclick="deleteAdvPreset()" title="حذف النموذج المحدد" class="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl font-bold"><i class="fa-solid fa-trash"></i></button>
+                    </div>
+                    <div class="flex gap-1.5 mt-1.5">
+                        <input id="advPresetName" placeholder="اسم النموذج للحفظ..." class="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500">
+                        <button onclick="saveAdvPreset()" title="حفظ الشروط الحالية كنموذج" class="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold"><i class="fa-solid fa-floppy-disk"></i> حفظ</button>
                     </div>
                 </div>
             </div>
@@ -2972,7 +2988,10 @@
                     const sel = columnFilters[col];
                     if (sel && sel.length && !sel.includes(String(cellVal(r, col)))) return false;
                 }
-                if (advFilters.length && !advFilters.every(f=>matchAdv(r, f))) return false;
+                if (advFilters.length){
+                    const ok = advMode === 'or' ? advFilters.some(f=>matchAdv(r, f)) : advFilters.every(f=>matchAdv(r, f));
+                    if(!ok) return false;
+                }
                 if (rawQ) {
                     if (!matchSmart(r)) return false;
                 }
@@ -3240,6 +3259,56 @@
         }
         // ── تصفية متقدمة (تكافؤ مشغل التقارير: حقل + عملية + قيمة، وشارات) ──
         let advFilters = [];
+        let advMode = 'and'; // and: تحقق الكل | or: تحقق أي شرط
+        function setAdvMode(m){
+            advMode = (m === 'or') ? 'or' : 'and';
+            currentPage = 1;
+            renderAdvTags();
+            renderGrid();
+        }
+        function advPresetKey(){ return 'fmlk_advpresets_' + (currentApp || '') + '_' + (currentFml || ''); }
+        function loadAdvPresets(){
+            try{ const a = JSON.parse(localStorage.getItem(advPresetKey()) || '[]'); return Array.isArray(a) ? a : []; }catch(e){ return []; }
+        }
+        function storeAdvPresets(a){
+            try{ localStorage.setItem(advPresetKey(), JSON.stringify(a)); }catch(e){}
+            refreshAdvPresetSel();
+        }
+        function refreshAdvPresetSel(){
+            const sel = document.getElementById('advPresetSel');
+            if(!sel) return;
+            sel.innerHTML = '<option value="">— نموذج محفوظ —</option>' + loadAdvPresets().map(p=>`<option value="${escAttr(p.name)}">${escHtml(p.name)} (${(p.filters || []).length})</option>`).join('');
+        }
+        function saveAdvPreset(){
+            const nm = ((document.getElementById('advPresetName') || {}).value || '').trim();
+            if(!nm){ try{ notify('أدخل اسماً للنموذج أولاً', 'info'); }catch(e){} return; }
+            if(!advFilters.length){ try{ notify('طبّق شرطاً واحداً على الأقل أولاً', 'info'); }catch(e){} return; }
+            const arr = loadAdvPresets().filter(p=>p.name !== nm);
+            arr.push({name: nm, mode: advMode, filters: JSON.parse(JSON.stringify(advFilters))});
+            storeAdvPresets(arr);
+            document.getElementById('advPresetName').value = '';
+            try{ notify(`حُفظ النموذج "${nm}" ✓`, 'success'); }catch(e){}
+        }
+        function applyAdvPreset(){
+            const nm = ((document.getElementById('advPresetSel') || {}).value || '').trim();
+            if(!nm){ try{ notify('اختر نموذجاً محفوظاً أولاً', 'info'); }catch(e){} return; }
+            const hit = loadAdvPresets().find(p=>p.name === nm);
+            if(!hit){ try{ notify('النموذج غير موجود', 'error'); }catch(e){} return; }
+            advFilters = JSON.parse(JSON.stringify(hit.filters || []));
+            advMode = (hit.mode === 'or') ? 'or' : 'and';
+            closeAdvFilterModal();
+            currentPage = 1;
+            renderAdvTags();
+            renderGrid();
+            try{ notify(`طُبق النموذج "${nm}" (${advFilters.length} شروط)`, 'success'); }catch(e){}
+        }
+        function deleteAdvPreset(){
+            const sel = document.getElementById('advPresetSel');
+            const nm = ((sel || {}).value || '').trim();
+            if(!nm){ try{ notify('اختر نموذجاً لحذفه', 'info'); }catch(e){} return; }
+            storeAdvPresets(loadAdvPresets().filter(p=>p.name !== nm));
+            try{ notify(`حُذف النموذج "${nm}"`, 'success'); }catch(e){}
+        }
         function fmlAdvKind(name){
             try{
                 const k = formFieldKind(fieldDef(name));
@@ -3263,6 +3332,7 @@
             document.getElementById('advFilterValFrom').value = '';
             document.getElementById('advFilterValTo').value = '';
             updateAdvOperators();
+            refreshAdvPresetSel();
             document.getElementById('advancedFilterModal').classList.remove('hidden');
             if(typeof lockScroll === 'function') lockScroll();
         }
@@ -3283,11 +3353,61 @@
             const t = kind === 'number' ? 'number' : kind === 'date' ? 'date' : kind === 'datetime' ? 'datetime-local' : 'text';
             ['advFilterValue','advFilterValFrom','advFilterValTo'].forEach(id=>{
                 const el = document.getElementById(id);
-                if(!el) return;
+                if(!el || el.tagName !== 'INPUT') return;
                 el.type = t;
                 if(t === 'text') el.placeholder = (id === 'advFilterValue') ? 'أدخل القيمة...' : (id === 'advFilterValFrom' ? 'القيمة الصغرى / البداية' : 'القيمة الكبرى / النهاية');
             });
             toggleAdvRangeInputs();
+            try{ renderAdvValueControl(); }catch(e){}
+        }
+        function advOptionPairs(f){
+            // خيارات الحقل الحرفية [{value,label}] — للقوائم والحالات
+            const out = [];
+            try{
+                (f.options || []).forEach(o=>{
+                    if(o && typeof o === 'object') out.push({value: String(o.value ?? ''), label: String(o.label ?? o.value ?? '')});
+                    else if(o !== undefined && o !== null && String(o) !== '') out.push({value: String(o), label: String(o)});
+                });
+            }catch(e){}
+            return out.filter(o=>o.value !== '' || o.label !== '');
+        }
+        async function renderAdvValueControl(){
+            // قيمة ديناميكية حسب نوع البيانات: قائمة خيارات / نعم-لا / مرجع / إدخال مكتوب
+            const box = document.getElementById('advSingleValContainer');
+            if(!box) return;
+            const fld = (document.getElementById('advFilterField') || {}).value || '';
+            const kind = fmlAdvKind(fld);
+            let f = {};
+            try{ f = fieldDef(fld) || {}; }catch(e){}
+            const it = String(f.inputType || '').toLowerCase();
+            const lbl = '<label class="block font-semibold text-slate-700 mb-1">القيمة:</label>';
+            const cls = 'w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500';
+            const t = kind === 'number' ? 'number' : kind === 'date' ? 'date' : kind === 'datetime' ? 'datetime-local' : 'text';
+            if(it === 'boolean'){
+                box.innerHTML = lbl + `<select id="advFilterValue" class="${cls}"><option value="true">نعم (مفعّل)</option><option value="false">لا (معطّل)</option></select>`;
+                return;
+            }
+            const pairs = advOptionPairs(f);
+            if(pairs.length && ['select','status','radio','multiselect','datamodal'].includes(it)){
+                box.innerHTML = lbl + `<select id="advFilterValue" class="${cls}">` + pairs.map(o=>`<option value="${escAttr(o.value)}">${escHtml(o.label)}</option>`).join('') + `</select>`;
+                return;
+            }
+            const refT = f.refTable || '';
+            if(refT && ['select','lookup','datamodal'].includes(it)){
+                box.innerHTML = lbl + `<select id="advFilterValue" class="${cls}"><option value="">جارٍ تحميل الخيارات...</option></select>`;
+                try{
+                    const opts = await loadOptionsSourceRef(refT, f.refFk || 'id', f.refDisplay || '');
+                    const cur = document.getElementById('advFilterValue');
+                    if(!cur || cur.tagName !== 'SELECT') return;
+                    if(((document.getElementById('advFilterField') || {}).value || '') !== fld) return;
+                    box.innerHTML = lbl + `<select id="advFilterValue" class="${cls}"><option value="">— اختر —</option>` + (opts || []).map(o=>{ const p = fmlkOptPair(o); return `<option value="${escAttr(p.value)}">${escHtml(p.label)}</option>`; }).join('') + `</select>`;
+                }catch(e){
+                    if(((document.getElementById('advFilterField') || {}).value || '') !== fld) return;
+                    box.innerHTML = lbl + `<input type="${t}" id="advFilterValue" placeholder="أدخل القيمة..." class="${cls}">`;
+                }
+                return;
+            }
+            box.innerHTML = lbl + `<input type="${t}" id="advFilterValue" placeholder="أدخل القيمة..." class="${cls}">`;
         }
         function toggleAdvRangeInputs(){
             const op = (document.getElementById('advFilterOp') || {}).value || '';
@@ -3343,6 +3463,10 @@
             if(!bar || !box) return;
             bar.classList.toggle('hidden', !advFilters.length);
             bar.classList.toggle('flex', !!advFilters.length);
+            const bAnd = document.getElementById('advModeAnd'), bOr = document.getElementById('advModeOr');
+            const orOn = advMode === 'or';
+            if(bAnd){ bAnd.className = 'px-2.5 py-1 ' + (orOn ? 'bg-white text-indigo-700' : 'bg-indigo-600 text-white'); }
+            if(bOr){ bOr.className = 'px-2.5 py-1 ' + (orOn ? 'bg-amber-500 text-white' : 'bg-white text-indigo-700'); }
             box.innerHTML = advFilters.map((f, idx)=>{
                 const vv = (f.value !== undefined && f.value !== '')
                     ? advCleanMidnight(f.value)
