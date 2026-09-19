@@ -228,6 +228,7 @@
                         <option value="all">الكل</option>
                     </select>
                     <span>سجل من أصل <strong id="totalRecordsCount">0</strong> سجل</span>
+                    <button id="loadMoreBtn" onclick="loadMoreRecords()" title="تحميل الدفعة التالية من الخادم" class="hidden px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold disabled:opacity-50">تحميل المزيد</button>
                 </div>
                 <div class="flex items-center gap-2">
                     <button onclick="changePage(-1)" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg font-medium">السابق</button>
@@ -341,6 +342,11 @@
         let gridSearch = '';
         let currentPage = 1;
         let pageSize = 25;
+        // التحميل التدريجي من الخادم (الجهات > 1000): دفعات FETCH_SIZE مع عدّاد المتبقي
+        let serverTotal = 0;
+        let serverPage = 1;
+        const FETCH_SIZE = 1000;
+        let loadingMore = false;
         let hiddenCols = new Set();
         let menuCol = null;
         let customActions = [];
@@ -1865,23 +1871,66 @@
         let loadError = '';
         async function loadAllRecords() {
             try {
-                const res = await fetch('/api/fmlk/records?fml=' + encodeURIComponent(currentFml) + '&app=' + encodeURIComponent(currentApp) + '&page=1&pageSize=1000');
+                const res = await fetch('/api/fmlk/records?fml=' + encodeURIComponent(currentFml) + '&app=' + encodeURIComponent(currentApp) + '&page=1&pageSize=' + FETCH_SIZE);
                 const data = await res.json();
                 if (data.error) throw new Error(data.error);
                 loadError = '';
                 allRows = data.rows || [];
+                serverTotal = (typeof data.total === 'number') ? data.total : allRows.length;
+                serverPage = 1;
                 formKindCache = {};
                 selectedIds = new Set([...selectedIds].filter(id => allRows.some((r, i) => rowId(r, i) === id)));
                 currentPage = 1;
                 refreshNav();
                 renderGrid();
+                updateLoadMore();
             } catch(e) {
                 loadError = String((e && e.message) || e).split('\n')[0].slice(0, 200);
                 showError(e, 'تحميل السجلات: ' + (currentFml || ''));
                 allRows = [];
+                serverTotal = 0; serverPage = 1;
                 refreshNav();
                 renderGrid();
+                updateLoadMore();
             }
+        }
+        function updateLoadMore(){
+            const btn = document.getElementById('loadMoreBtn');
+            if(!btn) return;
+            const remain = Math.max(0, (serverTotal || 0) - allRows.length);
+            btn.classList.toggle('hidden', !(remain > 0 && !loadError));
+            btn.disabled = !!loadingMore;
+            btn.textContent = loadingMore ? 'جارٍ التحميل...' : `تحميل المزيد (${remain} متبقٍ)`;
+        }
+        async function loadMoreRecords(){
+            if(loadingMore) return;
+            if(((serverTotal || 0) - allRows.length) <= 0) return;
+            loadingMore = true;
+            updateLoadMore();
+            try{
+                const next = serverPage + 1;
+                const res = await fetch('/api/fmlk/records?fml=' + encodeURIComponent(currentFml) + '&app=' + encodeURIComponent(currentApp) + '&page=' + next + '&pageSize=' + FETCH_SIZE);
+                const data = await res.json();
+                if(data.error) throw new Error(data.error);
+                const have = new Set(allRows.map((r, i)=>String(rowId(r, i))));
+                let added = 0;
+                (data.rows || []).forEach(r=>{
+                    const id = String(rowId(r, allRows.length));
+                    if(have.has(id)) return;
+                    have.add(id);
+                    allRows.push(r);
+                    added++;
+                });
+                if(typeof data.total === 'number') serverTotal = data.total;
+                serverPage = next;
+                refreshNav();
+                renderGrid();
+                try{ notify(`تم تحميل ${added} سجل إضافي (${allRows.length}/${serverTotal})`, 'success'); }catch(e){}
+            }catch(e){
+                try{ notify('تعذر تحميل المزيد: ' + String((e && e.message) || e).slice(0, 150), 'error'); }catch(_e){}
+            }
+            loadingMore = false;
+            updateLoadMore();
         }
 
         function refreshNav() {
@@ -1891,7 +1940,7 @@
                 if (currentRecordId && allRows.some((r, i) => rowId(r, i) === String(currentRecordId))) sel.value = String(currentRecordId);
             }
             const cnt = document.getElementById('recordCount');
-            if (cnt) cnt.textContent = allRows.length + ' سجل';
+            if (cnt) cnt.textContent = (serverTotal > allRows.length) ? (allRows.length + ' / ' + serverTotal + ' سجل') : (allRows.length + ' سجل');
         }
 
         async function loadRecord(id) {
