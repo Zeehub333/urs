@@ -1421,9 +1421,12 @@ def api_models_design_save(request, app_name):
                 fx = (f.get("formula") or f.get("calc_expr") or "").strip()
                 fx_el = ET.SubElement(el, "formula")
                 fx_el.text = fx
-            for k in ("refTable", "refFk", "refDisplay", "placeholder"):
+            for k in ("refTable", "refFk", "refDisplay", "placeholder",
+                        "displayTable", "displayKey", "displayFk", "displayShow", "displayExpr"):
                 if f.get(k):
                     el.set(k, str(f.get(k)))
+            if f.get("displayOnly") in (True, 1, "1", "true", "yes"):
+                el.set("displayOnly", "true")
             _cfg = f.get("config") or {}
             if isinstance(_cfg, dict):
                 for _ck in ("parent_field", "sync_source", "auto_condition", "calc_expr", "poly_types",
@@ -1630,6 +1633,8 @@ def api_models_migrate(request, app_name):
             nm = (getattr(f, "name", "") or "").strip()
             if not nm or nm.lower() in have:
                 continue
+            if getattr(f, "display_only", False):
+                continue  # عرض فقط — بلا عمود
             dt = str(getattr(f, "data_type", "") or "VARCHAR").upper().split("(")[0].strip()
             pg_t = eng.DATA_TYPE_MAP.get(dt, "TEXT")
             try:
@@ -1677,7 +1682,9 @@ def api_models_migrate_preview(request, app_name):
         fields = [{"name": (getattr(f, "name", "") or ""),
                    "alias": (getattr(f, "alias", "") or getattr(f, "name", "")),
                    "type": str(getattr(f, "data_type", "") or "VARCHAR").upper()}
-                  for f in (comp.fields() or []) if (getattr(f, "name", "") or "").strip()]
+                  for f in (comp.fields() or [])
+                  if (getattr(f, "name", "") or "").strip()
+                  and not getattr(f, "display_only", False)]
         db_cols = []
         note = ""
         try:
@@ -2031,6 +2038,77 @@ def api_fmlk_import_xlsx(request, app_name):
         return JsonResponse({"ok": True, "created": created, "updated": updated, "skipped": skipped,
                              "total": min(len(data_rows), MAX_ROWS), "truncated": truncated, "errors": errors},
                             json_dumps_params={"ensure_ascii": False})
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@csrf_exempt
+def api_fmlk_display_map(request):
+    """POST /api/fmlk/display-map/ {fml, app, table, key, show, keys[]} — دفعات قيم العرض.
+
+    يحل key→show لمدخلات العرض فقط (قراءة واحدة بدل N استعلامات).
+    """
+    if request.method != "POST":
+        return JsonResponse({"error": "POST required"}, status=405)
+    try:
+        import re as _re_id
+        data = json.loads(request.body.decode() or "{}")
+        fml = data.get("fml", "hr_form")
+        app = data.get("app")
+        table = str(data.get("table") or "").strip().strip('"')
+        key = str(data.get("key") or "").strip().strip('"')
+        show = str(data.get("show") or "").strip().strip('"') or key
+        keys = data.get("keys") or []
+        if not table or not key:
+            return JsonResponse({"error": "table and key required"}, status=400)
+        if not _re_id.fullmatch(r"[A-Za-z_][A-Za-z0-9_.]*", table):
+            return JsonResponse({"error": "invalid table name"}, status=400)
+        for _c in (key, show):
+            if not _re_id.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", _c):
+                return JsonResponse({"error": "invalid column name"}, status=400)
+        keys = [k for k in (keys or []) if k is not None and str(k).strip() != ""][:500]
+        if not keys:
+            return JsonResponse({"ok": True, "map": {}})
+        parts = table.split(".")
+        if len(parts) == 2:
+            sch, tbl = parts
+        else:
+            sch, tbl = "", parts[-1]
+        eng = _fmlk_get_engine(fml, app)
+        db = getattr(eng, "db", None)
+        if db is None or getattr(db, "conn", None) is None and hasattr(db, "connect"):
+            try:
+                db.connect()
+            except Exception as e:
+                return JsonResponse({"error": f"تعذر الاتصال: {str(e)[:150]}"}, status=400)
+        if not sch:
+            try:
+                sch = (eng.compiler.fml_metadata().get("schema") or "").strip() or "public"
+            except Exception:
+                sch = "public"
+        _q2 = lambda s: '"' + str(s).replace('"', '""') + '"'
+        binds = ", ".join(f":k{i}" for i in range(len(keys)))
+        sql = f"SELECT DISTINCT {_q2(key)}, {_q2(show)} FROM {_q2(sch)}.{_q2(tbl)} WHERE {_q2(key)} IN ({binds})"
+        params = {f"k{i}": v for i, v in enumerate(keys)}
+        try:
+            cur = db._exec(sql, params)
+            rows = cur.fetchall() if hasattr(cur, "fetchall") else []
+            try:
+                cur.close()
+            except Exception:
+                pass
+        except Exception as e:
+            return JsonResponse({"error": str(e)[:300]}, status=400)
+        out = {}
+        for r in rows or []:
+            try:
+                kv, sv = (list(r.values())[0], list(r.values())[1]) if isinstance(r, dict) else (r[0], r[1])
+            except Exception:
+                continue
+            if kv is None:
+                continue
+            out[str(kv)] = "" if sv is None else str(sv)
+        return JsonResponse({"ok": True, "map": out}, json_dumps_params={"ensure_ascii": False})
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 

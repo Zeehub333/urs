@@ -115,6 +115,12 @@ class FMLKField:
     ref_table: Optional[str] = None
     ref_fk: Optional[str] = None
     ref_display: Optional[str] = None
+    display_table: Optional[str] = None  # جدول العرض الإضافي (قراءة فقط)
+    display_key: Optional[str] = None  # عمود المفتاح المحلي للمطابقة
+    display_fk: Optional[str] = None  # عمود المفتاح في جدول العرض
+    display_show: Optional[str] = None  # عمود العرض من الجدول الآخر
+    display_only: bool = False  # عرض فقط — لا يُحفظ ولا يُدخل
+    display_expr: Optional[str] = None  # تعبير عرض [field] — متصفح فقط
     icon: Optional[str] = None  # أيقونة المدخل (fa-*) تُعرض بجانب الاسم في المشغل
     destination: Optional[str] = None  # الوجهة: main (الجدول الأساسي) أو اسم جدول متفرع
     options: List[str] = field(default_factory=list)  # for select (literal values only)
@@ -129,7 +135,7 @@ class FMLKField:
         """مطلوب فعلاً؟ — خاصية required تسقط حال الإخفاء (visibleIf غير محقق)."""
         return bool(self.required) and self.is_visible(data)
     def to_dict(self):
-        base = {"id": self.id, "name": self.name, "alias": self.alias, "dataType": self.data_type, "inputType": self.input_type, "required": self.required, "nullable": self.nullable, "editable": self.editable, "readonly": (not self.editable), "primary_key": self.primary_key, "primaryKey": self.primary_key, "default": self.default, "defaultValue": self.default, "formula": self.formula, "calc_expr": self.formula, "placeholder": self.placeholder, "visibleIf": self.visible_if, "visible_if": self.visible_if, "tab": self.tab, "category": self.category, "position": self.position, "colSpan": self.col_span, "rowSpan": self.row_span, "refTable": self.ref_table, "refFk": self.ref_fk, "refDisplay": self.ref_display, "icon": self.icon, "destination": self.destination, "options": self.options, "options_source": self.options_source, "optionsSource": self.options_source, "validation": self.validation, "validationRules": self.validation, "config": self.config}
+        base = {"id": self.id, "name": self.name, "alias": self.alias, "dataType": self.data_type, "inputType": self.input_type, "required": self.required, "nullable": self.nullable, "editable": self.editable, "readonly": (not self.editable), "primary_key": self.primary_key, "primaryKey": self.primary_key, "default": self.default, "defaultValue": self.default, "formula": self.formula, "calc_expr": self.formula, "placeholder": self.placeholder, "visibleIf": self.visible_if, "visible_if": self.visible_if, "tab": self.tab, "category": self.category, "position": self.position, "colSpan": self.col_span, "rowSpan": self.row_span, "refTable": self.ref_table, "refFk": self.ref_fk, "refDisplay": self.ref_display, "displayTable": self.display_table, "display_table": self.display_table, "displayKey": self.display_key, "display_key": self.display_key, "displayFk": self.display_fk, "display_fk": self.display_fk, "displayShow": self.display_show, "display_show": self.display_show, "displayOnly": self.display_only, "display_only": self.display_only, "displayExpr": self.display_expr, "display_expr": self.display_expr, "icon": self.icon, "destination": self.destination, "options": self.options, "options_source": self.options_source, "optionsSource": self.options_source, "validation": self.validation, "validationRules": self.validation, "config": self.config}
         # Foreign Keys: expose dynamic endpoint for frontend to fetch reference data
         if self.ref_table:
             base["refEndpoint"] = f"/api/fmlk/lookup?field={self.name}&table={self.ref_table}"
@@ -358,6 +364,12 @@ class FMLKFormCompiler:
             ref_table = get("refTable","reftable","ref_table")
             ref_fk = get("refFk","reffk","ref_fk")
             ref_display = get("refDisplay","refdisplay","ref_display")
+            display_table = get("displayTable","displaytable","display_table")
+            display_key = get("displayKey","displaykey","display_key")
+            display_fk = get("displayFk","displayfk","display_fk")
+            display_show = get("displayShow","displayshow","display_show")
+            display_only = str(get("displayOnly","displayonly","display_only", default="false")).lower() in ("true","1","yes")
+            display_expr = get("displayExpr","displayexpr","display_expr")
             icon = get("icon","iconCls","icon_class")
             destination = get("destination","dest","dest_table","target")
             # ── Validation Engine: parse <validation> child or field attributes ──
@@ -470,7 +482,7 @@ class FMLKFormCompiler:
                     config[cfg_key] = v
             if formula and "calc_expr" not in config:
                 config["calc_expr"] = formula
-            result.append(FMLKField(id=str(fid), name=str(name), alias=str(alias), data_type=str(data_type) if data_type else None, input_type=input_type, required=required, nullable=nullable, editable=editable, primary_key=primary_key, default=default_val, formula=formula, placeholder=placeholder, visible_if=(str(visible_if).strip() if visible_if else None), tab=tab, category=category, position=position, col_span=col_span, row_span=row_span, ref_table=str(ref_table) if ref_table else None, ref_fk=str(ref_fk) if ref_fk else None, ref_display=str(ref_display) if ref_display else None, icon=(str(icon).strip() if icon else None), destination=(str(destination).strip() if destination else None), options=opts, options_source=opts_source, validation=validation_rules, config=config, raw_attrs=dict(el.attrib)))
+            result.append(FMLKField(id=str(fid), name=str(name), alias=str(alias), data_type=str(data_type) if data_type else None, input_type=input_type, required=required, nullable=nullable, editable=editable, primary_key=primary_key, default=default_val, formula=formula, placeholder=placeholder, visible_if=(str(visible_if).strip() if visible_if else None), tab=tab, category=category, position=position, col_span=col_span, row_span=row_span, ref_table=str(ref_table) if ref_table else None, ref_fk=str(ref_fk) if ref_fk else None, ref_display=str(ref_display) if ref_display else None, display_table=str(display_table) if display_table else None, display_key=str(display_key) if display_key else None, display_fk=str(display_fk) if display_fk else None, display_show=str(display_show) if display_show else None, display_only=display_only, display_expr=str(display_expr) if display_expr else None, icon=(str(icon).strip() if icon else None), destination=(str(destination).strip() if destination else None), options=opts, options_source=opts_source, validation=validation_rules, config=config, raw_attrs=dict(el.attrib)))
         self._fields = result
         return result
 

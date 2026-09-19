@@ -789,9 +789,16 @@
         }
 
         function renderInput(field) {
-            const req = field.required ? '<span class="text-rose-600">*</span>' : '';
+            const isDisp = !!(field.display_only || field.displayOnly);
+            const req = (field.required && !isDisp) ? '<span class="text-rose-600">*</span>' : '';
             const ico = field.icon ? `<i class="fa-solid ${escAttr(field.icon)} text-indigo-500 ml-1"></i>` : '';
-            const label = `<label class="block text-xs font-medium text-slate-700 mb-1">${ico}${escHtml(field.alias)} ${req}</label>`;
+            const dispBadge = isDisp ? ' <span class="inline-block text-[9px] font-bold bg-amber-100 text-amber-700 rounded px-1" title="عرض فقط — يُقرأ ولا يُخزن">✦ عرض</span>' : '';
+            const label = `<label class="block text-xs font-medium text-slate-700 mb-1">${ico}${escHtml(field.alias)} ${req}${dispBadge}</label>`;
+            // عرض فقط: صندوق قراءة بلا data-field (يُستبعد من الحفظ تلقائياً) + حل القيمة لاحقاً
+            if(isDisp){
+                setTimeout(()=>{ try{ fmlkResolveDisplay(field.name); }catch(e){} }, 0);
+                return label + `<div data-display-field="${field.name}" class="w-full bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-sm text-slate-700">…</div>`;
+            }
             let input = '';
             const ph = field.placeholder || '';
             const val = fieldVal(field);
@@ -1660,6 +1667,13 @@
         }
         function cellVal(r, name) {
             const f = fieldDef(name);
+            // عرض فقط بتعبير: يُحسب محلياً (بلا شبكة) — يغطي البطاقات أيضاً
+            if(f && (f.display_only || f.displayOnly)){
+                const ex0 = f.display_expr || f.displayExpr || '';
+                if(ex0){ try{ return fmlkEvalDisplayExpr(ex0, r); }catch(e){ return ''; } }
+                const cv = _dispCachedFor(f, r);
+                if(cv !== undefined) return cv;
+            }
             let v = (f.alias) ? rowGet(r, f.alias) : undefined;
             if(v === undefined) v = rowGet(r, name);
             const out = (v === undefined || v === null) ? '' : v;
@@ -1679,8 +1693,133 @@
             }catch(e){}
             return out;
         }
+        // ── حقول العرض فقط ✦: تعبير محلّي + ربط دفعي عبر /api/fmlk/display-map ──
+        const _dmapCache = {};
+        function _dispRecVal(rec, name){
+            if(rec == null || name == null) return undefined;
+            if(Object.prototype.hasOwnProperty.call(rec, name)) return rec[name];
+            let v = undefined;
+            try{ v = rowGet(rec, name); }catch(e){}
+            if(v !== undefined) return v;
+            try{
+                const f = (typeof fieldDef === 'function' ? fieldDef(name) : {});
+                if(f && f.alias) v = rowGet(rec, f.alias);
+            }catch(e){}
+            return v;
+        }
+        function _dispLeaf(rec, dotted){
+            if(rec == null) return undefined;
+            const v = _dispRecVal(rec, dotted);
+            if(v !== undefined) return v;
+            const parts = String(dotted).split('.');
+            return _dispRecVal(rec, parts[parts.length - 1]);
+        }
+        function _dispLit(v){
+            if(v === undefined || v === null) return "''";
+            if(typeof v === 'number') return String(v);
+            const s = String(v).trim();
+            if(s !== '' && !isNaN(Number(s))) return s;
+            return "'" + s.replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "'";
+        }
+        function fmlkEvalDisplayExpr(expr, rec){
+            let s = String(expr || '');
+            s = s.replace(/\{([A-Za-z_][A-Za-z0-9_.]*)\}/g, (m, n)=>_dispLit(_dispLeaf(rec, n)));
+            s = s.replace(/\[([A-Za-z_][A-Za-z0-9_]*)\]/g, (m, n)=>_dispLit(_dispRecVal(rec, n)));
+            if(!/^[\s\d+\-*/%().,'"A-Za-z_\u0600-\u06FF]*$/.test(s)) return s.replace(/^'+|'+$/g, '');
+            try{ const r = new Function('return (' + s + ')')(); return (r === undefined || r === null) ? '' : String(r); }
+            catch(e){ return s; }
+        }
+        function _dispMapSpec(f){
+            f = f || {};
+            return {
+                tbl: f.display_table || f.displayTable || '',
+                fk: f.display_fk || f.displayFk || 'id',
+                show: f.display_show || f.displayShow || f.name || '',
+                lk: f.display_key || f.displayKey || ''
+            };
+        }
+        function _dispCachedFor(f, r){
+            try{
+                const sp = _dispMapSpec(f);
+                if(!sp.tbl || !sp.lk) return undefined;
+                const kv = _dispRecVal(r, sp.lk);
+                if(kv === undefined || kv === null || String(kv) === '') return '';
+                return _dmapCache[sp.tbl + '|' + sp.fk + '|' + sp.show + '|' + String(kv)];
+            }catch(e){ return undefined; }
+        }
+        async function fmlkResolveListDisplays(){
+            const spans = [...document.querySelectorAll('span[data-dmap-t]')];
+            if(!spans.length) return;
+            const groups = {};
+            spans.forEach(sp=>{
+                const t = sp.getAttribute('data-dmap-t'), k = sp.getAttribute('data-dmap-k'),
+                      s = sp.getAttribute('data-dmap-s'), v = sp.getAttribute('data-dmap-v');
+                const done = ()=>{ try{ sp.removeAttribute('data-dmap-t'); }catch(e){} };
+                if(!t || !k || v === null || v === undefined || v === ''){ sp.textContent = '—'; done(); return; }
+                const ck = t + '|' + k + '|' + s + '|' + v;
+                if(_dmapCache[ck] !== undefined){ sp.textContent = _dmapCache[ck] || '—'; done(); return; }
+                const gk = t + '|' + k + '|' + s;
+                if(!groups[gk]) groups[gk] = {t, k, s, keys: [], spans: []};
+                if(!groups[gk].keys.includes(v)) groups[gk].keys.push(v);
+                groups[gk].spans.push(sp);
+            });
+            for(const gk of Object.keys(groups)){
+                const g = groups[gk];
+                try{
+                    const res = await fetch('/api/fmlk/display-map', {method:'POST', headers:{'Content-Type':'application/json'},
+                        body: JSON.stringify({fml: currentFml, app: currentApp, table: g.t, key: g.k, show: g.s, keys: g.keys.slice(0, 500)})});
+                    const d = await res.json().catch(()=>({}));
+                    const mp = (res.ok && d && d.map) ? d.map : {};
+                    g.spans.forEach(sp=>{
+                        const v = sp.getAttribute('data-dmap-v');
+                        const val = (mp[v] !== undefined) ? mp[v] : '';
+                        _dmapCache[g.t + '|' + g.k + '|' + g.s + '|' + v] = val;
+                        sp.textContent = (val === '' || val === null || val === undefined) ? '—' : val;
+                        try{ sp.removeAttribute('data-dmap-t'); }catch(e){}
+                    });
+                }catch(e){ g.spans.forEach(sp=>{ sp.textContent = '—'; try{ sp.removeAttribute('data-dmap-t'); }catch(_e){} }); }
+            }
+        }
+        async function fmlkResolveDisplay(name){
+            let f = {};
+            try{ f = fmlkField(name) || {}; }catch(e){}
+            const rec = (typeof currentData !== 'undefined' && currentData) ? currentData : {};
+            const set = (v)=>{ try{ document.querySelectorAll(`[data-display-field="${CSS.escape(name)}"]`).forEach(el=>{ el.textContent = (v === undefined || v === null || v === '') ? '—' : String(v); }); }catch(e){} };
+            try{
+                const ex = f.display_expr || f.displayExpr || '';
+                if(ex){ set(fmlkEvalDisplayExpr(ex, rec)); return; }
+                const sp = _dispMapSpec(f);
+                if(!sp.tbl){ set(''); return; }
+                const kv = sp.lk ? _dispRecVal(rec, sp.lk) : undefined;
+                if(kv === undefined || kv === null || String(kv) === ''){ set(''); return; }
+                const ck = sp.tbl + '|' + sp.fk + '|' + sp.show + '|' + String(kv);
+                if(_dmapCache[ck] !== undefined){ set(_dmapCache[ck]); return; }
+                const res = await fetch('/api/fmlk/display-map', {method:'POST', headers:{'Content-Type':'application/json'},
+                    body: JSON.stringify({fml: currentFml, app: currentApp, table: sp.tbl, key: sp.fk, show: sp.show, keys: [kv]})});
+                const d = await res.json().catch(()=>({}));
+                const v = (res.ok && d && d.map) ? (d.map[String(kv)] ?? '') : '';
+                _dmapCache[ck] = v;
+                set(v);
+            }catch(e){ set(''); }
+        }
         // نسخة العرض: صورة/وسائط تُرسم، وغيرها نص مُهرَّب
         function cellHtml(r, name){
+            const f = fieldDef(name);
+            const raw = cellVal(r, name);
+            // عرض فقط ✦: تعبير محلّي فوري، أو ربط دفعي بعد الرسم
+            if(f && (f.display_only || f.displayOnly)){
+                const ex = f.display_expr || f.displayExpr || '';
+                if(ex){ try{ return escHtml(fmlkEvalDisplayExpr(ex, r)); }catch(e){ return '—'; } }
+                const sp = _dispMapSpec(f);
+                if(sp.tbl && sp.lk){
+                    const kv = _dispRecVal(r, sp.lk);
+                    const ckv = (kv === undefined || kv === null) ? '' : String(kv);
+                    const hit = (ckv !== '') ? _dmapCache[sp.tbl + '|' + sp.fk + '|' + sp.show + '|' + ckv] : undefined;
+                    if(hit !== undefined) return escHtml(hit || '—');
+                    return `<span class="text-slate-400" title="عرض فقط ✦" data-dmap-t="${escAttr(sp.tbl)}" data-dmap-k="${escAttr(sp.fk)}" data-dmap-s="${escAttr(sp.show)}" data-dmap-v="${escAttr(ckv)}">…</span>`;
+                }
+                return '<span class="text-slate-300">—</span>';
+            }
             const f = fieldDef(name);
             const raw = cellVal(r, name);
             try{
@@ -2035,6 +2174,7 @@
                         }).catch(()=>{});
                 }
             }catch(e){ box.innerHTML = '<div class="py-6">—</div>'; }
+            try{ fmlkResolveListDisplays(); }catch(e){}
         }
         // ── تحرير/حذف/طباعة من اللوحة (بدل الدرج القديم) ──
         function panelEditRec(){
@@ -2802,6 +2942,7 @@
             if (isList) renderTable(cols, paged, start);
             else renderCards(cols, paged, start);
             try{ paintBlankPanel(); }catch(e){}
+            try{ fmlkResolveListDisplays(); }catch(e){}
         }
         function renderTable(cols, paged, start) {
             const allChecked = paged.length > 0 && paged.every((r, i) => selectedIds.has(String(rowId(r, allRows.indexOf(r)))));

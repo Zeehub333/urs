@@ -127,7 +127,7 @@ class FMLKFormEngine:
             if not visible:
                 continue
             val = data.get(f.name)
-            if f.required and (val is None or str(val).strip() == ""):
+            if f.required and not getattr(f, "display_only", False) and (val is None or str(val).strip() == ""):
                 errors[f.name] = f"{f.alias} مطلوب"
                 continue  # skip further checks if empty required
             if val is None or str(val).strip() == "":
@@ -307,7 +307,13 @@ class FMLKFormEngine:
         cols: List[str] = []
         binds: List[str] = []
         params: Dict[str, Any] = {}
+        try:
+            _disp_ins = {getattr(f, "name", "") for f in (self.fields or []) if getattr(f, "display_only", False)}
+        except Exception:
+            _disp_ins = set()
         for f in self.fields:
+            if f.name in _disp_ins:
+                continue  # عرض فقط — لا يُخزن
             formula = (getattr(f, "formula", None) or "").strip()
             has_val = f.name in data and not (data[f.name] is None or (isinstance(data[f.name], str) and data[f.name].strip() == ""))
             if formula and not has_val:
@@ -370,9 +376,15 @@ class FMLKFormEngine:
         """Build UPDATE with WHERE pk."""
         sets = []
         params: Dict[str, Any] = {}
+        try:
+            _disp = {getattr(f, "name", "") for f in (self.fields or []) if getattr(f, "display_only", False)}
+        except Exception:
+            _disp = set()
         for k, v in data.items():
             if k in pk:
                 continue
+            if k in _disp:
+                continue  # عرض فقط — لا يُكتب أبداً
             sets.append(f"{_q(k)}=:{k}")
             params[k] = v
         if not sets:
@@ -737,6 +749,8 @@ class FMLKFormEngine:
         col_defs: List[str] = []
         pk_explicit = [f.name for f in self.fields if getattr(f, "primary_key", False)]
         for f in self.fields:
+            if getattr(f, "display_only", False):
+                continue  # عرض فقط — بلا عمود
             dt = (f.data_type or "VARCHAR").upper().split("(")[0].strip()
             pg = self.DATA_TYPE_MAP.get(dt, "TEXT")
             parts = [_q(f.name), pg]

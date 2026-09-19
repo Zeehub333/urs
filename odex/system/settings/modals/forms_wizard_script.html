@@ -100,6 +100,12 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                     options: Array.isArray(f.options) ? f.options : [],
                     options_source: f.options_source || f.optionsSource || [],
                     refTable: f.refTable || '', refFk: f.refFk || '', refDisplay: f.refDisplay || '',
+                    displayTable: f.displayTable || f.display_table || '',
+                    displayKey: f.displayKey || f.display_key || '',
+                    displayFk: f.displayFk || f.display_fk || '',
+                    displayShow: f.displayShow || f.display_show || '',
+                    displayOnly: !!(f.displayOnly || f.display_only),
+                    displayExpr: f.displayExpr || f.display_expr || '',
                     visibleIf: f.visibleIf || f.visible_if || '',
                     config: f.config || {}
                 }));
@@ -683,6 +689,70 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             try{ notify('تم استيراد ' + n + ' جدول متفرع — حدد مفاتيح الربط', n ? 'success' : 'info'); }catch(e){}
         }
         function fwDelBranch(i){ const b = fwBranches[i]; fwBranches.splice(i,1); if(b) fwInputs = fwInputs.filter(x=>x.destination !== b.table); fwRenderSheet(); }
+        /* ── استيراد عرض من جدول: مدخلات عرض فقط (تُقرأ ولا تُخزن) ── */
+        let fwDispColsCache = [];
+        function fwOpenDispImport(){
+            if(!fwMainTable){ try{ notify('اختر الجدول الأساسي أولاً', 'info'); }catch(e){} return; }
+            let m = document.getElementById('fwDispModal');
+            if(!m){
+                m = document.createElement('div');
+                m.id = 'fwDispModal';
+                m.className = 'hidden fixed inset-0 z-[120] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4';
+                m.setAttribute('onclick', 'if(event.target===this)fwDispClose()');
+                m.innerHTML = '<div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[86vh] overflow-hidden flex flex-col">'
+                    + '<div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-amber-50 shrink-0"><h3 class="text-sm font-bold text-slate-800"><i class="fa-solid fa-eye text-amber-600"></i> استيراد عرض من جدول <span class="text-[10px] text-amber-600 font-normal">— تُقرأ ولا تُخزن</span></h3><button onclick="fwDispClose()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button></div>'
+                    + '<div class="p-4 space-y-2.5 overflow-y-auto custom-scroll text-xs">'
+                    + '<div><label class="block font-bold text-slate-600 mb-1">جدول العرض</label><select id="fwDispTable" onchange="fwDispTableChanged()" class="wb-inp font-mono" dir="ltr"><option value="">— اختر الجدول —</option></select></div>'
+                    + '<div class="grid grid-cols-2 gap-2"><div><label class="block font-bold text-slate-600 mb-1">عمود الربط (جدولك)</label><select id="fwDispLocal" onchange="fwDispTableChanged()" class="wb-inp font-mono" dir="ltr"></select></div>'
+                    + '<div><label class="block font-bold text-slate-600 mb-1">عمود الربط (جدول العرض)</label><select id="fwDispFk" class="wb-inp font-mono" dir="ltr"></select></div></div>'
+                    + '<div><label class="block font-bold text-slate-600 mb-1">أعمدة العرض</label><div id="fwDispCols" class="border border-slate-200 rounded-xl max-h-56 overflow-y-auto custom-scroll p-1"><p class="text-slate-400 text-center py-3">اختر الجدول لعرض أعمدته</p></div></div>'
+                    + '</div>'
+                    + '<div class="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2 shrink-0"><button onclick="fwDispClose()" class="px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl">إلغاء</button><button onclick="fwDoDispImport()" class="px-4 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-bold"><i class="fa-solid fa-eye"></i> استيراد كعرض فقط</button></div>'
+                    + '</div>';
+                document.body.appendChild(m);
+            }
+            document.getElementById('fwDispTable').innerHTML = '<option value="">— اختر الجدول —</option>' + (fwTablesCache || []).map(t=>{ const full = t.full || t.name || ''; return full ? `<option value="${fwEsc(full)}">${fwEsc(full)}</option>` : ''; }).join('');
+            const mains = (fwInputs || []).filter(x=>(!x.destination || x.destination === 'main') && (x.name || '').trim() && !x.displayOnly);
+            document.getElementById('fwDispLocal').innerHTML = '<option value="">— عمود الربط المحلي —</option>' + mains.map(x=>`<option value="${fwEsc(x.name)}">${fwEsc(x.name)} — ${fwEsc(x.alias || '')}</option>`).join('');
+            document.getElementById('fwDispFk').innerHTML = '<option value="">— اختر الجدول أولاً —</option>';
+            document.getElementById('fwDispCols').innerHTML = '<p class="text-slate-400 text-center py-3">اختر الجدول لعرض أعمدته</p>';
+            m.classList.remove('hidden');
+        }
+        function fwDispClose(){ const m = document.getElementById('fwDispModal'); if(m) m.classList.add('hidden'); }
+        async function fwDispTableChanged(){
+            const full = (document.getElementById('fwDispTable') || {}).value || '';
+            const fkS = document.getElementById('fwDispFk'); const box = document.getElementById('fwDispCols');
+            if(!full){ if(fkS) fkS.innerHTML = '<option value="">—</option>'; return; }
+            if(box) box.innerHTML = '<p class="text-slate-400 text-center py-3">جارٍ التحميل...</p>';
+            let cols = [];
+            try{ cols = await fwLoadCols(full); }catch(e){ if(box) box.innerHTML = '<p class="text-rose-500 text-center py-3">تعذر تحميل الأعمدة</p>'; return; }
+            fwDispColsCache = cols || [];
+            if(fkS) fkS.innerHTML = (fwDispColsCache.map(c=>`<option value="${fwEsc(c.name)}">${fwEsc(c.name)}</option>`).join('')) || '<option value="">—</option>';
+            const localSel = (document.getElementById('fwDispLocal') || {}).value || '';
+            const pick = fwDispColsCache.find(c=>c.name === localSel) || fwDispColsCache.find(c=>/^id$/i.test(c.name)) || fwDispColsCache[0];
+            if(pick && fkS) fkS.value = pick.name;
+            if(box) box.innerHTML = fwDispColsCache.map(c=>`<label class="flex items-center gap-2 px-2 py-1.5 hover:bg-amber-50 rounded-lg cursor-pointer"><input type="checkbox" data-disp-col="${fwEsc(c.name)}" checked class="rounded text-amber-600"><span class="font-mono font-bold text-slate-800" dir="ltr">${fwEsc(c.name)}</span><span class="text-slate-400 font-mono" dir="ltr">${fwEsc(c.type || '')}</span></label>`).join('') || '<p class="text-slate-400 text-center py-3">لا أعمدة</p>';
+        }
+        function fwDoDispImport(){
+            const full = (document.getElementById('fwDispTable') || {}).value || '';
+            const local = (document.getElementById('fwDispLocal') || {}).value || '';
+            const fk = (document.getElementById('fwDispFk') || {}).value || '';
+            if(!full){ try{ notify('اختر جدول العرض', 'info'); }catch(e){} return; }
+            if(!local){ try{ notify('اختر عمود الربط المحلي', 'info'); }catch(e){} return; }
+            if(!fk){ try{ notify('اختر عمود الربط في جدول العرض', 'info'); }catch(e){} return; }
+            const checked = [...document.querySelectorAll('#fwDispCols [data-disp-col]:checked')].map(c=>c.getAttribute('data-disp-col')).filter(Boolean);
+            if(!checked.length){ try{ notify('حدد عمود عرض واحداً على الأقل', 'info'); }catch(e){} return; }
+            let n = 0;
+            checked.forEach(cn=>{
+                if(fwInputs.some(x=>x.name === cn && (x.displayTable || '') === full)) return;
+                const meta = (fwDispColsCache || []).find(c=>c.name === cn) || {};
+                const mp = fwMapDbType(meta.type);
+                fwInputs.push({key: fwInputKey(full, cn), table: full, name: cn, alias: cn, icon:'', inputType: mp.inputType, dataType: mp.dataType, destination:'main', required:false, computed:false, expr:'', editable:false, tab:(fwTabs[0] || {}).id || 'البيانات الأساسية', options:[], options_source:[], refTable:'', refFk:'', refDisplay:'', displayTable: full, displayKey: local, displayFk: fk, displayShow: cn, displayOnly:true, displayExpr:'', visibleIf:'', config:{}});
+                n++;
+            });
+            fwDispClose(); fwRenderSheet();
+            try{ notify('تم استيراد ' + n + ' مدخل عرض ✦ (تُقرأ ولا تُخزن)', n ? 'success' : 'info'); }catch(e){}
+        }
         async function fwBranchChanged(i){
             const sel = document.querySelector(`[data-b="table"]`);
             const sels = [...document.querySelectorAll('select[data-b="table"]')];
@@ -762,6 +832,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                     <div class="wb-panel-title !mb-0"><i class="fa-solid fa-pen-to-square text-indigo-600"></i> المدخلات — تهيئة كل مدخل (الوجهة • العرض • النوع • القيود)</div>
                     <div class="flex items-center gap-1">
                         <button onclick="fwImportMain()" class="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg font-bold"><i class="fa-solid fa-download"></i> استيراد الأساسي</button>
+                        <button onclick="fwOpenDispImport()" title="مدخلات عرض فقط من جدول آخر (تُقرأ ولا تُخزن)" class="px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded-lg font-bold"><i class="fa-solid fa-eye"></i> استيراد عرض من جدول</button>
                         <button onclick="fwAddInput()" class="px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg font-bold"><i class="fa-solid fa-plus"></i> مدخل يدوي</button>
                     </div>
                 </div>
@@ -770,12 +841,12 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                     <thead class="bg-slate-50 text-slate-600"><tr>
                         <th class="p-1.5 text-right">الوجهة</th><th class="p-1.5 text-right">الحقل</th><th class="p-1.5 text-right">اسم العرض *</th>
                         <th class="p-1.5">الأيقونة</th><th class="p-1.5">نوع البيانات</th><th class="p-1.5">التبويب</th>
-                        <th class="p-1.5" title="مطلوب">مطلوب</th><th class="p-1.5" title="محسوب">محسوب</th><th class="p-1.5" title="قابل للإدخال">إدخال</th><th class="p-1.5" title="شرط الإظهار: field==قيمة ويمكن && و ||">إظهار مشروط</th><th class="p-1.5"></th>
+                        <th class="p-1.5" title="مطلوب">مطلوب</th><th class="p-1.5" title="محسوب">محسوب</th><th class="p-1.5" title="قابل للإدخال">إدخال</th><th class="p-1.5" title="شرط الإظهار: field==قيمة ويمكن && و ||">إظهار مشروط</th><th class="p-1.5" title="تعبير عرض فقط: {col} أو حساب بنفس صياغة المحسوب — لا يُخزن">تعبير العرض ✦</th><th class="p-1.5"></th>
                     </tr></thead>
                     <tbody>${fwInputs.map((r, i)=>`
-                        <tr class="border-t border-slate-100">
+                        <tr class="border-t border-slate-100 ${r.displayOnly ? 'bg-amber-50/50' : ''}">
                             <td class="p-1"><select onchange="fwInputs[${i}].destination=this.value" class="wb-inp !py-1 font-mono" dir="ltr">${destOpts.map(d=>`<option value="${fwEsc(d)}" ${r.destination===d?'selected':''}>${fwEsc(destName(d))}</option>`).join('') || '<option value="main">الأساسي</option>'}</select></td>
-                            <td class="p-1">${fwNameLocked(r) ? `<span class="font-mono text-slate-500" dir="ltr" title="عمود موجود بالقاعدة — مقفل">${fwEsc(r.name)} <i class="fa-solid fa-lock text-[9px]"></i></span>` : `<input value="${fwEsc(r.name || '')}" oninput="fwInputs[${i}].name=this.value" placeholder="programmatic_name" class="wb-inp !py-1 font-mono" dir="ltr">`}<div class="text-[9px] text-slate-400">${fwEsc((r.table||'').split('.').pop())}</div></td>
+                            <td class="p-1">${r.displayOnly ? `<span class="inline-block text-[9px] font-bold bg-amber-100 text-amber-700 rounded px-1 mb-0.5" title="عرض فقط — يُقرأ ولا يُخزن">✦ عرض</span><br>` : ''}${fwNameLocked(r) ? `<span class="font-mono text-slate-500" dir="ltr" title="عمود موجود بالقاعدة — مقفل">${fwEsc(r.name)} <i class="fa-solid fa-lock text-[9px]"></i></span>` : `<input value="${fwEsc(r.name || '')}" oninput="fwInputs[${i}].name=this.value" placeholder="programmatic_name" class="wb-inp !py-1 font-mono" dir="ltr">`}<div class="text-[9px] text-slate-400">${fwEsc((r.table||'').split('.').pop())}</div></td>
                             <td class="p-1"><input value="${fwEsc(r.alias || '')}" oninput="fwInputs[${i}].alias=this.value" class="wb-inp !py-1"></td>
                             <td class="p-1"><select onchange="fwInputs[${i}].icon=this.value" class="wb-inp !py-1 font-mono" dir="ltr"><option value="">—</option>${FW_ICONS.map(ic=>`<option value="${ic}" ${r.icon===ic?'selected':''}>${ic}</option>`).join('')}</select></td>
                             <td class="p-1 whitespace-nowrap"><button onclick="fwOpenType(${i})" class="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg font-bold">${fwEsc(fwTypeLabel(r.inputType))}${(r.options||[]).length || (r.options_source||[]).length || r.refTable ? ' •' : ''}</button><div class="text-[9px] text-slate-400">${fwEsc(r.dataType || '')}</div></td>
@@ -784,9 +855,10 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                             <td class="p-1 text-center"><input type="checkbox" ${r.computed?'checked':''} onchange="fwInputs[${i}].computed=this.checked;fwRenderSheet()" class="w-4 h-4 accent-indigo-600"></td>
                             <td class="p-1 text-center"><input type="checkbox" ${r.editable?'checked':''} onchange="fwInputs[${i}].editable=this.checked" class="w-4 h-4 accent-emerald-600"></td>
                             <td class="p-1"><input value="${fwEsc(r.visibleIf || '')}" oninput="fwInputs[${i}].visibleIf=this.value;fwVisAC(this)" onkeydown="return fwVisACKey(event,this)" onblur="fwVisHideSoon()" data-fwself="${fwEsc(r.name)}" dir="ltr" placeholder="status==active" title="إكمال تلقائي: حقل ← عملية ← قيمة ← رابط. مثال: status==active && city==جدة" class="wb-inp !py-1 font-mono"></td>
+                            <td class="p-1"><input value="${fwEsc(r.displayExpr || '')}" oninput="fwInputs[${i}].displayExpr=this.value" dir="ltr" placeholder="{col} أو [a]+[b]" title="عرض فقط — مرجع {col} من جدول العرض أو حساب. يُقرأ ولا يُخزن" class="wb-inp !py-1 font-mono"></td>
                             <td class="p-1"><button onclick="fwDelInput(${i})" class="text-rose-400 hover:text-rose-600 px-1"><i class="fa-solid fa-trash"></i></button><button onclick="fwMoveInput(${i},-1)" title="لأعلى" class="text-slate-400 hover:text-indigo-600 px-1"><i class="fa-solid fa-arrow-up text-[10px]"></i></button><button onclick="fwMoveInput(${i},1)" title="لأسفل" class="text-slate-400 hover:text-indigo-600 px-1"><i class="fa-solid fa-arrow-down text-[10px]"></i></button></td>
                         </tr>
-                        ${r.computed ? `<tr class="border-t border-indigo-100 bg-indigo-50/40"><td class="p-1 text-[10px] text-indigo-700 font-bold" colspan="2">تعبير الحساب <span class="font-mono" dir="ltr">[col]</span></td><td class="p-1" colspan="8"><input value="${fwEsc(r.expr || '')}" oninput="fwInputs[${i}].expr=this.value" dir="ltr" placeholder="[qty] * [price]" list="fwInputNames" class="wb-inp !py-1 font-mono"></td></tr>` : ''}`).join('') || '<tr><td colspan="10" class="p-4 text-center text-slate-400">لا مدخلات — استورد أعمدة الجدول الأساسي</td></tr>'}
+                        ${r.computed ? `<tr class="border-t border-indigo-100 bg-indigo-50/40"><td class="p-1 text-[10px] text-indigo-700 font-bold" colspan="2">تعبير الحساب <span class="font-mono" dir="ltr">[col]</span></td><td class="p-1" colspan="9"><input value="${fwEsc(r.expr || '')}" oninput="fwInputs[${i}].expr=this.value" dir="ltr" placeholder="[qty] * [price]" list="fwInputNames" class="wb-inp !py-1 font-mono"></td></tr>` : ''}`).join('') || '<tr><td colspan="12" class="p-4 text-center text-slate-400">لا مدخلات — استورد أعمدة الجدول الأساسي</td></tr>'}
                     </tbody>
                 </table>
                 </div>
@@ -1243,6 +1315,9 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                 icon: x.icon || '', destination: 'main', visibleIf: x.visibleIf || '',
                 options: x.options || [], options_source: x.options_source || [],
                 refTable: x.refTable || '', refFk: x.refFk || '', refDisplay: x.refDisplay || '',
+                displayTable: x.displayTable || '', displayKey: x.displayKey || '',
+                displayFk: x.displayFk || '', displayShow: x.displayShow || '',
+                displayOnly: !!x.displayOnly, displayExpr: x.displayExpr || '',
                 config: x.config || {}
             }));
             const details = fwBranches.map(b=>{
