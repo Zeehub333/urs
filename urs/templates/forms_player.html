@@ -3380,8 +3380,10 @@
             }catch(e){}
             return out.filter(o=>o.value !== '' || o.label !== '');
         }
+        let advValueGen = 0;
         async function renderAdvValueControl(){
             // قيمة ديناميكية حسب نوع البيانات: قائمة خيارات / نعم-لا / مرجع / إدخال مكتوب
+            const myGen = ++advValueGen;
             const box = document.getElementById('advSingleValContainer');
             if(!box) return;
             const fld = (document.getElementById('advFilterField') || {}).value || '';
@@ -3406,11 +3408,15 @@
                 box.innerHTML = lbl + `<select id="advFilterValue" class="${cls}"><option value="">جارٍ تحميل الخيارات...</option></select>`;
                 try{
                     const opts = await loadOptionsSourceRef(refT, f.refFk || 'id', f.refDisplay || '');
+                    if(myGen !== advValueGen) return;
                     const cur = document.getElementById('advFilterValue');
                     if(!cur || cur.tagName !== 'SELECT') return;
                     if(((document.getElementById('advFilterField') || {}).value || '') !== fld) return;
+                    // قائمة فارغة = بلا فائدة كصندوق اختيار → رجوع لإدخال نصي بدل select ميت
+                    if(!(opts || []).length) throw new Error('empty options');
                     box.innerHTML = lbl + `<select id="advFilterValue" class="${cls}"><option value="">— اختر —</option>` + (opts || []).map(o=>{ const p = fmlkOptPair(o); return `<option value="${escAttr(p.value)}">${escHtml(p.label)}</option>`; }).join('') + `</select>`;
                 }catch(e){
+                    if(myGen !== advValueGen) return;
                     if(((document.getElementById('advFilterField') || {}).value || '') !== fld) return;
                     box.innerHTML = lbl + `<input type="${t}" id="advFilterValue" placeholder="أدخل القيمة..." class="${cls}">`;
                 }
