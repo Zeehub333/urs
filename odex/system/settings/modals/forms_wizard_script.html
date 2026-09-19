@@ -18,7 +18,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
         let fwBranches = []; // {table,alias,master,detail,cols:[{name,alias,data_type}],colsCache:[]}
         let fwTabs = []; // {id,name,alias,order,visibleIf}
         let fwTypes = []; // field-types registry
-        let fwTypeIdx = -1, fwTypeSel = '', fwTypeOpts = [], fwTypeSrcs = [];
+        let fwTypeIdx = -1, fwTypeSel = '', fwTypeOrig = '', fwTypeOpts = [], fwTypeSrcs = [];
         let fwBranchIdx = -1, fwBranchSel = [];
         let fwPrevState = {conn:'', table:''};
         function fwEsc(s){ return String(s ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
@@ -1006,6 +1006,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             fwTypeIdx = i;
             const r = fwInputs[i];
             fwTypeSel = r.inputType || 'text';
+            fwTypeOrig = fwTypeSel;
             fwTypeOpts = JSON.parse(JSON.stringify(r.options || []));
             fwTypeSrcs = JSON.parse(JSON.stringify(r.options_source || []));
             if(!fwTypeOpts.length && (r.inputType === 'status')) fwTypeOpts = [{value:'1', label:'نشط', color:'#16a34a'}, {value:'0', label:'موقوف', color:'#dc2626'}];
@@ -1027,6 +1028,18 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
         }
         function fwTypePick(k){ fwTypeSel = k; fwRenderTypeGrid(); fwRenderTypeConfig(); }
         function fwRenderTypeConfig(){
+            // حصاد القيم المعلقة من DOM قبل إعادة البناء — وإلا ضاع اختيار الجدول المرجعي
+            // عند إضافة خيار/مصدر أو تبديل النوع (إعادة الرسم كانت تعيد القيم القديمة من r)
+            try{
+                const r0 = fwInputs[fwTypeIdx] || {};
+                const gv = (id)=>{ const el = document.getElementById(id); return el ? el.value : null; };
+                const _t = gv('fwTypeRefTable'); if(_t !== null) r0.refTable = _t;
+                const _fk = gv('fwTypeRefFk'); if(_fk !== null) r0.refFk = _fk;
+                const _dp = gv('fwTypeRefDisplay'); if(_dp !== null) r0.refDisplay = _dp;
+                const _pr = gv('fwTypeParent'); if(_pr !== null){ r0.config = r0.config || {}; if(_pr) r0.config.parent_field = _pr; }
+                const _sp = gv('fwTypeSep'); if(_sp !== null){ r0.config = r0.config || {}; if(_sp) r0.config.separator = _sp; }
+                const _an = document.getElementById('fwTypeAllowNew'); if(_an){ r0.config = r0.config || {}; r0.config.allow_new = _an.checked ? 'true' : 'false'; }
+            }catch(e){}
             const box = document.getElementById('fwTypeConfig');
             const r = fwInputs[fwTypeIdx] || {};
             const needOpts = ['select','multiselect','status','radio','restricted_tags','reorder','badges'].includes(fwTypeSel);
@@ -1117,6 +1130,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             r.options_source = fwTypeSrcs.filter(s=>s.table && s.column).map(s=>({table: s.table, schema:'', column: s.column}));
             const g = (id)=>{ const el = document.getElementById(id); return el ? el.value : ''; };
             if(['select','lookup','datamodal'].includes(fwTypeSel)){ r.refTable = g('fwTypeRefTable'); r.refFk = g('fwTypeRefFk') || 'id'; r.refDisplay = g('fwTypeRefDisplay'); }
+            else if(fwTypeSel !== fwTypeOrig){ r.refTable = ''; r.refFk = ''; r.refDisplay = ''; }
             r.config = r.config || {};
             if(fwTypeSel === 'cascading_select'){ const p = g('fwTypeParent'); if(p) r.config.parent_field = p; }
             if(['list-input','multiselect','restricted_tags'].includes(fwTypeSel)){
