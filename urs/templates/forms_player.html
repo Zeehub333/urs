@@ -228,7 +228,7 @@
                         <option value="all">الكل</option>
                     </select>
                     <span>سجل من أصل <strong id="totalRecordsCount">0</strong> سجل</span>
-                    <button id="loadMoreBtn" onclick="loadMoreRecords()" title="تحميل الدفعة التالية من الخادم" class="hidden px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold disabled:opacity-50">تحميل المزيد</button>
+                    <span id="lazyStatus" class="text-indigo-600 font-bold"></span>
                 </div>
                 <div class="flex items-center gap-2">
                     <button onclick="changePage(-1)" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg font-medium">السابق</button>
@@ -342,11 +342,13 @@
         let gridSearch = '';
         let currentPage = 1;
         let pageSize = 25;
-        // التحميل التدريجي من الخادم (الجهات > 1000): دفعات FETCH_SIZE مع عدّاد المتبقي
+        // التحميل التدريجي من الخادم (الجهات > 1000): دفعات FETCH_SIZE عبر lazy scroll
         let serverTotal = 0;
         let serverPage = 1;
         const FETCH_SIZE = 1000;
         let loadingMore = false;
+        let lazyBound = false;
+        let autoBatches = 0;
         let hiddenCols = new Set();
         let menuCol = null;
         let customActions = [];
@@ -1878,6 +1880,7 @@
                 allRows = data.rows || [];
                 serverTotal = (typeof data.total === 'number') ? data.total : allRows.length;
                 serverPage = 1;
+                autoBatches = 0;
                 formKindCache = {};
                 selectedIds = new Set([...selectedIds].filter(id => allRows.some((r, i) => rowId(r, i) === id)));
                 currentPage = 1;
@@ -1895,12 +1898,41 @@
             }
         }
         function updateLoadMore(){
-            const btn = document.getElementById('loadMoreBtn');
-            if(!btn) return;
+            const st = document.getElementById('lazyStatus');
+            if(!st) return;
             const remain = Math.max(0, (serverTotal || 0) - allRows.length);
-            btn.classList.toggle('hidden', !(remain > 0 && !loadError));
-            btn.disabled = !!loadingMore;
-            btn.textContent = loadingMore ? 'جارٍ التحميل...' : `تحميل المزيد (${remain} متبقٍ)`;
+            if(loadingMore) st.textContent = 'جارٍ تحميل المزيد...';
+            else if(remain > 0 && !loadError) st.textContent = `مرر للأسفل لتحميل المزيد (${remain} متبقٍ)`;
+            else st.textContent = '';
+        }
+        // ربط مرة واحدة: عند الاقتراب من أسفل القائمة تُجلب الدفعة التالية تلقائياً
+        function bindLazyScroll(){
+            if(lazyBound) return;
+            const wrap = document.getElementById('formTableWrap');
+            if(!wrap) return;
+            lazyBound = true;
+            wrap.addEventListener('scroll', ()=>{
+                try{ autoBatches = 0; }catch(e){}
+                try{
+                    if(loadingMore) return;
+                    if(((serverTotal || 0) - allRows.length) <= 0) return;
+                    if(wrap.scrollTop + wrap.clientHeight >= wrap.scrollHeight - 400) loadMoreRecords();
+                }catch(e){}
+            });
+        }
+        // تعبئة تلقائية إن كان المحتوى أقصر من الحاوية (بلا شريط تمرير) — بحد 5 دفعات
+        function maybeLazyFill(){
+            try{
+                if(loadingMore) return;
+                if(((serverTotal || 0) - allRows.length) <= 0) return;
+                if(autoBatches >= 5) return;
+                const wrap = document.getElementById('formTableWrap');
+                if(!wrap) return;
+                if(wrap.scrollHeight <= wrap.clientHeight + 50){
+                    autoBatches++;
+                    loadMoreRecords();
+                }
+            }catch(e){}
         }
         async function loadMoreRecords(){
             if(loadingMore) return;
@@ -1925,7 +1957,6 @@
                 serverPage = next;
                 refreshNav();
                 renderGrid();
-                try{ notify(`تم تحميل ${added} سجل إضافي (${allRows.length}/${serverTotal})`, 'success'); }catch(e){}
             }catch(e){
                 try{ notify('تعذر تحميل المزيد: ' + String((e && e.message) || e).slice(0, 150), 'error'); }catch(_e){}
             }
@@ -2990,6 +3021,8 @@
             else renderCards(cols, paged, start);
             try{ paintBlankPanel(); }catch(e){}
             try{ fmlkResolveListDisplays(); }catch(e){}
+            try{ bindLazyScroll(); }catch(e){}
+            try{ maybeLazyFill(); }catch(e){}
         }
         function renderTable(cols, paged, start) {
             const allChecked = paged.length > 0 && paged.every((r, i) => selectedIds.has(String(rowId(r, allRows.indexOf(r)))));
