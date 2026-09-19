@@ -163,11 +163,18 @@
             <div class="px-3 py-1.5 flex items-center gap-2 text-xs shrink-0 bg-white border-b border-slate-200">
                 <i class="fa-solid fa-search text-slate-400"></i>
                 <input id="gridSearch" type="text" placeholder="بحث ذكي: نص، رقم، تاريخ، 09:00... (& للجمع، ، للتخيير)..." oninput="onGridSearch(this.value)" class="flex-1 min-w-[120px] bg-transparent border-none focus:outline-none text-slate-700">
+                <button onclick="openAdvFilterModal()" title="تصفية متقدمة (عوامل على الحقول)" class="relative inline-flex items-center gap-1 px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg font-bold whitespace-nowrap"><i class="fa-solid fa-sliders"></i> تصفية <span id="advCount" class="hidden min-w-[18px] h-[18px] px-1 rounded-full bg-indigo-600 text-white text-[10px] items-center justify-center"></span></button>
                 <span id="selectedCount" class="text-slate-400 whitespace-nowrap"></span>
                 <div id="activeGroupIndicator" class="hidden items-center gap-2 bg-indigo-50 text-indigo-700 px-3 py-1 rounded-lg font-medium">
                     <span>تجميع: <strong id="activeGroupColName"></strong> = <span id="activeGroupVal"></span></span>
                     <button onclick="clearGroupFilter()" class="hover:text-indigo-900"><i class="fa-solid fa-xmark"></i></button>
                 </div>
+            </div>
+            <!-- Advanced filter tags (report-player parity) -->
+            <div id="advTagsBar" class="hidden px-3 py-1.5 flex-wrap items-center gap-1.5 text-xs shrink-0 bg-indigo-50/50 border-b border-indigo-100">
+                <span class="text-indigo-400 font-bold"><i class="fa-solid fa-filter"></i></span>
+                <span id="advTagsList" class="contents"></span>
+                <button onclick="clearAdvFilters()" title="مسح كل عوامل التصفية" class="mr-auto text-[11px] text-rose-600 hover:text-rose-800 font-bold whitespace-nowrap">مسح الكل</button>
             </div>
 
             <!-- Body: grouping sidebar + table/cards -->
@@ -237,6 +244,52 @@
                 </div>
             </footer>
         </main>
+    </div>
+
+    <!-- Advanced Filter Modal (report-player parity: field + operator + value) -->
+    <div id="advancedFilterModal" class="hidden fixed inset-0 z-[70] bg-slate-900/50 backdrop-blur-sm p-4 overflow-y-auto" onclick="if(event.target===this)closeAdvFilterModal()">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg m-auto overflow-hidden flex flex-col max-h-[92vh]">
+            <div class="px-6 py-3 border-b border-slate-200 flex items-center justify-between bg-slate-50 gap-2 shrink-0">
+                <h3 class="text-sm font-bold text-slate-800 flex items-center gap-2">
+                    <i class="fa-solid fa-sliders text-indigo-600"></i> تصفية متقدمة
+                </h3>
+                <div class="flex items-center gap-2">
+                    <button onclick="closeAdvFilterModal()" class="px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded-xl text-xs">إلغاء</button>
+                    <button onclick="applyAdvFilter()" class="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-xl shadow-md shadow-indigo-100 text-xs">تطبيق التصفية</button>
+                    <button onclick="closeAdvFilterModal()" class="text-slate-400 hover:text-slate-600 ms-1"><i class="fa-solid fa-xmark text-base"></i></button>
+                </div>
+            </div>
+            <div class="p-6 space-y-4 text-xs overflow-y-auto custom-scroll min-h-0">
+                <div>
+                    <label class="block font-semibold text-slate-700 mb-1">اختر الحقل:</label>
+                    <select id="advFilterField" onchange="updateAdvOperators()" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 font-medium focus:outline-none focus:border-indigo-500"></select>
+                </div>
+                <div>
+                    <label class="block font-semibold text-slate-700 mb-1">عملية التصفية:</label>
+                    <select id="advFilterOp" onchange="toggleAdvRangeInputs()" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 font-medium focus:outline-none focus:border-indigo-500">
+                        <option value="equals">يساوي</option>
+                        <option value="contains">يحتوي على</option>
+                        <option value="gt">أكبر من</option>
+                        <option value="lt">أقل من</option>
+                        <option value="between">بين (رقمين أو تاريخين)</option>
+                    </select>
+                </div>
+                <div id="advSingleValContainer">
+                    <label class="block font-semibold text-slate-700 mb-1">القيمة:</label>
+                    <input type="text" id="advFilterValue" placeholder="أدخل القيمة..." class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500">
+                </div>
+                <div id="advRangeValContainer" class="hidden grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">من:</label>
+                        <input type="text" id="advFilterValFrom" placeholder="القيمة الصغرى / البداية" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500">
+                    </div>
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">إلى:</label>
+                        <input type="text" id="advFilterValTo" placeholder="القيمة الكبرى / النهاية" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500">
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- Data-grid modal picker (datamodal inputs) -->
@@ -2919,6 +2972,7 @@
                     const sel = columnFilters[col];
                     if (sel && sel.length && !sel.includes(String(cellVal(r, col)))) return false;
                 }
+                if (advFilters.length && !advFilters.every(f=>matchAdv(r, f))) return false;
                 if (rawQ) {
                     if (!matchSmart(r)) return false;
                 }
@@ -3183,6 +3237,189 @@
             document.querySelectorAll('#colValuesCheckboxesList .col-filter-chk').forEach(chk => { if (chk.checked) sel.push(chk.value); });
             columnFilters[menuCol] = sel;
             closeColumnMenu(); currentPage = 1; renderGrid();
+        }
+        // ── تصفية متقدمة (تكافؤ مشغل التقارير: حقل + عملية + قيمة، وشارات) ──
+        let advFilters = [];
+        function fmlAdvKind(name){
+            try{
+                const k = formFieldKind(fieldDef(name));
+                if(k === 'date' || k === 'datetime') return k;
+                if(k === 'number') return 'number';
+                return 'text';
+            }catch(e){ return 'text'; }
+        }
+        function advOpList(kind){
+            if(kind === 'date' || kind === 'datetime')
+                return [['lt','قبل'],['gt','بعد'],['between','بين تاريخين'],['equals','في يوم'],['inmonth','في شهر'],['inyear','في سنة'],['since','منذ']];
+            if(kind === 'number')
+                return [['equals','يساوي'],['not_equals','لا يساوي'],['gt','أكبر من'],['gte','أكبر من أو يساوي'],['lt','أصغر من'],['lte','أصغر من أو يساوي'],['between','بين (من - إلى)']];
+            return [['contains','يحتوي على'],['equals','يساوي'],['startswith','يبدأ بـ'],['endswith','ينتهي بـ'],['not_contains','لا يحتوي على'],['not_equals','لا يساوي']];
+        }
+        function openAdvFilterModal(){
+            const fields = visibleFields();
+            if(!fields.length){ try{ notify('لا حقول مرئية للتصفية', 'info'); }catch(e){} return; }
+            document.getElementById('advFilterField').innerHTML = fields.map(f=>`<option value="${escAttr(f.name)}">${escHtml(f.alias || f.name)}</option>`).join('');
+            document.getElementById('advFilterValue').value = '';
+            document.getElementById('advFilterValFrom').value = '';
+            document.getElementById('advFilterValTo').value = '';
+            updateAdvOperators();
+            document.getElementById('advancedFilterModal').classList.remove('hidden');
+            if(typeof lockScroll === 'function') lockScroll();
+        }
+        function closeAdvFilterModal(){
+            document.getElementById('advancedFilterModal').classList.add('hidden');
+            if(typeof unlockScroll === 'function') unlockScroll();
+        }
+        function updateAdvOperators(){
+            const fld = (document.getElementById('advFilterField') || {}).value || '';
+            const kind = fmlAdvKind(fld);
+            const ops = advOpList(kind);
+            const osel = document.getElementById('advFilterOp');
+            const cur = osel ? osel.value : '';
+            if(osel){
+                osel.innerHTML = ops.map(([v,l])=>`<option value="${v}">${l}</option>`).join('');
+                osel.value = ops.some(([v])=>v===cur) ? cur : ops[0][0];
+            }
+            const t = kind === 'number' ? 'number' : kind === 'date' ? 'date' : kind === 'datetime' ? 'datetime-local' : 'text';
+            ['advFilterValue','advFilterValFrom','advFilterValTo'].forEach(id=>{
+                const el = document.getElementById(id);
+                if(!el) return;
+                el.type = t;
+                if(t === 'text') el.placeholder = (id === 'advFilterValue') ? 'أدخل القيمة...' : (id === 'advFilterValFrom' ? 'القيمة الصغرى / البداية' : 'القيمة الكبرى / النهاية');
+            });
+            toggleAdvRangeInputs();
+        }
+        function toggleAdvRangeInputs(){
+            const op = (document.getElementById('advFilterOp') || {}).value || '';
+            const single = document.getElementById('advSingleValContainer');
+            const range = document.getElementById('advRangeValContainer');
+            if(!single || !range) return;
+            if(op === 'between'){ single.classList.add('hidden'); range.classList.remove('hidden'); }
+            else { single.classList.remove('hidden'); range.classList.add('hidden'); }
+        }
+        function applyAdvFilter(){
+            const fld = (document.getElementById('advFilterField') || {}).value || '';
+            const op = (document.getElementById('advFilterOp') || {}).value || 'equals';
+            if(!fld){ try{ notify('اختر الحقل أولاً', 'info'); }catch(e){} return; }
+            if(op === 'between'){
+                const a = ((document.getElementById('advFilterValFrom') || {}).value || '').trim();
+                const b = ((document.getElementById('advFilterValTo') || {}).value || '').trim();
+                if(!a || !b){ try{ notify('أدخل القيمتين (من - إلى)', 'info'); }catch(e){} return; }
+                advFilters.push({field: fld, op: 'between', valFrom: a, valTo: b});
+            } else {
+                const v = ((document.getElementById('advFilterValue') || {}).value || '').trim();
+                if(!v){ try{ notify('أدخل القيمة أولاً', 'info'); }catch(e){} return; }
+                advFilters.push({field: fld, op: op, value: v});
+            }
+            closeAdvFilterModal();
+            currentPage = 1;
+            renderAdvTags();
+            renderGrid();
+        }
+        function advOpSym(op){
+            return op === 'gt' ? '>' : op === 'lt' ? '<' : op === 'gte' ? '≥' : op === 'lte' ? '≤'
+                : op === 'contains' ? '∋' : op === 'startswith' ? '⇥' : op === 'endswith' ? '⇤'
+                : op === 'not_contains' ? '∌' : op === 'not_equals' ? '≠'
+                : op === 'inyear' ? 'سنة' : op === 'inmonth' ? 'شهر' : op === 'since' ? 'منذ'
+                : op === 'between' ? '⇋' : '=';
+        }
+        function advFieldLabel(name){
+            try{ const f = fieldDef(name); return (f && f.alias) || name; }catch(e){ return name; }
+        }
+        function advCleanMidnight(v){
+            if(typeof v !== 'string') return v;
+            const m = v.match(/^(\d{4}-\d{2}-\d{2})[T ]00:00:00(\.0+)?$/);
+            return m ? m[1] : v;
+        }
+        function renderAdvTags(){
+            const bar = document.getElementById('advTagsBar');
+            const box = document.getElementById('advTagsList');
+            const badge = document.getElementById('advCount');
+            if(badge){
+                badge.textContent = advFilters.length || '';
+                badge.classList.toggle('hidden', !advFilters.length);
+                badge.classList.toggle('inline-flex', !!advFilters.length);
+            }
+            if(!bar || !box) return;
+            bar.classList.toggle('hidden', !advFilters.length);
+            bar.classList.toggle('flex', !!advFilters.length);
+            box.innerHTML = advFilters.map((f, idx)=>{
+                const vv = (f.value !== undefined && f.value !== '')
+                    ? advCleanMidnight(f.value)
+                    : ((advCleanMidnight(f.valFrom) || '') + ' - ' + (advCleanMidnight(f.valTo) || ''));
+                return `<span class="inline-flex items-center gap-1.5 bg-indigo-600 text-white px-2.5 py-1 rounded-lg font-semibold">${escHtml(advFieldLabel(f.field))} ${advOpSym(f.op)} ${escHtml(vv)}<button onclick="removeAdvFilter(${idx})" class="hover:text-indigo-200" title="إزالة"><i class="fa-solid fa-xmark text-[10px]"></i></button></span>`;
+            }).join('');
+        }
+        function removeAdvFilter(idx){
+            advFilters.splice(idx, 1);
+            currentPage = 1;
+            renderAdvTags();
+            renderGrid();
+        }
+        function clearAdvFilters(){
+            if(!advFilters.length) return;
+            advFilters = [];
+            currentPage = 1;
+            renderAdvTags();
+            renderGrid();
+        }
+        function advNum(v){
+            if(v === undefined || v === null) return NaN;
+            const n = parseFloat(String(v).trim().replace(/،/g, ',').replace(/,/g, ''));
+            return isNaN(n) ? NaN : n;
+        }
+        function advDatePart(v){
+            const m = String(v ?? '').trim().match(/\d{4}-\d{2}-\d{2}/);
+            return m ? m[0] : '';
+        }
+        function matchAdv(r, f){
+            try{
+                const sv = String(cellVal(r, f.field) ?? '');
+                const s = sv.trim();
+                const kind = fmlAdvKind(f.field);
+                const op = f.op || 'equals';
+                if(op === 'between'){
+                    const a = String(f.valFrom ?? '').trim(), b = String(f.valTo ?? '').trim();
+                    if(kind === 'number'){
+                        const n = advNum(s), x = advNum(a), y = advNum(b);
+                        return !isNaN(n) && !isNaN(x) && !isNaN(y) && n >= x && n <= y;
+                    }
+                    if(kind === 'date' || kind === 'datetime'){
+                        const d = advDatePart(s), x = advDatePart(a), y = advDatePart(b);
+                        return !!d && !!x && !!y && d >= x && d <= y;
+                    }
+                    return !!s && s >= a && s <= b;
+                }
+                const v = String(f.value ?? '').trim();
+                if(kind === 'number'){
+                    const n = advNum(s), x = advNum(v);
+                    if(op === 'equals') return !isNaN(n) && !isNaN(x) && n === x;
+                    if(op === 'not_equals') return !( !isNaN(n) && !isNaN(x) && n === x );
+                    if(op === 'gt') return !isNaN(n) && !isNaN(x) && n > x;
+                    if(op === 'gte') return !isNaN(n) && !isNaN(x) && n >= x;
+                    if(op === 'lt') return !isNaN(n) && !isNaN(x) && n < x;
+                    if(op === 'lte') return !isNaN(n) && !isNaN(x) && n <= x;
+                    return s.toLowerCase().includes(v.toLowerCase());
+                }
+                if(kind === 'date' || kind === 'datetime'){
+                    const d = advDatePart(s), x = advDatePart(v);
+                    if(op === 'equals') return !!d && d === x;
+                    if(op === 'not_equals') return d !== x;
+                    if(op === 'lt') return !!d && !!x && d < x;
+                    if(op === 'gt') return !!d && !!x && d > x;
+                    if(op === 'inmonth') return !!d && d.slice(0, 7) === String(v).trim().slice(0, 7);
+                    if(op === 'inyear') return !!d && d.slice(0, 4) === String(v).trim().slice(0, 4);
+                    if(op === 'since') return !!d && !!x && d >= x;
+                    return s.toLowerCase().includes(v.toLowerCase());
+                }
+                const sl = s.toLowerCase(), vl = v.toLowerCase();
+                if(op === 'equals') return sl === vl;
+                if(op === 'not_equals') return sl !== vl;
+                if(op === 'startswith') return sl.startsWith(vl);
+                if(op === 'endswith') return sl.endsWith(vl);
+                if(op === 'not_contains') return !sl.includes(vl);
+                return sl.includes(vl);
+            }catch(e){ return false; }
         }
         window.addEventListener('click', function(e) {
             const menu = document.getElementById('columnDropdownMenu');
