@@ -1028,6 +1028,12 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             const r = fwInputs[fwTypeIdx];
             if(!r) return closeFwTypeModal();
             r.inputType = fwTypeSel;
+            // مطابقة نوع التخزين مع نوع الواجهة — فقط إن كان عاماً (VARCHAR/TEXT/فارغ)
+            // حتى لا تضيع دقة مستوردة (NUMERIC/DATE...) عند تغيير الودجت
+            const FW_INPUT_DATATYPE = {text:'VARCHAR', textarea:'TEXT', number:'INTEGER', datetime:'TIMESTAMP', boolean:'BOOLEAN', select:'VARCHAR', password:'VARCHAR', image:'TEXT', media:'TEXT', 'list-input':'TEXT', multiselect:'TEXT', lookup:'VARCHAR', status:'VARCHAR', datamodal:'VARCHAR', subform:'TEXT', grid:'TEXT', reorder:'INTEGER', tree:'VARCHAR', badges:'TEXT', polymorphic:'VARCHAR', livesync:'VARCHAR', autopopulate:'VARCHAR', calculated:'NUMERIC', matrix:'TEXT', restricted_tags:'TEXT', cascade_grid:'VARCHAR', cascading_select:'VARCHAR', phone:'VARCHAR', email:'VARCHAR', file:'TEXT'};
+            const _cur = String(r.dataType || '').toUpperCase();
+            const _map = FW_INPUT_DATATYPE[fwTypeSel];
+            if(_map && (_cur === '' || _cur === 'VARCHAR' || _cur === 'TEXT')) r.dataType = _map;
             r.options = fwTypeOpts.map(o=>{
                 if(typeof o === 'object' && o !== null){
                     const out = {value: String(o.value ?? ''), label: String(o.label ?? o.value ?? '')};
