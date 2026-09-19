@@ -11,7 +11,7 @@ set ROOT=%~dp0
 
 REM ---- defaults, used if app.config is missing keys ----
 set PY=
-set APP_HOST=127.0.0.1
+set APP_HOST=0.0.0.0
 set APP_PORT=8004
 set APP_SETTINGS=config.settings_local
 
@@ -30,6 +30,9 @@ if exist "%ROOT%app.config" (
   )
 )
 if not defined PY set PY=%ROOT%odex\venv\Scripts\python.exe
+REM URL host for browser/local probes (0.0.0.0 binds all but is not browsable)
+set APP_URLHOST=%APP_HOST%
+if "%APP_HOST%"=="0.0.0.0" set APP_URLHOST=127.0.0.1
 
 REM ---- verify the interpreter actually runs, venv stub may be dead ----
 "%PY%" --version >nul 2>&1
@@ -73,7 +76,7 @@ echo.
 echo [4/4] Seeding default connection from app.conf [skips if no DB_*]
 set TRIES=0
 :seed_retry
-"%PY%" "%ROOT%seed_conn.py" http://%APP_HOST%:%APP_PORT%
+"%PY%" "%ROOT%seed_conn.py" http://%APP_URLHOST%:%APP_PORT%
 if errorlevel 2 goto seed_done
 if not errorlevel 1 goto seed_done
 set /a TRIES+=1
@@ -90,22 +93,22 @@ REM ---- main-data gate: no app.config / company / connection / tables -> setup 
 call "%ROOT%db_checker.bat"
 set DBCHECK=%errorlevel%
 if defined NOCONF (
-  set OPEN_URL=http://%APP_HOST%:%APP_PORT%/settings/setup/
+  set OPEN_URL=http://%APP_URLHOST%:%APP_PORT%/settings/setup/
   set OPEN_NOTE=FIRST RUN (no app.config) - opening the setup wizard ...
 ) else if %DBCHECK% neq 0 (
-  set OPEN_URL=http://%APP_HOST%:%APP_PORT%/settings/setup/
+  set OPEN_URL=http://%APP_URLHOST%:%APP_PORT%/settings/setup/
   set OPEN_NOTE=FIRST RUN - opening the setup wizard ...
 ) else (
-  set OPEN_URL=http://%APP_HOST%:%APP_PORT%/
+  set OPEN_URL=http://%APP_URLHOST%:%APP_PORT%/
   set OPEN_NOTE=opening home ...
 )
 
 echo.
 echo ========================================
-echo  Odex running:
-echo    Home [20 apps]            : http://%APP_HOST%:%APP_PORT%/
-echo    Setup wizard [first run]  : http://%APP_HOST%:%APP_PORT%/settings/setup/
-echo    Settings / Connections    : http://%APP_HOST%:%APP_PORT%/settings/
+echo  Odex running (bind %APP_HOST%:%APP_PORT% - LAN reachable):
+echo    Home [20 apps]            : http://%APP_URLHOST%:%APP_PORT%/
+echo    Setup wizard [first run]  : http://%APP_URLHOST%:%APP_PORT%/settings/setup/
+echo    Settings / Connections    : http://%APP_URLHOST%:%APP_PORT%/settings/
 echo    375 Demo [static]         : http://127.0.0.1:8002/demo.html
 echo ========================================
 echo  Config: app.config   Checker: db_checker.bat
