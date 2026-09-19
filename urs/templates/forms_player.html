@@ -6,8 +6,10 @@
         .fmlk-field-left { grid-column: span 1; }
         .fmlk-field-full { grid-column: 1 / -1; }
         @media (max-width: 768px) { .fmlk-field-left { grid-column: 1 / -1; } }
-        @keyframes toolbarBtnPop { from { opacity: 0; transform: scale(.5); } to { opacity: 1; transform: scale(1); } }
-        .toolbar-btn-pop { animation: toolbarBtnPop .18s ease; }
+@keyframes toolbarBtnPop { from { opacity: 0; transform: scale(.5); } to { opacity: 1; transform: scale(1); } }
+.toolbar-btn-pop { animation: toolbarBtnPop .18s ease; }
+@keyframes migBlink { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
+.mig-blink { animation: migBlink 1.1s ease-in-out infinite; }
         .freeze-col { position: sticky; right: 0; z-index: 5; box-shadow: -1px 0 0 #e2e8f0; }
         .freeze-col-head { position: sticky; right: 0; z-index: 30; background: #f1f5f9; box-shadow: -1px 0 0 #e2e8f0; }
 {% endblock %}
@@ -98,7 +100,7 @@
                         {% for f in fml_files %}<option value="{{ f.file }}" data-url="{% if f.virtual %}{{ f.url }}{% endif %}" {% if f.file == fml_file %}selected{% endif %}>{{ f.metadata.displayName }}</option>{% endfor %}
                         <option value="__designer__">+ مصمم موديل جديد</option>
                     </select>
-                    <button onclick="migrateCurrentModel()" title="ترحيل الجدول" class="w-8 h-8 rounded-full hidden md:flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-emerald-600 transition"><i class="fa-solid fa-database"></i></button>
+                    <button id="migrateToolbarBtn" onclick="migrateCurrentModel()" title="ترحيل الجدول" class="w-8 h-8 rounded-full hidden md:flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-emerald-600 transition"><i class="fa-solid fa-database"></i></button>
                     <span class="w-px h-6 bg-slate-200 mx-1 hidden md:block"></span>
                     <span id="formActionsBar" class="flex items-center gap-1"></span>
                     <button id="addToolbarBtn" onclick="openAddPanel()" title="إضافة" class="w-8 h-8 rounded-full flex items-center justify-center text-indigo-600 hover:bg-indigo-50 transition"><i class="fa-solid fa-plus"></i></button>
@@ -454,6 +456,7 @@
                 renderTabs(fmlMeta.cats.map((c, i) => ({id: 'cat' + i, alias: c})));
                 renderForm(data);
                 await loadAllRecords();
+                try{ checkMigrateChanges(); }catch(e){}
             } catch(e) {
                 showError(e, 'تحميل النموذج: ' + (name || '') + ' — ' + (currentApp || ''));
                 renderTabs([{id:"basic", alias:"البيانات الأساسية"}, {id:"work", alias:"العمل"}]);
@@ -2163,6 +2166,23 @@
             if(opt.dataset.url){ location.href = opt.dataset.url; return; }
             location.href = `/app/${currentApp}/form/${encodeURIComponent(opt.value)}/`;
         }
+        async function checkMigrateChanges(){
+            const btn = document.getElementById('migrateToolbarBtn');
+            if(!btn) return;
+            const base = 'w-8 h-8 rounded-full hidden md:flex items-center justify-center transition ';
+            try{
+                const res = await fetch(`/api/apps/${encodeURIComponent(currentApp)}/models/migrate/preview/`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({file: currentFml})});
+                const d = await res.json();
+                const n = res.ok ? ((d.new_inputs || []).length) : 0;
+                if(n > 0){
+                    btn.className = base + 'bg-amber-100 text-amber-700 hover:bg-amber-200 mig-blink';
+                    btn.title = `ترحيل الجدول — ${n} جديد`;
+                } else {
+                    btn.className = base + 'text-slate-500 hover:bg-slate-100 hover:text-emerald-600';
+                    btn.title = 'ترحيل الجدول';
+                }
+            }catch(e){}
+        }
         async function migrateCurrentModel() {
             // مودال المعاينة: تفاصيل الترحيل + المدخلات الجديدة قبل التنفيذ
             let ov = document.getElementById('migrateModal');
@@ -2248,6 +2268,7 @@
                     notify(`تم الترحيل ✓ ${data.schema}.${data.table} (${(data.columns || []).length} عمود${added ? '، +' + added + ' جديد' : ''}${rned ? '، ' + rned + ' مُعاد تسميته' : ''})`, 'success');
                     closeMigrateModal();
                     await loadAllRecords();
+                    try{ checkMigrateChanges(); }catch(e){}
                 }
                 else notify(data.error || 'فشل الترحيل', 'error');
             } catch(e) { notify('تعذر الاتصال', 'error'); }
