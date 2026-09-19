@@ -818,7 +818,7 @@
                             return `<option value="${escAttr(vv)}" ${String(vv)==String(val)?'selected':''}>${escHtml(ll)}</option>`;
                         }).join('');
                         input = `<select data-field="${field.name}" class="${baseCls}">${opts2 || '<option value="">— اختر —</option>'}</select>`;
-                        if((field.options_source || field.optionsSource || []).length) setTimeout(()=> hydOptionsSource(field), 0);
+                        if(((field.options_source || field.optionsSource || []).length) || field.refTable) setTimeout(()=> hydOptionsSource(field), 0);
                         break;
                     }
                     case 'textarea':
@@ -1023,21 +1023,44 @@
         }
         function hydOptionsSource(field){
             const srcs = field.options_source || field.optionsSource || [];
-            if(!srcs.length) return;
-            Promise.all(srcs.map(s => loadOptionsSource(s.table, s.column, s.schema).catch(()=>[]))).then(lists => {
-                const seen = new Set((field.options || []).map(String));
+            const refT = field.refTable || '';
+            const jobs = [];
+            // مرجع جدول بمفتاح + عمود عرض (refTable/refFk/refDisplay)
+            if(refT){
+                const fk = field.refFk || 'id', dp = field.refDisplay || '';
+                jobs.push(loadOptionsSourceRef(refT, fk, dp).catch(()=>[]));
+            }
+            if(!srcs.length && !jobs.length) return;
+            const lists = srcs.map(s => loadOptionsSource(s.table, s.column, s.schema).catch(()=>[]));
+            Promise.all([...jobs, ...lists]).then(all => {
+                const seen = new Set((field.options || []).map(o=>String((o && typeof o === 'object') ? (o.value ?? o.label ?? '') : o)));
                 const merged = [...(field.options || [])];
-                lists.flat().forEach(o => {
-                    const v = String(o.value ?? o);
-                    if(!seen.has(v)){ seen.add(v); merged.push(v); }
+                all.flat().forEach(o => {
+                    const p = (o && typeof o === 'object') ? {value: String(o.value ?? ''), label: String(o.label ?? o.value ?? '')} : {value: String(o ?? ''), label: String(o ?? '')};
+                    if(p.value === '' && p.label === '') return;
+                    if(!seen.has(p.value)){ seen.add(p.value); merged.push(p.label === p.value ? p.value : p); }
                 });
+                try{ field.options = merged; }catch(e){}
                 const sel = document.querySelector(`select[data-field="${CSS.escape(field.name)}"]`);
                 if(sel){
                     const cur = sel.value || fieldVal(field);
-                    sel.innerHTML = '<option value="">— اختر —</option>' + merged.map(o=>`<option value="${escAttr(o)}" ${String(o)===String(cur)?'selected':''}>${escHtml(o)}</option>`).join('');
+                    sel.innerHTML = '<option value="">— اختر —</option>' + merged.map(o=>{
+                        const vv = (o && typeof o === 'object') ? (o.value ?? '') : o;
+                        const ll = (o && typeof o === 'object') ? (o.label ?? o.value ?? '') : o;
+                        return `<option value="${escAttr(vv)}" ${String(vv)===String(cur)?'selected':''}>${escHtml(ll)}</option>`;
+                    }).join('');
                     if(cur) sel.value = String(cur);
                 }
             });
+        }
+        async function loadOptionsSourceRef(table, fk, display){
+            let url = `/api/fmlk/options?table=${encodeURIComponent(table)}&column=${encodeURIComponent(fk || 'id')}&limit=500`;
+            if(display) url += `&display=${encodeURIComponent(display)}`;
+            try{
+                const res = await fetch(url);
+                const data = await res.json();
+                return data.options || [];
+            }catch(e){ showLookupError('تعذر جلب الخيارات: ' + String((e && e.message) || e).slice(0, 150)); return []; }
         }
         function hydLookupSelect(fieldName, refTable){
             loadLookupOptions(fieldName, refTable).then(opts => {

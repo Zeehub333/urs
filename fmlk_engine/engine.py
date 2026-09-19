@@ -17,24 +17,40 @@ def _valid_table_ident(name: str) -> bool:
     return bool(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name or ""))
 
 
-def get_options_source(table: str, column: str, schema: str = "", limit: int = 500, search: str | None = None) -> List[Dict[str, Any]]:
-    """قيم مميزة لعمود جدول (مرجع [table.column]) — قراءة فقط بمعرفات مُتحقق منها."""
+def get_options_source(table: str, column: str, schema: str = "", limit: int = 500, search: str | None = None, display: str | None = None) -> List[Dict[str, Any]]:
+    """قيم مميزة لعمود جدول (مرجع [table.column]) — قراءة فقط بمعرفات مُتحقق منها.
+
+    display (اختياري): عمود العرض للتسمية — القيمة من column والتسمية منه.
+    """
     if not _valid_table_ident(table) or not _valid_table_ident(column):
         raise ValueError("invalid table/column name")
+    disp = (display or "").strip()
+    if disp and not _valid_table_ident(disp):
+        raise ValueError("invalid display column name")
     sch = schema.strip() if schema and _valid_table_ident(schema) else "public"
     lim = max(1, min(int(limit or 500), 1000))
     import psycopg2
     conn = psycopg2.connect(dbname="urs", user="postgres", password="postgres", host="172.16.10.101", port=5432, connect_timeout=5)
     try:
         cur = conn.cursor()
-        sql = f"SELECT DISTINCT {_q(column)} FROM {_q(sch)}.{_q(table)} WHERE {_q(column)} IS NOT NULL"
-        params: Dict[str, Any] = {}
-        if search:
-            sql += f" AND CAST({_q(column)} AS TEXT) ILIKE %(s)s"
-            params["s"] = f"%{search}%"
-        sql += f" ORDER BY 1 LIMIT {lim}"
-        cur.execute(sql, params)
-        out = [{"value": r[0], "label": str(r[0])} for r in cur.fetchall() if r[0] is not None]
+        if disp and disp.lower() != column.lower():
+            sql = f"SELECT DISTINCT {_q(column)}, {_q(disp)} FROM {_q(sch)}.{_q(table)} WHERE {_q(column)} IS NOT NULL"
+            params: Dict[str, Any] = {}
+            if search:
+                sql += f" AND (CAST({_q(column)} AS TEXT) ILIKE %(s)s OR CAST({_q(disp)} AS TEXT) ILIKE %(s)s)"
+                params["s"] = f"%{search}%"
+            sql += f" ORDER BY 2 LIMIT {lim}"
+            cur.execute(sql, params)
+            out = [{"value": r[0], "label": (str(r[1]) if r[1] is not None else str(r[0]))} for r in cur.fetchall() if r[0] is not None]
+        else:
+            sql = f"SELECT DISTINCT {_q(column)} FROM {_q(sch)}.{_q(table)} WHERE {_q(column)} IS NOT NULL"
+            params = {}
+            if search:
+                sql += f" AND CAST({_q(column)} AS TEXT) ILIKE %(s)s"
+                params["s"] = f"%{search}%"
+            sql += f" ORDER BY 1 LIMIT {lim}"
+            cur.execute(sql, params)
+            out = [{"value": r[0], "label": str(r[0])} for r in cur.fetchall() if r[0] is not None]
         cur.close()
     finally:
         conn.close()

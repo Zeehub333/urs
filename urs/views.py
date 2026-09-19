@@ -1178,10 +1178,11 @@ def api_app_modal(request, app_name, file):
 
 
 def api_fmlk_options(request):
-    """GET /api/fmlk/options?table=&column=&schema=&search=&limit= — قيم مرجع [table.column]."""
+    """GET /api/fmlk/options?table=&column=&schema=&search=&limit=&display= — قيم مرجع [table.column]."""
     table = (request.GET.get("table") or "").strip()
     column = (request.GET.get("column") or "").strip()
     schema = (request.GET.get("schema") or "").strip()
+    display = (request.GET.get("display") or "").strip() or None
     search = request.GET.get("search") or None
     try:
         limit = int(request.GET.get("limit") or 500)
@@ -1191,9 +1192,9 @@ def api_fmlk_options(request):
         return JsonResponse({"error": "table and column required"}, status=400)
     try:
         from fmlk_engine.engine import get_options_source
-        opts = get_options_source(table, column, schema, limit, search)
+        opts = get_options_source(table, column, schema, limit, search, display)
         return JsonResponse({"table": table, "column": column, "schema": schema or "public",
-                             "options": opts, "total": len(opts)})
+                             "display": display or column, "options": opts, "total": len(opts)})
     except ValueError as ve:
         return JsonResponse({"error": str(ve)}, status=400)
     except Exception as e:

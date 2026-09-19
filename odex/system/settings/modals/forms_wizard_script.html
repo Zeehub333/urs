@@ -959,7 +959,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             const r = fwInputs[fwTypeIdx] || {};
             const needOpts = ['select','multiselect','status','radio','restricted_tags','reorder','badges'].includes(fwTypeSel);
             const needSrc = ['select','multiselect','status','datamodal','lookup','cascade_grid','restricted_tags'].includes(fwTypeSel);
-            const needRef = ['lookup','datamodal'].includes(fwTypeSel);
+            const needRef = ['select','lookup','datamodal'].includes(fwTypeSel);
             const needParent = (fwTypeSel === 'cascading_select');
             const needExtra = ['list-input','multiselect','restricted_tags'].includes(fwTypeSel);
             let h = `<div class="text-[11px] text-slate-500">النوع الحالي: <b>${fwEsc(fwTypeLabel(fwTypeSel))}</b> — يُرسم في المشغل ${fwTypeSel==='status' ? 'أزرار radio ملونة' : fwTypeSel==='datamodal' ? 'شبكة منبثقة قابلة للبحث' : fwTypeSel==='select' ? 'قائمة منسدلة' : fwTypeSel==='multiselect' ? 'اختيار متعدد' : 'مدخل ' + fwEsc(fwTypeSel)}</div>`;
@@ -1044,7 +1044,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             }).filter(o => (typeof o === 'string' && o) || (typeof o === 'object' && (o.value || o.label)));
             r.options_source = fwTypeSrcs.filter(s=>s.table && s.column).map(s=>({table: s.table, schema:'', column: s.column}));
             const g = (id)=>{ const el = document.getElementById(id); return el ? el.value : ''; };
-            if(['lookup','datamodal'].includes(fwTypeSel)){ r.refTable = g('fwTypeRefTable'); r.refFk = g('fwTypeRefFk') || 'id'; r.refDisplay = g('fwTypeRefDisplay'); }
+            if(['select','lookup','datamodal'].includes(fwTypeSel)){ r.refTable = g('fwTypeRefTable'); r.refFk = g('fwTypeRefFk') || 'id'; r.refDisplay = g('fwTypeRefDisplay'); }
             r.config = r.config || {};
             if(fwTypeSel === 'cascading_select'){ const p = g('fwTypeParent'); if(p) r.config.parent_field = p; }
             if(['list-input','multiselect','restricted_tags'].includes(fwTypeSel)){
