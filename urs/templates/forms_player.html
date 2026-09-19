@@ -1086,8 +1086,15 @@
             }catch(e){}
         }
 
-        async function loadLookupOptions(fieldName, refTable, search){
+        // اتصال النموذج الحالي لخيارات المرجع — وإلا الخادم يستخدم الاحتياطي الميت
+        function fmlkConnParam(){
             try{
+                const md = (typeof fmlMeta !== 'undefined' && fmlMeta && fmlMeta.metadata) || {};
+                const c = String(md.connection || '').trim();
+                return c ? `&conn=${encodeURIComponent(c)}` : '';
+            }catch(e){ return ''; }
+        }
+        async function loadLookupOptions(fieldName, refTable, search){            try{
                 let url = `/api/fmlk/lookup?fml=${encodeURIComponent(currentFml)}&field=${encodeURIComponent(fieldName)}&app=${encodeURIComponent(currentApp)}&limit=100`;
                 if(search) url += `&search=${encodeURIComponent(search)}`;
                 const res = await fetch(url);
@@ -1098,6 +1105,7 @@
         async function loadOptionsSource(table, column, schema, search){
             let url = `/api/fmlk/options?table=${encodeURIComponent(table)}&column=${encodeURIComponent(column)}&limit=500`;
             if(schema) url += `&schema=${encodeURIComponent(schema)}`;
+            url += fmlkConnParam();
             if(search) url += `&search=${encodeURIComponent(search)}`;
             try{
                 const res = await fetch(url);
@@ -1140,6 +1148,7 @@
         async function loadOptionsSourceRef(table, fk, display){
             let url = `/api/fmlk/options?table=${encodeURIComponent(table)}&column=${encodeURIComponent(fk || 'id')}&limit=500`;
             if(display) url += `&display=${encodeURIComponent(display)}`;
+            url += fmlkConnParam();
             try{
                 const res = await fetch(url);
                 const data = await res.json();

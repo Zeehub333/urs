@@ -17,10 +17,11 @@ def _valid_table_ident(name: str) -> bool:
     return bool(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name or ""))
 
 
-def get_options_source(table: str, column: str, schema: str = "", limit: int = 500, search: str | None = None, display: str | None = None) -> List[Dict[str, Any]]:
+def get_options_source(table: str, column: str, schema: str = "", limit: int = 500, search: str | None = None, display: str | None = None, conn_params: Dict[str, Any] | None = None) -> List[Dict[str, Any]]:
     """قيم مميزة لعمود جدول (مرجع [table.column]) — قراءة فقط بمعرفات مُتحقق منها.
 
     display (اختياري): عمود العرض للتسمية — القيمة من column والتسمية منه.
+    conn_params (اختياري): وسائط psycopg2 للاتصال الصحيح (وإلا الاحتياطي القديم).
     """
     if not _valid_table_ident(table) or not _valid_table_ident(column):
         raise ValueError("invalid table/column name")
@@ -30,7 +31,10 @@ def get_options_source(table: str, column: str, schema: str = "", limit: int = 5
     sch = schema.strip() if schema and _valid_table_ident(schema) else "public"
     lim = max(1, min(int(limit or 500), 1000))
     import psycopg2
-    conn = psycopg2.connect(dbname="urs", user="postgres", password="postgres", host="172.16.10.101", port=5432, connect_timeout=5)
+    if conn_params:
+        conn = psycopg2.connect(connect_timeout=5, **conn_params)
+    else:
+        conn = psycopg2.connect(dbname="urs", user="postgres", password="postgres", host="172.16.10.101", port=5432, connect_timeout=5)
     try:
         cur = conn.cursor()
         if disp and disp.lower() != column.lower():

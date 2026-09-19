@@ -1178,12 +1178,15 @@ def api_app_modal(request, app_name, file):
 
 
 def api_fmlk_options(request):
-    """GET /api/fmlk/options?table=&column=&schema=&search=&limit=&display= — قيم مرجع [table.column]."""
+    """GET /api/fmlk/options?table=&column=&schema=&search=&limit=&display=&conn= — قيم مرجع [table.column]."""
     table = (request.GET.get("table") or "").strip()
     column = (request.GET.get("column") or "").strip()
     schema = (request.GET.get("schema") or "").strip()
     display = (request.GET.get("display") or "").strip() or None
     search = request.GET.get("search") or None
+    conn_ref = (request.GET.get("conn") or "").strip()
+    if "." in table and not schema:
+        schema, table = table.split(".", 1)
     try:
         limit = int(request.GET.get("limit") or 500)
     except (TypeError, ValueError):
@@ -1192,7 +1195,22 @@ def api_fmlk_options(request):
         return JsonResponse({"error": "table and column required"}, status=400)
     try:
         from fmlk_engine.engine import get_options_source
-        opts = get_options_source(table, column, schema, limit, search, display)
+        conn_params = None
+        if conn_ref:
+            try:
+                from .models import Connection
+                _c = Connection.objects.filter(name=conn_ref).first()
+                if _c is None and conn_ref.isdigit():
+                    _c = Connection.objects.filter(id=int(conn_ref)).first()
+                if _c is not None:
+                    _c = _effective_or_row(_c.id)
+                if _c is not None and str(getattr(_c, "engine", "") or "").lower() == "postgres":
+                    conn_params = dict(dbname=_c.instance or "urs", user=_c.user or "",
+                                       password=_c.password or "", host=_c.host or "",
+                                       port=int(_c.port or 5432))
+            except Exception:
+                conn_params = None
+        opts = get_options_source(table, column, schema, limit, search, display, conn_params)
         return JsonResponse({"table": table, "column": column, "schema": schema or "public",
                              "display": display or column, "options": opts, "total": len(opts)})
     except ValueError as ve:
