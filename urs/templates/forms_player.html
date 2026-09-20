@@ -12,6 +12,38 @@
 .mig-blink { animation: migBlink 1.1s ease-in-out infinite; }
         .freeze-col { position: sticky; right: 0; z-index: 5; box-shadow: -1px 0 0 #e2e8f0; }
         .freeze-col-head { position: sticky; right: 0; z-index: 30; background: #f1f5f9; box-shadow: -1px 0 0 #e2e8f0; }
+        /* ── Input widgets package (موحد لكل المدخلات) ── */
+        .fx-label{display:block; font-size:13px; font-weight:800; color:#1e293b; margin-bottom:6px;}
+        .fx-label .req{color:#e11d48;}
+        .fx-label .fx-ico{color:#6366f1; margin-inline-end:4px;}
+        .fx-inp{width:100%; background:#fff; border:1.5px solid #e2e8f0; border-radius:12px; padding:9px 14px; font-size:13px; color:#1e293b; transition:border-color .15s, box-shadow .15s;}
+        .fx-inp::placeholder{color:#94a3b8;}
+        .fx-inp:focus{outline:none; border-color:#6366f1; box-shadow:0 0 0 3px rgba(99,102,241,.12);}
+        .fx-inp:disabled{opacity:.6;}
+        select.fx-inp{appearance:none; -webkit-appearance:none; padding-inline-end:2.25rem; background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>"); background-repeat:no-repeat; background-position:left .8rem center; background-size:14px; cursor:pointer;}
+        textarea.fx-inp{resize:vertical; min-height:74px;}
+        .fx-wrap{position:relative;}
+        .fx-wrap > .fx-ic{position:absolute; top:50%; transform:translateY(-50%); inset-inline-start:12px; color:#94a3b8; font-size:13px; pointer-events:none;}
+        .fx-wrap > input.fx-inp{padding-inline-start:2.4rem;}
+        .fx-switch{position:relative; display:inline-block; width:44px; height:24px; flex:none; cursor:pointer;}
+        .fx-switch input{position:absolute; opacity:0; width:100%; height:100%; margin:0; cursor:pointer;}
+        .fx-switch .fx-track{position:absolute; inset:0; border-radius:999px; background:#cbd5e1; transition:background .18s;}
+        .fx-switch .fx-knob{position:absolute; top:3px; inset-inline-start:3px; width:18px; height:18px; border-radius:999px; background:#fff; box-shadow:0 1px 3px rgba(0,0,0,.25); transition:transform .18s;}
+        .fx-switch input:checked + .fx-track{background:#4f46e5;}
+        .fx-switch input:checked + .fx-track .fx-knob{transform:translateX(-20px);}
+        .fx-checkrow{display:flex; align-items:center; gap:8px; padding:7px 10px; border-radius:10px; cursor:pointer; font-size:12px;}
+        .fx-checkrow:hover{background:#f8fafc;}
+        .fx-checkrow input{width:16px; height:16px; accent-color:#4f46e5; flex:none; cursor:pointer;}
+        .fx-chip{display:inline-flex; align-items:center; gap:6px; padding:5px 12px; border-radius:999px; font-size:12px; font-weight:700;}
+        .fx-chip-ind{background:#4f46e5; color:#fff; box-shadow:0 1px 4px rgba(79,70,229,.35);}
+        .fx-chip-em{background:#ecfdf5; color:#047857; border:1px solid #a7f3d0;}
+        .fx-chip button{opacity:.75;} .fx-chip button:hover{opacity:1;}
+        .fx-radio{width:16px; height:16px; accent-color:#4f46e5; flex:none; cursor:pointer;}
+        .fx-box{background:#fff; border:1.5px solid #e2e8f0; border-radius:12px;}
+        .fx-btn{display:inline-flex; align-items:center; gap:6px; padding:9px 14px; border-radius:12px; font-size:12px; font-weight:800; transition:filter .15s, background .15s;}
+        .fx-btn-ind{background:#4f46e5; color:#fff;} .fx-btn-ind:hover{background:#4338ca;}
+        .fx-btn-soft{background:#eef2ff; color:#4f46e5;} .fx-btn-soft:hover{background:#e0e7ff;}
+        .fx-pill{display:inline-flex; align-items:center; gap:6px; padding:5px 14px; border-radius:999px; font-size:12px; font-weight:800;}
 {% endblock %}
 {% block sidebar %}
     <!-- Sidebar — kept for navigation (Forms + Reports) -->
@@ -867,10 +899,10 @@
 
         function renderInput(field) {
             const isDisp = !!(field.display_only || field.displayOnly);
-            const req = (field.required && !isDisp) ? '<span class="text-rose-600">*</span>' : '';
-            const ico = field.icon ? `<i class="fa-solid ${escAttr(field.icon)} text-indigo-500 ml-1"></i>` : '';
+            const req = (field.required && !isDisp) ? '<span class="req">*</span>' : '';
+            const ico = field.icon ? `<i class="fa-solid ${escAttr(field.icon)} fx-ico"></i>` : '';
             const dispBadge = isDisp ? ' <span class="inline-block text-[9px] font-bold bg-amber-100 text-amber-700 rounded px-1" title="عرض فقط — يُقرأ ولا يُخزن">✦ عرض</span>' : '';
-            const label = `<label class="block text-xs font-medium text-slate-700 mb-1">${ico}${escHtml(field.alias)} ${req}${dispBadge}</label>`;
+            const label = `<label class="fx-label">${ico}${escHtml(field.alias)} ${req}${dispBadge}</label>`;
             // عرض فقط: صندوق قراءة بلا data-field (يُستبعد من الحفظ تلقائياً) + حل القيمة لاحقاً
             if(isDisp){
                 setTimeout(()=>{ try{ fmlkResolveDisplay(field.name); }catch(e){} }, 0);
@@ -885,7 +917,7 @@
             const maxLenAttr = validation.max_length ? `maxlength="${validation.max_length}"` : '';
             const minAttr = validation.min !== undefined ? `min="${validation.min}"` : '';
             const maxAttr = validation.max !== undefined ? `max="${validation.max}"` : '';
-            const baseCls = "w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm";
+            const baseCls = "fx-inp";
             const t = field.inputType || 'text';
             // Handle FK select: if refTable exists, we will enhance via lookup
             if(t === 'select' && field.refTable){
@@ -919,17 +951,17 @@
                     }
                     case 'boolean': {
                         const on = (String(val).toLowerCase() === 'true' || val === '1' || val === 1);
-                        input = `<label class="inline-flex items-center gap-2 cursor-pointer"><input type="checkbox" ${on?'checked':''} onchange="FMLK.boolSync('${field.name}', this.checked)" class="w-5 h-5 rounded text-indigo-600"/><span class="text-xs text-slate-600">${on ? 'مفعّل' : 'معطّل'}</span></label>` + hiddenField(field, on ? 'true' : 'false');
+                        input = `<div class="flex items-center gap-3"><label class="fx-switch"><input type="checkbox" ${on?'checked':''} onchange="FMLK.boolSync('${field.name}', this.checked)"/><span class="fx-track"><span class="fx-knob"></span></span></label><span class="text-xs font-bold ${on ? 'text-emerald-600' : 'text-slate-400'}">${on ? 'مفعّل' : 'معطّل'}</span></div>` + hiddenField(field, on ? 'true' : 'false');
                         break;
                     }
                     case 'phone':
-                        input = `<div class="flex gap-1"><input data-field="${field.name}" value="${escAttr(val)}" placeholder="+966 12 345 6789" ${patternAttr} ${minLenAttr} ${maxLenAttr} class="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm" dir="ltr"/><span class="px-2 py-2 bg-emerald-600 text-white rounded-lg text-xs">🇸🇦</span></div>`;
+                        input = `<div class="flex gap-1.5"><input data-field="${field.name}" value="${escAttr(val)}" placeholder="+966 12 345 6789" ${patternAttr} ${minLenAttr} ${maxLenAttr} class="flex-1 fx-inp font-mono" dir="ltr"/><span class="px-3 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold flex items-center">🇸🇦</span></div>`;
                         break;
                     case 'email':
-                        input = `<div class="flex gap-1"><input type="email" data-field="${field.name}" value="${escAttr(val)}" placeholder="example@domain.com" ${patternAttr} class="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm" dir="ltr"/></div>`;
+                        input = `<div class="fx-wrap"><span class="fx-ic"><i class="fa-solid fa-envelope"></i></span><input type="email" data-field="${field.name}" value="${escAttr(val)}" placeholder="example@domain.com" ${patternAttr} ${minLenAttr} ${maxLenAttr} class="fx-inp font-mono" dir="ltr"/></div>`;
                         break;
                     case 'file':
-                        input = `<div class="w-full h-24 bg-slate-50 border-2 border-dashed border-slate-200 rounded-lg flex items-center justify-center text-slate-400 text-xs"><i class="fa-solid fa-image"></i> ${escHtml(ph) || 'صورة'}</div>`;
+                        input = `<div class="w-full h-24 fx-box border-dashed flex items-center justify-center text-slate-400 text-xs" style="border-style:dashed"><i class="fa-solid fa-image ml-1"></i> ${escHtml(ph) || 'صورة'}</div>`;
                         break;
                     case 'image':
                     case 'media': {
@@ -938,12 +970,12 @@
                         const hasV = String(val ?? '').trim() !== '';
                         const isData = /^data:/i.test(String(val ?? '').trim());
                         input = `<div class="space-y-1.5">
-                            <div id="${fxId(field)}_prev" class="flex justify-center items-center bg-slate-50 border border-slate-200 rounded-lg p-2 min-h-[64px] overflow-hidden">${hasV ? mediaHtml(val, mk2) : '<span class="text-slate-400 text-xs"><i class="fa-solid fa-image"></i> بلا صورة</span>'}</div>
-                            <div class="flex gap-1">
-                                <input data-field-url="${field.name}" value="${isData ? '' : escAttr(val)}" placeholder="رابط https://... أو اختر ملفاً" class="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-mono${isData ? ' hidden' : ''}" dir="ltr" oninput="fmlkMediaUrl('${field.name}')"/>
-                                <span id="${fxId(field)}_chip" class="flex-1 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg px-3 py-1.5 text-xs font-bold text-center${isData ? '' : ' hidden'}">📎 ملف مرفوع (مضمّن)</span>
-                                <label class="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-xs font-bold cursor-pointer whitespace-nowrap"><i class="fa-solid fa-upload"></i> ملف<input type="file" accept="${accept}" class="hidden" onchange="fmlkMediaFile('${field.name}', this)"/></label>
-                                <button type="button" onclick="fmlkMediaClear('${field.name}')" title="مسح" class="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg text-xs"><i class="fa-solid fa-xmark"></i></button>
+                            <div id="${fxId(field)}_prev" class="flex justify-center items-center bg-slate-50 border border-slate-200 rounded-xl p-2 min-h-[64px] overflow-hidden">${hasV ? mediaHtml(val, mk2) : '<span class="text-slate-400 text-xs"><i class="fa-solid fa-image"></i> بلا صورة</span>'}</div>
+                            <div class="flex gap-1.5">
+                                <input data-field-url="${field.name}" value="${isData ? '' : escAttr(val)}" placeholder="رابط https://... أو اختر ملفاً" class="flex-1 fx-inp !py-2 font-mono${isData ? ' hidden' : ''}" dir="ltr" oninput="fmlkMediaUrl('${field.name}')"/>
+                                <span id="${fxId(field)}_chip" class="flex-1 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-xl px-3 py-2 text-xs font-bold text-center${isData ? '' : ' hidden'}">📎 ملف مرفوع (مضمّن)</span>
+                                <label class="fx-btn fx-btn-soft whitespace-nowrap"><i class="fa-solid fa-upload"></i> ملف<input type="file" accept="${accept}" class="hidden" onchange="fmlkMediaFile('${field.name}', this)"/></label>
+                                <button type="button" onclick="fmlkMediaClear('${field.name}')" title="مسح" class="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl text-xs"><i class="fa-solid fa-xmark"></i></button>
                             </div>
                         </div>` + hiddenField(field, val);
                         break;
@@ -957,7 +989,7 @@
                     }
                     case 'multiselect': {
                         const arr = parseJsonVal(val, Array.isArray(val) ? val : (String(val).trim() !== '' ? [String(val)] : []));
-                        input = `<div id="${fxId(field)}_chips" class="flex flex-wrap gap-1.5 mb-1.5"></div><div id="${fxId(field)}_box" class="space-y-1 max-h-40 overflow-y-auto border border-slate-200 rounded-lg p-2 bg-white" data-multi-box="${field.name}"></div>` + hiddenField(field, arr);
+                        input = `<div id="${fxId(field)}_chips" class="flex flex-wrap gap-1.5 mb-1.5"></div><div id="${fxId(field)}_box" class="space-y-0.5 max-h-40 overflow-y-auto custom-scroll fx-box p-1.5" data-multi-box="${field.name}"></div>` + hiddenField(field, arr);
                         setTimeout(()=> FMLK.multiLoad(field.name), 0);
                         break;
                     }
@@ -968,25 +1000,25 @@
                             const s = String(val ?? '').trim();
                             larr = s ? (s.startsWith('[') ? [] : s.split(/[\n;,]+/).map(x=>x.trim()).filter(Boolean)) : [];
                         }
-                        input = `<div id="${fxId(field)}_list" class="flex flex-wrap gap-1.5 items-center border border-slate-200 rounded-lg p-2 bg-white min-h-[42px]"></div>` + hiddenField(field, larr) + `<div class="flex gap-1 mt-1"><input id="${fxId(field)}_new" placeholder="${escAttr(field.placeholder || 'أضف قيمة + Enter')}" class="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs" dir="ltr" onkeydown="if(event.key==='Enter'){event.preventDefault();FMLK.listAdd('${field.name}')}" /><button type="button" onclick="FMLK.listAdd('${field.name}')" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold"><i class="fa-solid fa-plus"></i></button></div>`;
+                        input = `<div id="${fxId(field)}_list" class="flex flex-wrap gap-1.5 items-center fx-box p-2 min-h-[42px]"></div>` + hiddenField(field, larr) + `<div class="flex gap-1.5 mt-1.5"><input id="${fxId(field)}_new" placeholder="${escAttr(field.placeholder || 'أضف قيمة + Enter')}" class="flex-1 fx-inp !py-2" dir="ltr" onkeydown="if(event.key==='Enter'){event.preventDefault();FMLK.listAdd('${field.name}')}" /><button type="button" onclick="FMLK.listAdd('${field.name}')" class="fx-btn fx-btn-ind"><i class="fa-solid fa-plus"></i></button></div>`;
                         setTimeout(()=> FMLK.listRender(field.name), 0);
                         break;
                     }
                     case 'lookup': {
-                        input = `<div class="relative"><input type="text" id="${fxId(field)}_q" value="${escAttr(val)}" placeholder="ابحث..." autocomplete="off" oninput="FMLK.lookupSearch('${field.name}')" class="${baseCls}"/><div id="${fxId(field)}_res" class="hidden absolute z-20 w-full bg-white border border-slate-200 rounded-lg mt-1 max-h-40 overflow-y-auto shadow-lg"></div></div>` + hiddenField(field, val);
+                        input = `<div class="fx-wrap"><span class="fx-ic"><i class="fa-solid fa-magnifying-glass"></i></span><input type="text" id="${fxId(field)}_q" value="${escAttr(val)}" placeholder="ابحث..." autocomplete="off" oninput="FMLK.lookupSearch('${field.name}')" class="${baseCls}"/><div id="${fxId(field)}_res" class="hidden absolute z-20 w-full bg-white border border-slate-200 rounded-xl mt-1 max-h-40 overflow-y-auto custom-scroll shadow-lg"></div></div>` + hiddenField(field, val);
                         setTimeout(()=> FMLK.lookupLabel(field.name), 0);
                         break;
                     }
                     case 'subform': {
                         const subs = splitList(cfg(field, 'sub_fields'));
                         const rows = parseJsonVal(val, []);
-                        input = `<div id="${fxId(field)}_rows" class="space-y-2"></div><button type="button" onclick="FMLK.subAdd('${field.name}')" class="mt-2 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-xs font-semibold"><i class="fa-solid fa-plus"></i> إضافة سطر</button>` + hiddenField(field, rows);
+                        input = `<div id="${fxId(field)}_rows" class="space-y-2"></div><button type="button" onclick="FMLK.subAdd('${field.name}')" class="mt-2 fx-btn fx-btn-soft"><i class="fa-solid fa-plus"></i> إضافة سطر</button>` + hiddenField(field, rows);
                         setTimeout(()=> FMLK.subRender(field.name), 0);
                         break;
                     }
                     case 'grid': {
                         const rows = parseJsonVal(val, []);
-                        input = `<div id="${fxId(field)}_grid" class="overflow-x-auto"></div><button type="button" onclick="FMLK.gridAdd('${field.name}')" class="mt-2 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-xs font-semibold"><i class="fa-solid fa-plus"></i> إضافة صف</button>` + hiddenField(field, rows);
+                        input = `<div id="${fxId(field)}_grid" class="overflow-x-auto"></div><button type="button" onclick="FMLK.gridAdd('${field.name}')" class="mt-2 fx-btn fx-btn-soft"><i class="fa-solid fa-plus"></i> إضافة صف</button>` + hiddenField(field, rows);
                         setTimeout(()=> FMLK.gridRender(field.name), 0);
                         break;
                     }
@@ -997,7 +1029,7 @@
                         break;
                     }
                     case 'tree': {
-                        input = `<div id="${fxId(field)}_tree" class="border border-slate-200 rounded-lg p-2 bg-white max-h-44 overflow-y-auto text-sm"></div>` + hiddenField(field, val);
+                        input = `<div id="${fxId(field)}_tree" class="fx-box p-2 max-h-44 overflow-y-auto custom-scroll text-sm"></div>` + hiddenField(field, val);
                         setTimeout(()=> FMLK.treeRender(field.name), 0);
                         break;
                     }
@@ -1013,19 +1045,19 @@
                         const ptype = pv.type || types[0] || '';
                         const pid = pv.id || (typeof pv === 'string' ? pv : '');
                         const typeOpts = types.map(x=>`<option ${x===ptype?'selected':''}>${escHtml(x)}</option>`).join('') || '<option value="">—</option>';
-                        input = `<div class="flex gap-1"><select onchange="FMLK.polySync('${field.name}')" id="${fxId(field)}_t" class="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm">${typeOpts}</select><input id="${fxId(field)}_v" value="${escAttr(pid)}" oninput="FMLK.polySync('${field.name}')" placeholder="المعرف" class="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm"/></div>` + hiddenField(field, pv && pv.type ? pv : '');
+                        input = `<div class="flex gap-1.5"><select onchange="FMLK.polySync('${field.name}')" id="${fxId(field)}_t" class="flex-1 fx-inp">${typeOpts}</select><input id="${fxId(field)}_v" value="${escAttr(pid)}" oninput="FMLK.polySync('${field.name}')" placeholder="المعرف" class="flex-1 fx-inp"/></div>` + hiddenField(field, pv && pv.type ? pv : '');
                         break;
                     }
                     case 'livesync':
                     case 'autopopulate': {
                         const src = cfg(field, 'sync_source');
-                        input = `<div class="flex gap-1"><input data-field="${field.name}" value="${escAttr(val)}" readonly class="flex-1 bg-slate-100 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-600"/><span class="px-2 py-2 bg-slate-200 text-slate-600 rounded-lg text-xs" title="تعبئة تلقائية"><i class="fa-solid fa-rotate"></i></span></div><input type="hidden" data-sync-target="${field.name}" data-sync-source="${escAttr(src)}" data-sync-mode="${t}"/>`;
+                        input = `<div class="flex gap-1.5"><input data-field="${field.name}" value="${escAttr(val)}" readonly class="flex-1 fx-inp text-slate-500"/><span class="px-3 py-2 bg-slate-100 text-slate-500 rounded-xl text-xs flex items-center" title="تعبئة تلقائية"><i class="fa-solid fa-rotate"></i></span></div><input type="hidden" data-sync-target="${field.name}" data-sync-source="${escAttr(src)}" data-sync-mode="${t}"/>`;
                         setTimeout(()=> FMLK.syncFill(field.name, t === 'livesync'), 0);
                         break;
                     }
                     case 'calculated': {
                         const expr = cfg(field, 'calc_expr');
-                        input = `<div class="flex gap-1"><input data-field="${field.name}" value="${escAttr(val)}" readonly class="flex-1 bg-slate-100 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 font-semibold"/><span class="px-2 py-2 bg-indigo-100 text-indigo-700 rounded-lg text-xs" title="محسوب تلقائياً"><i class="fa-solid fa-calculator"></i></span></div><input type="hidden" data-calc="${field.name}" data-calc-expr="${escAttr(expr)}"/>`;
+                        input = `<div class="flex gap-1.5"><input data-field="${field.name}" value="${escAttr(val)}" readonly class="flex-1 fx-inp font-semibold"/><span class="px-3 py-2 bg-indigo-50 text-indigo-600 rounded-xl text-xs flex items-center" title="محسوب تلقائياً"><i class="fa-solid fa-calculator"></i></span></div><input type="hidden" data-calc="${field.name}" data-calc-expr="${escAttr(expr)}"/>`;
                         setTimeout(()=> FMLK.calcRefresh(), 0);
                         break;
                     }
@@ -1037,7 +1069,7 @@
                     case 'restricted_tags': {
                         const allowNew = String(cfg(field, 'allow_new')).toLowerCase() === 'true';
                         const arr = parseJsonVal(val, Array.isArray(val) ? val : []);
-                        input = `<div id="${fxId(field)}_tags" class="flex flex-wrap gap-1.5 items-center border border-slate-200 rounded-lg p-2 bg-white min-h-[42px]"></div>` + hiddenField(field, arr) + (allowNew ? `<div class="flex gap-1 mt-1"><input id="${fxId(field)}_new" placeholder="وسم جديد" class="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs"/><button type="button" onclick="FMLK.tagAdd('${field.name}')" class="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs">إضافة</button></div>` : '');
+                        input = `<div id="${fxId(field)}_tags" class="flex flex-wrap gap-1.5 items-center fx-box p-2 min-h-[42px]"></div>` + hiddenField(field, arr) + (allowNew ? `<div class="flex gap-1.5 mt-1.5"><input id="${fxId(field)}_new" placeholder="وسم جديد" class="flex-1 fx-inp !py-2"/><button type="button" onclick="FMLK.tagAdd('${field.name}')" class="fx-btn fx-btn-ind">إضافة</button></div>` : '');
                         setTimeout(()=> FMLK.tagsRender(field.name), 0);
                         break;
                     }
@@ -1053,7 +1085,7 @@
                             const ll = (o && typeof o === 'object') ? (o.label ?? o.value ?? '') : o;
                             const cc = (o && typeof o === 'object' && o.color) ? o.color : '#64748b';
                             const on = String(vv) === String(val);
-                            return `<label class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-bold cursor-pointer transition ${on?'text-white border-transparent':'bg-white text-slate-600 border-slate-200 hover:border-slate-400'}" ${on?`style="background:${escAttr(cc)}"`:''}>
+                            return `<label class="fx-pill border cursor-pointer transition ${on?'text-white border-transparent':'bg-white text-slate-600 border-slate-200 hover:border-slate-400'}" ${on?`style="background:${escAttr(cc)}"`:''}>
                                 <input type="radio" name="st_${field.name}" value="${escAttr(vv)}" ${on?'checked':''} onchange="FMLK.statusSync('${field.name}', this.value)" class="hidden">
                                 <span class="w-2 h-2 rounded-full" style="background:${on?'#fff':escAttr(cc)}"></span>${escHtml(ll)}</label>`;
                         }).join('');
@@ -1062,12 +1094,12 @@
                     }
                     case 'datamodal': {
                         // القوائم الكبيرة: شبكة منبثقة قابلة للبحث
-                        input = `<div class="flex gap-1"><input id="${fxId(field)}_lbl" value="${escAttr(fmlkDataLabel(field, val))}" readonly placeholder="— اختر من الشبكة —" class="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700"/><button type="button" onclick="fmlkDataModalOpen('${field.name}')" title="استعراض الشبكة" class="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold whitespace-nowrap"><i class="fa-solid fa-table-cells"></i> شبكة</button></div>` + hiddenField(field, val);
+                        input = `<div class="flex gap-1.5"><input id="${fxId(field)}_lbl" value="${escAttr(fmlkDataLabel(field, val))}" readonly placeholder="— اختر من الشبكة —" class="flex-1 fx-inp text-slate-700"/><button type="button" onclick="fmlkDataModalOpen('${field.name}')" title="استعراض الشبكة" class="fx-btn fx-btn-ind whitespace-nowrap"><i class="fa-solid fa-table-cells"></i> شبكة</button></div>` + hiddenField(field, val);
                         break;
                     }
                     case 'password': {
                         const isMask = /^\*+$/.test(String(val ?? '')) || val === '' || val == null;
-                        input = `<div class="flex gap-1"><input type="password" data-field="${field.name}" value="${isMask ? '' : escAttr(val)}" placeholder="••••••••" ${patternAttr} ${minLenAttr} ${maxLenAttr} class="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm" dir="ltr" autocomplete="new-password"/><button type="button" onclick="togglePw(this)" title="إظهار/إخفاء" class="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-500 rounded-lg text-xs"><i class="fa-solid fa-eye"></i></button></div>`;
+                        input = `<div class="flex gap-1.5"><input type="password" data-field="${field.name}" value="${isMask ? '' : escAttr(val)}" placeholder="••••••••" ${patternAttr} ${minLenAttr} ${maxLenAttr} class="flex-1 fx-inp font-mono" dir="ltr" autocomplete="new-password"/><button type="button" onclick="togglePw(this)" title="إظهار/إخفاء" class="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-500 rounded-xl text-xs flex-none"><i class="fa-solid fa-eye"></i></button></div>`;
                         break;
                     }
                     default:
@@ -1277,7 +1309,7 @@
                 const h = fmlkHidden(name);
                 const wrap = h ? h.closest('div') : null;
                 const lbl = wrap ? wrap.querySelector('span.text-xs') : null;
-                if(lbl) lbl.textContent = checked ? 'مفعّل' : 'معطّل';
+                if(lbl){ lbl.textContent = checked ? 'مفعّل' : 'معطّل'; lbl.className = 'text-xs font-bold ' + (checked ? 'text-emerald-600' : 'text-slate-400'); }
             },
             statusSync(name, value){
                 // الحالات radio: حدّث القيمة المخفية وأعد تلوين الأزرار
@@ -1338,7 +1370,7 @@
                 if(cur === undefined || cur === null || cur === '') cur = f.default ?? [];
                 if(!Array.isArray(cur)) cur = String(cur).split(',').map(x=>x.trim()).filter(Boolean);
                 cur = cur.map(String);
-                box.innerHTML = opts.length ? opts.map(o=>`<label class="flex items-center gap-2 px-2 py-1 hover:bg-slate-50 rounded cursor-pointer text-xs"><input type="checkbox" value="${escAttr(o.value)}" ${cur.includes(String(o.value))?'checked':''} onchange="FMLK.multiSync('${name}')" class="rounded text-indigo-600"><span class="text-slate-700">${escHtml(o.label)}</span></label>`).join('') : '<p class="text-slate-400 text-xs p-1">لا توجد خيارات</p>';
+                box.innerHTML = opts.length ? opts.map(o=>`<label class="fx-checkrow"><input type="checkbox" value="${escAttr(o.value)}" ${cur.includes(String(o.value))?'checked':''} onchange="FMLK.multiSync('${name}')"><span class="text-slate-700">${escHtml(o.label)}</span></label>`).join('') : '<p class="text-slate-400 text-xs p-1">لا توجد خيارات</p>';
                 fmlkSetHidden(name, cur);
                 FMLK.multiChips(name, cur);
             },
@@ -1354,7 +1386,7 @@
                 const chips = document.getElementById('fx_' + slug + '_chips');
                 if(!chips) return;
                 const vals = sel ?? (()=>{ try{ const p = JSON.parse(fmlkHidden(name)?.value || '[]'); return Array.isArray(p) ? p.map(String) : []; }catch(e){ return []; } })();
-                chips.innerHTML = vals.length ? vals.map(v=>`<span class="inline-flex items-center gap-1 px-2.5 py-1 bg-indigo-600 text-white rounded-full text-xs font-semibold">${escHtml(v)}<button type="button" onclick="FMLK.multiUncheck('${name}','${escAttr(v)}')" class="hover:text-rose-200"><i class="fa-solid fa-xmark text-[10px]"></i></button></span>`).join('') : '<span class="text-slate-400 text-xs">لم يُحدد شيء بعد</span>';
+                chips.innerHTML = vals.length ? vals.map(v=>`<span class="fx-chip fx-chip-ind">${escHtml(v)}<button type="button" onclick="FMLK.multiUncheck('${name}','${escAttr(v)}')"><i class="fa-solid fa-xmark text-[10px]"></i></button></span>`).join('') : '<span class="text-slate-400 text-xs">ابحث أو اختر...</span>';
             },
             multiUncheck(name, value){
                 const slug = name.replace(/[^A-Za-z0-9_]/g,'_');
@@ -1373,7 +1405,7 @@
                 const box = document.getElementById('fx_' + slug + '_list');
                 if(!box) return;
                 const vals = this.listVals(name);
-                box.innerHTML = vals.length ? vals.map((v,i)=>`<span class="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-xs font-semibold" dir="ltr">${escHtml(v)}<button type="button" onclick="FMLK.listDel('${name}',${i})" class="hover:text-rose-600"><i class="fa-solid fa-xmark text-[10px]"></i></button></span>`).join('') : '<span class="text-slate-400 text-xs">لا قيم بعد — أضف قيمة ثم Enter</span>';
+                box.innerHTML = vals.length ? vals.map((v,i)=>`<span class="fx-chip fx-chip-em" dir="ltr">${escHtml(v)}<button type="button" onclick="FMLK.listDel('${name}',${i})"><i class="fa-solid fa-xmark text-[10px]"></i></button></span>`).join('') : '<span class="text-slate-400 text-xs">لا قيم بعد — أضف قيمة ثم Enter</span>';
                 fmlkSetHidden(name, vals);
             },
             listAdd(name){
@@ -1557,13 +1589,13 @@
                     return Object.keys(node).map(k=>{
                         const full = prefix ? prefix + ' > ' + k : k;
                         const kids = Object.keys(node[k] || {});
-                        return `<details class="mr-2" ${String(cur).startsWith(full)?'open':''}><summary class="cursor-pointer list-none flex items-center gap-2 py-1"><input type="radio" name="tree_${escAttr(name)}" value="${escAttr(full)}" ${String(cur)===full?'checked':''} onchange="FMLK.treePick('${name}', this.value)" class="text-indigo-600" onclick="event.stopPropagation()"><span class="text-slate-700">${escHtml(k)}</span>${kids.length?'<i class="fa-solid fa-chevron-down text-[10px] text-slate-400"></i>':''}</summary>${kids.length?`<div class="mr-4 border-r border-slate-200 pr-1">${renderNode(node[k], full)}</div>`:''}</details>`;
+                        return `<details class="mr-2" ${String(cur).startsWith(full)?'open':''}><summary class="cursor-pointer list-none flex items-center gap-2 py-1"><input type="radio" name="tree_${escAttr(name)}" value="${escAttr(full)}" ${String(cur)===full?'checked':''} onchange="FMLK.treePick('${name}', this.value)" class="fx-radio" onclick="event.stopPropagation()"><span class="text-slate-700">${escHtml(k)}</span>${kids.length?'<i class="fa-solid fa-chevron-down text-[10px] text-slate-400"></i>':''}</summary>${kids.length?`<div class="mr-4 border-r border-slate-200 pr-1">${renderNode(node[k], full)}</div>`:''}</details>`;
                     }).join('');
                 };
                 if(paths.length){
                     box.innerHTML = renderNode(this.treeBuild(paths), '');
                 } else if((f.options||[]).length){
-                    box.innerHTML = f.options.map(o=>`<label class="flex items-center gap-2 px-2 py-1 hover:bg-slate-50 rounded cursor-pointer text-xs"><input type="radio" name="tree_${escAttr(name)}" value="${escAttr(o)}" ${String(cur)===String(o)?'checked':''} onchange="FMLK.treePick('${name}', this.value)" class="text-indigo-600"><span class="text-slate-700">${escHtml(o)}</span></label>`).join('');
+                    box.innerHTML = f.options.map(o=>`<label class="fx-checkrow"><input type="radio" name="tree_${escAttr(name)}" value="${escAttr(o)}" ${String(cur)===String(o)?'checked':''} onchange="FMLK.treePick('${name}', this.value)" class="fx-radio"><span class="text-slate-700">${escHtml(o)}</span></label>`).join('');
                 } else {
                     box.innerHTML = '<p class="text-slate-400 text-xs">لا توجد عناصر</p>';
                 }
@@ -1580,7 +1612,7 @@
                 if(cur === undefined || cur === null || cur === '') cur = f.default ?? [];
                 if(!Array.isArray(cur)) cur = String(cur).split(',').map(x=>x.trim()).filter(Boolean);
                 cur = cur.map(String);
-                box.innerHTML = opts.length ? opts.map(o=>`<button type="button" onclick="FMLK.badgeToggle('${name}','${escAttr(o.value)}')" class="px-3 py-1.5 rounded-full text-xs font-semibold border transition ${cur.includes(String(o.value))?'bg-indigo-600 text-white border-indigo-600':'bg-white text-slate-600 border-slate-200 hover:border-indigo-300'}">${escHtml(o.label)}</button>`).join('') : '<p class="text-slate-400 text-xs">لا توجد عناصر</p>';
+                box.innerHTML = opts.length ? opts.map(o=>`<button type="button" onclick="FMLK.badgeToggle('${name}','${escAttr(o.value)}')" class="fx-pill border transition ${cur.includes(String(o.value))?'bg-indigo-600 text-white border-indigo-600':'bg-white text-slate-600 border-slate-200 hover:border-indigo-300'}">${escHtml(o.label)}</button>`).join('') : '<p class="text-slate-400 text-xs">لا توجد عناصر</p>';
                 fmlkSetHidden(name, cur);
             },
             badgeToggle(name, value){
@@ -1659,7 +1691,7 @@
                 if(cur === undefined || cur === null || cur === '') cur = f.default ?? [];
                 if(!Array.isArray(cur)) cur = String(cur).split(',').map(x=>x.trim()).filter(Boolean);
                 cur = cur.map(String);
-                box.innerHTML = cur.map(v=>`<span class="inline-flex items-center gap-1 px-2.5 py-1 bg-indigo-50 text-indigo-700 rounded-full text-xs font-semibold">${escHtml(v)}<button type="button" onclick="FMLK.tagDel('${name}','${escAttr(v)}')" class="hover:text-rose-600"><i class="fa-solid fa-xmark text-[10px]"></i></button></span>`).join('') || '<span class="text-slate-400 text-xs">لا وسوم</span>';
+                box.innerHTML = cur.map(v=>`<span class="fx-chip fx-chip-ind">${escHtml(v)}<button type="button" onclick="FMLK.tagDel('${name}','${escAttr(v)}')"><i class="fa-solid fa-xmark text-[10px]"></i></button></span>`).join('') || '<span class="text-slate-400 text-xs">لا وسوم</span>';
                 box.dataset.allowed = JSON.stringify(opts);
                 fmlkSetHidden(name, cur);
             },
@@ -1712,7 +1744,7 @@
                     const opts = [...new Set(paths.filter(p=>prefix.every((v,i)=>p[i]===v)).map(p=>p[l]).filter(Boolean))];
                     if(!opts.length) break;
                     const sel = cur[l] || '';
-                    html += `<select onchange="FMLK.cascadePick('${name}',${l},this.value)" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm"><option value="">— اختر المستوى ${l+1} —</option>${opts.map(o=>`<option ${o===sel?'selected':''}>${escHtml(o)}</option>`).join('')}</select>`;
+                    html += `<select onchange="FMLK.cascadePick('${name}',${l},this.value)" class="fx-inp"><option value="">— اختر المستوى ${l+1} —</option>${opts.map(o=>`<option ${o===sel?'selected':''}>${escHtml(o)}</option>`).join('')}</select>`;
                     if(!sel) break;
                     prefix.push(sel);
                 }
