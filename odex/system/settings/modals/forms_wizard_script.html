@@ -1054,8 +1054,9 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             const needSrc = ['select','multiselect','status','datamodal','lookup','cascade_grid','restricted_tags'].includes(fwTypeSel);
             const needRef = ['select','lookup','datamodal'].includes(fwTypeSel);
             // وضع المصدر الصريح: إما خيارات ثابتة أو من جدول (الثلاثية) — بلا جمع بينهما
+            // أنواع الثلاثية بلا قسم مصادر إطلاقاً (ثابتة=حرفية فقط، جدول=الثلاثية فقط)
             const srcModeTable = needRef && fwSrcMode === 'table';
-            const showSrc = needSrc && !srcModeTable;
+            const showSrc = needSrc && !needRef;
             const showOpts = needOpts && !srcModeTable;
             const needParent = (fwTypeSel === 'cascading_select');
             const needExtra = ['list-input','multiselect','restricted_tags'].includes(fwTypeSel);
@@ -1160,6 +1161,9 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             else if(fwTypeSel !== fwTypeOrig){ r.refTable = ''; r.refFk = ''; r.refDisplay = ''; }
             if(tableMode){
                 r.options = [];
+                r.options_source = [];
+            } else if(isRefType){
+                // ثابتة = حرفية فقط — بلا مصادر إطلاقاً
                 r.options_source = [];
             } else {
             r.options_source = fwTypeSrcs.filter(s=>s.table && s.column).filter(s=>{
