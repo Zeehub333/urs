@@ -37,14 +37,28 @@
             <div>
                 <h3 class="text-xs font-bold text-gray-700 flex items-center gap-2 mb-2">
                     <i class="fa-solid fa-pen-to-square text-indigo-600"></i>
-                    الادخالات
+                    <span class="flex-1">الادخالات</span>
+                    <button onclick="toggleSideCats(true)" class="font-normal text-indigo-600 hover:text-indigo-800" title="توسيع الكل">توسيع</button>
+                    <span class="text-slate-300 font-normal">|</span>
+                    <button onclick="toggleSideCats(false)" class="font-normal text-slate-400 hover:text-slate-600" title="طي الكل">طي</button>
                 </h3>
-                <div class="space-y-1">
-                    {% for f in fml_files %}
-                    <a href="/app/{{ app_name }}/form/{{ f.file }}/" class="block p-2.5 rounded-xl border transition text-right hover:bg-slate-50 border-transparent hover:border-slate-200">
-                        <div class="text-xs font-semibold text-gray-800 truncate">{{ f.metadata.displayName }}</div>
-                        {% if f.metadata.description %}<div class="text-[11px] text-gray-500 truncate">{{ f.metadata.description }}</div>{% else %}<div class="text-[11px] text-gray-400 truncate">{{ f.metadata.category|default:"" }}</div>{% endif %}
-                    </a>
+                <div class="space-y-2">
+                    {% for g in fml_by_category %}
+                    <details open data-side-cat class="urs-cat border border-slate-100 rounded-xl overflow-hidden" data-persist="pr{{ app_name }}F{{ forloop.counter }}">
+                        <summary class="cursor-pointer list-none bg-slate-50 px-2.5 py-2 flex items-center gap-2">
+                            <i class="fa-solid fa-chevron-down chev text-[10px] text-slate-400"></i>
+                            <span class="flex-1 text-xs font-bold text-slate-700 truncate">{{ g.name }}</span>
+                            <span class="text-[10px] text-slate-500 bg-white border border-slate-200 px-1.5 py-0.5 rounded-full">{{ g.files|length }}</span>
+                        </summary>
+                        <div class="p-1.5 space-y-1">
+                            {% for f in g.files %}
+                            <a href="/app/{{ app_name }}/form/{{ f.file }}/" class="block p-2.5 rounded-xl border transition text-right hover:bg-slate-50 border-transparent hover:border-slate-200" data-search="{{ f.metadata.displayName }} {{ f.metadata.category|default:'' }}">
+                                <div class="text-xs font-semibold text-gray-800 truncate">{{ f.metadata.displayName }}</div>
+                                {% if f.metadata.description %}<div class="text-[11px] text-gray-500 truncate">{{ f.metadata.description }}</div>{% endif %}
+                            </a>
+                            {% endfor %}
+                        </div>
+                    </details>
                     {% endfor %}
                     {% if not fml_files %}<p class="text-xs text-gray-400">لا توجد ادخالات</p>{% endif %}
                 </div>
@@ -52,14 +66,28 @@
             <div>
                 <h3 class="text-xs font-bold text-gray-700 flex items-center gap-2 mb-2">
                     <i class="fa-solid fa-chart-line text-emerald-600"></i>
-                    التقارير
+                    <span class="flex-1">التقارير</span>
+                    <button onclick="toggleSideCats(true)" class="font-normal text-emerald-600 hover:text-emerald-800" title="توسيع الكل">توسيع</button>
+                    <span class="text-slate-300 font-normal">|</span>
+                    <button onclick="toggleSideCats(false)" class="font-normal text-slate-400 hover:text-slate-600" title="طي الكل">طي</button>
                 </h3>
-                <div class="space-y-1">
-                    {% for f in rml_files %}
-                    <a href="/app/{{ app_name }}/report/{{ f.file }}/" class="block p-2.5 rounded-xl border transition text-right {% if f.file == rml_file %}bg-emerald-50 border-emerald-200{% else %}hover:bg-slate-50 border-transparent hover:border-slate-200{% endif %}">
-                        <div class="text-xs font-semibold truncate {% if f.file == rml_file %}text-emerald-800{% else %}text-gray-800{% endif %}">{{ f.metadata.displayName }}</div>
-                        {% if f.metadata.description %}<div class="text-[11px] text-gray-500 truncate">{{ f.metadata.description }}</div>{% else %}<div class="text-[11px] text-gray-400 truncate">{{ f.metadata.category|default:"" }}</div>{% endif %}
-                    </a>
+                <div class="space-y-2">
+                    {% for g in rml_by_category %}
+                    <details open data-side-cat class="urs-cat border border-slate-100 rounded-xl overflow-hidden" data-persist="pr{{ app_name }}R{{ forloop.counter }}">
+                        <summary class="cursor-pointer list-none bg-slate-50 px-2.5 py-2 flex items-center gap-2">
+                            <i class="fa-solid fa-chevron-down chev text-[10px] text-slate-400"></i>
+                            <span class="flex-1 text-xs font-bold text-slate-700 truncate">{{ g.name }}</span>
+                            <span class="text-[10px] text-slate-500 bg-white border border-slate-200 px-1.5 py-0.5 rounded-full">{{ g.files|length }}</span>
+                        </summary>
+                        <div class="p-1.5 space-y-1">
+                            {% for f in g.files %}
+                            <a href="/app/{{ app_name }}/report/{{ f.file }}/" class="block p-2.5 rounded-xl border transition text-right {% if f.file == rml_file %}bg-emerald-50 border-emerald-200{% else %}hover:bg-slate-50 border-transparent hover:border-slate-200{% endif %}" data-search="{{ f.metadata.displayName }} {{ f.metadata.category|default:'' }}">
+                                <div class="text-xs font-semibold truncate {% if f.file == rml_file %}text-emerald-800{% else %}text-gray-800{% endif %}">{{ f.metadata.displayName }}</div>
+                                {% if f.metadata.description %}<div class="text-[11px] text-gray-500 truncate">{{ f.metadata.description }}</div>{% endif %}
+                            </a>
+                            {% endfor %}
+                        </div>
+                    </details>
                     {% endfor %}
                     {% if not rml_files %}<p class="text-xs text-gray-400">لا توجد تقارير</p>{% endif %}
                 </div>
@@ -2047,6 +2075,9 @@
             const inp = document.getElementById('groupBucketInput');
             if(inp) inp.value = '';
             loadGroupSidebar();
+        }
+        function toggleSideCats(open) {
+            document.querySelectorAll('details[data-side-cat]').forEach(d => { d.open = !!open; });
         }
         function clearGroupFilter() {
             activeGroupColumn = null;

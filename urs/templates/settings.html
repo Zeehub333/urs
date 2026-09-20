@@ -22,16 +22,31 @@
                         <div class="text-xs font-semibold truncate">{{ it.metadata.displayName|default:it.file }}</div>
                         </a>
                         {% endfor %}
-                        {% for f in fmlk_items %}
-                        <a href="{% if f.virtual %}{{ f.url }}{% else %}/app/settings/form/{{ f.file }}/{% endif %}" data-search="{{ f.metadata.displayName|default:f.file }} نموذج" class="side-cml-item block p-2.5 rounded-xl border transition text-right hover:bg-gray-50 border-transparent hover:border-gray-200">
-                        <div class="text-xs font-semibold text-gray-800 truncate">{% if f.virtual %}<i class="fa-solid fa-table-list text-indigo-500"></i> {% else %}<i class="fa-solid fa-pen-to-square text-indigo-500"></i> {% endif %}{{ f.metadata.displayName|default:f.file }}</div>
-                        <div class="text-[11px] text-gray-500 truncate">{% if f.virtual %}قائمة الموديلات الحية{% else %}نموذج — {{ f.fields }} حقل{% endif %}</div>
-                        </a>
-                        {% endfor %}
                         {% if not system_items and not fmlk_items %}
                         <p class="text-xs text-gray-400 px-1">لا توجد ملفات نظام</p>
                         {% endif %}
                     </div>
+                    {% if fmlk_items %}
+                    <div class="space-y-2 mt-2" id="sideFmlkGroups">
+                        {% for g in fmlk_side_groups %}
+                        <details open class="urs-cat urs-sub border border-slate-100 rounded-xl overflow-hidden" data-persist="ssF{{ forloop.counter }}">
+                            <summary class="cursor-pointer list-none bg-slate-50 px-2.5 py-2 flex items-center gap-2">
+                                <i class="fa-solid fa-chevron-down chev text-[10px] text-slate-400"></i>
+                                <span class="flex-1 text-xs font-bold text-slate-700 truncate">{{ g.name }}</span>
+                                <span class="text-[10px] text-slate-500 bg-white border border-slate-200 px-1.5 py-0.5 rounded-full">{{ g.files|length }}</span>
+                            </summary>
+                            <div class="p-1.5 space-y-1">
+                                {% for f in g.files %}
+                        <a href="{% if f.virtual %}{{ f.url }}{% else %}/app/settings/form/{{ f.file }}/{% endif %}" data-search="{{ f.metadata.displayName|default:f.file }} نموذج {{ f.metadata.category|default:'' }}" class="side-cml-item block p-2.5 rounded-xl border transition text-right hover:bg-gray-50 border-transparent hover:border-gray-200">
+                        <div class="text-xs font-semibold text-gray-800 truncate">{% if f.virtual %}<i class="fa-solid fa-table-list text-indigo-500"></i> {% else %}<i class="fa-solid fa-pen-to-square text-indigo-500"></i> {% endif %}{{ f.metadata.displayName|default:f.file }}</div>
+                        <div class="text-[11px] text-gray-500 truncate">{% if f.virtual %}قائمة الموديلات الحية{% else %}نموذج — {{ f.fields }} حقل{% endif %}</div>
+                        </a>
+                                {% endfor %}
+                            </div>
+                        </details>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
                     </div>
                 </details>
                 <details class="urs-cat" data-persist="sideSecApps" open>
@@ -312,6 +327,7 @@
                 if(show) visible++;
             });
             if(noResults) noResults.classList.toggle('hidden', visible > 0);
+            try{ if(typeof ursSyncSubGroups === 'function') ursSyncSubGroups(document, !!ql); }catch(e){}
         }
         let settingsSearchTimeout;
         if(settingsSearch){

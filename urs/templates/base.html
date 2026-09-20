@@ -335,6 +335,17 @@
         if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', restoreUrsDetails);
         else restoreUrsDetails();
     })();
+    // مزامنة الفئات الفرعية مع البحث: إخفاء الفارغة وفتح ذات المطابقات
+    function ursSyncSubGroups(container, hasQuery){
+        try{
+            (container || document).querySelectorAll('details.urs-sub').forEach(function(d){
+                var vis = 0;
+                d.querySelectorAll('[data-search]').forEach(function(el){ if(el.style.display !== 'none') vis++; });
+                d.style.display = vis ? '' : 'none';
+                if(hasQuery && vis){ try{ d.setAttribute('open', ''); }catch(e){} }
+            });
+        }catch(e){}
+    }
     // ── تقاريري: تقارير مفضلة عبر كل التطبيقات (localStorage: my_reports) ──
     function getMyReports(){ try{ return JSON.parse(localStorage.getItem('my_reports')||'[]'); }catch(e){ return []; } }
     function saveMyReports(l){ try{ localStorage.setItem('my_reports', JSON.stringify(l)); }catch(e){} }

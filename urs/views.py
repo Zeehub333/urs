@@ -173,6 +173,20 @@ def _load_app_context(app_name):
         app_meta = {"name": app_name, "ar": app_name, "icon": "fa-cube", "icon_bg": "bg-gray-900", "icon_color": "text-white", "version": "1.0.0", "description": ""}
     return app_meta, fml_files, rml_files
 
+def _group_files_by_category(files):
+    """Group fml/rml file dicts by metadata.category (order-preserving) → [{name, files}].
+
+    Single source for collapsible sidebar categories in all screens.
+    """
+    groups, idx = [], {}
+    for _f in files or []:
+        _cat = (((_f.get("metadata") or {}).get("category")) or "عام").strip() or "عام"
+        if _cat not in idx:
+            idx[_cat] = len(groups)
+            groups.append({"name": _cat, "files": []})
+        groups[idx[_cat]]["files"].append(_f)
+    return groups
+
 def _find_fml_path(fml_name: str, app_name: str | None = None):
     """Locate FML file by name (with or without extension) optionally scoped to app"""
     from fmlk_engine.compiler import FMLKFormCompiler
@@ -856,6 +870,8 @@ def app_detail(request, app_name):
         "fml_files": fml_files,
         "app_name": app_name,
         "app_rules": app_rules,
+        "fml_by_category": _group_files_by_category(fml_files),
+        "rml_by_category": _group_files_by_category(rml_files),
     })
 
 # ── Player Views (moved into urs/templates) ──────────────────────────────────
@@ -880,14 +896,7 @@ def app_form_player(request, app_name, fml_file):
         except Exception:
             pass
     # تجميع نماذج الشريط الجانبي حسب الفئة (للطي والتوسيع)
-    fml_by_category = []
-    _cat_idx = {}
-    for _f in fml_files:
-        _cat = ((_f.get("metadata") or {}).get("category") or "عام").strip() or "عام"
-        if _cat not in _cat_idx:
-            _cat_idx[_cat] = len(fml_by_category)
-            fml_by_category.append({"name": _cat, "files": []})
-        fml_by_category[_cat_idx[_cat]]["files"].append(_f)
+    fml_by_category = _group_files_by_category(fml_files)
     return render(request, "forms_player.html", {
         "app": app_meta,
         "app_name": app_name,
@@ -898,6 +907,7 @@ def app_form_player(request, app_name, fml_file):
         "fml_files": fml_files,
         "fml_by_category": fml_by_category,
         "rml_files": rml_files,
+        "rml_by_category": _group_files_by_category(rml_files),
     })
 
 def app_report_player(request, app_name, rml_file):
@@ -956,6 +966,8 @@ def app_report_player(request, app_name, rml_file):
         "rml_table_opts_json": _json.dumps(rml_table_opts, ensure_ascii=False),
         "fml_files": fml_files,
         "rml_files": rml_files,
+        "fml_by_category": _group_files_by_category(fml_files),
+        "rml_by_category": _group_files_by_category(rml_files),
     })
 
 def app_report_designer(request, app_name):
@@ -6515,6 +6527,7 @@ def _settings_base_ctx():
         "all_apps": all_apps,
         "fmlk_items": fmlk_items,
         "fmlk_by_category": fmlk_by_category,
+        "fmlk_side_groups": _group_files_by_category(fmlk_items),
         "needs_setup": needs_setup,
     }
 
