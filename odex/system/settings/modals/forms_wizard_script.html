@@ -1008,7 +1008,12 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             fwTypeSel = r.inputType || 'text';
             fwTypeOrig = fwTypeSel;
             fwTypeOpts = JSON.parse(JSON.stringify(r.options || []));
-            fwTypeSrcs = JSON.parse(JSON.stringify(r.options_source || []));
+            fwTypeSrcs = JSON.parse(JSON.stringify(r.options_source || [])).map(s=>{
+                // تطبيع: schema منفصل + جدول عارٍ → اسم كامل للمطابقة مع القائمة
+                s = Object.assign({}, s);
+                if(s.schema && s.table && String(s.table).indexOf('.') < 0) s.table = s.schema + '.' + s.table;
+                return s;
+            });
             if(!fwTypeOpts.length && (r.inputType === 'status')) fwTypeOpts = [{value:'1', label:'نشط', color:'#16a34a'}, {value:'0', label:'موقوف', color:'#dc2626'}];
             document.getElementById('fwTypeTitle').innerHTML = '<i class="fa-solid fa-shapes text-indigo-600"></i> نوع المدخل: ' + fwEsc(r.alias || r.name);
             fwRenderTypeGrid();
@@ -1066,6 +1071,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             if(needSrc){
                 h += `<div class="bg-slate-50 border border-slate-200 rounded-xl p-2.5 space-y-1.5">
                     <div class="flex items-center justify-between"><b class="text-[11px]">مصادر من الجداول <span class="font-mono" dir="ltr">[table.column]</span></b><button onclick="fwTypeSrcAdd()" class="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg font-bold text-[11px]"><i class="fa-solid fa-plus"></i> مصدر</button></div>
+                    ${r.refTable ? `<div class="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1">الجدول المرجعي (<span class="font-mono" dir="ltr">${fwEsc(r.refTable)}</span>) يغني عن مصادر نفس الجدول — تُحذف تلقائياً عند الحفظ حتى لا تتكرر الخيارات</div>` : ''}
                     <div class="space-y-1">${fwTypeSrcs.map((s, i)=>`<div class="flex items-center gap-1">
                         <select onchange="fwTypeSrcSet(${i},'table',this.value)" class="wb-inp !py-1 font-mono flex-1" dir="ltr"><option value="">— الجدول —</option>${fwTablesCache.map(t=>`<option value="${fwEsc(t.full || t.name)}" ${s.table===(t.full||t.name)?'selected':''}>${fwEsc(t.full || t.name)}</option>`).join('')}</select>
                         <input value="${fwEsc(s.column || '')}" oninput="fwTypeSrcSet(${i},'column',this.value)" placeholder="العمود" class="wb-inp !py-1 font-mono flex-1" dir="ltr" list="fwTypeSrcCols${i}">
@@ -1127,10 +1133,25 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                 }
                 return String(o ?? '');
             }).filter(o => (typeof o === 'string' && o) || (typeof o === 'object' && (o.value || o.label)));
-            r.options_source = fwTypeSrcs.filter(s=>s.table && s.column).map(s=>({table: s.table, schema:'', column: s.column}));
             const g = (id)=>{ const el = document.getElementById(id); return el ? el.value : ''; };
             if(['select','lookup','datamodal'].includes(fwTypeSel)){ r.refTable = g('fwTypeRefTable'); r.refFk = g('fwTypeRefFk') || 'id'; r.refDisplay = g('fwTypeRefDisplay'); }
             else if(fwTypeSel !== fwTypeOrig){ r.refTable = ''; r.refFk = ''; r.refDisplay = ''; }
+            r.options_source = fwTypeSrcs.filter(s=>s.table && s.column).filter(s=>{
+                // إسقاط مصادر المكررة للثلاثية المرجعية (نفس الجدول + عمود المفتاح/العرض)
+                // وإلا اندمجت قيم خام (أسماء) مع خيارات {id→name} وأفسدت القائمة
+                try{
+                    const rb = String(r.refTable || '').split('.').pop().toLowerCase();
+                    const sb = String(s.table || '').split('.').pop().toLowerCase();
+                    const sc = String(s.column || '').toLowerCase();
+                    if(rb && sb === rb && (sc === String(r.refFk || 'id').toLowerCase() || (r.refDisplay && sc === String(r.refDisplay).toLowerCase()))) return false;
+                }catch(e){}
+                return true;
+            }).map(s=>{
+                // فك الاسم الكامل إلى schema + جدول عارٍ — وإلا ضاع الـschema في [a.b.c]
+                const full = String(s.table);
+                const i = full.indexOf('.');
+                return i > 0 ? {table: full.slice(i + 1), schema: full.slice(0, i), column: s.column} : {table: full, schema: s.schema || '', column: s.column};
+            });
             r.config = r.config || {};
             if(fwTypeSel === 'cascading_select'){ const p = g('fwTypeParent'); if(p) r.config.parent_field = p; }
             if(['list-input','multiselect','restricted_tags'].includes(fwTypeSel)){
