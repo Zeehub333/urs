@@ -430,6 +430,23 @@ def _needs_ar_norm(value: Any) -> bool:
     return isinstance(value, str) and bool(_AR_LETTER_RE.search(value))
 
 
+_NON_TEXT_HINTS = ("INT", "SERIAL", "NUMERIC", "DECIMAL", "FLOAT", "DOUBLE", "REAL", "MONEY", "NUMBER", "DATE", "TIME", "BOOL")
+
+def _field_is_texty(field_name: str, fmap: Dict[str, Any]) -> bool:
+    """TRANSLATE() مخصص للأعمدة النصية فقط — الرقمية/التاريخ يُقارن مباشرة.
+
+    unknown (no metadata) → True للحفاظ على السلوك القديم.
+    """
+    try:
+        fl = (fmap or {}).get(str(field_name or "").strip().lower())
+        if fl is None:
+            return True
+        t = str(getattr(fl, "data_type", "") or "").upper()
+        return not any(k in t for k in _NON_TEXT_HINTS)
+    except Exception:
+        return True
+
+
 def _ar_col_sql(col_expr: str) -> str:
     """لفّ عمود نصي بمقارنة عربية موحدة (TRANSLATE يعمل على Oracle وPostgres)."""
     return f"TRANSLATE({col_expr}, 'أإآةى', 'اااهي')"
@@ -535,6 +552,8 @@ def _build_where(filters: List[Dict[str, Any]], start_idx: int = 1, columns: Opt
         op = (f.get("op") or "equals").lower()
         if not field:
             continue
+        # TRANSLATE() للأعمدة النصية فقط — وإلا Postgres يرفض translate(integer,...)
+        _texty = _field_is_texty(field, _fmap)
         p = f"p{i}"
         col = _find_column_for_field(field, columns)
         # fk_lookup display search: match on referenced display value via EXISTS
@@ -618,7 +637,7 @@ def _build_where(filters: List[Dict[str, Any]], start_idx: int = 1, columns: Opt
                     f"{qfield} >= TO_DATE(:{p}, 'YYYY-MM-DD') "
                     f"AND {qfield} < TO_DATE(:{p}, 'YYYY-MM-DD') + 1")
                 params[p] = _v
-            elif _needs_ar_norm(_v) and not is_date:
+            elif _needs_ar_norm(_v) and not is_date and _texty:
                 # مقارنة عربية موحدة (أيمن = أيمن رغم الهمزة)
                 clauses.append(f"{_ar_col_sql(qfield)}=:{p}")
                 params[p] = _ar_norm(_v)
@@ -626,7 +645,7 @@ def _build_where(filters: List[Dict[str, Any]], start_idx: int = 1, columns: Opt
                 clauses.append(f"{qfield}={_dbind(':'+p, _v, is_date)}")
                 params[p] = _v
         elif op in ("contains", "like", "ilike", "contains"):
-            if _needs_ar_norm(f.get("value")):
+            if _needs_ar_norm(f.get("value")) and _texty:
                 clauses.append(f"{_ar_col_sql(qfield)} LIKE :{p}")
                 params[p] = f"%{_ar_norm(f.get('value',''))}%"
             else:
@@ -634,21 +653,21 @@ def _build_where(filters: List[Dict[str, Any]], start_idx: int = 1, columns: Opt
                 # Use %value% for contains
                 params[p] = f"%{f.get('value','')}%"
         elif op in ("startswith", "starts_with", "start", "begins", "begins_with"):
-            if _needs_ar_norm(f.get("value")):
+            if _needs_ar_norm(f.get("value")) and _texty:
                 clauses.append(f"{_ar_col_sql(qfield)} LIKE :{p}")
                 params[p] = f"{_ar_norm(f.get('value',''))}%"
             else:
                 clauses.append(f"{qfield} LIKE :{p}")
                 params[p] = f"{f.get('value','')}%"
         elif op in ("endswith", "ends_with", "end", "ends"):
-            if _needs_ar_norm(f.get("value")):
+            if _needs_ar_norm(f.get("value")) and _texty:
                 clauses.append(f"{_ar_col_sql(qfield)} LIKE :{p}")
                 params[p] = f"%{_ar_norm(f.get('value',''))}"
             else:
                 clauses.append(f"{qfield} LIKE :{p}")
                 params[p] = f"%{f.get('value','')}"
         elif op in ("not_contains", "notcontains", "notlike", "not_like"):
-            if _needs_ar_norm(f.get("value")):
+            if _needs_ar_norm(f.get("value")) and _texty:
                 clauses.append(f"{_ar_col_sql(qfield)} NOT LIKE :{p}")
                 params[p] = f"%{_ar_norm(f.get('value',''))}%"
             else:
@@ -656,7 +675,7 @@ def _build_where(filters: List[Dict[str, Any]], start_idx: int = 1, columns: Opt
                 params[p] = f"%{f.get('value','')}%"
         elif op in ("not_equals", "notequals", "not_equal", "!=", "<>", "ne", "neq"):
             _v = _norm_dt_val(f.get("value"))
-            if _needs_ar_norm(_v) and not is_date:
+            if _needs_ar_norm(_v) and not is_date and _texty:
                 clauses.append(f"{_ar_col_sql(qfield)}<>:{p}")
                 params[p] = _ar_norm(_v)
             else:
@@ -737,7 +756,7 @@ def _build_where(filters: List[Dict[str, Any]], start_idx: int = 1, columns: Opt
             clauses.append(f"{qfield} IN ({', '.join(placeholders)})" if placeholders else "1=0")
         else:
             # Fallback to equals (مع توحيد عربي عند الحاجة)
-            if _needs_ar_norm(f.get("value")):
+            if _needs_ar_norm(f.get("value")) and _texty:
                 clauses.append(f"{_ar_col_sql(qfield)}=:{p}")
                 params[p] = _ar_norm(f.get("value"))
             else:

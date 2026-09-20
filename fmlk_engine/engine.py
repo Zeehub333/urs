@@ -444,7 +444,7 @@ class FMLKFormEngine:
         params: Dict[str, Any] = {}
         if filters:
             from rml_python.engine import _build_where
-            where_sql, params = _build_where(filters)
+            where_sql, params = _build_where(filters, fields=self.fields)
         order_sql = f" ORDER BY {_q(order_by)}" if order_by else ""
         # Pagination
         paginate = ""

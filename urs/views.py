@@ -2504,7 +2504,7 @@ def api_fmlk_record(request):
         row = eng.get_record({"id": rid})
         return JsonResponse({"row": row})
     except Exception as e:
-        return JsonResponse({"error": str(e)}, status=400)
+        return JsonResponse({"error": f"id={str(rid)[:60]}: {str(e)[:240]}"}, status=400)
 
 def _rml_is_live_sql(dj):
     """RML-only: connection can be queried live (pg/oracle always; sqlserver
