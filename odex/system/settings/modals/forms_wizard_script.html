@@ -18,7 +18,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
         let fwBranches = []; // {table,alias,master,detail,cols:[{name,alias,data_type}],colsCache:[]}
         let fwTabs = []; // {id,name,alias,order,visibleIf}
         let fwTypes = []; // field-types registry
-        let fwTypeIdx = -1, fwTypeSel = '', fwTypeOrig = '', fwTypeOpts = [], fwTypeSrcs = [];
+        let fwTypeIdx = -1, fwTypeSel = '', fwTypeOrig = '', fwSrcMode = 'fixed', fwTypeOpts = [], fwTypeSrcs = [];
         let fwBranchIdx = -1, fwBranchSel = [];
         let fwPrevState = {conn:'', table:''};
         function fwEsc(s){ return String(s ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
@@ -1007,6 +1007,8 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             const r = fwInputs[i];
             fwTypeSel = r.inputType || 'text';
             fwTypeOrig = fwTypeSel;
+            // وضع المصدر: ثلاثية جدول أم خيارات ثابتة — يُستنتج من الحقل ويبدّله المستخدم صراحة
+            fwSrcMode = (r.refTable || '').trim() ? 'table' : 'fixed';
             fwTypeOpts = JSON.parse(JSON.stringify(r.options || []));
             fwTypeSrcs = JSON.parse(JSON.stringify(r.options_source || [])).map(s=>{
                 // تطبيع: schema منفصل + جدول عارٍ → اسم كامل للمطابقة مع القائمة
@@ -1032,7 +1034,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                 ${arr.map(t=>`<button onclick="fwTypePick('${t.key}')" class="px-2 py-1.5 rounded-lg border text-[11px] font-bold transition ${fwTypeSel===t.key?'bg-indigo-600 border-indigo-600 text-white':'bg-white border-slate-200 text-slate-600 hover:border-indigo-400'}" title="${fwEsc(t.description || '')}">${fwEsc(t.ar || t.key)}</button>`).join('')}`).join('');
         }
         function fwTypePick(k){ fwTypeSel = k; fwRenderTypeGrid(); fwRenderTypeConfig(); }
-        function fwTypeRefTripleChanged(){ fwRenderTypeConfig(); } // الحصاد في أولها يحفظ المعلّق ثم تُحسم رؤية المصادر
+        function fwSrcModePick(m){ fwSrcMode = (m === 'table') ? 'table' : 'fixed'; fwRenderTypeConfig(); }
         function fwRenderTypeConfig(){
             // حصاد القيم المعلقة من DOM قبل إعادة البناء — وإلا ضاع اختيار الجدول المرجعي
             // عند إضافة خيار/مصدر أو تبديل النوع (إعادة الرسم كانت تعيد القيم القديمة من r)
@@ -1051,13 +1053,14 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             const needOpts = ['select','multiselect','status','radio','restricted_tags','reorder','badges'].includes(fwTypeSel);
             const needSrc = ['select','multiselect','status','datamodal','lookup','cascade_grid','restricted_tags'].includes(fwTypeSel);
             const needRef = ['select','lookup','datamodal'].includes(fwTypeSel);
-            // الثلاثية المرجعية هي المصدر الأساسي لهذه الأنواع — قسم "مصادر" يُخفى عند وجودها (بلا تكرار)
-            const hasTriple = !!(r.refTable || '').trim();
-            const showSrc = needSrc && !(needRef && hasTriple);
+            // وضع المصدر الصريح: إما خيارات ثابتة أو من جدول (الثلاثية) — بلا جمع بينهما
+            const srcModeTable = needRef && fwSrcMode === 'table';
+            const showSrc = needSrc && !srcModeTable;
+            const showOpts = needOpts && !srcModeTable;
             const needParent = (fwTypeSel === 'cascading_select');
             const needExtra = ['list-input','multiselect','restricted_tags'].includes(fwTypeSel);
             let h = `<div class="text-[11px] text-slate-500">النوع الحالي: <b>${fwEsc(fwTypeLabel(fwTypeSel))}</b> — يُرسم في المشغل ${fwTypeSel==='status' ? 'أزرار radio ملونة' : fwTypeSel==='datamodal' ? 'شبكة منبثقة قابلة للبحث' : fwTypeSel==='select' ? 'قائمة منسدلة' : fwTypeSel==='multiselect' ? 'اختيار متعدد' : 'مدخل ' + fwEsc(fwTypeSel)}</div>`;
-            if(needOpts){
+            if(showOpts){
                 h += `<div class="bg-slate-50 border border-slate-200 rounded-xl p-2.5 space-y-1.5">
                     <div class="flex items-center justify-between"><b class="text-[11px]">الخيارات ${fwTypeSel==='status' ? '(الحالات + اللون)' : ''}</b><button onclick="fwTypeOptAdd()" class="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg font-bold text-[11px]"><i class="fa-solid fa-plus"></i> خيار</button></div>
                     <div id="fwTypeOptsList" class="space-y-1">${fwTypeOpts.map((o, i)=>{
@@ -1075,7 +1078,6 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             if(showSrc){
                 h += `<div class="bg-slate-50 border border-slate-200 rounded-xl p-2.5 space-y-1.5">
                     <div class="flex items-center justify-between"><b class="text-[11px]">مصادر من الجداول <span class="font-mono" dir="ltr">[table.column]</span></b><button onclick="fwTypeSrcAdd()" class="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg font-bold text-[11px]"><i class="fa-solid fa-plus"></i> مصدر</button></div>
-                    ${r.refTable ? `<div class="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1">الجدول المرجعي (<span class="font-mono" dir="ltr">${fwEsc(r.refTable)}</span>) يغني عن مصادر نفس الجدول — تُحذف تلقائياً عند الحفظ حتى لا تتكرر الخيارات</div>` : ''}
                     <div class="space-y-1">${fwTypeSrcs.map((s, i)=>`<div class="flex items-center gap-1">
                         <select onchange="fwTypeSrcSet(${i},'table',this.value)" class="wb-inp !py-1 font-mono flex-1" dir="ltr"><option value="">— الجدول —</option>${fwTablesCache.map(t=>`<option value="${fwEsc(t.full || t.name)}" ${s.table===(t.full||t.name)?'selected':''}>${fwEsc(t.full || t.name)}</option>`).join('')}</select>
                         <input value="${fwEsc(s.column || '')}" oninput="fwTypeSrcSet(${i},'column',this.value)" placeholder="العمود" class="wb-inp !py-1 font-mono flex-1" dir="ltr" list="fwTypeSrcCols${i}">
@@ -1085,8 +1087,18 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                 </div>`;
             }
             if(needRef){
+                h += `<div class="flex items-center gap-2 bg-indigo-50/60 border border-indigo-100 rounded-xl px-2.5 py-2">
+                    <b class="text-[11px] text-indigo-800">مصدر الخيارات:</b>
+                    <span class="inline-flex rounded-lg overflow-hidden border border-indigo-300 text-[11px] font-bold">
+                        <button onclick="fwSrcModePick('fixed')" class="px-3 py-1 ${fwSrcMode === 'table' ? 'bg-white text-indigo-700' : 'bg-indigo-600 text-white'}">خيارات ثابتة</button>
+                        <button onclick="fwSrcModePick('table')" class="px-3 py-1 ${fwSrcMode === 'table' ? 'bg-emerald-600 text-white' : 'bg-white text-indigo-700'}">من جدول</button>
+                    </span>
+                    <span class="text-[10px] text-slate-500">${fwSrcMode === 'table' ? 'الجدول + المفتاح + العمود المعروض' : 'قائمة قيم يدوية (و/أو مصادر جداول أخرى)'}</span>
+                </div>`;
+            }
+            if(needRef && srcModeTable){
                 h += `<div class="grid grid-cols-3 gap-2">
-                    <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">الجدول المرجعي</label><select id="fwTypeRefTable" onchange="fwTypeRefTripleChanged()" class="wb-inp font-mono" dir="ltr"><option value="">—</option>${fwTablesCache.map(t=>`<option value="${fwEsc(t.full || t.name)}" ${r.refTable===(t.full||t.name)?'selected':''}>${fwEsc(t.full || t.name)}</option>`).join('')}</select></div>
+                    <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">الجدول المرجعي</label><select id="fwTypeRefTable" class="wb-inp font-mono" dir="ltr"><option value="">—</option>${fwTablesCache.map(t=>`<option value="${fwEsc(t.full || t.name)}" ${r.refTable===(t.full||t.name)?'selected':''}>${fwEsc(t.full || t.name)}</option>`).join('')}</select></div>
                     <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">المفتاح (FK)</label><input id="fwTypeRefFk" value="${fwEsc(r.refFk || 'id')}" class="wb-inp font-mono" dir="ltr"></div>
                     <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">العمود المعروض</label><input id="fwTypeRefDisplay" value="${fwEsc(r.refDisplay || '')}" class="wb-inp font-mono" dir="ltr"></div>
                 </div>`;
@@ -1138,10 +1150,16 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                 return String(o ?? '');
             }).filter(o => (typeof o === 'string' && o) || (typeof o === 'object' && (o.value || o.label)));
             const g = (id)=>{ const el = document.getElementById(id); return el ? el.value : ''; };
-            if(['select','lookup','datamodal'].includes(fwTypeSel)){ r.refTable = g('fwTypeRefTable'); r.refFk = g('fwTypeRefFk') || 'id'; r.refDisplay = g('fwTypeRefDisplay'); }
+            // وضع المصدر الصريح: إما خيارات ثابتة أو من جدول — بلا جمع
+            const isRefType = ['select','lookup','datamodal'].includes(fwTypeSel);
+            const tableMode = isRefType && fwSrcMode === 'table';
+            if(isRefType){
+                if(tableMode){ r.refTable = g('fwTypeRefTable'); r.refFk = g('fwTypeRefFk') || 'id'; r.refDisplay = g('fwTypeRefDisplay'); }
+                else { r.refTable = ''; r.refFk = ''; r.refDisplay = ''; }
+            }
             else if(fwTypeSel !== fwTypeOrig){ r.refTable = ''; r.refFk = ''; r.refDisplay = ''; }
-            if(['select','lookup','datamodal'].includes(fwTypeSel) && (r.refTable || '').trim()){
-                // الثلاثية هي المصدر الأساسي — إسقاط كل صفوف المصادر (بلا مدخلات مكررة)
+            if(tableMode){
+                r.options = [];
                 r.options_source = [];
             } else {
             r.options_source = fwTypeSrcs.filter(s=>s.table && s.column).filter(s=>{
