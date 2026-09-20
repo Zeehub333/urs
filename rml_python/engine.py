@@ -447,6 +447,124 @@ def _field_is_texty(field_name: str, fmap: Dict[str, Any]) -> bool:
         return True
 
 
+def _type_str_of(col, field_name: str = "", fmap=None) -> str:
+    """Data-type string of a column (RML col object/dict) or its field fallback, uppercased."""
+    try:
+        if col is not None:
+            if isinstance(col, dict):
+                for _k in ("data_type", "dataType", "data-type", "type"):
+                    if col.get(_k):
+                        return str(col.get(_k)).strip().upper()
+            else:
+                for _k in ("data_type", "dataType", "type"):
+                    _v = getattr(col, _k, None)
+                    if _v:
+                        return str(_v).strip().upper()
+        if field_name:
+            fl = (fmap or {}).get(str(field_name).strip().lower())
+            if fl is not None:
+                return str(getattr(fl, "data_type", "") or "").upper()
+    except Exception:
+        pass
+    return ""
+
+
+_NUMERIC_HINTS = ("INT", "SERIAL", "NUMERIC", "DECIMAL", "FLOAT", "DOUBLE", "REAL", "MONEY", "NUMBER")
+
+def _col_is_numeric(col, field_name: str = "", fmap=None) -> bool:
+    """True when the column/field is declared numeric (any subtype)."""
+    try:
+        return any(k in _type_str_of(col, field_name, fmap) for k in _NUMERIC_HINTS)
+    except Exception:
+        return False
+
+
+def _int_bounds_for_type(t: str):
+    """Exact (lo, hi) for integral subtypes; None for float/decimal/unknown.
+
+    Prevents conversion-overflow errors (e.g. MSSQL tinyint vs 11-digit value):
+    out-of-range values can never match → caller emits 1=0 instead of crashing.
+    """
+    try:
+        t = str(t or "").upper()
+        if "BIGINT" in t or "BIGSERIAL" in t or "INT8" in t:
+            return (-9223372036854775808, 9223372036854775807)
+        if "SMALLINT" in t or "SMALLSERIAL" in t or "INT2" in t:
+            return (-32768, 32767)
+        if "TINYINT" in t or "INT1" in t:
+            return (0, 255)
+        if "INT" in t or "SERIAL" in t or "INT4" in t or "INTEGER" in t:
+            return (-2147483648, 2147483647)
+    except Exception:
+        pass
+    return None
+
+
+_NUM_LIT_RE = re.compile(r"^-?\d+(\.\d+)?$")
+
+def _num_safe_for_compare(v, type_str: str = "") -> bool:
+    """Literal safe to compare against a numeric column (no overflow/format error).
+
+    Unknown subtype → BIGINT-range best effort (fixes huge values; tiny-subtype
+    medium values keep legacy behavior). Float/decimal families: format-only.
+    """
+    try:
+        if isinstance(v, bool):
+            return True
+        bounds = _int_bounds_for_type(type_str)
+        if isinstance(v, int):
+            return bounds is None or (bounds[0] <= v <= bounds[1])
+        if isinstance(v, float):
+            return bounds is None or (bounds[0] <= v <= bounds[1])
+        if not isinstance(v, str):
+            return False
+        s = v.strip().replace("،", ",").replace(",", "")
+        if not _NUM_LIT_RE.match(s):
+            return False
+        if bounds is None:
+            return True
+        if "." in s:
+            return False  # decimals never match an integral subtype
+        return bounds[0] <= int(s) <= bounds[1]
+    except Exception:
+        return False
+
+
+def _date_safe_for_compare(v) -> bool:
+    """Full date/datetime literal only (YYYY[-MM[-DD]] would still crash a DATE compare)."""
+    try:
+        if not isinstance(v, str):
+            return False
+        s = v.strip()
+        if _is_date_only(s):
+            return True
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2})?", s):
+            return True
+        return False
+    except Exception:
+        return False
+
+
+_BOOL_LITS = {"true", "false", "1", "0", "t", "f", "yes", "no", "y", "n", "on", "off"}
+
+def _bool_col_kind(col, field_name: str = "", fmap=None) -> bool:
+    try:
+        return "BOOL" in _type_str_of(col, field_name, fmap)
+    except Exception:
+        return False
+
+
+def _bool_safe_for_compare(v) -> bool:
+    try:
+        if isinstance(v, bool):
+            return True
+        if isinstance(v, (int, float)):
+            return True
+        return isinstance(v, str) and v.strip().lower() in _BOOL_LITS
+    except Exception:
+        return False
+
+
 def _ar_col_sql(col_expr: str) -> str:
     """لفّ عمود نصي بمقارنة عربية موحدة (TRANSLATE يعمل على Oracle وPostgres)."""
     return f"TRANSLATE({col_expr}, 'أإآةى', 'اااهي')"
@@ -628,22 +746,35 @@ def _build_where(filters: List[Dict[str, Any]], start_idx: int = 1, columns: Opt
         qfield = _resolve_filter_field(field, columns, fields, table_map, conn_map, rules)
         is_date = _col_is_date(col, field)
         date_kind = _col_date_kind(col, field) if is_date else ""
+        # Impossible-match guards: a value that can never match the column type
+        # emits 1=0 (or 1=1 for negations) instead of a conversion-crashing compare
+        # (e.g. 11-digit search on a TINYINT commission column in an OR group).
+        _numcol = _col_is_numeric(col, field, _fmap)
+        _tstr = _type_str_of(col, field, _fmap) if _numcol else ""
+        _boolcol = _bool_col_kind(col, field, _fmap)
         if op in ("equals", "=", "==", "eq"):
-            _v = _norm_dt_val(f.get("value"))
-            if date_kind == "datetime" and _is_date_only(_v):
-                # date-picker day on a TIMESTAMP column: whole-day range
-                # (works on Oracle and Postgres: TO_DATE + 1 day)
-                clauses.append(
-                    f"{qfield} >= TO_DATE(:{p}, 'YYYY-MM-DD') "
-                    f"AND {qfield} < TO_DATE(:{p}, 'YYYY-MM-DD') + 1")
-                params[p] = _v
-            elif _needs_ar_norm(_v) and not is_date and _texty:
-                # مقارنة عربية موحدة (أيمن = أيمن رغم الهمزة)
-                clauses.append(f"{_ar_col_sql(qfield)}=:{p}")
-                params[p] = _ar_norm(_v)
+            if _numcol and not _num_safe_for_compare(f.get("value"), _tstr):
+                clauses.append("1=0")
+            elif is_date and not _date_safe_for_compare(_norm_dt_val(f.get("value"))):
+                clauses.append("1=0")
+            elif _boolcol and not _bool_safe_for_compare(f.get("value")):
+                clauses.append("1=0")
             else:
-                clauses.append(f"{qfield}={_dbind(':'+p, _v, is_date)}")
-                params[p] = _v
+                _v = f.get("value") if _numcol or _boolcol else _norm_dt_val(f.get("value"))
+                if date_kind == "datetime" and _is_date_only(_v):
+                    # date-picker day on a TIMESTAMP column: whole-day range
+                    # (works on Oracle and Postgres: TO_DATE + 1 day)
+                    clauses.append(
+                        f"{qfield} >= TO_DATE(:{p}, 'YYYY-MM-DD') "
+                        f"AND {qfield} < TO_DATE(:{p}, 'YYYY-MM-DD') + 1")
+                    params[p] = _v
+                elif _needs_ar_norm(_v) and not is_date and _texty:
+                    # مقارنة عربية موحدة (أيمن = أيمن رغم الهمزة)
+                    clauses.append(f"{_ar_col_sql(qfield)}=:{p}")
+                    params[p] = _ar_norm(_v)
+                else:
+                    clauses.append(f"{qfield}={_dbind(':'+p, _v, is_date)}")
+                    params[p] = _v
         elif op in ("contains", "like", "ilike", "contains"):
             if _needs_ar_norm(f.get("value")) and _texty:
                 clauses.append(f"{_ar_col_sql(qfield)} LIKE :{p}")
@@ -674,57 +805,98 @@ def _build_where(filters: List[Dict[str, Any]], start_idx: int = 1, columns: Opt
                 clauses.append(f"{qfield} NOT LIKE :{p}")
                 params[p] = f"%{f.get('value','')}%"
         elif op in ("not_equals", "notequals", "not_equal", "!=", "<>", "ne", "neq"):
-            _v = _norm_dt_val(f.get("value"))
-            if _needs_ar_norm(_v) and not is_date and _texty:
-                clauses.append(f"{_ar_col_sql(qfield)}<>:{p}")
-                params[p] = _ar_norm(_v)
+            if _numcol and not _num_safe_for_compare(f.get("value"), _tstr):
+                clauses.append("1=1")
+            elif is_date and not _date_safe_for_compare(_norm_dt_val(f.get("value"))):
+                clauses.append("1=1")
+            elif _boolcol and not _bool_safe_for_compare(f.get("value")):
+                clauses.append("1=1")
             else:
-                clauses.append(f"{qfield}<> {_dbind(':'+p, _v, is_date)}")
-                params[p] = _v
+                _v = f.get("value") if _numcol or _boolcol else _norm_dt_val(f.get("value"))
+                if _needs_ar_norm(_v) and not is_date and _texty:
+                    clauses.append(f"{_ar_col_sql(qfield)}<>:{p}")
+                    params[p] = _ar_norm(_v)
+                else:
+                    clauses.append(f"{qfield}<> {_dbind(':'+p, _v, is_date)}")
+                    params[p] = _v
         elif op in ("gt", ">", "greater", "greater_than"):
-            _v = _norm_dt_val(f.get("value"))
-            clauses.append(f"{qfield} > {_dbind(':'+p, _v, is_date)}")
-            params[p] = _v
+            if _numcol and not _num_safe_for_compare(f.get("value"), _tstr):
+                clauses.append("1=0")
+            elif is_date and not _date_safe_for_compare(_norm_dt_val(f.get("value"))):
+                clauses.append("1=0")
+            else:
+                _v = f.get("value") if _numcol else _norm_dt_val(f.get("value"))
+                clauses.append(f"{qfield} > {_dbind(':'+p, _v, is_date)}")
+                params[p] = _v
         elif op in ("lt", "<", "less", "less_than"):
-            _v = _norm_dt_val(f.get("value"))
-            clauses.append(f"{qfield} < {_dbind(':'+p, _v, is_date)}")
-            params[p] = _v
+            if _numcol and not _num_safe_for_compare(f.get("value"), _tstr):
+                clauses.append("1=0")
+            elif is_date and not _date_safe_for_compare(_norm_dt_val(f.get("value"))):
+                clauses.append("1=0")
+            else:
+                _v = f.get("value") if _numcol else _norm_dt_val(f.get("value"))
+                clauses.append(f"{qfield} < {_dbind(':'+p, _v, is_date)}")
+                params[p] = _v
         elif op in ("gte", ">=", "ge"):
-            _v = _norm_dt_val(f.get("value"))
-            clauses.append(f"{qfield} >= {_dbind(':'+p, _v, is_date)}")
-            params[p] = _v
+            if _numcol and not _num_safe_for_compare(f.get("value"), _tstr):
+                clauses.append("1=0")
+            elif is_date and not _date_safe_for_compare(_norm_dt_val(f.get("value"))):
+                clauses.append("1=0")
+            else:
+                _v = f.get("value") if _numcol else _norm_dt_val(f.get("value"))
+                clauses.append(f"{qfield} >= {_dbind(':'+p, _v, is_date)}")
+                params[p] = _v
         elif op in ("lte", "<=", "le"):
-            _v = _norm_dt_val(f.get("value"))
-            clauses.append(f"{qfield} <= {_dbind(':'+p, _v, is_date)}")
-            params[p] = _v
+            if _numcol and not _num_safe_for_compare(f.get("value"), _tstr):
+                clauses.append("1=0")
+            elif is_date and not _date_safe_for_compare(_norm_dt_val(f.get("value"))):
+                clauses.append("1=0")
+            else:
+                _v = f.get("value") if _numcol else _norm_dt_val(f.get("value"))
+                clauses.append(f"{qfield} <= {_dbind(':'+p, _v, is_date)}")
+                params[p] = _v
         elif op == "between":
             p2 = f"p{i}_2"
             # Support valFrom/valTo or value as [from,to]
             v_from = f.get("valFrom", f.get("value", [None, None])[0] if isinstance(f.get("value"), (list, tuple)) else None)
             v_to = f.get("valTo", f.get("value", [None, None])[1] if isinstance(f.get("value"), (list, tuple)) else None)
-            v_from = _norm_dt_val(v_from)
-            v_to = _norm_dt_val(v_to)
-            if date_kind == "datetime" and _is_date_only(v_from) and _is_date_only(v_to):
-                # date-picker range on a TIMESTAMP column: include the whole end day
-                clauses.append(
-                    f"{qfield} >= TO_DATE(:{p}, 'YYYY-MM-DD') "
-                    f"AND {qfield} < TO_DATE(:{p2}, 'YYYY-MM-DD') + 1")
+            if _numcol and (not _num_safe_for_compare(v_from, _tstr) or not _num_safe_for_compare(v_to, _tstr)):
+                clauses.append("1=0")
+            elif is_date and (not _date_safe_for_compare(_norm_dt_val(v_from)) or not _date_safe_for_compare(_norm_dt_val(v_to))):
+                clauses.append("1=0")
             else:
-                clauses.append(f"{qfield} BETWEEN {_dbind(':'+p, v_from, is_date)} AND {_dbind(':'+p2, v_to, is_date)}")
-            params[p] = v_from
-            params[p2] = v_to
+                v_from = v_from if _numcol else _norm_dt_val(v_from)
+                v_to = v_to if _numcol else _norm_dt_val(v_to)
+                if date_kind == "datetime" and _is_date_only(v_from) and _is_date_only(v_to):
+                    # date-picker range on a TIMESTAMP column: include the whole end day
+                    clauses.append(
+                        f"{qfield} >= TO_DATE(:{p}, 'YYYY-MM-DD') "
+                        f"AND {qfield} < TO_DATE(:{p2}, 'YYYY-MM-DD') + 1")
+                else:
+                    clauses.append(f"{qfield} BETWEEN {_dbind(':'+p, v_from, is_date)} AND {_dbind(':'+p2, v_to, is_date)}")
+                params[p] = v_from
+                params[p2] = v_to
         elif op in ("before", "qabl"):
             _v = _norm_dt_val(f.get("value"))
-            clauses.append(f"{qfield} < {_dbind(':'+p, _v, True)}")
-            params[p] = _v
+            if not _date_safe_for_compare(_v):
+                clauses.append("1=0")
+            else:
+                clauses.append(f"{qfield} < {_dbind(':'+p, _v, True)}")
+                params[p] = _v
         elif op in ("after",):
             _v = _norm_dt_val(f.get("value"))
-            clauses.append(f"{qfield} > {_dbind(':'+p, _v, True)}")
-            params[p] = _v
+            if not _date_safe_for_compare(_v):
+                clauses.append("1=0")
+            else:
+                clauses.append(f"{qfield} > {_dbind(':'+p, _v, True)}")
+                params[p] = _v
         elif op in ("since", "from_date"):
             _v = _norm_dt_val(f.get("value"))
-            clauses.append(f"{qfield} >= {_dbind(':'+p, _v, True)}")
-            params[p] = _v
+            if not _date_safe_for_compare(_v):
+                clauses.append("1=0")
+            else:
+                clauses.append(f"{qfield} >= {_dbind(':'+p, _v, True)}")
+                params[p] = _v
         elif op in ("inyear", "year", "in_year"):
             _yv = _parse_year_only(f.get("value"))
             if not _yv:
@@ -748,6 +920,12 @@ def _build_where(filters: List[Dict[str, Any]], start_idx: int = 1, columns: Opt
             vals = f.get("value") or []
             if not isinstance(vals, (list, tuple)):
                 vals = [vals]
+            if _numcol:
+                vals = [v for v in vals if _num_safe_for_compare(v, _tstr)]
+            elif is_date:
+                vals = [v for v in vals if _date_safe_for_compare(_norm_dt_val(v))]
+            elif _boolcol:
+                vals = [v for v in vals if _bool_safe_for_compare(v)]
             placeholders = []
             for j, v in enumerate(vals):
                 pj = f"{p}_{j}"
@@ -756,7 +934,13 @@ def _build_where(filters: List[Dict[str, Any]], start_idx: int = 1, columns: Opt
             clauses.append(f"{qfield} IN ({', '.join(placeholders)})" if placeholders else "1=0")
         else:
             # Fallback to equals (مع توحيد عربي عند الحاجة)
-            if _needs_ar_norm(f.get("value")) and _texty:
+            if _numcol and not _num_safe_for_compare(f.get("value"), _tstr):
+                clauses.append("1=0")
+            elif is_date and not _date_safe_for_compare(_norm_dt_val(f.get("value"))):
+                clauses.append("1=0")
+            elif _boolcol and not _bool_safe_for_compare(f.get("value")):
+                clauses.append("1=0")
+            elif _needs_ar_norm(f.get("value")) and _texty:
                 clauses.append(f"{_ar_col_sql(qfield)}=:{p}")
                 params[p] = _ar_norm(f.get("value"))
             else:
@@ -2269,19 +2453,21 @@ class RMLReportEngine:
 
     @staticmethod
     def _stage_engine_of(db) -> str:
-        """'oracle' | 'postgres' — staging TEMP-table dialect for a DB wrapper."""
+        """'oracle' | 'postgres' | 'mssql' — staging TEMP-table dialect for a DB wrapper."""
         try:
             _nm = (type(db).__name__ or "").lower()
             _mod = (type(db).__module__ or "").lower()
             if "oracle" in _nm or "oracle" in _mod:
                 return "oracle"
+            if "sqlserver" in _nm or "sqlserver" in _mod or "mssql" in _nm or "mssql" in _mod:
+                return "mssql"
         except Exception:
             pass
         return "postgres"
 
     @staticmethod
     def _stage_col_type(rml_type, engine: str) -> str:
-        """Staging column type per engine (Oracle has no TIME/BOOLEAN/TEXT)."""
+        """Staging column type per engine (Oracle has no TIME/BOOLEAN/TEXT; MSSQL has no BOOLEAN/TEXT)."""
         t = str(rml_type or "").upper().strip()
         if engine == "oracle":
             if t in ("INTEGER", "INT", "SERIAL", "BOOLEAN"):
@@ -2293,6 +2479,20 @@ class RMLReportEngine:
             if t == "DATE":
                 return "DATE"
             return "VARCHAR2(4000)"
+        if engine == "mssql":
+            if t in ("INTEGER", "INT", "SERIAL", "BIGINT"):
+                return "BIGINT"
+            if t in ("NUMERIC", "DECIMAL", "FLOAT", "DOUBLE", "MONEY"):
+                return "DECIMAL(38,10)"
+            if t in ("TIMESTAMP", "DATETIME"):
+                return "DATETIME2"
+            if t == "DATE":
+                return "DATE"
+            if t == "TIME":
+                return "TIME"
+            if t == "BOOLEAN":
+                return "BIT"
+            return "NVARCHAR(MAX)"
         return RMLReportEngine._pg_col_type(rml_type)
 
     def _api_table_info(self, table_norm):
@@ -2977,12 +3177,20 @@ class RMLReportEngine:
     @staticmethod
     def _stage_normtype(t) -> str:
         s = str(t or "").lower().strip()
-        if s.startswith("timestamp"):
+        if s.startswith("timestamp") or s.startswith("datetime"):
             return "timestamp"
         if s.startswith("time"):
             return "time"
-        if "varchar" in s or s == "character varying":
+        if "varchar" in s or s in ("character varying", "text", "nvarchar"):
             return "text"
+        if s in ("bit", "boolean"):
+            return "boolean"
+        if s in ("bigint", "int", "integer", "smallint", "tinyint", "serial"):
+            return "integer"
+        if s.startswith("decimal") or s.startswith("numeric") or s in ("float", "double", "real", "money"):
+            return "numeric"
+        if s == "date":
+            return "date"
         return s
 
     def _stage_table_ready(self, db, phy, coldefs) -> bool:
@@ -2993,6 +3201,8 @@ class RMLReportEngine:
         fill → never ready (self-healing refill).
         """
         try:
+            if self._stage_engine_of(db) == "mssql":
+                return self._stage_table_ready_mssql(db, phy, coldefs)
             _cur = db.conn.cursor()
             try:
                 _cur.execute("SELECT to_regclass(%s)", (str(phy),))
@@ -3035,6 +3245,44 @@ class RMLReportEngine:
                         pass
             except Exception:
                 pass
+            return True
+        except Exception:
+            return False
+
+    def _stage_table_ready_mssql(self, db, phy, coldefs) -> bool:
+        """MSSQL variant: OBJECT_ID existence + information_schema shape match.
+
+        No rml_stage_meta on MSSQL (PG-only registry) — shape match reuses,
+        anything else refills. Best-effort, never raises.
+        """
+        try:
+            _cur = db.conn.cursor()
+            try:
+                _cur.execute("SELECT OBJECT_ID(?, 'U')", (str(phy),))
+                _row = _cur.fetchone()
+                if not _row or not _row[0]:
+                    return False
+            finally:
+                try:
+                    _cur.close()
+                except Exception:
+                    pass
+            _cur2 = db.conn.cursor()
+            try:
+                _cur2.execute(
+                    "SELECT column_name, data_type FROM information_schema.columns "
+                    "WHERE table_name=?", (str(phy),))
+                _have = {str(r[0]).lower(): self._stage_normtype(r[1]) for r in (_cur2.fetchall() or [])}
+            finally:
+                try:
+                    _cur2.close()
+                except Exception:
+                    pass
+            _want = {str(_n).lower(): self._stage_normtype(_t) for _n, _t in (coldefs or [])}
+            if not _want or set(_want) != set(_have):
+                return False
+            if any(_have.get(_k) != _v for _k, _v in _want.items()):
+                return False
             return True
         except Exception:
             return False
@@ -3176,6 +3424,7 @@ class RMLReportEngine:
                     # Reuse skips the whole fetch; refresh (or missing/changed table) refills.
                     _phy = self._stage_phy_name(_temp, coldefs)
                     _collist = ", ".join(f"{_q(_n)} {_t}" for _n, _t in coldefs)
+                    _is_ms = self._stage_engine_of(db) == "mssql"
                     if not refresh and self._stage_table_ready(db, _phy, coldefs):
                         self._report_progress({"stage": "cached", "table": str(label).lower(),
                                                "text": f"استخدام مرحلة مخزنة: {str(label).lower()}…"})
@@ -3185,19 +3434,26 @@ class RMLReportEngine:
                         _cur.execute(f"CREATE TABLE {_q(_phy)} ({_collist})")
                     except Exception as _dce:
                         _dm = str(_dce)
-                        if "permission denied" in _dm.lower() or "42501" in _dm:
+                        if "permission denied" in _dm.lower() or "42501" in _dm or "(262)" in _dm:
+                            if self._stage_engine_of(db) == "mssql":
+                                raise ValueError(
+                                    "حساب SQL Server لا يملك صلاحية إنشاء الجداول المؤقتة "
+                                    "(CREATE TABLE permission denied) — اطلب من الـ DBA منحه، "
+                                    "أو شغّل التقارير أحادية الاتصال مباشرة (لا تحتاج ترحيلاً).")
                             raise ValueError(
                                 "حساب قاعدة البيانات لا يملك صلاحية إنشاء جداول الترحيل — "
                                 "نفّذ مرة واحدة كـ DBA: GRANT CREATE ON SCHEMA public TO <user>.")
                         raise
                     if data:
+                        _ph_ins = "?" if _is_ms else "%s"
                         _cur.executemany(
                             f"INSERT INTO {_q(_phy)} ({', '.join(_q(_n) for _n, _t in coldefs)}) "
-                            f"VALUES ({', '.join(['%s'] * len(coldefs))})", data)
+                            f"VALUES ({', '.join([_ph_ins] * len(coldefs))})", data)
                     db.conn.commit()
                     # -1 = filling in progress (streaming path sets the real count
                     # afterwards); an interrupted fill is never treated as ready.
-                    self._stage_touch_meta(db, _phy, len(data) if data else -1)
+                    if not _is_ms:
+                        self._stage_touch_meta(db, _phy, len(data) if data else -1)
                     return _phy
             except Exception as _e:
                 try:
@@ -3367,8 +3623,25 @@ class RMLReportEngine:
                                    "text": f"استخدام مرحلة مخزنة: {str(table_norm).lower()}…"})
             return _phy0, _cols_ret
         _eff = self._write_temp_table(db, _temp, _coldefs, [], table_norm.lower(), refresh=refresh)
+        # Streaming always refills fully: clear any reused rows first (idempotent,
+        # also self-heals interrupted fills on engines without a meta registry).
+        _cur0 = db.conn.cursor()
+        try:
+            _cur0.execute(f"DELETE FROM {_q(_eff)}")
+            db.conn.commit()
+        except Exception:
+            try:
+                db.conn.rollback()
+            except Exception:
+                pass
+        finally:
+            try:
+                _cur0.close()
+            except Exception:
+                pass
         _plan = self._sqlserver_plan(table_norm, info, info.get("row"))
         _cur = db.conn.cursor()
+        _is_ms_stream = (self._stage_engine_of(db) == "mssql")
         _use_ev = (self._stage_engine_of(db) == "postgres")
         try:
             from psycopg2.extras import execute_values as _ev
@@ -3376,8 +3649,9 @@ class RMLReportEngine:
             _ev = None
             _use_ev = False
         try:
+            _ph_s = "?" if _is_ms_stream else "%s"
             _ins = (f'INSERT INTO {_q(_eff)} ({", ".join(_q(_n) for _n, _t in _coldefs)}) '
-                    f'VALUES ({", ".join(["%s"] * len(_coldefs))})')
+                    f'VALUES ({", ".join([_ph_s] * len(_coldefs))})')
             _ev_sql = (f'INSERT INTO {_q(_eff)} ({", ".join(_q(_n) for _n, _t in _coldefs)}) VALUES %s')
             _first = True
             _staged_rows = 0
@@ -3422,7 +3696,8 @@ class RMLReportEngine:
                                            "rows": _staged_rows,
                                            "text": f"ترحيل {str(table_norm).lower()}… {_staged_rows:,}"})
             db.conn.commit()
-            self._stage_touch_meta(db, _eff, _staged_rows)
+            if self._stage_engine_of(db) != "mssql":
+                self._stage_touch_meta(db, _eff, _staged_rows)
         except Exception as _e:
             try:
                 db.conn.rollback()
@@ -3451,7 +3726,7 @@ class RMLReportEngine:
         _temp = re.sub(r"[^a-z0-9_]", "_", f"rml_api_{_gid}_{table_norm}".lower())
         _coldefs = [(str(getattr(_f, "name", "")), self._stage_col_type(getattr(_f, "data_type", None), self._stage_engine_of(db))) for _f in _flds]
         _cols_ret2 = [(str(getattr(_f, "name", "")), str(getattr(_f, "data_type", None) or "")) for _f in _flds]
-        if ((not refresh) and self._stage_engine_of(db) == "postgres"
+        if ((not refresh) and self._stage_engine_of(db) in ("postgres", "mssql")
                 and self._stage_table_ready(db, self._stage_phy_name(_temp, _coldefs), _coldefs)):
             self._report_progress({"stage": "cached", "table": str(table_norm).lower(),
                                    "text": f"استخدام مرحلة مخزنة: {str(table_norm).lower()}…"})
