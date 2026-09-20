@@ -59,6 +59,11 @@
         .uidp-day.sel{background:#4f46e5 !important; color:#fff !important;}
         .uidp-hint{font-size:9px; color:#94a3b8; text-align:center; margin-top:6px;}
         .uidp-err{border-color:#f43f5e !important; box-shadow:0 0 0 2px rgba(244,63,94,.15);}
+        /* ── فئات قابلة للطي (معممة على كل الشاشات): details.urs-cat + data-persist ── */
+        .urs-cat > summary{list-style:none; cursor:pointer;}
+        .urs-cat > summary::-webkit-details-marker{display:none;}
+        .urs-cat > summary .chev{transition:transform .2s;}
+        .urs-cat[open] > summary .chev{transform:rotate(180deg);}
         {% block head_css %}{% endblock %}
     </style>
     {% block head_extra %}{% endblock %}
@@ -304,6 +309,32 @@
         try{ if(history.length > 1){ history.back(); return; } }catch(e){}
         location.href = '/';
     }
+    // ── فئات قابلة للطي: حفظ الحالة + فتح تلقائي عند الرابط النشط ──
+    (function(){
+        function detailsKey(el){ return 'urs_details_' + (el.getAttribute('data-persist') || el.id || ''); }
+        function restoreUrsDetails(){
+            document.querySelectorAll('details[data-persist]').forEach(function(el){
+                var k = detailsKey(el);
+                try{
+                    var v = localStorage.getItem(k);
+                    if(v === '0') el.removeAttribute('open');
+                    else if(v === '1') el.setAttribute('open', '');
+                }catch(e){}
+                try{
+                    var links = el.querySelectorAll('a[href]');
+                    for(var i = 0; i < links.length; i++){
+                        var h = links[i].getAttribute('href');
+                        if(h && h !== '#' && location.pathname === h){ el.setAttribute('open', ''); break; }
+                    }
+                }catch(e){}
+                el.addEventListener('toggle', function(){
+                    try{ localStorage.setItem(detailsKey(el), el.open ? '1' : '0'); }catch(e){}
+                });
+            });
+        }
+        if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', restoreUrsDetails);
+        else restoreUrsDetails();
+    })();
     // ── تقاريري: تقارير مفضلة عبر كل التطبيقات (localStorage: my_reports) ──
     function getMyReports(){ try{ return JSON.parse(localStorage.getItem('my_reports')||'[]'); }catch(e){ return []; } }
     function saveMyReports(l){ try{ localStorage.setItem('my_reports', JSON.stringify(l)); }catch(e){} }

@@ -26,11 +26,14 @@
 
         <div class="flex-1 overflow-y-auto p-3 space-y-4">
             <!-- الادخالات -->
-            <div>
-                <h3 class="text-xs font-bold text-gray-700 flex items-center gap-2 mb-2">
+            <details class="urs-cat" data-persist="sideSecForms" open>
+                <summary class="text-xs font-bold text-gray-700 flex items-center gap-2 cursor-pointer list-none">
                     <i class="fa-solid fa-pen-to-square text-indigo-600"></i>
-                    الادخالات
-                </h3>
+                    <span class="flex-1">الادخالات</span>
+                    <span class="bg-indigo-100 text-indigo-700 text-[10px] px-2 py-0.5 rounded-full">{{ fml_files|length }}</span>
+                    <i class="fa-solid fa-chevron-down chev text-[10px] text-slate-400"></i>
+                </summary>
+                <div class="pt-2">
                 {% if fml_files %}
                     <div class="space-y-1" id="sideFmlList">
                         {% for f in fml_files %}
@@ -50,15 +53,19 @@
                     <p class="text-xs text-gray-400">لا توجد ادخالات</p>
                 {% endif %}
                 <button onclick="location.href='/app/{{ app_name }}/forms-designer/'" class="w-full mt-2 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1"><i class="fa-solid fa-plus text-[10px]"></i> مصمم النماذج</button>
-            </div>
+                </div>
+            </details>
 
             {% if app_name != 'settings' %}
             <!-- التقارير -->
-            <div>
-                <h3 class="text-xs font-bold text-gray-700 flex items-center gap-2 mb-2">
+            <details class="urs-cat" data-persist="sideSecReports" open>
+                <summary class="text-xs font-bold text-gray-700 flex items-center gap-2 cursor-pointer list-none">
                     <i class="fa-solid fa-chart-line text-emerald-600"></i>
-                    التقارير
-                </h3>
+                    <span class="flex-1">التقارير</span>
+                    <span class="bg-emerald-100 text-emerald-700 text-[10px] px-2 py-0.5 rounded-full">{{ rml_files|length }}</span>
+                    <i class="fa-solid fa-chevron-down chev text-[10px] text-slate-400"></i>
+                </summary>
+                <div class="pt-2">
                 {% if rml_files %}
                     <div class="space-y-1" id="sideRmlList">
                         {% for f in rml_files %}
@@ -76,16 +83,20 @@
                     <p class="text-xs text-gray-400">لا توجد تقارير</p>
                 {% endif %}
                 <a href="/app/{{ app_name }}/report-designer/" class="w-full mt-2 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1"><i class="fa-solid fa-plus text-[10px]"></i> إضافة تقرير</a>
-            </div>
+                </div>
+            </details>
             {% endif %}
 
             {% if app_rules %}
             <!-- قواعد الأعمال -->
-            <div>
-                <h3 class="text-xs font-bold text-gray-700 flex items-center gap-2 mb-2">
+            <details class="urs-cat" data-persist="sideSecRules" open>
+                <summary class="text-xs font-bold text-gray-700 flex items-center gap-2 cursor-pointer list-none">
                     <i class="fa-solid fa-scale-balanced text-amber-600"></i>
-                    قواعد الأعمال
-                </h3>
+                    <span class="flex-1">قواعد الأعمال</span>
+                    <span class="bg-amber-100 text-amber-700 text-[10px] px-2 py-0.5 rounded-full">{{ app_rules|length }}</span>
+                    <i class="fa-solid fa-chevron-down chev text-[10px] text-slate-400"></i>
+                </summary>
+                <div class="pt-2">
                 <div class="space-y-1" id="sideRulesList">
                     {% for r in app_rules %}
                     <button onclick="openRulePolicies('{{ r.file|escapejs }}','{{ r.name|escapejs }}')" data-search="{{ r.display|default:r.name }} {{ r.description|default:'' }} {{ r.file }}" class="side-rule-item w-full flex items-center gap-2 p-2.5 rounded-xl hover:bg-amber-50 border border-transparent hover:border-amber-200 transition text-right">
@@ -97,7 +108,8 @@
                     </button>
                     {% endfor %}
                 </div>
-            </div>
+                </div>
+            </details>
             {% endif %}
 
             <!-- Actions -->
