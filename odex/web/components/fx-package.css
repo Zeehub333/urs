@@ -1,0 +1,34 @@
+/* ── URS central UI package: input widgets (موحد لكل المدخلات) ──
+   Single source of truth for the input-widgets look (the package).
+   Served via staticfiles from odex/web. Variant catalogs nearby are untouched. */
+.fx-label{display:block; font-size:13px; font-weight:800; color:#1e293b; margin-bottom:6px;}
+.fx-label .req{color:#e11d48;}
+.fx-label .fx-ico{color:#6366f1; margin-inline-end:4px;}
+.fx-inp{width:100%; background:#fff; border:1.5px solid #e2e8f0; border-radius:12px; padding:9px 14px; font-size:13px; color:#1e293b; transition:border-color .15s, box-shadow .15s;}
+.fx-inp::placeholder{color:#94a3b8;}
+.fx-inp:focus{outline:none; border-color:#6366f1; box-shadow:0 0 0 3px rgba(99,102,241,.12);}
+.fx-inp:disabled{opacity:.6;}
+select.fx-inp{appearance:none; -webkit-appearance:none; padding-inline-end:2.25rem; background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>"); background-repeat:no-repeat; background-position:left .8rem center; background-size:14px; cursor:pointer;}
+textarea.fx-inp{resize:vertical; min-height:74px;}
+.fx-wrap{position:relative;}
+.fx-wrap > .fx-ic{position:absolute; top:50%; transform:translateY(-50%); inset-inline-start:12px; color:#94a3b8; font-size:13px; pointer-events:none;}
+.fx-wrap > input.fx-inp{padding-inline-start:2.4rem;}
+.fx-switch{position:relative; display:inline-block; width:44px; height:24px; flex:none; cursor:pointer;}
+.fx-switch input{position:absolute; opacity:0; width:100%; height:100%; margin:0; cursor:pointer;}
+.fx-switch .fx-track{position:absolute; inset:0; border-radius:999px; background:#cbd5e1; transition:background .18s;}
+.fx-switch .fx-knob{position:absolute; top:3px; inset-inline-start:3px; width:18px; height:18px; border-radius:999px; background:#fff; box-shadow:0 1px 3px rgba(0,0,0,.25); transition:transform .18s;}
+.fx-switch input:checked + .fx-track{background:#4f46e5;}
+.fx-switch input:checked + .fx-track .fx-knob{transform:translateX(-20px);}
+.fx-checkrow{display:flex; align-items:center; gap:8px; padding:7px 10px; border-radius:10px; cursor:pointer; font-size:12px;}
+.fx-checkrow:hover{background:#f8fafc;}
+.fx-checkrow input{width:16px; height:16px; accent-color:#4f46e5; flex:none; cursor:pointer;}
+.fx-chip{display:inline-flex; align-items:center; gap:6px; padding:5px 12px; border-radius:999px; font-size:12px; font-weight:700;}
+.fx-chip-ind{background:#4f46e5; color:#fff; box-shadow:0 1px 4px rgba(79,70,229,.35);}
+.fx-chip-em{background:#ecfdf5; color:#047857; border:1px solid #a7f3d0;}
+.fx-chip button{opacity:.75;} .fx-chip button:hover{opacity:1;}
+.fx-radio{width:16px; height:16px; accent-color:#4f46e5; flex:none; cursor:pointer;}
+.fx-box{background:#fff; border:1.5px solid #e2e8f0; border-radius:12px;}
+.fx-btn{display:inline-flex; align-items:center; gap:6px; padding:9px 14px; border-radius:12px; font-size:12px; font-weight:800; transition:filter .15s, background .15s;}
+.fx-btn-ind{background:#4f46e5; color:#fff;} .fx-btn-ind:hover{background:#4338ca;}
+.fx-btn-soft{background:#eef2ff; color:#4f46e5;} .fx-btn-soft:hover{background:#e0e7ff;}
+.fx-pill{display:inline-flex; align-items:center; gap:6px; padding:5px 14px; border-radius:999px; font-size:12px; font-weight:800;}
