@@ -25,26 +25,29 @@
         </div>
 
         <div class="flex-1 overflow-y-auto p-3 space-y-4">
-            <!-- الادخالات -->
-            <details class="urs-cat" data-persist="sideSecForms" open>
-                <summary class="text-xs font-bold text-gray-700 flex items-center gap-2 cursor-pointer list-none">
-                    <i class="fa-solid fa-pen-to-square text-indigo-600"></i>
-                    <span class="flex-1">الادخالات</span>
-                    <span class="bg-indigo-100 text-indigo-700 text-[10px] px-2 py-0.5 rounded-full">{{ fml_files|length }}</span>
-                    <i class="fa-solid fa-chevron-down chev text-[10px] text-slate-400"></i>
-                </summary>
-                <div class="pt-2">
-                {% if fml_files %}
-                    <div class="space-y-2" id="sideFmlList">
-                        {% for g in fml_by_category %}
-                        <details open class="urs-cat urs-sub border border-slate-100 rounded-xl overflow-hidden" data-persist="ad{{ app_name }}F{{ forloop.counter }}">
-                            <summary class="cursor-pointer list-none bg-slate-50 px-2.5 py-2 flex items-center gap-2">
-                                <i class="fa-solid fa-chevron-down chev text-[10px] text-slate-400"></i>
-                                <span class="flex-1 text-xs font-bold text-slate-700 truncate">{{ g.name }}</span>
-                                <span class="text-[10px] text-slate-500 bg-white border border-slate-200 px-1.5 py-0.5 rounded-full">{{ g.files|length }}</span>
-                            </summary>
-                            <div class="p-1.5 space-y-1">
-                                {% for f in g.files %}
+            <!-- الفئات الموحدة: كل فئة وتحتها ادخالاتها وتقاريرها -->
+            <div>
+                <h3 class="text-xs font-bold text-gray-700 flex items-center gap-2 mb-2">
+                    <i class="fa-solid fa-layer-group text-indigo-600"></i>
+                    <span class="flex-1">الفئات</span>
+                    <button onclick="toggleSideCats(true)" class="font-normal text-indigo-600 hover:text-indigo-800" title="توسيع الكل">توسيع</button>
+                    <span class="text-slate-300 font-normal">|</span>
+                    <button onclick="toggleSideCats(false)" class="font-normal text-slate-400 hover:text-slate-600" title="طي الكل">طي</button>
+                </h3>
+                <div class="space-y-2" id="sideUniList">
+                    {% for g in side_groups %}
+                    <details open data-side-cat class="urs-cat urs-sub border border-slate-100 rounded-xl overflow-hidden" data-persist="ad{{ app_name }}U{{ forloop.counter }}">
+                        <summary class="cursor-pointer list-none bg-slate-50 px-2.5 py-2 flex items-center gap-2">
+                            <i class="fa-solid fa-chevron-down chev text-[10px] text-slate-400"></i>
+                            <span class="flex-1 text-xs font-bold text-slate-700 truncate">{{ g.name }}</span>
+                            {% if g.fml %}<span class="text-[10px] text-indigo-600 bg-indigo-50 border border-indigo-100 px-1.5 py-0.5 rounded-full" title="ادخالات">{{ g.fml|length }}</span>{% endif %}
+                            {% if g.rml %}<span class="text-[10px] text-emerald-600 bg-emerald-50 border border-emerald-100 px-1.5 py-0.5 rounded-full" title="تقارير">{{ g.rml|length }}</span>{% endif %}
+                        </summary>
+                        <div class="p-1.5 space-y-2">
+                            {% if g.fml %}
+                            <div class="text-[10px] font-bold text-indigo-500 px-1">الادخالات</div>
+                            <div class="space-y-1">
+                                {% for f in g.fml %}
                         <div class="flex items-center gap-1 group side-fml-item" data-search="{{ f.metadata.displayName }} {{ f.metadata.category|default:'' }} {{ f.metadata.description|default:'' }}">
                             <a href="{% if f.virtual %}{{ f.url }}{% else %}/app/{{ app_name }}/form/{{ f.file }}/{% endif %}" class="flex-1 block p-2.5 rounded-xl hover:bg-slate-50 border border-transparent hover:border-slate-200 transition text-right">
                                 <div class="text-xs font-semibold text-gray-800 truncate">{% if f.virtual %}<i class="fa-solid fa-table-list text-indigo-500"></i> {% endif %}{{ f.metadata.displayName }}</div>
@@ -57,37 +60,12 @@
                         </div>
                                 {% endfor %}
                             </div>
-                        </details>
-                        {% endfor %}
-                    </div>
-                {% else %}
-                    <p class="text-xs text-gray-400">لا توجد ادخالات</p>
-                {% endif %}
-                <button onclick="location.href='/app/{{ app_name }}/forms-designer/'" class="w-full mt-2 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1"><i class="fa-solid fa-plus text-[10px]"></i> مصمم النماذج</button>
-                </div>
-            </details>
-
-            {% if app_name != 'settings' %}
-            <!-- التقارير -->
-            <details class="urs-cat" data-persist="sideSecReports" open>
-                <summary class="text-xs font-bold text-gray-700 flex items-center gap-2 cursor-pointer list-none">
-                    <i class="fa-solid fa-chart-line text-emerald-600"></i>
-                    <span class="flex-1">التقارير</span>
-                    <span class="bg-emerald-100 text-emerald-700 text-[10px] px-2 py-0.5 rounded-full">{{ rml_files|length }}</span>
-                    <i class="fa-solid fa-chevron-down chev text-[10px] text-slate-400"></i>
-                </summary>
-                <div class="pt-2">
-                {% if rml_files %}
-                    <div class="space-y-2" id="sideRmlList">
-                        {% for g in rml_by_category %}
-                        <details open class="urs-cat urs-sub border border-slate-100 rounded-xl overflow-hidden" data-persist="ad{{ app_name }}R{{ forloop.counter }}">
-                            <summary class="cursor-pointer list-none bg-slate-50 px-2.5 py-2 flex items-center gap-2">
-                                <i class="fa-solid fa-chevron-down chev text-[10px] text-slate-400"></i>
-                                <span class="flex-1 text-xs font-bold text-slate-700 truncate">{{ g.name }}</span>
-                                <span class="text-[10px] text-slate-500 bg-white border border-slate-200 px-1.5 py-0.5 rounded-full">{{ g.files|length }}</span>
-                            </summary>
-                            <div class="p-1.5 space-y-1">
-                                {% for f in g.files %}
+                            {% endif %}
+                            {% if g.rml %}
+                            {% if app_name != 'settings' %}
+                            <div class="text-[10px] font-bold text-emerald-600 px-1">التقارير</div>
+                            <div class="space-y-1">
+                                {% for f in g.rml %}
                         <div class="flex items-center gap-1 group side-rml-item" data-search="{{ f.metadata.displayName }} {{ f.metadata.category|default:'' }} {{ f.metadata.description|default:'' }}">
                             <a href="/app/{{ app_name }}/report/{{ f.file }}/" class="flex-1 block p-2.5 rounded-xl hover:bg-slate-50 border border-transparent hover:border-slate-200 transition text-right">
                                 <div class="text-xs font-semibold text-gray-800 truncate">{{ f.metadata.displayName }}</div>
@@ -98,16 +76,18 @@
                         </div>
                                 {% endfor %}
                             </div>
-                        </details>
-                        {% endfor %}
-                    </div>
-                {% else %}
-                    <p class="text-xs text-gray-400">لا توجد تقارير</p>
-                {% endif %}
-                <a href="/app/{{ app_name }}/report-designer/" class="w-full mt-2 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1"><i class="fa-solid fa-plus text-[10px]"></i> إضافة تقرير</a>
+                            {% endif %}
+                            {% endif %}
+                        </div>
+                    </details>
+                    {% endfor %}
+                    {% if not fml_files and not rml_files %}<p class="text-xs text-gray-400">لا توجد عناصر</p>{% endif %}
                 </div>
-            </details>
-            {% endif %}
+                <div class="flex gap-2 mt-2">
+                    <button onclick="location.href='/app/{{ app_name }}/forms-designer/'" class="flex-1 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1"><i class="fa-solid fa-plus text-[10px]"></i> مصمم النماذج</button>
+                    {% if app_name != 'settings' %}<a href="/app/{{ app_name }}/report-designer/" class="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1"><i class="fa-solid fa-plus text-[10px]"></i> إضافة تقرير</a>{% endif %}
+                </div>
+            </div>
 
             {% if app_rules %}
             <!-- قواعد الأعمال -->
@@ -354,6 +334,9 @@
         }
         // --- Overview elegant search (forms + reports) ---
         let overviewFilterType = 'all';
+        function toggleSideCats(open) {
+            document.querySelectorAll('details[data-side-cat]').forEach(d => { d.open = !!open; });
+        }
         function setOverviewFilter(t){
             overviewFilterType = t;
             document.querySelectorAll('.overview-filter-btn').forEach(b=>{

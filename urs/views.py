@@ -187,6 +187,28 @@ def _group_files_by_category(files):
         groups[idx[_cat]]["files"].append(_f)
     return groups
 
+def _unified_side_groups(fml_files, rml_files):
+    """One group per shared category name holding BOTH its forms and reports.
+
+    [{name, fml: [...], rml: [...]}] — fml categories first-seen, then rml-only ones.
+    """
+    groups, idx = [], {}
+    def _cat(m):
+        return ((m or {}).get("category") or "عام").strip() or "عام"
+    for _f in fml_files or []:
+        _c = _cat(_f.get("metadata"))
+        if _c not in idx:
+            idx[_c] = len(groups)
+            groups.append({"name": _c, "fml": [], "rml": []})
+        groups[idx[_c]]["fml"].append(_f)
+    for _f in rml_files or []:
+        _c = _cat(_f.get("metadata"))
+        if _c not in idx:
+            idx[_c] = len(groups)
+            groups.append({"name": _c, "fml": [], "rml": []})
+        groups[idx[_c]]["rml"].append(_f)
+    return groups
+
 def _find_fml_path(fml_name: str, app_name: str | None = None):
     """Locate FML file by name (with or without extension) optionally scoped to app"""
     from fmlk_engine.compiler import FMLKFormCompiler
@@ -872,6 +894,7 @@ def app_detail(request, app_name):
         "app_rules": app_rules,
         "fml_by_category": _group_files_by_category(fml_files),
         "rml_by_category": _group_files_by_category(rml_files),
+        "side_groups": _unified_side_groups(fml_files, rml_files),
     })
 
 # ── Player Views (moved into urs/templates) ──────────────────────────────────
@@ -908,6 +931,7 @@ def app_form_player(request, app_name, fml_file):
         "fml_by_category": fml_by_category,
         "rml_files": rml_files,
         "rml_by_category": _group_files_by_category(rml_files),
+        "side_groups": _unified_side_groups(fml_files, rml_files),
     })
 
 def app_report_player(request, app_name, rml_file):
@@ -968,6 +992,7 @@ def app_report_player(request, app_name, rml_file):
         "rml_files": rml_files,
         "fml_by_category": _group_files_by_category(fml_files),
         "rml_by_category": _group_files_by_category(rml_files),
+        "side_groups": _unified_side_groups(fml_files, rml_files),
     })
 
 def app_report_designer(request, app_name):
