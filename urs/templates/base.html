@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
+    {% load static %}
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}النظام ERP{% endblock %}</title>
@@ -69,6 +70,7 @@
         {% block head_css %}{% endblock %}
     </style>
     {% block head_extra %}{% endblock %}
+    <link rel="stylesheet" href="{% static 'components/fx-package.css' %}">
 </head>
 <body class="bg-gray-100 text-gray-800 flex h-screen overflow-hidden">
 <div id="notifyStack" class="fixed top-4 left-1/2 -translate-x-1/2 z-[100] flex flex-col items-center pointer-events-none"></div>

@@ -84,8 +84,8 @@
                     {% if not fml_files and not rml_files %}<p class="text-xs text-gray-400">لا توجد عناصر</p>{% endif %}
                 </div>
                 <div class="flex gap-2 mt-2">
-                    <button onclick="location.href='/app/{{ app_name }}/forms-designer/'" class="flex-1 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1"><i class="fa-solid fa-plus text-[10px]"></i> مصمم النماذج</button>
-                    {% if app_name != 'settings' %}<a href="/app/{{ app_name }}/report-designer/" class="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1"><i class="fa-solid fa-plus text-[10px]"></i> إضافة تقرير</a>{% endif %}
+                    <button onclick="location.href='/app/{{ app_name }}/forms-designer/'" class="flex-1 justify-center fx-btn fx-btn-ind"><i class="fa-solid fa-plus text-[10px]"></i> مصمم النماذج</button>
+                    {% if app_name != 'settings' %}<a href="/app/{{ app_name }}/report-designer/" class="flex-1 justify-center fx-btn fx-btn-em"><i class="fa-solid fa-plus text-[10px]"></i> إضافة تقرير</a>{% endif %}
                 </div>
             </div>
 

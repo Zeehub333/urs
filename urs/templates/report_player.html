@@ -318,17 +318,17 @@
                 <button onclick="closeTagEditor()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
             </div>
             <div class="p-5 space-y-3 text-xs">
-                <div><label class="block font-semibold text-slate-700 mb-1">العمود</label><select id="tagEditField" onchange="refreshTagEditorOps()" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"></select></div>
-                <div><label class="block font-semibold text-slate-700 mb-1">العملية</label><select id="tagEditOp" onchange="refreshTagEditorVals()" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"></select></div>
-                <div id="tagEditSingleWrap"><label class="block font-semibold text-slate-700 mb-1">القيمة</label><input id="tagEditValue" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"></div>
+                <div><label class="fx-label">العمود</label><select id="tagEditField" onchange="refreshTagEditorOps()" class="fx-inp"></select></div>
+                <div><label class="fx-label">العملية</label><select id="tagEditOp" onchange="refreshTagEditorVals()" class="fx-inp"></select></div>
+                <div id="tagEditSingleWrap"><label class="fx-label">القيمة</label><input id="tagEditValue" class="fx-inp"></div>
                 <div id="tagEditRangeWrap" class="hidden grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div><label class="block font-semibold text-slate-700 mb-1">من</label><input id="tagEditValFrom" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"></div>
-                    <div><label class="block font-semibold text-slate-700 mb-1">إلى</label><input id="tagEditValTo" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"></div>
+                    <div><label class="fx-label">من</label><input id="tagEditValFrom" class="fx-inp"></div>
+                    <div><label class="fx-label">إلى</label><input id="tagEditValTo" class="fx-inp"></div>
                 </div>
             </div>
             <div class="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2">
-                <button onclick="closeTagEditor()" class="px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs">إلغاء</button>
-                <button onclick="saveTagEditor()" class="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold">حفظ</button>
+                <button onclick="closeTagEditor()" class="fx-btn fx-btn-slate">إلغاء</button>
+                <button onclick="saveTagEditor()" class="fx-btn fx-btn-ind">حفظ</button>
             </div>
         </div>
     </div>
@@ -451,19 +451,19 @@
                     <i class="fa-solid fa-sliders text-indigo-600"></i> تصفية متقدمة
                 </h3>
                 <div class="flex items-center gap-2">
-                    <button onclick="closeAdvancedFilterModal()" class="px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded-xl text-xs">إلغاء</button>
-                    <button onclick="applyAdvancedFilter()" class="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-xl shadow-md shadow-indigo-100 text-xs">تطبيق التصفية</button>
+                    <button onclick="closeAdvancedFilterModal()" class="fx-btn fx-btn-slate">إلغاء</button>
+                    <button onclick="applyAdvancedFilter()" class="fx-btn fx-btn-ind">تطبيق التصفية</button>
                     <button onclick="closeAdvancedFilterModal()" class="text-slate-400 hover:text-slate-600 ms-1"><i class="fa-solid fa-xmark text-base"></i></button>
                 </div>
             </div>
             <div class="p-6 space-y-4 text-xs overflow-y-auto custom-scroll min-h-0">
                 <div>
-                    <label class="block font-semibold text-slate-700 mb-1">اختر الحقل:</label>
-                    <select id="advFilterField" onchange="updateAdvOperators()" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 font-medium focus:outline-none focus:border-indigo-500"></select>
+                    <label class="fx-label">اختر الحقل:</label>
+                    <select id="advFilterField" onchange="updateAdvOperators()" class="fx-inp font-medium"></select>
                 </div>
                 <div>
-                    <label class="block font-semibold text-slate-700 mb-1">عملية التصفية:</label>
-                    <select id="advFilterOp" onchange="toggleAdvRangeInputs()" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 font-medium focus:outline-none focus:border-indigo-500">
+                    <label class="fx-label">عملية التصفية:</label>
+                    <select id="advFilterOp" onchange="toggleAdvRangeInputs()" class="fx-inp font-medium">
                         <option value="equals">يساوي</option>
                         <option value="contains">يحتوي على</option>
                         <option value="gt">أكبر من</option>
@@ -472,17 +472,17 @@
                     </select>
                 </div>
                 <div id="advSingleValContainer">
-                    <label class="block font-semibold text-slate-700 mb-1">القيمة:</label>
-                    <input type="text" id="advFilterValue" placeholder="أدخل القيمة..." class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500">
+                    <label class="fx-label">القيمة:</label>
+                    <input type="text" id="advFilterValue" placeholder="أدخل القيمة..." class="fx-inp">
                 </div>
                 <div id="advRangeValContainer" class="hidden grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
-                        <label class="block font-semibold text-slate-700 mb-1">من:</label>
-                        <input type="text" id="advFilterValFrom" placeholder="القيمة الصغرى / البداية" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500">
+                        <label class="fx-label">من:</label>
+                        <input type="text" id="advFilterValFrom" placeholder="القيمة الصغرى / البداية" class="fx-inp">
                     </div>
                     <div>
-                        <label class="block font-semibold text-slate-700 mb-1">إلى:</label>
-                        <input type="text" id="advFilterValTo" placeholder="القيمة الكبرى / النهاية" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500">
+                        <label class="fx-label">إلى:</label>
+                        <input type="text" id="advFilterValTo" placeholder="القيمة الكبرى / النهاية" class="fx-inp">
                     </div>
                 </div>
             </div>

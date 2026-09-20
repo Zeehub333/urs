@@ -1,7 +1,5 @@
 {% extends "base.html" %}
-{% load static %}
 {% block title %}{{ app.ar }} — {{ fml_metadata.displayName }} — مشغل الادخالات{% endblock %}
-{% block head_extra %}<link rel="stylesheet" href="{% static 'components/fx-package.css' %}">{% endblock %}
 {% block head_css %}
         .fmlk-tab-active { background: #4f46e5; color: white; border-color: #4f46e5; }
         .fmlk-category { border: 1px solid #e2e8f0; border-radius: 12px; background: white; }
@@ -268,12 +266,12 @@
             </div>
             <div class="p-6 space-y-4 text-xs overflow-y-auto custom-scroll min-h-0">
                 <div>
-                    <label class="block font-semibold text-slate-700 mb-1">اختر الحقل:</label>
-                    <select id="advFilterField" onchange="updateAdvOperators()" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 font-medium focus:outline-none focus:border-indigo-500"></select>
+                    <label class="fx-label">اختر الحقل:</label>
+                    <select id="advFilterField" onchange="updateAdvOperators()" class="fx-inp font-medium"></select>
                 </div>
                 <div>
-                    <label class="block font-semibold text-slate-700 mb-1">عملية التصفية:</label>
-                    <select id="advFilterOp" onchange="toggleAdvRangeInputs()" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 font-medium focus:outline-none focus:border-indigo-500">
+                    <label class="fx-label">عملية التصفية:</label>
+                    <select id="advFilterOp" onchange="toggleAdvRangeInputs()" class="fx-inp font-medium">
                         <option value="equals">يساوي</option>
                         <option value="contains">يحتوي على</option>
                         <option value="gt">أكبر من</option>
@@ -282,29 +280,29 @@
                     </select>
                 </div>
                 <div id="advSingleValContainer">
-                    <label class="block font-semibold text-slate-700 mb-1">القيمة:</label>
-                    <input type="text" id="advFilterValue" placeholder="أدخل القيمة..." class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500">
+                    <label class="fx-label">القيمة:</label>
+                    <input type="text" id="advFilterValue" placeholder="أدخل القيمة..." class="fx-inp">
                 </div>
                 <div id="advRangeValContainer" class="hidden grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
-                        <label class="block font-semibold text-slate-700 mb-1">من:</label>
-                        <input type="text" id="advFilterValFrom" placeholder="القيمة الصغرى / البداية" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500">
+                        <label class="fx-label">من:</label>
+                        <input type="text" id="advFilterValFrom" placeholder="القيمة الصغرى / البداية" class="fx-inp">
                     </div>
                     <div>
-                        <label class="block font-semibold text-slate-700 mb-1">إلى:</label>
-                        <input type="text" id="advFilterValTo" placeholder="القيمة الكبرى / النهاية" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500">
+                        <label class="fx-label">إلى:</label>
+                        <input type="text" id="advFilterValTo" placeholder="القيمة الكبرى / النهاية" class="fx-inp">
                     </div>
                 </div>
                 <div class="border-t border-slate-100 pt-3">
-                    <label class="block font-semibold text-slate-700 mb-1">نماذج محفوظة (الشروط + طريقة الجمع):</label>
+                    <label class="fx-label">نماذج محفوظة (الشروط + طريقة الجمع):</label>
                     <div class="flex gap-1.5">
-                        <select id="advPresetSel" class="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-2 py-2 text-slate-800 focus:outline-none focus:border-indigo-500"><option value="">— نموذج محفوظ —</option></select>
-                        <button onclick="applyAdvPreset()" title="تحميل النموذج المحدد" class="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold">تحميل</button>
-                        <button onclick="deleteAdvPreset()" title="حذف النموذج المحدد" class="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl font-bold"><i class="fa-solid fa-trash"></i></button>
+                        <select id="advPresetSel" class="flex-1 fx-inp"><option value="">— نموذج محفوظ —</option></select>
+                        <button onclick="applyAdvPreset()" title="تحميل النموذج المحدد" class="fx-btn fx-btn-em">تحميل</button>
+                        <button onclick="deleteAdvPreset()" title="حذف النموذج المحدد" class="fx-btn fx-btn-rose"><i class="fa-solid fa-trash"></i></button>
                     </div>
                     <div class="flex gap-1.5 mt-1.5">
-                        <input id="advPresetName" placeholder="اسم النموذج للحفظ..." class="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500">
-                        <button onclick="saveAdvPreset()" title="حفظ الشروط الحالية كنموذج" class="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold"><i class="fa-solid fa-floppy-disk"></i> حفظ</button>
+                        <input id="advPresetName" placeholder="اسم النموذج للحفظ..." class="flex-1 fx-inp">
+                        <button onclick="saveAdvPreset()" title="حفظ الشروط الحالية كنموذج" class="fx-btn fx-btn-ind"><i class="fa-solid fa-floppy-disk"></i> حفظ</button>
                     </div>
                 </div>
             </div>
@@ -3438,8 +3436,8 @@
             let f = {};
             try{ f = fieldDef(fld) || {}; }catch(e){}
             const it = String(f.inputType || '').toLowerCase();
-            const lbl = '<label class="block font-semibold text-slate-700 mb-1">القيمة:</label>';
-            const cls = 'w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500';
+            const lbl = '<label class="fx-label">القيمة:</label>';
+            const cls = 'fx-inp';
             const t = kind === 'number' ? 'number' : kind === 'date' ? 'date' : kind === 'datetime' ? 'datetime-local' : 'text';
             if(it === 'boolean'){
                 box.innerHTML = lbl + `<select id="advFilterValue" class="${cls}"><option value="true">نعم (مفعّل)</option><option value="false">لا (معطّل)</option></select>`;
