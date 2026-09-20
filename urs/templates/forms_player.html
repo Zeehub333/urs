@@ -536,6 +536,14 @@
                 renderForm(data);
                 await loadAllRecords();
                 try{ checkMigrateChanges(); }catch(e){}
+                // فتح سجل محدد من رابط ?record= (زر تحرير المرجع بتبويب جديد)
+                try{
+                    const _rq = new URLSearchParams(location.search).get('record');
+                    if(_rq){
+                        try{ history.replaceState(null, '', location.pathname); }catch(e){}
+                        setTimeout(()=>{ try{ loadRecord(_rq); }catch(e){} }, 350);
+                    }
+                }catch(e){}
             } catch(e) {
                 showError(e, 'تحميل النموذج: ' + (name || '') + ' — ' + (currentApp || ''));
                 renderTabs([{id:"basic", alias:"البيانات الأساسية"}, {id:"work", alias:"العمل"}]);
@@ -891,7 +899,11 @@
             // Handle FK select: if refTable exists, we will enhance via lookup
             if(t === 'select' && field.refTable){
                 const opts = (field.options || []).map(o=>`<option ${o==val?'selected':''}>${escHtml(o)}</option>`).join('');
-                input = `<select data-field="${field.name}" ${patternAttr} class="${baseCls} lookup-select" data-ref-table="${escAttr(field.refTable)}">${opts || '<option value="">— جاري التحميل —</option>'}</select>`;
+                const _refFile = fmlkRefForm(field.refTable);
+                input = `<div class="flex gap-1.5"><select data-field="${field.name}" ${patternAttr} class="${baseCls} lookup-select flex-1 min-w-0" data-ref-table="${escAttr(field.refTable)}">${opts || '<option value="">— جاري التحميل —</option>'}</select>`
+                    + `<button type="button" onclick="fmlkDataModalOpen('${field.name}')" title="بحث في شبكة" class="fx-btn fx-btn-soft fx-btn-ic"><i class="fa-solid fa-magnifying-glass"></i></button>`
+                    + (_refFile ? `<button type="button" onclick="fmlkOpenRefForm('${field.name}','add')" title="إنشاء جديد في تبويب" class="fx-btn fx-btn-em fx-btn-ic"><i class="fa-solid fa-plus"></i></button><button type="button" onclick="fmlkOpenRefForm('${field.name}','edit')" title="تحرير المحدد في تبويب" class="fx-btn fx-btn-slate fx-btn-ic"><i class="fa-solid fa-pen"></i></button>` : '')
+                    + `</div>`;
                 // trigger async lookup
                 setTimeout(()=> hydLookupSelect(field.name, field.refTable), 0);
             } else {
@@ -1062,8 +1074,12 @@
                         break;
                     }
                     case 'datamodal': {
-                        // القوائم الكبيرة: شبكة منبثقة قابلة للبحث
-                        input = `<div class="flex gap-1.5"><input id="${fxId(field)}_lbl" value="${escAttr(fmlkDataLabel(field, val))}" readonly placeholder="— اختر من الشبكة —" class="flex-1 fx-inp text-slate-700"/><button type="button" onclick="fmlkDataModalOpen('${field.name}')" title="استعراض الشبكة" class="fx-btn fx-btn-ind whitespace-nowrap"><i class="fa-solid fa-table-cells"></i> شبكة</button></div>` + hiddenField(field, val);
+                        // القوائم الكبيرة: شبكة منبثقة قابلة للبحث (+ إنشاء/تحرير المرجع بتبويب)
+                        const _dmRefFile = fmlkRefForm(field.refTable || '');
+                        input = `<div class="flex gap-1.5"><input id="${fxId(field)}_lbl" value="${escAttr(fmlkDataLabel(field, val))}" readonly placeholder="— ابحث واختر من الشبكة —" class="flex-1 fx-inp text-slate-700 min-w-0"/><button type="button" onclick="fmlkDataModalOpen('${field.name}')" title="استعراض الشبكة" class="fx-btn fx-btn-ind whitespace-nowrap"><i class="fa-solid fa-table-cells"></i> شبكة</button>`
+                            + (_dmRefFile ? `<button type="button" onclick="fmlkOpenRefForm('${field.name}','add')" title="إنشاء جديد في تبويب" class="fx-btn fx-btn-em fx-btn-ic"><i class="fa-solid fa-plus"></i></button><button type="button" onclick="fmlkOpenRefForm('${field.name}','edit')" title="تحرير المحدد في تبويب" class="fx-btn fx-btn-slate fx-btn-ic"><i class="fa-solid fa-pen"></i></button>` : '')
+                            + `</div>` + hiddenField(field, val);
+                        setTimeout(()=>{ try{ fmlkRefreshDmLabel(field.name); }catch(e){} }, 0);
                         break;
                     }
                     case 'password': {
@@ -1254,7 +1270,58 @@
             fmlkSetHidden(_fmlkDmField, value);
             const lbl = document.getElementById('fx_' + _fmlkDmField.replace(/[^A-Za-z0-9_]/g, '_') + '_lbl');
             if(lbl) lbl.value = label || value;
+            // مزامنة صندوق الاختيار الأصلي إن وُجد (قيمة مضافة للتو من الشبكة)
+            try{
+                const sel = document.querySelector(`select[data-field="${CSS.escape(_fmlkDmField)}"]`);
+                if(sel){
+                    const sv = String(value ?? '');
+                    if(sv && ![...sel.options].some(o=>String(o.value) === sv)){
+                        sel.insertAdjacentHTML('afterbegin', `<option value="${escAttr(sv)}" selected>${escHtml(label || sv)}</option>`);
+                    }
+                    sel.value = sv;
+                    sel.dispatchEvent(new Event('change', {bubbles: true}));
+                }
+            }catch(e){}
             fmlkDataModalClose();
+        }
+        // خريطة الجدول → ملف نموذج الإدخال (من الخادم) لزرّي إنشاء/تحرير المرجع
+        let FML_TABLE_MAP = {};
+        try{ FML_TABLE_MAP = {{ fml_table_map_json|safe }} || {}; }catch(e){ FML_TABLE_MAP = {}; }
+        function fmlkRefForm(refTable){
+            try{
+                const bare = String(refTable || '').split('.').pop().trim().toLowerCase();
+                if(!bare) return null;
+                const mp = FML_TABLE_MAP || {};
+                for(const k of Object.keys(mp)){ if(String(k).toLowerCase() === bare) return mp[k]; }
+                return null;
+            }catch(e){ return null; }
+        }
+        function fmlkOpenRefForm(name, mode){
+            let f = {};
+            try{ f = fmlkField(name) || {}; }catch(e){}
+            const file = fmlkRefForm(f.refTable || '');
+            if(!file){ try{ notify('لا يوجد نموذج إدخال مرتبط بهذا الجدول', 'info'); }catch(e){} return; }
+            let url = `/app/${currentApp}/form/${encodeURIComponent(file)}/`;
+            if(mode === 'edit'){
+                let v = '';
+                try{ v = fmlkGet(name); }catch(e){}
+                if(v === undefined || v === null || String(v).trim() === ''){ try{ notify('اختر قيمة أولاً لتحريرها', 'info'); }catch(e){} return; }
+                url += `?record=${encodeURIComponent(String(v).trim())}`;
+            }
+            try{ window.open(url, '_blank', 'noopener'); }catch(e){ location.href = url; }
+        }
+        // تحديث تسمية datamodal للقيمة الحالية (id → اسم العرض)
+        async function fmlkRefreshDmLabel(name){
+            try{
+                const f = fmlkField(name);
+                if(!f || (!f.refTable && !f.displayTable)) return;
+                const lbl = document.getElementById('fx_' + String(name).replace(/[^A-Za-z0-9_]/g, '_') + '_lbl');
+                if(!lbl) return;
+                let v = '';
+                try{ v = fmlkGet(name); }catch(e){}
+                if(v === undefined || v === null || String(v).trim() === '') return;
+                lbl.value = await fmlkRefLabel(f, v);
+            }catch(e){}
         }
 
         // ── Relational widgets behavior (FMLK) ──

@@ -920,6 +920,13 @@ def app_form_player(request, app_name, fml_file):
             pass
     # تجميع نماذج الشريط الجانبي حسب الفئة (للطي والتوسيع)
     fml_by_category = _group_files_by_category(fml_files)
+    # خريطة الجدول → ملف النموذج (لزرّي إنشاء/تحرير المرجع في تبويب جديد)
+    import json as _json2
+    _tbl_map = {}
+    for _f in fml_files:
+        _t = (((_f.get("metadata") or {}).get("table")) or "").strip()
+        if _t:
+            _tbl_map.setdefault(_t.split(".")[-1], _f.get("file"))
     return render(request, "forms_player.html", {
         "app": app_meta,
         "app_name": app_name,
@@ -932,6 +939,7 @@ def app_form_player(request, app_name, fml_file):
         "rml_files": rml_files,
         "rml_by_category": _group_files_by_category(rml_files),
         "side_groups": _unified_side_groups(fml_files, rml_files),
+        "fml_table_map_json": _json2.dumps(_tbl_map, ensure_ascii=False),
     })
 
 def app_report_player(request, app_name, rml_file):

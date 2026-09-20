@@ -34,6 +34,7 @@ textarea.fx-inp{resize:vertical; min-height:74px;}
 .fx-btn-em{background:#059669; color:#fff;} .fx-btn-em:hover{background:#047857;}
 .fx-btn-rose{background:#fff1f2; color:#e11d48;} .fx-btn-rose:hover{background:#ffe4e6;}
 .fx-btn-slate{background:#f1f5f9; color:#334155;} .fx-btn-slate:hover{background:#e2e8f0;}
+.fx-btn-ic{padding:9px 11px; flex:none;}
 .fx-pill{display:inline-flex; align-items:center; gap:6px; padding:5px 14px; border-radius:999px; font-size:12px; font-weight:800;}
 /* designer info strips share the package look (dense sheet grids keep .wb-inp) */
 #fwInfoStrip .wb-inp, #wbInfoStrip .wb-inp{width:100%; background:#fff; border:1.5px solid #e2e8f0; border-radius:12px; padding:9px 14px; font-size:13px; color:#1e293b; transition:border-color .15s, box-shadow .15s;}
