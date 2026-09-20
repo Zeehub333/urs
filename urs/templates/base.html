@@ -64,6 +64,8 @@
         .urs-cat > summary::-webkit-details-marker{display:none;}
         .urs-cat > summary .chev{transition:transform .2s;}
         .urs-cat[open] > summary .chev{transform:rotate(180deg);}
+        /* ارتفاع ثابت للفئات: تمرير داخلي بدل دفع المحتوى أسفلها */
+        .urs-cat-body{max-height:300px; overflow-y:auto;}
         {% block head_css %}{% endblock %}
     </style>
     {% block head_extra %}{% endblock %}
@@ -346,6 +348,23 @@
             });
         }catch(e){}
     }
+    // قائمة الفئات الموجودة لمدخلات المصممين (كتابة جديدة أو اختيار) — datalist
+    async function refreshCatDatalists(){
+        try{
+            var res = await fetch('/api/meta/categories');
+            var d = await res.json();
+            var cats = (d && d.categories) || [];
+            [['fmlCategoryList'], ['rmlCategoryList']].forEach(function(pair){
+                var dl = document.getElementById(pair[0]);
+                if(!dl) return;
+                dl.innerHTML = cats.map(function(c){
+                    return '<option value="' + String(c).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;') + '">';
+                }).join('');
+            });
+        }catch(e){}
+    }
+    if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function(){ try{ refreshCatDatalists(); }catch(e){} });
+    else { try{ refreshCatDatalists(); }catch(e){} }
     // ── تقاريري: تقارير مفضلة عبر كل التطبيقات (localStorage: my_reports) ──
     function getMyReports(){ try{ return JSON.parse(localStorage.getItem('my_reports')||'[]'); }catch(e){ return []; } }
     function saveMyReports(l){ try{ localStorage.setItem('my_reports', JSON.stringify(l)); }catch(e){} }

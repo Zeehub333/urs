@@ -26,7 +26,7 @@
                     </script>
                     <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">الاتصال المحلي *</label><select id="fmlConnection" onchange="fwConnChanged()" class="wb-inp"></select></div>
                     <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">الجدول الأساسي *</label><input id="fmlMainTableSearch" oninput="fwFilterMainTables(this.value)" placeholder="ابحث..." class="wb-inp font-mono mb-1" dir="ltr"><select id="fmlMainTable" onchange="fwMainTableChanged()" class="wb-inp font-mono" dir="ltr"></select></div>
-                    <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">الفئة</label><input id="fmlCategory" placeholder="عام" class="wb-inp"></div>
+                    <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">الفئة</label><input id="fmlCategory" list="fmlCategoryList" placeholder="عام — اكتب جديدة أو اختر" class="wb-inp" autocomplete="off"><datalist id="fmlCategoryList"></datalist></div>
                     <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">الوصف</label><input id="fmlDescription" placeholder="وصف مختصر" class="wb-inp"></div>
                 </div>
                 <div id="fmlError" class="hidden text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-3 py-1.5 text-xs mt-2"></div>

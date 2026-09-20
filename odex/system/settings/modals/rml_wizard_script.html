@@ -105,6 +105,7 @@
             resetWizardState();
             document.getElementById('addRmlModal').classList.remove('hidden');
             if(typeof lockScroll === 'function') lockScroll();
+            try{ if(typeof refreshCatDatalists === 'function') refreshCatDatalists(); }catch(e){}
             showRmlStep(1);
             loadConnectionsForWizard();
             renderWizardFields();
@@ -115,6 +116,7 @@
         }
         async function openEditRmlModal(file){
             resetWizardState();
+            try{ if(typeof refreshCatDatalists === 'function') refreshCatDatalists(); }catch(e){}
             const err = document.getElementById('rmlError');
             try{
                 const res = await fetch(`/api/rml/metadata?rml=${encodeURIComponent(file)}&app=${encodeURIComponent(wizApp())}`);

@@ -43,7 +43,7 @@
                             {% if g.fml %}<span class="text-[10px] text-indigo-600 bg-indigo-50 border border-indigo-100 px-1.5 py-0.5 rounded-full" title="ادخالات">{{ g.fml|length }}</span>{% endif %}
                             {% if g.rml %}<span class="text-[10px] text-emerald-600 bg-emerald-50 border border-emerald-100 px-1.5 py-0.5 rounded-full" title="تقارير">{{ g.rml|length }}</span>{% endif %}
                         </summary>
-                        <div class="p-1.5 space-y-2">
+                        <div class="p-1.5 space-y-2 urs-cat-body custom-scroll">
                             {% if g.fml %}
                             <div class="text-[10px] font-bold text-indigo-500 px-1">الادخالات</div>
                             <div class="space-y-1">
@@ -99,7 +99,7 @@
                     <i class="fa-solid fa-chevron-down chev text-[10px] text-slate-400"></i>
                 </summary>
                 <div class="pt-2">
-                <div class="space-y-1" id="sideRulesList">
+                <div class="space-y-1 urs-cat-body custom-scroll" id="sideRulesList">
                     {% for r in app_rules %}
                     <button onclick="openRulePolicies('{{ r.file|escapejs }}','{{ r.name|escapejs }}')" data-search="{{ r.display|default:r.name }} {{ r.description|default:'' }} {{ r.file }}" class="side-rule-item w-full flex items-center gap-2 p-2.5 rounded-xl hover:bg-amber-50 border border-transparent hover:border-amber-200 transition text-right">
                         <span class="w-7 h-7 rounded-lg bg-amber-100 text-amber-700 flex items-center justify-center shrink-0"><i class="fa-solid {{ r.icon|default:'fa-scale-balanced' }} text-[11px]"></i></span>

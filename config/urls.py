@@ -99,6 +99,7 @@ urlpatterns = [
     path('api/fmlk/lookups', urs_views.api_fmlk_lookups, name='api_fmlk_lookups'),
     path('api/fmlk/display-map', urs_views.api_fmlk_display_map, name='api_fmlk_display_map'),
     path('api/fmlk/field-types', urs_views.api_fmlk_field_types, name='api_fmlk_field_types'),
+    path('api/meta/categories', urs_views.api_meta_categories, name='api_meta_categories'),
     path('api/fmlk/preview_insert', urs_views.api_fmlk_preview_insert, name='api_fmlk_preview_insert'),
     path('api/fmlk/create', urs_views.api_fmlk_create, name='api_fmlk_create'),
     path('api/fmlk/update', urs_views.api_fmlk_update, name='api_fmlk_update'),

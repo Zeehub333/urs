@@ -1300,6 +1300,52 @@ def api_fmlk_field_types(request):
         return JsonResponse({"error": str(e)}, status=400)
 
 
+_META_CATS_CACHE = {"at": 0.0, "cats": []}
+
+def api_meta_categories(request):
+    """GET /api/meta/categories/ → sorted unique categories from all .rml/.fmlk metadata.
+
+    Feeds designer category datalists (type new or pick existing). 60s cache.
+    """
+    import time
+    try:
+        if time.time() - _META_CATS_CACHE["at"] < 60 and _META_CATS_CACHE["cats"]:
+            return JsonResponse({"categories": _META_CATS_CACHE["cats"]})
+    except Exception:
+        pass
+    cats = set()
+    try:
+        from rml_python.compiler import RMLReportCompiler
+        from fmlk_engine.compiler import FMLKFormCompiler
+        for _root in [BASE_DIR / "odex" / "system", BASE_DIR / "system"]:
+            if not _root.exists():
+                continue
+            for _app in sorted([d for d in _root.iterdir() if d.is_dir()]):
+                for _p in sorted(_app.glob("*.rml")):
+                    try:
+                        _c = (RMLReportCompiler(path=_p).rpt_metadata().get("category") or "").strip()
+                        if _c:
+                            cats.add(_c)
+                    except Exception:
+                        pass
+                for _p in sorted(_app.glob("*.fmlk")) + sorted(_app.glob("*.fml")):
+                    try:
+                        _c = (FMLKFormCompiler(path=_p).fml_metadata().get("category") or "").strip()
+                        if _c:
+                            cats.add(_c)
+                    except Exception:
+                        pass
+            break
+    except Exception:
+        pass
+    out = sorted(cats)
+    try:
+        _META_CATS_CACHE.update({"at": time.time(), "cats": out})
+    except Exception:
+        pass
+    return JsonResponse({"categories": out})
+
+
 def api_fmlk_sql_functions(request):
     """GET /api/fmlk/sql-functions → دوال SQL المقبولة في الصيغ مع [field]."""
     try:

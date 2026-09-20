@@ -16,7 +16,7 @@
                         <i class="fa-solid fa-chevron-down chev text-[10px] text-slate-400"></i>
                     </summary>
                     <div class="pt-2">
-                    <div class="space-y-1" id="sideSystemList">
+                    <div class="space-y-1 urs-cat-body custom-scroll" id="sideSystemList">
                         {% for it in system_items %}
                         <a href="/settings/system/settings/{{ it.file }}/" data-search="{{ it.metadata.displayName|default:it.file }}" class="side-cml-item block p-2.5 rounded-xl border transition text-right {% if active and active.file == it.file and active.scope == 'system' %}bg-slate-800 text-white border-slate-800{% else %}hover:bg-gray-50 border-transparent hover:border-gray-200{% endif %}">
                         <div class="text-xs font-semibold truncate">{{ it.metadata.displayName|default:it.file }}</div>
@@ -35,7 +35,7 @@
                                 <span class="flex-1 text-xs font-bold text-slate-700 truncate">{{ g.name }}</span>
                                 <span class="text-[10px] text-slate-500 bg-white border border-slate-200 px-1.5 py-0.5 rounded-full">{{ g.files|length }}</span>
                             </summary>
-                            <div class="p-1.5 space-y-1">
+                            <div class="p-1.5 space-y-1 urs-cat-body custom-scroll">
                                 {% for f in g.files %}
                         <a href="{% if f.virtual %}{{ f.url }}{% else %}/app/settings/form/{{ f.file }}/{% endif %}" data-search="{{ f.metadata.displayName|default:f.file }} نموذج {{ f.metadata.category|default:'' }}" class="side-cml-item block p-2.5 rounded-xl border transition text-right hover:bg-gray-50 border-transparent hover:border-gray-200">
                         <div class="text-xs font-semibold text-gray-800 truncate">{% if f.virtual %}<i class="fa-solid fa-table-list text-indigo-500"></i> {% else %}<i class="fa-solid fa-pen-to-square text-indigo-500"></i> {% endif %}{{ f.metadata.displayName|default:f.file }}</div>
@@ -57,7 +57,7 @@
                         <i class="fa-solid fa-chevron-down chev text-[10px] text-slate-400"></i>
                     </summary>
                     <div class="pt-2">
-                    <div class="space-y-1" id="sideAppList">
+                    <div class="space-y-1 urs-cat-body custom-scroll" id="sideAppList">
                         {% for it in app_items %}
                         <a href="/settings/{{ it.scope }}/{{ it.app }}/{{ it.file }}/" data-search="{{ it.metadata.displayName|default:it.file }} {{ it.app }}" class="side-cml-item block p-2.5 rounded-xl border transition text-right hover:bg-gray-50 border-transparent hover:border-gray-200">
                         <div class="text-xs font-semibold text-gray-800 truncate">{{ it.metadata.displayName|default:it.file }}</div>

@@ -57,6 +57,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             fwReset();
             document.getElementById('addFmlModal').classList.remove('hidden');
             if(typeof lockScroll === 'function') lockScroll();
+            try{ if(typeof refreshCatDatalists === 'function') refreshCatDatalists(); }catch(e){}
             fwLoadTypes();
             fwLoadLocalConns().then(()=>{ fwShowSheet('tables'); });
         }
@@ -64,6 +65,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             fwReset();
             document.getElementById('addFmlModal').classList.remove('hidden');
             if(typeof lockScroll === 'function') lockScroll();
+            try{ if(typeof refreshCatDatalists === 'function') refreshCatDatalists(); }catch(e){}
             fwLoadTypes();
             await fwLoadLocalConns();
             try{
