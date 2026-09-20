@@ -1102,6 +1102,43 @@
                 return data.options || [];
             }catch(e){ showLookupError('تعذر جلب القيم المرجعية: ' + String((e && e.message) || e).slice(0, 150)); return []; }
         }
+        // تسمية القيمة الحالية لمرجع (id → اسم العرض) — عبر display-map مع كاش مشترك
+        async function fmlkRefLabel(f, val){
+            const sv = String(val ?? '').trim();
+            if(!sv) return '';
+            try{
+                const tbl = f.display_table || f.displayTable || f.refTable || f.ref_table || '';
+                const fk = f.display_fk || f.displayFk || f.refFk || f.ref_fk || 'id';
+                const show = f.display_show || f.displayShow || f.refDisplay || f.ref_display || '';
+                if(!tbl) return sv;
+                const ck = tbl + '|' + fk + '|' + show + '|' + sv;
+                if(_dmapCache[ck] !== undefined) return _dmapCache[ck] || sv;
+                const res = await fetch('/api/fmlk/display-map', {method:'POST', headers:{'Content-Type':'application/json'},
+                    body: JSON.stringify({fml: currentFml, app: currentApp, table: tbl, key: fk, show: show || fk, keys: [sv]})});
+                const d = await res.json().catch(()=>({}));
+                const v = (res.ok && d && d.map) ? (d.map[sv] ?? '') : '';
+                _dmapCache[ck] = v;
+                return v || sv;
+            }catch(e){ return sv; }
+        }
+        // القيمة الحالية غير الفارغة يجب أن تظهر بدل "— اختر —" حتى لو غابت عن الخيارات المجلوبة
+        async function fmlkEnsureCurrent(f, opts){
+            let cur = '';
+            try{
+                const sel = document.querySelector(`select[data-field="${CSS.escape(f.name)}"]`);
+                cur = String((sel && sel.value) || fieldVal(f) || '').trim();
+            }catch(e){}
+            if(!cur) return Array.isArray(opts) ? opts : [];
+            const list = Array.isArray(opts) ? [...opts] : [];
+            const has = list.some(o=>{
+                const vv = (o && typeof o === 'object') ? (o.value ?? o.label ?? '') : o;
+                return String(vv) === cur;
+            });
+            if(has) return list;
+            let lbl = cur;
+            try{ lbl = await fmlkRefLabel(f, cur); }catch(e){}
+            return [{value: cur, label: lbl}, ...list];
+        }
         async function loadOptionsSource(table, column, schema, search){
             let url = `/api/fmlk/options?table=${encodeURIComponent(table)}&column=${encodeURIComponent(column)}&limit=500`;
             if(schema) url += `&schema=${encodeURIComponent(schema)}`;
@@ -1124,7 +1161,7 @@
             }
             if(!srcs.length && !jobs.length) return;
             const lists = srcs.map(s => loadOptionsSource(s.table, s.column, s.schema).catch(()=>[]));
-            Promise.all([...jobs, ...lists]).then(all => {
+            Promise.all([...jobs, ...lists]).then(async all => {
                 const seen = new Set((field.options || []).map(o=>String((o && typeof o === 'object') ? (o.value ?? o.label ?? '') : o)));
                 const merged = [...(field.options || [])];
                 all.flat().forEach(o => {
@@ -1135,11 +1172,11 @@
                 try{ field.options = merged; }catch(e){}
                 const sel = document.querySelector(`select[data-field="${CSS.escape(field.name)}"]`);
                 if(sel){
-                    const cur = sel.value || fieldVal(field);
-                    sel.innerHTML = '<option value="">— اختر —</option>' + merged.map(o=>{
-                        const vv = (o && typeof o === 'object') ? (o.value ?? '') : o;
-                        const ll = (o && typeof o === 'object') ? (o.label ?? o.value ?? '') : o;
-                        return `<option value="${escAttr(vv)}" ${String(vv)===String(cur)?'selected':''}>${escHtml(ll)}</option>`;
+                    const list = await fmlkEnsureCurrent(field, merged);
+                    const cur = String(sel.value || fieldVal(field) || '');
+                    sel.innerHTML = '<option value="">— اختر —</option>' + list.map(o=>{
+                        const p = fmlkOptPair(o);
+                        return `<option value="${escAttr(p.value)}" ${String(p.value)===String(cur)?'selected':''}>${escHtml(p.label)}</option>`;
                     }).join('');
                     if(cur) sel.value = String(cur);
                 }
@@ -1156,11 +1193,18 @@
             }catch(e){ showLookupError('تعذر جلب الخيارات: ' + String((e && e.message) || e).slice(0, 150)); return []; }
         }
         function hydLookupSelect(fieldName, refTable){
-            loadLookupOptions(fieldName, refTable).then(opts => {
+            loadLookupOptions(fieldName, refTable).then(async opts => {
                 const sel = document.querySelector(`select[data-field="${CSS.escape(fieldName)}"]`);
                 if(sel && opts){
-                    const currentVal = currentData[fieldName] || '';
-                    sel.innerHTML = '<option value="">— اختر —</option>' + opts.map(o=>`<option value="${escAttr(o.value)}" ${String(o.value)===String(currentVal)?'selected':''}>${escHtml(o.label)}</option>`).join('');
+                    let f = {};
+                    try{ f = fmlkField(fieldName) || {}; }catch(e){}
+                    const list = await fmlkEnsureCurrent(Object.assign({name: fieldName, refTable: refTable}, f), opts);
+                    const currentVal = String(sel.value || (function(){ try{ return fieldVal(f); }catch(e){ return ''; } })() || '');
+                    sel.innerHTML = '<option value="">— اختر —</option>' + list.map(o=>{
+                        const p = fmlkOptPair(o);
+                        return `<option value="${escAttr(p.value)}" ${String(p.value)===currentVal?'selected':''}>${escHtml(p.label)}</option>`;
+                    }).join('');
+                    if(currentVal) sel.value = currentVal;
                 }
             });
         }
