@@ -1305,8 +1305,19 @@
             if(mode === 'edit'){
                 let v = '';
                 try{ v = fmlkGet(name); }catch(e){}
-                if(v === undefined || v === null || String(v).trim() === ''){ try{ notify('اختر قيمة أولاً لتحريرها', 'info'); }catch(e){} return; }
-                url += `?record=${encodeURIComponent(String(v).trim())}`;
+                v = String(v ?? '').trim();
+                // القيمة قد تكون التسمية المعروضة لا المعرف — حلّها عبر خيارات الحقل المحملة
+                if(v){
+                    try{
+                        const opts = (f.options || []).map(fmlkOptPair);
+                        if(!opts.some(o=>o.value === v)){
+                            const hit = opts.find(o=>o.label === v);
+                            if(hit) v = hit.value;
+                        }
+                    }catch(e){}
+                }
+                if(!v){ try{ notify('اختر قيمة أولاً لتحريرها', 'info'); }catch(e){} return; }
+                url += `?record=${encodeURIComponent(v)}`;
             }
             try{ window.open(url, '_blank', 'noopener'); }catch(e){ location.href = url; }
         }

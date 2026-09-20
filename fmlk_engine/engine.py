@@ -570,7 +570,7 @@ class FMLKFormEngine:
         where_sql = ""
         if filters:
             from rml_python.engine import _build_where
-            where_sql, _ = _build_where(filters)
+            where_sql, _ = _build_where(filters, fields=self.fields)
         count_sql = f"SELECT COUNT(*) as cnt FROM {table_q}{where_sql}"
         # Execute
         try:
