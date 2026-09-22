@@ -1162,6 +1162,100 @@ def _is_mssql_db(db) -> bool:
         return False
 
 
+# ── Local-PG staging engine ──────────────────────────────────────────────
+class _LocalPgStageEngine:
+    """Dedicated local PG used for ALL staging — both intra-PG reports (where it
+    matches the primary DB) and cross-DB reports where the remote source (e.g.
+    SQL Server login without CREATE TABLE) refuses DDL.
+
+    Connection params come from app.config (which the user's own PG account
+    already controls with full CREATE rights). All staging objects live under
+    the configured PG schema so the application schema stays untouched.
+
+    The instance deliberately exposes connect()/disconnect()/cursor() so it
+    can be slotted in wherever the engine passes a `db` object around.
+    """
+
+    DEFAULT_SCHEMA = "public"
+
+    def __init__(self, conn_row, schema: Optional[str] = None):
+        self.row = conn_row
+        self.conn = None
+        self.schema = schema or self.DEFAULT_SCHEMA
+        self._connect_url = ""
+        try:
+            host = str(getattr(conn_row, "host", "") or "127.0.0.1")
+            port = int(getattr(conn_row, "port", 0) or 5432)
+            user = str(getattr(conn_row, "user", "") or "")
+            pwd = str(getattr(conn_row, "password", "") or "")
+            name = str(getattr(conn_row, "name", "") or "urs")
+            self._connect_url = (
+                f"host={host} port={port} dbname={name} user={user} "
+                f"password={pwd} application_name=rml_local_stage"
+            )
+        except Exception:
+            self._connect_url = ""
+
+    def connect(self):
+        import psycopg2
+        if self.conn is not None:
+            try:
+                self.conn.rollback()
+                return self.conn
+            except Exception:
+                try: self.conn.close()
+                except Exception: pass
+                self.conn = None
+        if not self._connect_url:
+            raise ValueError("Local PG staging: no connection params resolved")
+        self.conn = psycopg2.connect(self._connect_url)
+        with self.conn.cursor() as cur:
+            try:
+                cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{self.schema}"')
+                cur.execute(
+                    f'ALTER SCHEMA "{self.schema}" '
+                    f'OWNER TO CURRENT_USER')
+            except Exception:
+                pass
+            self.conn.commit()
+        return self.conn
+
+    def cursor(self):
+        if self.conn is None:
+            self.connect()
+        return self.conn.cursor()
+
+    def commit(self):
+        try: self.conn.commit()
+        except Exception: pass
+
+    def rollback(self):
+        try: self.conn.rollback()
+        except Exception: pass
+
+    def disconnect(self):
+        try:
+            if self.conn is not None:
+                self.conn.close()
+        except Exception:
+            pass
+        finally:
+            self.conn = None
+
+    def _exec(self, sql, params=None):
+        """Tiny shim so the rest of the engine treats this like an OracleEngine."""
+        if not getattr(self, "conn", None):
+            self.connect()
+        cur = self.conn.cursor()
+        try:
+            cur.execute(sql, params or {})
+            return cur
+        except Exception:
+            try: cur.close()
+            except Exception: pass
+            raise
+
+
 # Staging diagnostic sink (file + stderr). Hidden windows can swallow stderr,
 # so we mirror every diagnostic line into <BASE_DIR>/logs/rml_stage_diag.log.
 def _emit_staging_diag(header, body):
@@ -2510,6 +2604,101 @@ class RMLReportEngine:
             return "boolean"
         return "text"
 
+    # ---- Local PG staging (routing + lazy accessor) -----------------
+    def _resolve_local_pg_row(self):
+        """Pull PG connection params from Django settings, then app.config.
+
+        Captures the first failure reason for diagnostics and never raises —
+        callers receive None on total failure.
+        """
+        _last_err = ""
+        try:
+            from django.conf import settings as _dj
+            if _dj.configured:
+                _default = _dj.DATABASES.get("default") or {}
+                _engine = str(_default.get("ENGINE") or "")
+                if _engine.endswith("postgresql") and _default.get("HOST"):
+                    _host = str(_default.get("HOST") or "")
+                    try:
+                        _port = int(_default.get("PORT") or 5432)
+                    except (TypeError, ValueError):
+                        _port = 5432
+                    if _host and _default.get("USER"):
+                        return SimpleNamespace(
+                            host=_host, port=_port,
+                            user=str(_default.get("USER") or ""),
+                            password=str(_default.get("PASSWORD") or ""),
+                            name=str(_default.get("NAME") or ""),
+                        )
+        except Exception as _e:
+            _last_err = f"django.conf lookup failed: {_e}"
+        try:
+            import config.dbconf as _d
+            _dbcfg = _d.get_db_config()
+            if _dbcfg and _dbcfg.get("ENGINE", "").endswith("postgresql"):
+                try:
+                    _port = int(_dbcfg.get("PORT") or 5432)
+                except (TypeError, ValueError):
+                    _port = 5432
+                if _dbcfg.get("USER") and _dbcfg.get("NAME"):
+                    return SimpleNamespace(
+                        host=str(_dbcfg.get("HOST") or ""),
+                        port=_port,
+                        user=str(_dbcfg.get("USER") or ""),
+                        password=str(_dbcfg.get("PASSWORD") or ""),
+                        name=str(_dbcfg.get("NAME") or ""),
+                    )
+        except Exception as _e:
+            _last_err = _last_err or f"config.dbconf.get_db_config failed: {_e}"
+        try:
+            self._local_pg_last_err = _last_err
+        except Exception:
+            pass
+        return None
+
+    def _local_pg_engine(self):
+        """Lazy accessor for the local PG staging engine (one per RML engine)."""
+        eng = getattr(self, "_local_pg", None)
+        if eng is not None:
+            return eng
+        row = self._resolve_local_pg_row()
+        if row is None:
+            raise ValueError(
+                "Local PG staging: app.config DB_HOST/USER/NAME/PASS غير مضبوطة — "
+                "لا يمكن إنشاء جداول الترحيل على الاتصال المحلي. السبب: "
+                + getattr(self, "_local_pg_last_err", ""))
+        from config.settings import BASE_DIR as _bd  # noqa
+        # Staging always happens in `public` (the user's own writable schema
+        # on the local PG). Using the report's metadata.schema would mix
+        # staging rows with real application tables on installations that
+        # share a schema for many reports.
+        schema = "public"
+        eng = _LocalPgStageEngine(row, schema=schema)
+        eng.connect()
+        # Drop our slice of the staging schema at the start of each run for a
+        # deterministic rebuild. Leaving cross-run residue would risk picking
+        # up rows from a previous execution that has since been reissued.
+        try:
+            with eng.cursor() as cur:
+                cur.execute(
+                    f'DELETE FROM "{eng.schema}".rml_stage_meta WHERE 1=1')
+                cur.execute(
+                    "SELECT tablename FROM pg_tables "
+                    f"WHERE schemaname = %s AND tablename LIKE 'rml_%%'",
+                    (eng.schema,))
+                _old = [str(r[0]) for r in (cur.fetchall() or [])]
+                for _t in _old:
+                    try:
+                        cur.execute(f'DROP TABLE IF EXISTS "{eng.schema}"."{_t}"')
+                    except Exception:
+                        pass
+            eng.commit()
+        except Exception:
+            try: eng.rollback()
+            except Exception: pass
+        self._local_pg = eng
+        return eng
+
     @staticmethod
     def _stage_engine_of(db) -> str:
         """'oracle' | 'postgres' | 'mssql' — staging TEMP-table dialect for a DB wrapper."""
@@ -2931,12 +3120,13 @@ class RMLReportEngine:
             c = cond.strip()
             if not c:
                 continue
-            refs = re.findall(r"[\[{]([^\]}]+)[\]}]", c)
+            refs = re.findall(r"\[{1,2}\{?\s*([^\]}]{1,200})\s*}?\]{1,2}", c)
             ok = True
+            _table_norm_norm = self._norm_table(table_norm)
             for r in refs:
                 parts = [p.strip() for p in r.split(".")]
                 if len(parts) == 2:
-                    if self._norm_table(parts[0]) != table_norm:
+                    if self._norm_table(parts[0]) != _table_norm_norm:
                         ok = False
                         break
                 elif len(parts) == 1:
@@ -3942,6 +4132,17 @@ class RMLReportEngine:
             raise ValueError(
                 "تعذر ترحيل البيانات مؤقتاً: لا توجد قاعدة SQL أساسية — "
                 "وجّه التقرير لاتصال قاعدة بيانات (postgres/oracle).")
+        # Staging ALWAYS runs through the local PG (schema=public). Remote
+        # sources refuse DDL (e.g. SQL Server logins without CREATE TABLE),
+        # and routing the staging copy through the local instance gives one
+        # uniform execution target for the final SELECT.
+        try:
+            _local_pg = self._local_pg_engine()
+            _db = _local_pg
+        except Exception:
+            # Local PG unavailable — keep the primary db so the original error
+            # surfaces, but flag it so the SELECT-side fallback can adapt.
+            self._local_pg = None
         try:
             self._stage_gc(_db)
         except Exception:
@@ -5575,6 +5776,19 @@ class RMLReportEngine:
         except Exception:
             _refresh = False
         self._ensure_api_staged(refresh=_refresh)
+        # When staging ran through the local PG, every SQL emitted against
+        # staged tables must also execute there — the remote db may not even
+        # own those temp objects, and re-routing avoids 42S02 races.
+        try:
+            if getattr(self, "_local_pg", None) is not None and (
+                    getattr(self, "_api_stage", None) or getattr(self, "_api_union", None)):
+                self._primary_db_was_remote = (self.db is not self._local_pg)
+                self.db = self._local_pg
+                # Plan cache may hold a base_db pointing to the remote —
+                # invalidate so this run rebuilds with the new primary.
+                self._plan_cache = {}
+        except Exception:
+            pass
         filters = payload.get("filters") or payload.get("activeFilters") or []
         column_filters = payload.get("columnFilters") or {}
         for col, vals in column_filters.items():
