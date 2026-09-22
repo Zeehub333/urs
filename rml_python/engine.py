@@ -3160,12 +3160,15 @@ class RMLReportEngine:
                     break
             if bad:
                 continue
-            # rewrite [t.c]/[c] → T-SQL [c]
+            # rewrite [t.c]/[c] → T-SQL [c] (also collapses doubled brackets like [[c]])
             def _rw(m):
                 inner = m.group(1)
                 parts = [p.strip() for p in inner.split(".")]
                 return "[" + parts[-1] + "]"
-            keep.append(re.sub(r"[\[{]([^\]}]+)[\]}]", _rw, c))
+            rewritten = re.sub(r"\[{1,2}\{?\s*([^\]}]{1,200})\s*}?\]{1,2}", _rw, c)
+            # Final cleanup: any leftover ]] → ] (defensive against odd RML)
+            rewritten = rewritten.replace("]]", "]").replace("[[", "[")
+            keep.append(rewritten)
         return " AND ".join(keep)
 
     def _fetch_sqlserver_rows(self, table_norm, info, refresh=False):
