@@ -1860,10 +1860,10 @@ list.innerHTML = wizardDetail.columns.map((col, idx)=>`
         }
         async function submitAddRml(){
             try{ console.log('[submitAddRml] start'); }catch(_e){}
+            const err = document.getElementById('rmlError');
+            if(!err){ try{ console.warn('[submitAddRml] rmlError div not found'); }catch(_e){} return; }
+            err.classList.add('hidden');
             try{
-                const err = document.getElementById('rmlError');
-                if(!err){ try{ console.warn('[submitAddRml] rmlError div not found'); }catch(_e){} return; }
-                err.classList.add('hidden');
             const file = document.getElementById('rmlFileName').value.trim();
             const progName = document.getElementById('rmlProgName').value.trim();
             const displayName = document.getElementById('rmlDisplayName').value.trim();
