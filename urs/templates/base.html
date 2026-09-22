@@ -275,9 +275,20 @@
     function notify(msg, type, duration){
         type = type || 'info';
         // duration: ms before auto-dismiss. Falsy or 0 → default 4000.
-        // Pass Infinity (or a very large value) to keep the toast visible.
+        // Pass Infinity to keep the toast visible until manually dismissed.
         var stack = document.getElementById('notifyStack');
         if(!stack) return;
+        // Persistent container — when any notify is persistent, all toasts
+        // attach to it and survive re-creations until the container is
+        // cleared via window.__dismissAllNotifications().
+        var isPersist = (duration === Infinity);
+        var host = isPersist ? (document.getElementById('notifyPersist') || (function(){
+            var d = document.createElement('div');
+            d.id = 'notifyPersist';
+            d.className = 'notify-persist pointer-events-auto fixed bottom-4 right-4 z-[60] flex flex-col gap-2 max-w-md';
+            document.body.appendChild(d);
+            return d;
+        })()) : stack;
         var styles = {
             success: ['bg-emerald-600', 'fa-circle-check'],
             error: ['bg-rose-600', 'fa-circle-exclamation'],
@@ -297,9 +308,9 @@
         el.appendChild(icon);
         el.appendChild(label);
         el.appendChild(btn);
-        stack.appendChild(el);
-        var ttl = (typeof duration === 'number' && duration > 0) ? duration : 4000;
-        var t = (ttl === Infinity) ? null : setTimeout(dismiss, ttl);
+        host.appendChild(el);
+        var ttl = (typeof duration === 'number' && duration > 0 && duration !== Infinity) ? duration : 4000;
+        var t = isPersist ? null : setTimeout(dismiss, ttl);
         function dismiss(){ if(t) clearTimeout(t); el.classList.add('leaving'); setTimeout(function(){ el.remove(); }, 250); }
         btn.onclick = dismiss;
     }

@@ -1905,6 +1905,9 @@ list.innerHTML = wizardDetail.columns.map((col, idx)=>`
             if(window._rmlSaving) return;
             window._rmlSaving = true;
             try{
+                try{
+                    if(window.__dismissAllNotifications) window.__dismissAllNotifications();
+                }catch(_e){}
                 try{ notify('جارٍ حفظ المسودة واختبار الجلب...', 'info', Infinity); }catch(e){}
                 const d0 = await fetch(`/api/apps/${wizApp()}/rml/draft/`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
                 let j0 = {}; try{ j0 = await d0.json(); }catch(e){}
@@ -1915,7 +1918,7 @@ list.innerHTML = wizardDetail.columns.map((col, idx)=>`
                         const secs = p.elapsed % 60;
                         const t = String(p.text || '').slice(0, 80);
                         const elapsed = mins > 0 ? (mins + 'د ' + secs + 'ث') : (secs + 'ث');
-                        notify(`جلب… ${t} (${elapsed})`, 'info', 3000);
+                        notify(`جلب… ${t} (${elapsed})`, 'info', Infinity);
                     }catch(_e){}
                 });
                 if(testErr){
@@ -1948,7 +1951,13 @@ list.innerHTML = wizardDetail.columns.map((col, idx)=>`
                 location.reload();
             }catch(e){
                 err.textContent = String((e && e.message) || e).slice(0, 500); err.classList.remove('hidden');
-            }finally{ window._rmlSaving = false; }
+            }finally{
+                try{
+                    const persist = document.getElementById('notifyPersist');
+                    if(persist){ persist.remove(); }
+                }catch(_e){}
+                window._rmlSaving = false;
+            }
         }
         function pollRmlTestJob(job, onProgress){
             // ينتظر مهمة اختبار الجلب: null = نجاح، وإلا نص الخطأ
