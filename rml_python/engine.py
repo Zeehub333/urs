@@ -2492,7 +2492,11 @@ class RMLReportEngine:
                 return "TIME"
             if t == "BOOLEAN":
                 return "BIT"
-            return "NVARCHAR(MAX)"
+            # NVARCHAR(MAX) (= SQL_WLONGVARCHAR) trips HYC00 on pyodbc's
+            # SQLBindParameter for several Microsoft ODBC drivers when the
+            # staged copy uses executemany. A bounded length keeps every
+            # supported driver happy; 2000 covers all RML field metadata.
+            return "NVARCHAR(2000)"
         return RMLReportEngine._pg_col_type(rml_type)
 
     def _api_table_info(self, table_norm):
