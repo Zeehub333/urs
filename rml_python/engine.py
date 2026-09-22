@@ -1266,6 +1266,11 @@ class SqlServerDirect:
                               f"UID={self._esc(user)}", f"PWD={self._esc(pwd)}"]
                     if _modern:
                         _parts += ["TrustServerCertificate=yes", "Connect Timeout=15"]
+                    # HYC00 "Optional feature not implemented (SQLBindParameter)"
+                    # surfaces across modern and legacy drivers with server-side
+                    # prepared statements. Disable them globally; ANSI-style
+                    # translation also avoids nvarchar binding quirks.
+                    _parts += ["AutoTranslate=no", "UseProcForPrepare=0"]
                     cn = pyodbc.connect(";".join(_parts) + ";", timeout=15)
                     try:
                         cur = cn.cursor()
@@ -2341,6 +2346,10 @@ class RMLReportEngine:
                                   f"UID={user}", f"PWD={pwd}"]
                         if _modern:
                             _parts += ["TrustServerCertificate=yes", "Connect Timeout=10"]
+                        # See SqlServerDirect.connect() — these flags are
+                        # the canonical pyodbc workaround for HYC00 on
+                        # SQLBindParameter across all driver versions.
+                        _parts += ["AutoTranslate=no", "UseProcForPrepare=0"]
                         _cn = pyodbc.connect(";".join(_parts) + ";", timeout=10)
                         try:
                             _cur = _cn.cursor()
@@ -3002,6 +3011,8 @@ class RMLReportEngine:
                               f"UID={user}", f"PWD={pwd}"]
                     if _modern:
                         _parts += ["TrustServerCertificate=yes", "Connect Timeout=15"]
+                    # See SqlServerDirect.connect() — HYC00 workaround.
+                    _parts += ["AutoTranslate=no", "UseProcForPrepare=0"]
                     _cn = pyodbc.connect(";".join(_parts) + ";", timeout=15)
                     try:
                         _cur = _cn.cursor()
