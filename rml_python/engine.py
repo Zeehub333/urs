@@ -6,6 +6,8 @@ Supports: filtering (Odoo-style), sorting, pagination (Oracle OFFSET/FETCH), gro
 from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
 import re
+from types import SimpleNamespace
+from pathlib import Path as _Path
 from .compiler import RMLReportCompiler, RMLColumn
 from .oracle_engine import OracleEngine
 
@@ -1160,6 +1162,37 @@ def _is_mssql_db(db) -> bool:
         return False
 
 
+# Staging diagnostic sink (file + stderr). Hidden windows can swallow stderr,
+# so we mirror every diagnostic line into <BASE_DIR>/logs/rml_stage_diag.log.
+def _emit_staging_diag(header, body):
+    try:
+        import sys as _sys
+        import traceback as _tb
+        try:
+            from pathlib import Path as _P
+            from config.settings import BASE_DIR as _BD
+            _logdir = _P(_BD) / "logs"
+            _logdir.mkdir(parents=True, exist_ok=True)
+            with open(_logdir / "rml_stage_diag.log", "a", encoding="utf-8") as _fh:
+                _fh.write("\n=== " + header + " ===\n")
+                _fh.write(str(body))
+                if not str(body).endswith("\n"):
+                    _fh.write("\n")
+                _fh.flush()
+        except Exception:
+            pass
+        try:
+            _sys.stderr.write("\n=== " + header + " ===\n")
+            _sys.stderr.write(str(body))
+            if not str(body).endswith("\n"):
+                _sys.stderr.write("\n")
+            _sys.stderr.flush()
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+
 def _mssql_transpile_sql(sql: str, convert_binds: bool = True) -> str:
     """Transpile builder (Oracle-flavored) SQL to T-SQL.
 
@@ -1283,14 +1316,12 @@ class SqlServerDirect:
                 except Exception as e:
                     last = e
                     try:
-                        import sys as _sys
                         import traceback as _tb
-                        _sys.stderr.write("\n=== RML SqlServerDirect connect diagnostic ===\n")
-                        _sys.stderr.write(f"driver: {_drv!r}  modern: {_modern}\n")
-                        _sys.stderr.write(f"connect_parts: {';'.join(_parts)[:300]}\n")
-                        _sys.stderr.write(_tb.format_exc())
-                        _sys.stderr.write("=== end ===\n")
-                        _sys.stderr.flush()
+                        _emit_staging_diag(
+                            "RML SqlServerDirect connect diagnostic",
+                            f"driver: {_drv!r}  modern: {_modern}\n"
+                            f"connect_parts: {';'.join(_parts)[:300]}\n"
+                            + _tb.format_exc())
                     except Exception:
                         pass
                     continue
@@ -2392,13 +2423,11 @@ class RMLReportEngine:
                         return out
                     except Exception:
                         try:
-                            import sys as _sys
                             import traceback as _tb
-                            _sys.stderr.write("\n=== RML _mssql_fk_keys diagnostic ===\n")
-                            _sys.stderr.write(f"driver: {_drv!r}  sch/tbl: {sch}/{tbl}\n")
-                            _sys.stderr.write(_tb.format_exc())
-                            _sys.stderr.write("=== end ===\n")
-                            _sys.stderr.flush()
+                            _emit_staging_diag(
+                                "RML _mssql_fk_keys diagnostic",
+                                f"driver: {_drv!r}  sch/tbl: {sch}/{tbl}\n"
+                                + _tb.format_exc())
                         except Exception:
                             pass
                         continue
@@ -3071,13 +3100,11 @@ class RMLReportEngine:
                         last = e
                         continue
                     try:
-                        import sys as _sys
                         import traceback as _tb
-                        _sys.stderr.write("\n=== RML _iter_sqlserver_batches diagnostic ===\n")
-                        _sys.stderr.write(f"driver: {_drv!r}  sch/tbl: {sch}/{tbl}\n")
-                        _sys.stderr.write(_tb.format_exc())
-                        _sys.stderr.write("=== end ===\n")
-                        _sys.stderr.flush()
+                        _emit_staging_diag(
+                            "RML _iter_sqlserver_batches diagnostic",
+                            f"driver: {_drv!r}  sch/tbl: {sch}/{tbl}\n"
+                            + _tb.format_exc())
                     except Exception:
                         pass
                     last = e
@@ -3807,27 +3834,21 @@ class RMLReportEngine:
                 db.conn.rollback()
             except Exception:
                 pass
-            # Diagnostic dump to stderr (always, not gated by DEBUG): pinpoints
+            # Diagnostic dump to file + stderr (always, not gated by DEBUG): pinpoints
             # whether HYC00 originates in pyodbc.connect(), the SELECT in
             # _iter_sqlserver_batches, the INSERT, or setinputsizes itself.
             try:
-                import sys as _sys
                 import traceback as _tb
-                _sys.stderr.write("\n=== RML staging diagnostic ===\n")
-                _sys.stderr.write(f"table: {table_norm!r}\n")
-                _sys.stderr.write(f"is_mssql_stream: {_is_ms_stream}\n")
-                _sys.stderr.write(f"coldefs: {coldefs!r}\n")
-                try:
-                    _info_row = info.get("row") if isinstance(info, dict) else None
-                    if _info_row is not None:
-                        _srv = str(getattr(_info_row, "host", "") or "")
-                        _dbn = str(getattr(_info_row, "name", "") or "")
-                        _sys.stderr.write(f"sqlserver_target: {_srv}/{_dbn}\n")
-                except Exception:
-                    pass
-                _sys.stderr.write(_tb.format_exc())
-                _sys.stderr.write("=== end diagnostic ===\n")
-                _sys.stderr.flush()
+                _info_row = info.get("row") if isinstance(info, dict) else None
+                _srv = str(getattr(_info_row, "host", "") or "") if _info_row is not None else ""
+                _dbn = str(getattr(_info_row, "name", "") or "") if _info_row is not None else ""
+                _emit_staging_diag(
+                    "RML staging diagnostic",
+                    f"table: {table_norm!r}\n"
+                    f"is_mssql_stream: {_is_ms_stream}\n"
+                    f"coldefs: {coldefs!r}\n"
+                    f"sqlserver_target: {_srv}/{_dbn}\n"
+                    + _tb.format_exc())
             except Exception:
                 pass
             raise ValueError(f"تعذر ترحيل بيانات '{table_norm.lower()}': {_e}")
