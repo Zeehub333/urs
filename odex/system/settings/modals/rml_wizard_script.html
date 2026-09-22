@@ -1883,6 +1883,82 @@ list.innerHTML = wizardDetail.columns.map((col, idx)=>`
             try{ const ov = document.getElementById('rmlSaveProg'); if(ov){ ov.remove(); } }catch(e){}
             try{ const np = document.getElementById('notifyPersist'); if(np){ np.innerHTML=''; } }catch(e){}
         }
+        function buildRmlPayloadForSave(){
+            const err = document.getElementById('rmlError');
+            if(!err){ return {ok:false, error:'rmlError div not found'}; }
+            err.classList.add('hidden');
+            const fail = (msg, step)=>{
+                err.textContent = msg; err.classList.remove('hidden');
+                try{ if(step){ showRmlStep(step); } }catch(e){}
+                return {ok:false, error:msg};
+            };
+            const file = document.getElementById('rmlFileName').value.trim();
+            const progName = document.getElementById('rmlProgName').value.trim();
+            const displayName = document.getElementById('rmlDisplayName').value.trim();
+            const icon = document.getElementById('rmlIcon').value;
+            const category = document.getElementById('rmlCategory').value.trim() || 'HR';
+            const schema = (wizardConnSchemas[String(wizardConnections[0])] || wizardSchema || '').trim();
+            const description = document.getElementById('rmlDescription').value.trim();
+            const namespace = document.getElementById('rmlNamespace').value.trim();
+            if(!file || !progName || !displayName){ return fail('أكمل الحقول المطلوبة (اسم التقرير بالإنجليزية، الاسم المختصر، الاسم العربي)', 1); }
+            if(!wizardConnections.length){ return fail('اختر اتصالاً واحداً على الأقل', 2); }
+            if(!wizardFields.length){ return fail('أضف حقلاً واحداً على الأقل', 3); }
+            if(!wizardFields.every(f=>f.name && f.name.trim())){ return fail('اسم كل حقل يجب أن يطابق الاسم المخزن في النظام', 3); }
+            if(!wizardColumns.length){ return fail('أضف عموداً واحداً على الأقل', 3); }
+            const payload = {
+                file: (wizardEditMode ? wizardEditMode.file : file), name: progName, displayName, icon, category, schema, description,
+                namespace: namespace,
+                report_type: ((document.getElementById('rmlReportType') || {}).value || 'master'),
+                detail: wizardDetail,
+                links: wizardLinks,
+                table_opts: Object.keys(wizardTableOpts || {}).map(k=>{
+                    const parts = String(k).split('||');
+                    const o = wizardTableOpts[k] || {};
+                    return {name: parts.slice(1).join('||'), conn: parts[0], is_default: !!o.is_default, is_sub: !!o.is_sub};
+                }),
+                connections: wizardConnections,
+                fields: wizardFields,
+                columns: wizardColumns,
+                groups: wizardGroups,
+                group_levels: wizardGroupLevels,
+                charts: wizardCharts,
+                rules: wizardRules,
+                general_where: wizardGeneralWhere || '',
+                doc_template: ((document.getElementById('wizardDocTemplate') || {}).value || wizardDocTemplate || '')
+            };
+            const _rtype = ((document.getElementById('rmlReportType') || {}).value || 'master');
+            if(_rtype === 'detail'){
+                if(!wizardDetail.table || !wizardDetail.master || !wizardDetail.detail){ return fail('حدد الجدول الفرعي ورابطه من ورقة الحقول أولاً (زر «فرعي» بجانب الجدول + رابط يربطه بالافتراضي)', 4); }
+                if(!wizardDetail.columns.length || !wizardDetail.columns.every(c=>c.alias && c.expr)){ return fail('أضف عموداً فرعياً واحداً على الأقل (اسم معروض + تعبير)', 4); }
+            }
+            const mode = wizardEditMode ? 'update' : 'create';
+            return {ok:true, payload, mode};
+        }
+        async function submitAddRmlQuick(){
+            if(window._rmlSaving){ return; }
+            window._rmlSaving = true;
+            try{ var _np0 = document.getElementById('notifyPersist'); if(_np0){ _np0.innerHTML=''; } }catch(_e){}
+            rmlSaveProgress('جارٍ حفظ ملف التقرير...', null);
+            try{
+                const built = buildRmlPayloadForSave();
+                if(!built.ok){ rmlSaveProgressDone(); return; }
+                const endpoint = `/api/apps/${wizApp()}/rml/${built.mode === 'update' ? 'update' : 'create'}/`;
+                const r0 = await fetch(endpoint, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(built.payload)});
+                let j0 = {}; try{ j0 = await r0.json(); }catch(e){}
+                if(!r0.ok) throw new Error(j0.error || ('خطأ ' + r0.status));
+                rmlSaveProgress('تم الحفظ ✓', 1);
+                try{ notify('تم حفظ ملف التقرير بدون اختبار الجلب ✓', 'success'); }catch(e){}
+                setTimeout(()=>{ try{ location.reload(); }catch(e){} }, 600);
+            }catch(e){
+                try{ rmlSaveProgressDone(); }catch(_e){}
+                const err = document.getElementById('rmlError');
+                if(err){ err.textContent = String((e && e.message) || e).slice(0, 500); err.classList.remove('hidden'); }
+                else{ try{ notify(String((e && e.message) || e).slice(0, 300), 'error'); }catch(_e){} }
+            }finally{
+                try{ rmlSaveProgressDone(); }catch(_e){}
+                window._rmlSaving = false;
+            }
+        }
         async function submitAddRml(){
             console.log('[submitAddRml] start');
             const err = document.getElementById('rmlError');
