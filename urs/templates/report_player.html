@@ -949,6 +949,10 @@
             const payload = { activeTable, filters: andF, sort: activeSort.column?{column:resolveDbField(activeSort.column), direction:activeSort.direction}:undefined, page: page, pageSize: effPageSize };
             if(forceStageRefresh){ payload.refreshApi = true; forceStageRefresh = false; }
             payload.columnFilters = {};
+            // Distributed execution: skip staging (5M-row copy) by joining
+            // across connections in Python instead. Engine falls back to
+            // the legacy staged path when the report has only one connection.
+            payload.distributed = true;
             for (const k in (columnFilters || {})) {
                 if (columnFilters[k] && columnFilters[k].length) {
                     payload.columnFilters[resolveDbField(k)] = columnFilters[k];
@@ -1041,22 +1045,41 @@
             try{ return (activeFilters || []).some(f=>f._group || f._bucket); }catch(e){ return false; }
         }
         function _rptSleep(ms){ return new Promise(_r=>setTimeout(_r, ms)); }
-        function showReportProgress(show, text){
+        function showReportProgress(show, text, info){
             try{
                 let ov = document.getElementById('rmlProgOv');
                 if(show){
                     if(!ov){
                         ov = document.createElement('div'); ov.id = 'rmlProgOv';
                         ov.style.cssText = 'position:fixed;inset:0;z-index:400;background:rgba(15,23,42,.45);display:flex;align-items:center;justify-content:center';
-                        ov.innerHTML = '<div style="background:#fff;border-radius:12px;padding:22px 26px;min-width:300px;max-width:90vw;text-align:center;box-shadow:0 10px 40px rgba(0,0,0,.3)">'
-                            + '<div id="rmlProgTx" style="font-size:13px;color:#0f172a;margin-bottom:12px">جاري التنفيذ…</div>'
-                            + '<div style="height:8px;background:#e2e8f0;border-radius:99px;overflow:hidden"><div style="height:100%;width:30%;background:#2563eb;border-radius:99px;animation:_rmlind 1.2s ease-in-out infinite alternate"></div></div>'
-                            + '<div style="font-size:11px;color:#64748b;margin-top:10px">تنفيذ خلفي — المتصفح لن يتجمد</div></div>'
-                            + '<style>@keyframes _rmlind{from{margin-right:70%}to{margin-right:0}}</style>';
+                        ov.innerHTML = '<div style="background:#fff;border-radius:14px;padding:22px 28px;min-width:340px;max-width:90vw;text-align:center;box-shadow:0 10px 40px rgba(0,0,0,.3)">'
+                            + '<div id="rmlProgTx" style="font-size:14px;color:#0f172a;font-weight:bold;margin-bottom:8px">جاري التنفيذ…</div>'
+                            + '<div id="rmlProgSub" style="font-size:11px;color:#64748b;margin-bottom:10px"></div>'
+                            + '<div style="position:relative;height:10px;background:#e2e8f0;border-radius:99px;overflow:hidden">'
+                            + '<div id="rmlProgBar" style="position:absolute;top:0;left:0;height:100%;width:0%;background:linear-gradient(90deg,#2563eb,#7c3aed);border-radius:99px;transition:width .4s ease"></div>'
+                            + '</div>'
+                            + '<div id="rmlProgPct" style="font-size:11px;color:#475569;margin-top:8px;font-weight:bold"></div>'
+                            + '<div style="font-size:10px;color:#94a3b8;margin-top:6px">تنفيذ خلفي — المتصفح لن يتجمد</div></div>';
                         document.body.appendChild(ov);
                     }
                     ov.style.display = 'flex';
                     const tx = document.getElementById('rmlProgTx'); if(tx && text) tx.textContent = text;
+                    const bar = document.getElementById('rmlProgBar');
+                    const pct = document.getElementById('rmlProgPct');
+                    const sub = document.getElementById('rmlProgSub');
+                    let _pct = 0, _rows = 0, _total = 0, _stage = '';
+                    if(info){
+                        _stage = String(info.stage || '');
+                        _rows = parseInt(info.rows || 0);
+                        _total = parseInt(info.total || 0);
+                        if(_total > 0){ _pct = Math.min(99, Math.round(_rows * 100 / _total)); }
+                    }
+                    if(_pct === 0 && !_stage){
+                        _pct = 30;  // indeterminate when we have no info yet
+                    }
+                    if(bar) bar.style.width = (_pct || 0) + '%';
+                    if(pct) pct.textContent = _pct > 0 ? (_pct + '%' + (_total ? ` (${_rows.toLocaleString('ar-EG')} / ${_total.toLocaleString('ar-EG')})` : '')) : '...';
+                    if(sub) sub.textContent = _stage ? ('مرحلة: ' + _stage) : '';
                 } else if(ov){ ov.style.display = 'none'; }
             }catch(e){}
         }
@@ -1089,7 +1112,7 @@
                 if(st === 'done'){ showReportProgress(false); return {ok:true, data:(j.result||{}), status:200}; }
                 if(st === 'error'){ showReportProgress(false); throw new Error(j.error || 'فشل التنفيذ الخلفي'); }
                 const p = j.progress || {};
-                showReportProgress(true, p.text || 'جاري التنفيذ…');
+                showReportProgress(true, p.text || 'جاري التنفيذ…', p);
             }
         }
         async function postExecuteReport(body){

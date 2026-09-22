@@ -5774,6 +5774,15 @@ class RMLReportEngine:
         Returns: {rows, total, page, pageSize, sql, columns}
         """
         self._validate_no_exact_dupes()
+        # Distributed query path: when the report spans multiple connections
+        # we avoid the (very slow) staging copy and instead fetch each
+        # connection independently, then join in Python. The user opts in
+        # explicitly so we never break legacy reports by accident.
+        try:
+            if payload.get("distributed") or getattr(self, "_force_distributed", False):
+                return self._execute_distributed(payload)
+        except Exception:
+            pass
         try:
             _refresh = bool(payload.get("refreshApi") or payload.get("refresh_api"))
         except Exception:
@@ -6782,6 +6791,367 @@ class RMLReportEngine:
         if no_over.strip().upper() == "COUNT(*)":
             return "COUNT(*)", base_norm
         return None, None
+
+    # ---- Distributed execution -------------------------------------------
+    def _execute_distributed(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Run multi-connection reports without copying rows to a staging
+        area: fetch each connection independently with its own live engine,
+        then join in Python and stream merged rows.
+
+        Required shape:
+        - activeTable / base is the primary (the FROM table); live engine
+          via _db_for_conn / _mssql_db_for / _local_pg_engine if applicable.
+        - Each secondary table (in columns / links / merges / table_opts)
+          gets its own live engine; rows are joined on the link's
+          (base_col, sec_col) key.
+        - The merge spec (in exec_plan['merges']) drives the per-row key
+          fetch, but here we batch the join by streaming the primary
+          fetchmany and preloading a {key: row} dict per secondary.
+
+        Returns the same shape as execute() (rows, total, page, …).
+        """
+        from collections import defaultdict
+        self._report_progress({"stage": "distributed", "text": "بدء التنفيذ الموزع…"})
+        filters = payload.get("filters") or payload.get("activeFilters") or []
+        sort = payload.get("sort") or payload.get("activeSort")
+        page = int(payload.get("page") or 1)
+        page_size = payload.get("pageSize") or payload.get("page_size") or 50
+        try:
+            page_size = int(page_size)
+        except Exception:
+            page_size = 50
+        active_table = payload.get("activeTable") or payload.get("table")
+        # Build plan WITHOUT routing base_db through staging. We use the
+        # original self.db so direct connections work normally.
+        try:
+            self._plan_cache = {}
+        except Exception:
+            pass
+        exec_plan = self._plan_structure(active_table, filters, sort, None)
+        base_norm = exec_plan.get("base_norm")
+        if not base_norm:
+            raise ValueError("لم يتم تحديد الجدول الأساسي.")
+        primary_db, primary_engine = self._resolve_live_db(exec_plan.get("base_conn"))
+        if primary_db is None:
+            raise ValueError(
+                "تعذر إيجاد اتصال مباشر للجدول الأساسي — راجع إعدادات الاتصال.")
+
+        # Identify secondaries: tables in columns + links not equal to base.
+        sec_specs = self._distributed_secondary_specs(exec_plan, base_norm)
+        # Build SQL for primary (filter-only, no JOIN with secondaries).
+        primary_sql, primary_params, _ = self._compile_distributed_primary(
+            exec_plan, base_norm, filters)
+        self._report_progress({"stage": "primary_fetch", "table": base_norm.lower(),
+                               "text": f"جلب {base_norm.lower()} من الاتصال الأساسي…"})
+
+        primary_rows = self._stream_primary(primary_db, primary_engine, primary_sql,
+                                            primary_params, page, page_size)
+        total_primary = len(primary_rows) if isinstance(primary_rows, list) else (
+            primary_rows.get("total") if isinstance(primary_rows, dict) else 0)
+        if isinstance(primary_rows, dict):
+            primary_rows = primary_rows.get("rows") or []
+
+        # Preload each secondary by its join key in one shot per request.
+        # Each secondary may live on its own connection.
+        sec_indexes = []
+        for spec in sec_specs:
+            self._report_progress({"stage": "secondary_fetch",
+                                   "table": spec["norm"].lower(),
+                                   "text": f"جلب {spec['norm'].lower()} ({spec.get('gid', '?')})…"})
+            try:
+                idx = self._index_secondary(spec, primary_rows)
+                sec_indexes.append(idx)
+            except Exception as _se:
+                self._report_progress({"stage": "secondary_fetch_error",
+                                       "table": spec["norm"].lower(),
+                                       "text": str(_se)[:200]})
+                sec_indexes.append({})
+
+        self._report_progress({"stage": "merge", "rows": len(primary_rows),
+                               "text": "دمج النتائج…"})
+        merged = self._merge_lazy(primary_rows, sec_indexes, sec_specs, sort)
+
+        if isinstance(merged, list):
+            result_rows = [{k: _fmt_cell(v) for k, v in _r.items()} for _r in merged]
+            total = max(total_primary, len(merged))
+        else:
+            result_rows = []
+            total = 0
+
+        total_pages = (total + page_size - 1) // page_size if page_size else 1
+        try:
+            _groups_list = [g.to_dict() for g in (self.compiler.groups() if hasattr(self.compiler, "groups") else [])]
+        except Exception:
+            _groups_list = []
+        try:
+            _meta_out = dict(self.metadata) if isinstance(self.metadata, dict) else {}
+        except Exception:
+            _meta_out = {}
+        _meta_out["groups"] = _groups_list
+        return {
+            "rows": result_rows,
+            "total": total,
+            "page": int(page),
+            "pageSize": page_size,
+            "totalPages": total_pages,
+            "sql": primary_sql,
+            "params": primary_params,
+            "warnings": self._render_api_warnings(),
+            "columns": [c.to_dict() for c in self.columns],
+            "fields": [f.to_dict() for f in getattr(self, "fields", [])],
+            "rules": [r.to_dict() for r in getattr(self, "rules", [])],
+            "groups": _groups_list,
+            "metadata": _meta_out,
+            "connections": [c.to_dict() for c in self.connections],
+            "charts": [c.to_dict() for c in self.charts],
+            "summary": {},
+            "detail": (lambda d: d.to_dict() if d is not None and not isinstance(d, dict) else d)(
+                self.compiler.detail() if hasattr(self.compiler, "detail") else None),
+            "distributed": True,
+        }
+
+    def _resolve_live_db(self, conn_key):
+        """Resolve a live engine for a connection key (no staging)."""
+        if not conn_key:
+            return self.db, self._stage_engine_of(self.db)
+        # Same DB as primary?
+        try:
+            if str(conn_key) == str(getattr(self, "primary_conn", None)):
+                return self.db, self._stage_engine_of(self.db)
+        except Exception:
+            pass
+        if conn_key in (self.databases or {}):
+            return self.databases[conn_key], self._stage_engine_of(self.databases[conn_key])
+        # Try direct SqlServerDirect.
+        try:
+            if conn_key == self._get_direct_gid():
+                return self._mssql_db_for(conn_key), "mssql"
+        except Exception:
+            pass
+        # Fallback: Django Connection lookup.
+        try:
+            _row = self._dj_conn(conn_key)
+            if _row is not None:
+                _eng = str(getattr(_row, "engine", "") or "").lower()
+                if _eng == "sqlserver":
+                    return self._mssql_db_for(conn_key), "mssql"
+                if _eng in ("postgres", "postgresql"):
+                    # Construct a tiny psycopg2-backed engine just for fetch.
+                    return self._local_pg_engine(), "postgres"
+        except Exception:
+            pass
+        return None, ""
+
+    def _distributed_secondary_specs(self, exec_plan, base_norm):
+        """Return [(norm, conn_key, link)] for each cross-DB secondary."""
+        out = []
+        try:
+            remote = exec_plan.get("remote") or {}
+            for sec_norm, info in remote.items():
+                if sec_norm == base_norm:
+                    continue
+                if not info:
+                    continue
+                out.append({
+                    "norm": sec_norm,
+                    "gid": str(info.get("gid") or info.get("conn_key") or ""),
+                    "key": info.get("key"),
+                    "info": info,
+                })
+        except Exception:
+            pass
+        # Also look at merge specs (cross-DB secondaries from Python merges).
+        try:
+            merges = exec_plan.get("merges") or []
+            for m in merges:
+                t = m.get("table")
+                if not t or t == base_norm:
+                    continue
+                _existing = next((s for s in out if s.get("norm") == t), None)
+                if _existing:
+                    continue
+                out.append({"norm": t, "gid": "", "key": None, "info": {"gid": ""}})
+        except Exception:
+            pass
+        return out
+
+    def _compile_distributed_primary(self, exec_plan, base_norm, filters):
+        """Compile a base-only SELECT (no cross-DB joins). Returns (sql, params, plan)."""
+        base_cols = []
+        try:
+            fields = getattr(self, "fields", []) or []
+            for f in fields:
+                if self._norm_table(getattr(f, "table_source", "") or "") == base_norm:
+                    base_cols.append(str(getattr(f, "name", "") or ""))
+        except Exception:
+            pass
+        # Distinct base columns actually requested.
+        _want = []
+        seen = set()
+        try:
+            for c in (exec_plan.get("columns") or []):
+                for r in self._refs_in_text(getattr(c, "expr", "") or "", {}):
+                    if r.lower() in {x.lower() for x in base_cols} and r.lower() not in seen:
+                        _want.append(r); seen.add(r.lower())
+        except Exception:
+            pass
+        if not _want:
+            _want = base_cols
+        base_schema = exec_plan.get("base_schema") or ""
+        sch_q = f"{_q(base_schema)}." if base_schema else ""
+        # T-SQL safe identifier quoting for primary.
+        _qsel = ", ".join([_q(c) for c in _want]) if _want else "*"
+        sql = f"SELECT {_qsel} FROM {sch_q}{_q(base_norm)}"
+        where_clause, where_params = _build_where(
+            filters, columns=exec_plan.get("columns") or self.columns,
+            fields=getattr(self, "fields", []),
+            table_map=exec_plan.get("table_map") or {},
+            conn_map=self._conn_map(), rules=getattr(self, "rules", []),
+        )
+        where_clause = self._apply_general_where(
+            where_clause, exec_plan.get("table_map") or {}, self._conn_map())
+        if where_clause:
+            sql += where_clause
+        return sql, where_params, exec_plan
+
+    def _stream_primary(self, db, engine, sql, params, page, page_size):
+        """Fetch primary rows directly from its live engine.
+
+        SQL Server: stream via pyodbc + fetchmany (no full copy).
+        Postgres / Oracle: standard cursor.fetchall.
+        """
+        if engine == "mssql":
+            try:
+                db.connect()
+            except Exception:
+                pass
+            import pyodbc as _p
+            # Apply LIMIT via OFFSET/FETCH (sqlserver 2012+).
+            try:
+                _offset = max(0, (int(page) - 1) * int(page_size))
+                sql_paged = sql + f" ORDER BY {_q('1')} OFFSET {_offset} ROWS FETCH NEXT {int(page_size)} ROWS ONLY"
+            except Exception:
+                sql_paged = sql
+            cur = db.conn.cursor()
+            try:
+                exec_sql = _mssql_transpile_sql(sql_paged, convert_binds=True)
+                values = _mssql_bind_values(sql_paged, params)
+                cur.execute(exec_sql, values)
+                names = [d[0] for d in (cur.description or [])]
+                rows = [dict(zip(names, r)) for r in cur.fetchall()]
+            finally:
+                try: cur.close()
+                except Exception: pass
+            return {"rows": rows, "total": len(rows)}
+        # Default path: standard cursor.
+        try:
+            db.connect()
+        except Exception:
+            pass
+        cur = self._exec_on(db, sql, params)
+        try:
+            names = [d[0] for d in (cur.description or [])] if cur.description else []
+            rows = [dict(zip(names, r)) for r in cur.fetchall()]
+        finally:
+            try: cur.close()
+            except Exception: pass
+        return {"rows": rows, "total": len(rows)}
+
+    def _index_secondary(self, spec, primary_rows):
+        """Bulk-fetch the secondary table keyed by every distinct key in
+        primary_rows. Returns {key_value: row_or_None}.
+
+        When the link key is not known (no join), we return {} (skip).
+        """
+        info = spec.get("info") or {}
+        key = spec.get("key")
+        if not key:
+            return {}
+        bcol, scol = (key[0], key[1]) if isinstance(key, (list, tuple)) else ("", "")
+        if not bcol or not scol:
+            return {}
+        # Collect distinct base key values from primary_rows.
+        keys = []
+        seen = set()
+        for r in primary_rows:
+            v = r.get(bcol)
+            if v is None:
+                continue
+            try:
+                if v in seen:
+                    continue
+                seen.add(v)
+                keys.append(v)
+            except Exception:
+                continue
+        if not keys:
+            return {}
+        sec_norm = spec["norm"]
+        sec_db, sec_engine = self._resolve_live_db(spec.get("gid"))
+        if sec_db is None:
+            return {}
+        # Build SELECT * FROM sec WHERE scol IN (?, ?, …).
+        ph = "%s"
+        placeholders = ", ".join([ph] * len(keys))
+        sql = f"SELECT * FROM {_q(sec_norm)} WHERE {_q(scol)} IN ({placeholders})"
+        params = keys if isinstance(keys, list) else tuple(keys)
+        try:
+            sec_db.connect()
+        except Exception:
+            pass
+        cur = self._exec_on(sec_db, sql, params)
+        try:
+            names = [d[0] for d in (cur.description or [])] if cur.description else []
+            sec_rows = [dict(zip(names, r)) for r in cur.fetchall()]
+        finally:
+            try: cur.close()
+            except Exception: pass
+        idx = {}
+        for r in sec_rows:
+            v = r.get(scol)
+            if v is not None and v not in idx:
+                idx[v] = r
+        return idx
+
+    def _merge_lazy(self, primary_rows, sec_indexes, sec_specs, sort):
+        """Merge primary rows with preloaded secondary indexes, with progress."""
+        total = len(primary_rows)
+        step = max(1, total // 50) if total else 1
+        merged = []
+        for i, r in enumerate(primary_rows):
+            for spec, idx in zip(sec_specs, sec_indexes):
+                key = spec.get("key")
+                if not key:
+                    continue
+                bcol = key[0] if isinstance(key, (list, tuple)) else ""
+                if not bcol:
+                    continue
+                v = r.get(bcol)
+                if v is None:
+                    continue
+                sec_row = idx.get(v) if isinstance(idx, dict) else None
+                if not sec_row:
+                    continue
+                # Merge columns: prefix to avoid name collision.
+                prefix = f"{spec['norm']}."
+                for kn, kv in sec_row.items():
+                    r[prefix + kn] = kv
+            merged.append(r)
+            if (i % step) == 0:
+                self._report_progress({"stage": "merge", "rows": i + 1,
+                                       "total": total,
+                                       "text": f"دمج… {i+1}/{total}"})
+        # Optional sort.
+        if sort:
+            try:
+                col = sort.get("column") if isinstance(sort, dict) else None
+                direction = (sort.get("direction") if isinstance(sort, dict) else "asc") or "asc"
+                if col and col in (merged[0] if merged else {}):
+                    merged.sort(key=lambda x: (x.get(col) is None, x.get(col)),
+                                reverse=(direction.lower() == "desc"))
+            except Exception:
+                pass
+        return merged
 
     def _summarize(self, aliases, filters, active_table) -> Dict[str, Any]:
         """Grand totals {alias: number} for chart compare mode (best effort).
