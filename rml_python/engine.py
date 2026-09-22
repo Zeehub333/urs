@@ -3647,6 +3647,55 @@ class RMLReportEngine:
         _cur = db.conn.cursor()
         _is_ms_stream = (self._stage_engine_of(db) == "mssql")
         _use_ev = (self._stage_engine_of(db) == "postgres")
+        # Pin the input sizes once for the cursor (pyodbc only — speeds bind,
+        # also dodges HYC00 on SQLBindParameter for some MSSQL drivers).
+        if _is_ms_stream:
+            try:
+                import pyodbc as _p
+                _sizes = []
+                for _n, _t in _coldefs:
+                    _tu = str(_t or "").upper()
+                    if _tu.startswith("BIGINT"):
+                        _sizes.append(_p.SQL_BIGINT)
+                    elif _tu.startswith("INT"):
+                        _sizes.append(_p.SQL_INTEGER)
+                    elif _tu.startswith("DECIMAL") or _tu.startswith("NUMERIC"):
+                        _sizes.append(_p.SQL_DECIMAL)
+                    elif _tu.startswith("DATETIME2") or _tu.startswith("DATETIME"):
+                        _sizes.append(_p.SQL_TYPE_TIMESTAMP)
+                    elif _tu == "DATE":
+                        _sizes.append(_p.SQL_TYPE_DATE)
+                    elif _tu == "TIME":
+                        _sizes.append(_p.SQL_TYPE_TIME)
+                    elif _tu == "BIT":
+                        _sizes.append(_p.SQL_BIT)
+                    elif _tu.startswith("FLOAT") or _tu.startswith("REAL"):
+                        _sizes.append(_p.SQL_DOUBLE)
+                    else:
+                        _sizes.append(_p.SQL_WVARCHAR)
+                _cur.setinputsizes(*_sizes)
+            except Exception:
+                pass
+        # Streaming always refills fully: clear any reused rows first (idempotent,
+        # also self-heals interrupted fills on engines without a meta registry).
+        _cur0 = db.conn.cursor()
+        try:
+            _cur0.execute(f"DELETE FROM {_q(_eff)}")
+            db.conn.commit()
+        except Exception:
+            try:
+                db.conn.rollback()
+            except Exception:
+                pass
+        finally:
+            try:
+                _cur0.close()
+            except Exception:
+                pass
+        _plan = self._sqlserver_plan(table_norm, info, info.get("row"))
+        _cur = db.conn.cursor()
+        _is_ms_stream = (self._stage_engine_of(db) == "mssql")
+        _use_ev = (self._stage_engine_of(db) == "postgres")
         try:
             from psycopg2.extras import execute_values as _ev
         except Exception:
@@ -3693,6 +3742,15 @@ class RMLReportEngine:
                 if _clean:
                     if _use_ev and _ev is not None:
                         _ev(_cur, _ev_sql, _clean, page_size=1000)
+                    elif _is_ms_stream:
+                        # MSSQL path: avoid executemany. Several Microsoft
+                        # ODBC drivers raise HYC00 ("Optional feature not
+                        # implemented" / SQLBindParameter) when bind types
+                        # are inferred per row in batch mode. Issuing one
+                        # execute per row, with setinputsizes pre-applied,
+                        # makes the call work on every driver we've seen.
+                        for _row in _clean:
+                            _cur.execute(_ins, _row)
                     else:
                         _cur.executemany(_ins, _clean)
                     _staged_rows += len(_clean)
