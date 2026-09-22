@@ -1909,7 +1909,15 @@ list.innerHTML = wizardDetail.columns.map((col, idx)=>`
                 const d0 = await fetch(`/api/apps/${wizApp()}/rml/draft/`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
                 let j0 = {}; try{ j0 = await d0.json(); }catch(e){}
                 if(!d0.ok) throw new Error(j0.error || ('خطأ ' + d0.status));
-                const testErr = await pollRmlTestJob(j0.job);
+                const testErr = await pollRmlTestJob(j0.job, (p)=>{
+                    try{
+                        const mins = Math.floor(p.elapsed / 60);
+                        const secs = p.elapsed % 60;
+                        const t = String(p.text || '').slice(0, 80);
+                        const elapsed = mins > 0 ? (mins + 'د ' + secs + 'ث') : (secs + 'ث');
+                        notify(`جلب… ${t} (${elapsed})`, 'info', 1500);
+                    }catch(_e){}
+                });
                 if(testErr){
                     // Test failed: ask the user whether to publish anyway or fix
                     // the report. The draft is preserved until they decide — we
@@ -1942,10 +1950,14 @@ list.innerHTML = wizardDetail.columns.map((col, idx)=>`
                 err.textContent = String((e && e.message) || e).slice(0, 500); err.classList.remove('hidden');
             }finally{ window._rmlSaving = false; }
         }
-        function pollRmlTestJob(job){
+        function pollRmlTestJob(job, onProgress){
             // ينتظر مهمة اختبار الجلب: null = نجاح، وإلا نص الخطأ
             return (async ()=>{
-                for(let i = 0; i < 150; i++){
+                const startedAt = Date.now();
+                // 30 minutes × 60 polls/minute ≈ 900 polls (every 2s). The fetch
+                // for large MSSQL copies can easily exceed the previous 5-minute
+                // ceiling; we now wait long enough for staging + fetch to finish.
+                for(let i = 0; i < 900; i++){
                     await new Promise(r=>setTimeout(r, 2000));
                     let j = null;
                     try{
@@ -1956,13 +1968,24 @@ list.innerHTML = wizardDetail.columns.map((col, idx)=>`
                         if(j === null) continue;
                         return String((pe && pe.message) || pe).slice(0, 1000);
                     }
+                    if(typeof onProgress === 'function'){
+                        try{
+                            const elapsed = Math.round((Date.now() - startedAt) / 1000);
+                            onProgress({
+                                status: j.status,
+                                stage: (j.progress && j.progress.stage) || '',
+                                text: (j.progress && j.progress.text) || '',
+                                elapsed,
+                            });
+                        }catch(_pe){}
+                    }
                     if(j.status === 'done'){
                         const _re = (j.result || {}).error;
                         return _re ? String(_re).slice(0, 2000) : null;
                     }
                     if(j.status === 'error') return String(j.error || 'فشل اختبار الجلب').slice(0, 2000);
                 }
-                return 'انتهت مهلة اختبار الجلب (5 دقائق) — تحقق من حجم الجداول ثم أعد المحاولة';
+                return 'انتهت مهلة اختبار الجلب (30 دقيقة) — تحقق من اتصال MSSQL وحجم الجداول ثم أعد المحاولة';
             })();
         }
         function showRmlTestErrorModal(msg, opts){
