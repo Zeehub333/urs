@@ -1859,8 +1859,11 @@ list.innerHTML = wizardDetail.columns.map((col, idx)=>`
             try{ f.contentWindow.print(); }catch(e){}
         }
         async function submitAddRml(){
-            const err = document.getElementById('rmlError');
-            err.classList.add('hidden');
+            try{ console.log('[submitAddRml] start'); }catch(_e){}
+            try{
+                const err = document.getElementById('rmlError');
+                if(!err){ try{ console.warn('[submitAddRml] rmlError div not found'); }catch(_e){} return; }
+                err.classList.add('hidden');
             const file = document.getElementById('rmlFileName').value.trim();
             const progName = document.getElementById('rmlProgName').value.trim();
             const displayName = document.getElementById('rmlDisplayName').value.trim();
@@ -1902,16 +1905,21 @@ list.innerHTML = wizardDetail.columns.map((col, idx)=>`
                 if(!wizardDetail.columns.length || !wizardDetail.columns.every(c=>c.alias && c.expr)){ err.textContent='أضف عموداً فرعياً واحداً على الأقل (اسم معروض + تعبير)'; err.classList.remove('hidden'); showRmlStep(4); return; }
             }
             const mode = wizardEditMode ? 'update' : 'create';
-            if(window._rmlSaving) return;
+            try{ console.log('[submitAddRml] mode=' + mode + ' file=' + file); }catch(_e){}
+            if(window._rmlSaving){ try{ console.log('[submitAddRml] already saving — skip'); }catch(_e){} return; }
             window._rmlSaving = true;
             try{
                 try{
                     if(window.__dismissAllNotifications) window.__dismissAllNotifications();
                 }catch(_e){}
-                try{ notify('جارٍ حفظ المسودة واختبار الجلب...', 'info', Infinity); }catch(e){}
+                try{ console.log('[submitAddRml] notify start'); }catch(_e){}
+                try{ notify('جارٍ حفظ المسودة واختبار الجلب...', 'info', Infinity); }catch(e){ try{ console.error('[submitAddRml] notify failed', e); }catch(_e){} }
+                try{ console.log('[submitAddRml] fetch draft start'); }catch(_e){}
                 const d0 = await fetch(`/api/apps/${wizApp()}/rml/draft/`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+                try{ console.log('[submitAddRml] fetch draft status=' + d0.status); }catch(_e){}
                 let j0 = {}; try{ j0 = await d0.json(); }catch(e){}
                 if(!d0.ok) throw new Error(j0.error || ('خطأ ' + d0.status));
+                try{ console.log('[submitAddRml] draft job=' + j0.job + ' draft=' + j0.draft); }catch(_e){}
                 const testErr = await pollRmlTestJob(j0.job, (p)=>{
                     try{
                         const mins = Math.floor(p.elapsed / 60);
