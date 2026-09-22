@@ -1282,6 +1282,17 @@ class SqlServerDirect:
                     return cn
                 except Exception as e:
                     last = e
+                    try:
+                        import sys as _sys
+                        import traceback as _tb
+                        _sys.stderr.write("\n=== RML SqlServerDirect connect diagnostic ===\n")
+                        _sys.stderr.write(f"driver: {_drv!r}  modern: {_modern}\n")
+                        _sys.stderr.write(f"connect_parts: {';'.join(_parts)[:300]}\n")
+                        _sys.stderr.write(_tb.format_exc())
+                        _sys.stderr.write("=== end ===\n")
+                        _sys.stderr.flush()
+                    except Exception:
+                        pass
                     continue
         raise ValueError(f"تعذر الاتصال المباشر بـ SQL Server: {str(last)[:200]}")
 
@@ -2380,6 +2391,16 @@ class RMLReportEngine:
                                 pass
                         return out
                     except Exception:
+                        try:
+                            import sys as _sys
+                            import traceback as _tb
+                            _sys.stderr.write("\n=== RML _mssql_fk_keys diagnostic ===\n")
+                            _sys.stderr.write(f"driver: {_drv!r}  sch/tbl: {sch}/{tbl}\n")
+                            _sys.stderr.write(_tb.format_exc())
+                            _sys.stderr.write("=== end ===\n")
+                            _sys.stderr.flush()
+                        except Exception:
+                            pass
                         continue
         except Exception:
             pass
@@ -3049,6 +3070,16 @@ class RMLReportEngine:
                     if "IM002" in _m or "Data source name not found" in _m:
                         last = e
                         continue
+                    try:
+                        import sys as _sys
+                        import traceback as _tb
+                        _sys.stderr.write("\n=== RML _iter_sqlserver_batches diagnostic ===\n")
+                        _sys.stderr.write(f"driver: {_drv!r}  sch/tbl: {sch}/{tbl}\n")
+                        _sys.stderr.write(_tb.format_exc())
+                        _sys.stderr.write("=== end ===\n")
+                        _sys.stderr.flush()
+                    except Exception:
+                        pass
                     last = e
         raise ValueError(f"تعذر جلب {sch}.{tbl} من SQL Server: {str(last)[:200]}")
 
@@ -3774,6 +3805,29 @@ class RMLReportEngine:
         except Exception as _e:
             try:
                 db.conn.rollback()
+            except Exception:
+                pass
+            # Diagnostic dump to stderr (always, not gated by DEBUG): pinpoints
+            # whether HYC00 originates in pyodbc.connect(), the SELECT in
+            # _iter_sqlserver_batches, the INSERT, or setinputsizes itself.
+            try:
+                import sys as _sys
+                import traceback as _tb
+                _sys.stderr.write("\n=== RML staging diagnostic ===\n")
+                _sys.stderr.write(f"table: {table_norm!r}\n")
+                _sys.stderr.write(f"is_mssql_stream: {_is_ms_stream}\n")
+                _sys.stderr.write(f"coldefs: {coldefs!r}\n")
+                try:
+                    _info_row = info.get("row") if isinstance(info, dict) else None
+                    if _info_row is not None:
+                        _srv = str(getattr(_info_row, "host", "") or "")
+                        _dbn = str(getattr(_info_row, "name", "") or "")
+                        _sys.stderr.write(f"sqlserver_target: {_srv}/{_dbn}\n")
+                except Exception:
+                    pass
+                _sys.stderr.write(_tb.format_exc())
+                _sys.stderr.write("=== end diagnostic ===\n")
+                _sys.stderr.flush()
             except Exception:
                 pass
             raise ValueError(f"تعذر ترحيل بيانات '{table_norm.lower()}': {_e}")
