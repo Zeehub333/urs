@@ -272,8 +272,10 @@
     function syncThemeUI(){var d=document.documentElement.classList.contains('dark');document.querySelectorAll('.theme-toggle-input').forEach(function(el){el.checked=d});document.querySelectorAll('.theme-toggle-label').forEach(function(el){el.textContent=d?'الوضع الداكن':'الوضع الفاتح'});document.querySelectorAll('.theme-toggle-icon').forEach(function(el){el.classList.toggle('fa-moon',d);el.classList.toggle('fa-sun',!d);el.classList.toggle('text-indigo-300',d);el.classList.toggle('text-amber-500',!d)});document.querySelectorAll('.theme-toggle-btn-icon').forEach(function(el){el.classList.toggle('fa-sun',d);el.classList.toggle('fa-moon',!d)});}
     document.addEventListener('DOMContentLoaded',syncThemeUI);
     syncThemeUI();
-    function notify(msg, type){
+    function notify(msg, type, duration){
         type = type || 'info';
+        // duration: ms before auto-dismiss. Falsy or 0 → default 4000.
+        // Pass Infinity (or a very large value) to keep the toast visible.
         var stack = document.getElementById('notifyStack');
         if(!stack) return;
         var styles = {
@@ -296,8 +298,9 @@
         el.appendChild(label);
         el.appendChild(btn);
         stack.appendChild(el);
-        var t = setTimeout(dismiss, 4000);
-        function dismiss(){ clearTimeout(t); el.classList.add('leaving'); setTimeout(function(){ el.remove(); }, 250); }
+        var ttl = (typeof duration === 'number' && duration > 0) ? duration : 4000;
+        var t = (ttl === Infinity) ? null : setTimeout(dismiss, ttl);
+        function dismiss(){ if(t) clearTimeout(t); el.classList.add('leaving'); setTimeout(function(){ el.remove(); }, 250); }
         btn.onclick = dismiss;
     }
     // رجوع ذكي: إلى الصفحة التي جئت منها (داخل النظام) وإلا للرابط الاحتياطي

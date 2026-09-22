@@ -1905,7 +1905,7 @@ list.innerHTML = wizardDetail.columns.map((col, idx)=>`
             if(window._rmlSaving) return;
             window._rmlSaving = true;
             try{
-                try{ notify('جارٍ حفظ المسودة واختبار الجلب...', 'info'); }catch(e){}
+                try{ notify('جارٍ حفظ المسودة واختبار الجلب...', 'info', Infinity); }catch(e){}
                 const d0 = await fetch(`/api/apps/${wizApp()}/rml/draft/`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
                 let j0 = {}; try{ j0 = await d0.json(); }catch(e){}
                 if(!d0.ok) throw new Error(j0.error || ('خطأ ' + d0.status));
@@ -1915,7 +1915,7 @@ list.innerHTML = wizardDetail.columns.map((col, idx)=>`
                         const secs = p.elapsed % 60;
                         const t = String(p.text || '').slice(0, 80);
                         const elapsed = mins > 0 ? (mins + 'د ' + secs + 'ث') : (secs + 'ث');
-                        notify(`جلب… ${t} (${elapsed})`, 'info', 1500);
+                        notify(`جلب… ${t} (${elapsed})`, 'info', 3000);
                     }catch(_e){}
                 });
                 if(testErr){
