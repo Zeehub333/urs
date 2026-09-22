@@ -1858,81 +1858,102 @@ list.innerHTML = wizardDetail.columns.map((col, idx)=>`
             const f = document.getElementById('dmlPreviewFrame2');
             try{ f.contentWindow.print(); }catch(e){}
         }
+        function rmlSaveProgress(text, frac){
+            try{
+                let ov = document.getElementById('rmlSaveProg');
+                if(!ov){
+                    ov = document.createElement('div'); ov.id = 'rmlSaveProg';
+                    ov.style.cssText = 'position:fixed;bottom:18px;right:18px;z-index:120;background:#4f46e5;color:#fff;border-radius:14px;box-shadow:0 12px 32px rgba(0,0,0,.35);min-width:320px;max-width:min(440px,90vw);padding:12px 14px;font-size:12px;font-weight:bold;direction:rtl';
+                    ov.innerHTML = '<div style="display:flex;align-items:center;gap:8px"><span style="background:#fff;color:#4f46e5;border-radius:99px;width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center;font-size:12px">i</span><span id="rmlSaveProgTx" style="flex:1"></span><button id="rmlSaveProgX" style="opacity:.8">✕</button></div>'
+                        + '<div style="height:8px;background:rgba(255,255,255,.3);border-radius:99px;overflow:hidden;margin-top:8px"><div id="rmlSaveProgBar" style="height:100%;width:0%;background:#fff;border-radius:99px;transition:width .3s"></div></div>';
+                    document.body.appendChild(ov);
+                    const bx = document.getElementById('rmlSaveProgX');
+                    if(bx){ bx.onclick = function(){ try{ rmlSaveProgressDone(); }catch(e){} }; }
+                }
+                const tx = document.getElementById('rmlSaveProgTx');
+                if(tx){ tx.textContent = String(text || ''); }
+                const bar = document.getElementById('rmlSaveProgBar');
+                if(bar){
+                    if(frac === null || frac === undefined || !isFinite(frac)){ bar.style.width = '100%'; bar.style.opacity = '.6'; }
+                    else{ bar.style.opacity = '1'; bar.style.width = (Math.round(frac*100)) + '%'; }
+                }
+            }catch(e){}
+        }
+        function rmlSaveProgressDone(){
+            try{ const ov = document.getElementById('rmlSaveProg'); if(ov){ ov.remove(); } }catch(e){}
+            try{ const np = document.getElementById('notifyPersist'); if(np){ np.innerHTML=''; } }catch(e){}
+        }
         async function submitAddRml(){
-            try{ console.log('[submitAddRml] start'); }catch(_e){}
+            console.log('[submitAddRml] start');
             const err = document.getElementById('rmlError');
-            if(!err){ try{ console.warn('[submitAddRml] rmlError div not found'); }catch(_e){} return; }
+            if(!err){ console.warn('[submitAddRml] rmlError div not found'); return; }
             err.classList.add('hidden');
             try{
-            const file = document.getElementById('rmlFileName').value.trim();
-            const progName = document.getElementById('rmlProgName').value.trim();
-            const displayName = document.getElementById('rmlDisplayName').value.trim();
-            const icon = document.getElementById('rmlIcon').value;
-            const category = document.getElementById('rmlCategory').value.trim() || 'HR';
-            // السكيما من الاتصال المختار (الأول) — لا حقل لها في المصمم
-            const schema = (wizardConnSchemas[String(wizardConnections[0])] || wizardSchema || '').trim();
-            const description = document.getElementById('rmlDescription').value.trim();
-            const namespace = document.getElementById('rmlNamespace').value.trim();
-            if(!file || !progName || !displayName){ err.textContent='أكمل الحقول المطلوبة (اسم التقرير بالإنجليزية، الاسم المختصر، الاسم العربي)'; err.classList.remove('hidden'); showRmlStep(1); return; }
-            if(!wizardConnections.length){ err.textContent='اختر اتصالاً واحداً على الأقل'; err.classList.remove('hidden'); showRmlStep(2); return; }
-            if(!wizardFields.length){ err.textContent='أضف حقلاً واحداً على الأقل'; err.classList.remove('hidden'); showRmlStep(3); return; }
-            if(!wizardFields.every(f=>f.name && f.name.trim())){ err.textContent='اسم كل حقل يجب أن يطابق الاسم المخزن في النظام'; err.classList.remove('hidden'); showRmlStep(3); return; }
-            if(!wizardColumns.length){ err.textContent='أضف عموداً واحداً على الأقل'; err.classList.remove('hidden'); showRmlStep(3); return; }
-            const payload = {
-                file: (wizardEditMode ? wizardEditMode.file : file), name: progName, displayName, icon, category, schema, description,
-                namespace: namespace,
-                report_type: ((document.getElementById('rmlReportType') || {}).value || 'master'),
-                detail: wizardDetail,
-                links: wizardLinks,
-                table_opts: Object.keys(wizardTableOpts || {}).map(k=>{
-                    const parts = String(k).split('||');
-                    const o = wizardTableOpts[k] || {};
-                    return {name: parts.slice(1).join('||'), conn: parts[0], is_default: !!o.is_default, is_sub: !!o.is_sub};
-                }),
-                connections: wizardConnections,
-                fields: wizardFields,
-                columns: wizardColumns,
-                groups: wizardGroups,
-                group_levels: wizardGroupLevels,
-                charts: wizardCharts,
-                rules: wizardRules,
-                general_where: wizardGeneralWhere || '',
-                doc_template: ((document.getElementById('wizardDocTemplate') || {}).value || wizardDocTemplate || '')
-            };
-            const _rtype = ((document.getElementById('rmlReportType') || {}).value || 'master');
-            if(_rtype === 'detail'){
-                if(!wizardDetail.table || !wizardDetail.master || !wizardDetail.detail){ err.textContent='حدد الجدول الفرعي ورابطه من ورقة الحقول أولاً (زر «فرعي» بجانب الجدول + رابط يربطه بالافتراضي)'; err.classList.remove('hidden'); showRmlStep(4); return; }
-                if(!wizardDetail.columns.length || !wizardDetail.columns.every(c=>c.alias && c.expr)){ err.textContent='أضف عموداً فرعياً واحداً على الأقل (اسم معروض + تعبير)'; err.classList.remove('hidden'); showRmlStep(4); return; }
-            }
-            const mode = wizardEditMode ? 'update' : 'create';
-            try{ console.log('[submitAddRml] mode=' + mode + ' file=' + file); }catch(_e){}
-            if(window._rmlSaving){ try{ console.log('[submitAddRml] already saving — skip'); }catch(_e){} return; }
-            window._rmlSaving = true;
-            try{
+                const file = document.getElementById('rmlFileName').value.trim();
+                const progName = document.getElementById('rmlProgName').value.trim();
+                const displayName = document.getElementById('rmlDisplayName').value.trim();
+                const icon = document.getElementById('rmlIcon').value;
+                const category = document.getElementById('rmlCategory').value.trim() || 'HR';
+                const schema = (wizardConnSchemas[String(wizardConnections[0])] || wizardSchema || '').trim();
+                const description = document.getElementById('rmlDescription').value.trim();
+                const namespace = document.getElementById('rmlNamespace').value.trim();
+                if(!file || !progName || !displayName){ err.textContent='أكمل الحقول المطلوبة (اسم التقرير بالإنجليزية، الاسم المختصر، الاسم العربي)'; err.classList.remove('hidden'); showRmlStep(1); return; }
+                if(!wizardConnections.length){ err.textContent='اختر اتصالاً واحداً على الأقل'; err.classList.remove('hidden'); showRmlStep(2); return; }
+                if(!wizardFields.length){ err.textContent='أضف حقلاً واحداً على الأقل'; err.classList.remove('hidden'); showRmlStep(3); return; }
+                if(!wizardFields.every(f=>f.name && f.name.trim())){ err.textContent='اسم كل حقل يجب أن يطابق الاسم المخزن في النظام'; err.classList.remove('hidden'); showRmlStep(3); return; }
+                if(!wizardColumns.length){ err.textContent='أضف عموداً واحداً على الأقل'; err.classList.remove('hidden'); showRmlStep(3); return; }
+                const payload = {
+                    file: (wizardEditMode ? wizardEditMode.file : file), name: progName, displayName, icon, category, schema, description,
+                    namespace: namespace,
+                    report_type: ((document.getElementById('rmlReportType') || {}).value || 'master'),
+                    detail: wizardDetail,
+                    links: wizardLinks,
+                    table_opts: Object.keys(wizardTableOpts || {}).map(k=>{
+                        const parts = String(k).split('||');
+                        const o = wizardTableOpts[k] || {};
+                        return {name: parts.slice(1).join('||'), conn: parts[0], is_default: !!o.is_default, is_sub: !!o.is_sub};
+                    }),
+                    connections: wizardConnections,
+                    fields: wizardFields,
+                    columns: wizardColumns,
+                    groups: wizardGroups,
+                    group_levels: wizardGroupLevels,
+                    charts: wizardCharts,
+                    rules: wizardRules,
+                    general_where: wizardGeneralWhere || '',
+                    doc_template: ((document.getElementById('wizardDocTemplate') || {}).value || wizardDocTemplate || '')
+                };
+                const _rtype = ((document.getElementById('rmlReportType') || {}).value || 'master');
+                if(_rtype === 'detail'){
+                    if(!wizardDetail.table || !wizardDetail.master || !wizardDetail.detail){ err.textContent='حدد الجدول الفرعي ورابطه من ورقة الحقول أولاً (زر «فرعي» بجانب الجدول + رابط يربطه بالافتراضي)'; err.classList.remove('hidden'); showRmlStep(4); return; }
+                    if(!wizardDetail.columns.length || !wizardDetail.columns.every(c=>c.alias && c.expr)){ err.textContent='أضف عموداً فرعياً واحداً على الأقل (اسم معروض + تعبير)'; err.classList.remove('hidden'); showRmlStep(4); return; }
+                }
+                const mode = wizardEditMode ? 'update' : 'create';
+                if(window._rmlSaving){ console.log('[submitAddRml] already saving — skip'); return; }
+                window._rmlSaving = true;
                 try{
                     if(window.__dismissAllNotifications) window.__dismissAllNotifications();
                 }catch(_e){}
-                try{ console.log('[submitAddRml] notify start'); }catch(_e){}
-                try{ notify('جارٍ حفظ المسودة واختبار الجلب...', 'info', Infinity); }catch(e){ try{ console.error('[submitAddRml] notify failed', e); }catch(_e){} }
-                try{ console.log('[submitAddRml] fetch draft start'); }catch(_e){}
+                try{ var _np = document.getElementById('notifyPersist'); if(_np){ _np.innerHTML=''; } }catch(_e){}
+                rmlSaveProgress('جارٍ حفظ المسودة واختبار الجلب...', null);
                 const d0 = await fetch(`/api/apps/${wizApp()}/rml/draft/`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
-                try{ console.log('[submitAddRml] fetch draft status=' + d0.status); }catch(_e){}
                 let j0 = {}; try{ j0 = await d0.json(); }catch(e){}
                 if(!d0.ok) throw new Error(j0.error || ('خطأ ' + d0.status));
-                try{ console.log('[submitAddRml] draft job=' + j0.job + ' draft=' + j0.draft); }catch(_e){}
                 const testErr = await pollRmlTestJob(j0.job, (p)=>{
                     try{
                         const mins = Math.floor(p.elapsed / 60);
                         const secs = p.elapsed % 60;
                         const t = String(p.text || '').slice(0, 80);
                         const elapsed = mins > 0 ? (mins + 'د ' + secs + 'ث') : (secs + 'ث');
-                        notify(`جلب… ${t} (${elapsed})`, 'info', Infinity);
+                        var frac = null;
+                        try{
+                            var _r = parseFloat(p.rows), _to = parseFloat(p.total);
+                            if(isFinite(_r) && isFinite(_to) && _to > 0){ frac = Math.max(0, Math.min(1, _r / _to)); }
+                        }catch(_e){}
+                        rmlSaveProgress(`جلب… ${t} (${elapsed})`, frac);
                     }catch(_e){}
                 });
                 if(testErr){
-                    // Test failed: ask the user whether to publish anyway or fix
-                    // the report. The draft is preserved until they decide — we
-                    // no longer delete it silently.
                     let userWantsPublish = false;
                     try{
                         userWantsPublish = await showRmlTestErrorModal(testErr, {
@@ -1960,6 +1981,7 @@ list.innerHTML = wizardDetail.columns.map((col, idx)=>`
             }catch(e){
                 err.textContent = String((e && e.message) || e).slice(0, 500); err.classList.remove('hidden');
             }finally{
+                try{ rmlSaveProgressDone(); }catch(_e){}
                 try{
                     const persist = document.getElementById('notifyPersist');
                     if(persist){ persist.remove(); }
@@ -1992,6 +2014,8 @@ list.innerHTML = wizardDetail.columns.map((col, idx)=>`
                                 status: j.status,
                                 stage: (j.progress && j.progress.stage) || '',
                                 text: (j.progress && j.progress.text) || '',
+                                rows: (j.progress && (j.progress.rows ?? j.progress.i)) || 0,
+                                total: (j.progress && (j.progress.total ?? j.progress.of)) || 0,
                                 elapsed,
                             });
                         }catch(_pe){}
