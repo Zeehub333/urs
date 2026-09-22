@@ -1911,8 +1911,27 @@ list.innerHTML = wizardDetail.columns.map((col, idx)=>`
                 if(!d0.ok) throw new Error(j0.error || ('خطأ ' + d0.status));
                 const testErr = await pollRmlTestJob(j0.job);
                 if(testErr){
-                    try{ await fetch(`/api/apps/${wizApp()}/rml/draft/discard/`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({draft: j0.draft})}); }catch(e){}
-                    showRmlTestErrorModal(testErr);
+                    // Test failed: ask the user whether to publish anyway or fix
+                    // the report. The draft is preserved until they decide — we
+                    // no longer delete it silently.
+                    let userWantsPublish = false;
+                    try{
+                        userWantsPublish = await showRmlTestErrorModal(testErr, {
+                            draft: j0.draft,
+                            finalizeUrl: `/api/apps/${wizApp()}/rml/draft/finalize/`,
+                            discardUrl: `/api/apps/${wizApp()}/rml/draft/discard/`,
+                            appName: wizApp(),
+                            mode,
+                        });
+                    }catch(e){}
+                    if(userWantsPublish){
+                        try{ notify('جارٍ النشر رغم فشل الاختبار...', 'info'); }catch(e){}
+                        const f1 = await fetch(`/api/apps/${wizApp()}/rml/draft/finalize/`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({draft: j0.draft, mode})});
+                        let f1j = {}; try{ f1j = await f1.json(); }catch(e){}
+                        if(!f1.ok) throw new Error(f1j.error || 'فشل النشر');
+                        try{ notify('تم النشر (رغم فشل الاختبار: ' + testErr.slice(0, 200) + '...)', 'warn'); }catch(e){}
+                        location.reload();
+                    }
                     return;
                 }
                 const f1 = await fetch(`/api/apps/${wizApp()}/rml/draft/finalize/`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({draft: j0.draft, mode})});
@@ -1946,37 +1965,60 @@ list.innerHTML = wizardDetail.columns.map((col, idx)=>`
                 return 'انتهت مهلة اختبار الجلب (5 دقائق) — تحقق من حجم الجداول ثم أعد المحاولة';
             })();
         }
-        function showRmlTestErrorModal(msg){
-            try{ closeRmlTestErrorModal(); }catch(e){}
-            const ov = document.createElement('div');
-            ov.id = 'rmlTestErrModal';
-            ov.style.cssText = 'position:fixed;inset:0;z-index:90;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;padding:16px';
-            ov.setAttribute('onclick', 'if(event.target===this)closeRmlTestErrorModal()');
-            const box = document.createElement('div');
-            box.style.cssText = 'background:#fff;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.35);width:100%;max-width:640px;max-height:85vh;display:flex;flex-direction:column;overflow:hidden';
-            const head = document.createElement('div');
-            head.style.cssText = 'padding:12px 16px;border-bottom:1px solid #fecaca;background:#fef2f2;display:flex;align-items:center;justify-content:space-between;gap:8px';
-            head.innerHTML = '<h3 style="font-size:14px;font-weight:bold;color:#b91c1c">✗ فشل اختبار الجلب — لم يُحفظ التقرير</h3>';
-            const x = document.createElement('button');
-            x.innerHTML = '✕'; x.style.cssText = 'color:#94a3b8;font-size:16px';
-            x.onclick = ()=>closeRmlTestErrorModal();
-            head.appendChild(x);
-            const pre = document.createElement('pre');
-            pre.style.cssText = 'padding:12px 16px;overflow:auto;font-size:11px;direction:rtl;white-space:pre-wrap;color:#0f172a;flex:1;min-height:120px';
-            pre.textContent = String(msg || 'خطأ غير معروف');
-            const bar = document.createElement('div');
-            bar.style.cssText = 'padding:10px 16px;border-top:1px solid #e2e8f0;display:flex;gap:8px';
-            const cp = document.createElement('button');
-            cp.textContent = 'نسخ الخطأ'; cp.style.cssText = 'flex:1;padding:8px;background:#f1f5f9;border-radius:12px;font-weight:bold;font-size:12px;color:#334155';
-            cp.onclick = ()=>{ try{ (navigator.clipboard.writeText(String(msg||'')) || Promise.resolve()).then(()=>{ try{notify('تم النسخ','success');}catch(e){} }).catch(()=>{}); }catch(e){} };
-            const cl = document.createElement('button');
-            cl.textContent = 'إغلاق'; cl.style.cssText = 'padding:8px 20px;background:#fff;border:1px solid #e2e8f0;border-radius:12px;font-weight:bold;font-size:12px;color:#475569';
-            cl.onclick = ()=>closeRmlTestErrorModal();
-            bar.appendChild(cp); bar.appendChild(cl);
-            box.appendChild(head); box.appendChild(pre); box.appendChild(bar);
-            ov.appendChild(box);
-            document.body.appendChild(ov);
-            try{ if(typeof lockScroll === 'function') lockScroll(); }catch(e){}
+        function showRmlTestErrorModal(msg, opts){
+            return new Promise((resolve)=>{
+                opts = opts || {};
+                try{ closeRmlTestErrorModal(); }catch(e){}
+                const ov = document.createElement('div');
+                ov.id = 'rmlTestErrModal';
+                ov.style.cssText = 'position:fixed;inset:0;z-index:90;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;padding:16px';
+                const box = document.createElement('div');
+                box.style.cssText = 'background:#fff;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.35);width:100%;max-width:720px;max-height:85vh;display:flex;flex-direction:column;overflow:hidden';
+                const head = document.createElement('div');
+                head.style.cssText = 'padding:12px 16px;border-bottom:1px solid #fecaca;background:#fef2f2;display:flex;align-items:center;justify-content:space-between;gap:8px';
+                head.innerHTML = '<h3 style="font-size:14px;font-weight:bold;color:#b91c1c">⚠ فشل اختبار الجلب — يمكنك النشر رغم ذلك</h3>';
+                const x = document.createElement('button');
+                x.innerHTML = '✕'; x.style.cssText = 'color:#94a3b8;font-size:16px';
+                x.onclick = ()=>{ try{ closeRmlTestErrorModal(); }catch(e){} resolve(false); };
+                head.appendChild(x);
+                const pre = document.createElement('pre');
+                pre.style.cssText = 'padding:12px 16px;overflow:auto;font-size:11px;direction:rtl;white-space:pre-wrap;color:#0f172a;flex:1;min-height:120px;max-height:340px';
+                pre.textContent = String(msg || 'خطأ غير معروف');
+                const bar = document.createElement('div');
+                bar.style.cssText = 'padding:10px 16px;border-top:1px solid #e2e8f0;display:flex;gap:8px;flex-wrap:wrap';
+                const cp = document.createElement('button');
+                cp.textContent = 'نسخ الخطأ'; cp.style.cssText = 'flex:1;padding:8px;background:#f1f5f9;border-radius:12px;font-weight:bold;font-size:12px;color:#334155';
+                cp.onclick = ()=>{ try{ (navigator.clipboard.writeText(String(msg||'')) || Promise.resolve()).then(()=>{ try{notify('تم النسخ','success');}catch(e){} }).catch(()=>{}); }catch(e){} };
+                const pub = document.createElement('button');
+                pub.textContent = 'نشر رغم فشل الاختبار';
+                pub.title = 'يكتب الملف النهائي حتى لو الـtest فشل (مثلاً صلاحيات DBA ناقصة)';
+                pub.style.cssText = 'flex:1;padding:8px;background:#d97706;color:#fff;border-radius:12px;font-weight:bold;font-size:12px';
+                pub.onclick = async ()=>{
+                    try{ closeRmlTestErrorModal(); }catch(e){}
+                    resolve(true);
+                };
+                const dsc = document.createElement('button');
+                dsc.textContent = 'حذف المسودة';
+                dsc.style.cssText = 'padding:8px 16px;background:#fff;border:1px solid #fecaca;color:#b91c1c;border-radius:12px;font-weight:bold;font-size:12px';
+                dsc.onclick = async ()=>{
+                    try{
+                        if(opts.discardUrl && opts.draft){
+                            await fetch(opts.discardUrl, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({draft: opts.draft})});
+                        }
+                    }catch(e){}
+                    try{ closeRmlTestErrorModal(); }catch(e){}
+                    resolve(false);
+                };
+                const cl = document.createElement('button');
+                cl.textContent = 'إغلاق'; cl.style.cssText = 'padding:8px 16px;background:#fff;border:1px solid #e2e8f0;border-radius:12px;font-weight:bold;font-size:12px;color:#475569';
+                cl.onclick = ()=>{ try{ closeRmlTestErrorModal(); }catch(e){} resolve(false); };
+                bar.appendChild(cp); bar.appendChild(pub); bar.appendChild(dsc); bar.appendChild(cl);
+                box.appendChild(head); box.appendChild(pre); box.appendChild(bar);
+                ov.appendChild(box);
+                ov.addEventListener('click', (e)=>{ if(e.target===ov){ try{ closeRmlTestErrorModal(); }catch(e){} resolve(false); } });
+                document.body.appendChild(ov);
+                try{ if(typeof lockScroll === 'function') lockScroll(); }catch(e){}
+            });
         }
         function closeRmlTestErrorModal(){
             const ov = document.getElementById('rmlTestErrModal');
