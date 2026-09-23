@@ -399,24 +399,21 @@ class _Parser:
             self.eat()
             return Literal(None)
         if t.kind == "id":
-            # Function call OR column ref
             name = t.value
-            up = name.upper()
-            if up in (
-                "SUM", "MIN", "MAX", "AVG", "COUNT", "SUMIF", "SUMIFS",
-                "COUNTBLANK", "COUNTIF", "COUNTA", "IF", "FILTER",
-                "XLOOKUP", "VLOOKUP",
-            ):
+            # Lookahead: if the next token is `(` then it's a function call
+            # (works for SUMIF, COUNTIF, NOW, CURRENT_TIMESTAMP, etc.).
+            nxt = self.toks[self.i + 1] if self.i + 1 < len(self.toks) else None
+            if nxt is not None and nxt.kind == "lparen":
                 self.eat()
                 self.expect("lparen")
                 args = self._parse_func_args()
                 self.expect("rparen")
-                return FuncCall(up, args)
+                return FuncCall(name.upper(), args)
             self.eat()
             parts = [name]
             while self._accept_dot():
-                nxt = self.expect("id")
-                parts.append(nxt.value)
+                nxt_id = self.expect("id")
+                parts.append(nxt_id.value)
             return ColumnRef(parts)
         if t.kind == "kw":
             # Functions are not in the keyword set; treat as identifier

@@ -3545,10 +3545,11 @@ def api_rml_job(request, job_id):
 # ---------------------------------------------------------------------------
 
 def _xsql_resolve_conn(conn_key):
-    """Return (engine_obj, db_engine_str) for a Django Connection id.
+    """Return (live_engine_obj, db_engine_str) for a Django Connection id.
 
-    Falls back to (None, '') when the connection cannot be resolved or is
-    not queryable (e.g. API mirrors).
+    Builds a real, connected engine wrapper (SqlServerDirect for SQL Server,
+    psycopg2-backed wrapper for Postgres) so the XSQL executor can run
+    SQL on it directly.
     """
     try:
         from .models import Connection as _DC
@@ -3561,14 +3562,68 @@ def _xsql_resolve_conn(conn_key):
     is_queryable = bool(getattr(row, "is_queryable", True))
     if not is_queryable or eng not in ("postgres", "postgresql", "sqlserver", "oracle"):
         return None, eng
-    return row, eng
+    # Build a live engine that has `conn.cursor()`.
+    if eng in ("sqlserver",):
+        try:
+            from rml_python.engine import SqlServerDirect as _SD
+            w = _SD(row)
+            try:
+                w.connect()
+            except Exception:
+                return None, eng
+            return w, eng
+        except Exception:
+            return None, eng
+    # postgres (and oracle via same psycopg2 path used elsewhere)
+    try:
+        import psycopg2 as _pg
+        host = str(getattr(row, "host", "") or "127.0.0.1")
+        port = int(getattr(row, "port", 0) or 5432)
+        user = str(getattr(row, "user", "") or "")
+        name = str(getattr(row, "name", "") or "urs")
+        # Password may be PBKDF2-encrypted; decrypt via config.dbconf.
+        pwd = str(getattr(row, "password", "") or "")
+        try:
+            import config.dbconf as _dbconf
+            _dec = _dbconf.dbpass_resolve(pwd) if pwd else ""
+            if _dec:
+                pwd = _dec
+        except Exception:
+            pass
+        cn = _pg.connect(
+            host=host, port=port, dbname=name, user=user,
+            password=pwd, application_name="xsql_runner",
+        )
+    except Exception:
+        return None, eng
+    # Wrap with a tiny shim that mirrors OracleEngine's interface.
+    class _PgShim:
+        def __init__(self, conn):
+            self.conn = conn
+        def _exec(self, sql, params):
+            cur = self.conn.cursor()
+            try:
+                cur.execute(sql, params or {})
+                return cur
+            except Exception:
+                try: cur.close()
+                except Exception: pass
+                raise
+    return _PgShim(cn), eng
 
 
 def _xsql_exec_on_db(db_obj, sql, params):
     """Execute sql on a live engine and return rows as list[dict]."""
     cur = db_obj.conn.cursor()
     try:
-        cur.execute(sql, params or {})
+        # Postgres wants %s placeholders; SQL Server uses {}. Transpile if needed.
+        from rml_python.engine import _mssql_transpile_sql, _mssql_bind_values
+        try:
+            transpiled_sql = _mssql_transpile_sql(sql, convert_binds=True)
+            binds = _mssql_bind_values(sql, params)
+            cur.execute(transpiled_sql, binds)
+        except Exception:
+            cur.execute(sql, params or {})
         names = [d[0] for d in (cur.description or [])] if cur.description else []
         rows = [dict(zip(names, r)) for r in cur.fetchall()]
         return rows, names
@@ -3663,10 +3718,6 @@ def api_xsql_execute(request):
         pdb = (conn_map.get(pkey) or {}).get("db")
         if pdb is None:
             return JsonResponse({"error": f"primary conn {pkey!r} not queryable"}, status=400)
-        try:
-            pdb.connect()
-        except Exception:
-            pass
         sql_per_conn[pkey or "_"] = compiled.primary.sql
         try:
             primary_rows, primary_names = _xsql_exec_on_db(pdb, compiled.primary.sql, {})
@@ -3712,6 +3763,109 @@ def api_xsql_execute(request):
 
 
 @csrf_exempt
+@csrf_exempt
+def api_xsql_run(request):
+    """One-shot XSQL endpoint for the designer/player UI.
+
+    POST {sql, namespaces:{alias: connection_id}, page, pageSize} →
+        {ok, columns, rows, total, sql_per_conn, primary_conn, errors}
+    """
+    if request.method != "POST":
+        return JsonResponse({"error": "POST required"}, status=405)
+    try:
+        body = json.loads(request.body.decode() or "{}")
+        sql_text = (body.get("sql") or "").strip()
+        if not sql_text:
+            return JsonResponse({"error": "sql required"}, status=400)
+        namespaces = body.get("namespaces") or {}
+        conn_keys = body.get("conn_keys") or []
+        if not namespaces and conn_keys:
+            namespaces = {f"ns_{ck}": str(ck) for ck in conn_keys}
+        try:
+            page = max(1, int(body.get("page") or 1))
+        except Exception:
+            page = 1
+        try:
+            page_size = body.get("pageSize") or body.get("page_size") or 50
+            page_size = int(page_size) if page_size != "all" else None
+        except Exception:
+            page_size = 50
+        conn_map: Dict[str, Dict[str, Any]] = {}
+        for alias, ck in namespaces.items():
+            db_obj, _eng = _xsql_resolve_conn(ck)
+            conn_map[str(alias)] = {"engine": _eng, "db": db_obj, "conn_id": str(ck)}
+        from rml_python.xsql import compile_xsql, parse as _xparse
+        try:
+            parsed = _xparse(sql_text)
+        except Exception as pe:
+            return JsonResponse({"ok": False, "error": f"parse error: {pe}"}, status=400)
+        try:
+            compiled = compile_xsql(sql_text, conn_map)
+        except Exception as ce:
+            return JsonResponse({"ok": False, "error": f"compile error: {ce}"}, status=400)
+
+        sql_per_conn: Dict[str, str] = {}
+        pkey = compiled.primary.conn_key or ""
+        pdb = (conn_map.get(pkey) or {}).get("db")
+        if pdb is None:
+            return JsonResponse({"ok": False, "error": f"primary conn {pkey!r} not queryable", "primary_sql": compiled.primary.sql}, status=400)
+        sql_per_conn[pkey or "_"] = compiled.primary.sql
+        try:
+            primary_rows, primary_names = _xsql_exec_on_db(pdb, compiled.primary.sql, {})
+        except Exception as pe:
+            return JsonResponse({"ok": False, "error": f"primary query failed: {pe}",
+                                "primary_sql": compiled.primary.sql}, status=500)
+
+        # Merge JOINs: index secondary by key col, attach to primary row.
+        for jn in (compiled.merges or []):
+            sk = str(jn.get("secondary_conn") or "")
+            sec_db = (conn_map.get(sk) or {}).get("db")
+            if sec_db is None:
+                continue
+            sec_sql = f"SELECT * FROM {jn['secondary_table']}"
+            sql_per_conn[sk or "_"] = sec_sql
+            try:
+                sec_rows, _ = _xsql_exec_on_db(sec_db, sec_sql, {})
+            except Exception:
+                sec_rows = []
+            key_col = jn.get("secondary_col") or ""
+            idx: Dict[Any, Dict[str, Any]] = {}
+            for r in sec_rows:
+                idx[r.get(key_col)] = r
+            pc = jn.get("primary_col") or ""
+            for r in primary_rows:
+                r[f"{jn['secondary_table']}.{key_col}"] = idx.get(r.get(pc), {}).get(key_col)
+
+        total = len(primary_rows)
+        if page_size:
+            start = (page - 1) * page_size
+            page_rows = primary_rows[start:start + page_size]
+        else:
+            page_rows = primary_rows
+        return JsonResponse({
+            "ok": True,
+            "columns": primary_names,
+            "rows": page_rows,
+            "total": total,
+            "page": page,
+            "pageSize": page_size or "all",
+            "sql_per_conn": sql_per_conn,
+            "primary_conn": pkey,
+            "plan": {
+                "primary_sql": compiled.primary.sql,
+                "primary_columns": compiled.primary.columns,
+                "secondaries": [
+                    {"conn_key": s.conn_key, "schema": s.schema, "table": s.table, "sql": s.sql}
+                    for s in compiled.secondaries
+                ],
+                "merges": compiled.merges,
+                "final_columns": compiled.final_columns,
+            },
+        }, json_dumps_params={"ensure_ascii": False})
+    except Exception as e:
+        return JsonResponse({"ok": False, "error": str(e)}, status=500)
+
+
 def api_rml_execute(request):
     pipe = None
     try:
