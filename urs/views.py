@@ -3579,7 +3579,7 @@ def _xsql_exec_on_db(db_obj, sql, params):
 
 @csrf_exempt
 def api_xsql_compile(request):
-    """POST {sql, conn_keys:[...]} → {ok, primary_sql, secondaries, plan}."""
+    """POST {sql, conn_keys:[...], namespaces:{alias: connection_id}} → plan."""
     if request.method != "POST":
         return JsonResponse({"error": "POST required"}, status=405)
     try:
@@ -3587,17 +3587,28 @@ def api_xsql_compile(request):
         sql_text = (body.get("sql") or "").strip()
         if not sql_text:
             return JsonResponse({"error": "sql required"}, status=400)
+        # Build conn_map keyed by the namespace used in the SQL
+        # (`conn_a.tbl`, `conn_b.lookup`, ...). Two options:
+        #   1) Body provides `namespaces`: {"conn_a": "2", "conn_b": "6"}
+        #   2) Fallback: body provides `conn_keys` (list of connection ids);
+        #      we map each to `ns_<id>`.
+        namespaces = body.get("namespaces") or {}
+        conn_map: Dict[str, Dict[str, Any]] = {}
+        if namespaces:
+            for alias, ck in namespaces.items():
+                db_obj, _eng = _xsql_resolve_conn(ck)
+                conn_map[str(alias)] = {"engine": _eng, "db": db_obj, "conn_id": str(ck)}
+        else:
+            conn_keys = body.get("conn_keys") or ["1"]
+            for ck in conn_keys:
+                db_obj, _eng = _xsql_resolve_conn(ck)
+                alias = f"ns_{ck}"
+                conn_map[alias] = {"engine": _eng, "db": db_obj, "conn_id": str(ck)}
         from rml_python.xsql import compile_xsql, parse as _xparse
         try:
             parsed = _xparse(sql_text)
         except Exception as pe:
             return JsonResponse({"error": f"parse error: {pe}"}, status=400)
-        conn_keys = body.get("conn_keys") or ["1"]
-        # Build conn_map keyed by alias in the SQL (first segment before .table).
-        conn_map = {}
-        for ck in conn_keys:
-            db_obj, _eng = _xsql_resolve_conn(ck)
-            conn_map[str(ck)] = {"engine": _eng, "db": db_obj}
         try:
             compiled = compile_xsql(sql_text, conn_map)
         except Exception as ce:
@@ -3620,37 +3631,43 @@ def api_xsql_compile(request):
 
 @csrf_exempt
 def api_xsql_execute(request):
-    """POST {sql, conn_keys:[...]} → {ok, rows, columns, sql_per_conn}."""
+    """POST {sql, namespaces:{alias: connection_id}} → {rows, columns}."""
     if request.method != "POST":
         return JsonResponse({"error": "POST required"}, status=405)
     try:
         body = json.loads(request.body.decode() or "{}")
         sql_text = (body.get("sql") or "").strip()
-        conn_keys = body.get("conn_keys") or ["1"]
         if not sql_text:
             return JsonResponse({"error": "sql required"}, status=400)
+        namespaces = body.get("namespaces") or {}
+        conn_map: Dict[str, Dict[str, Any]] = {}
+        if namespaces:
+            for alias, ck in namespaces.items():
+                db_obj, _eng = _xsql_resolve_conn(ck)
+                conn_map[str(alias)] = {"engine": _eng, "db": db_obj, "conn_id": str(ck)}
+        else:
+            conn_keys = body.get("conn_keys") or ["1"]
+            for ck in conn_keys:
+                db_obj, _eng = _xsql_resolve_conn(ck)
+                alias = f"ns_{ck}"
+                conn_map[alias] = {"engine": _eng, "db": db_obj, "conn_id": str(ck)}
         from rml_python.xsql import compile_xsql
-        conn_map = {}
-        for ck in conn_keys:
-            db_obj, _eng = _xsql_resolve_conn(ck)
-            conn_map[str(ck)] = {"engine": _eng, "db": db_obj}
         try:
             compiled = compile_xsql(sql_text, conn_map)
         except Exception as ce:
             return JsonResponse({"error": f"compile error: {ce}"}, status=400)
 
         sql_per_conn = {}
-        all_rows: List[Dict[str, Any]] = []
-
         # Run primary SQL.
-        pdb = (conn_map.get(compiled.primary.conn_key) or {}).get("db")
+        pkey = compiled.primary.conn_key or ""
+        pdb = (conn_map.get(pkey) or {}).get("db")
         if pdb is None:
-            return JsonResponse({"error": f"primary conn {compiled.primary.conn_key!r} not queryable"}, status=400)
+            return JsonResponse({"error": f"primary conn {pkey!r} not queryable"}, status=400)
         try:
             pdb.connect()
         except Exception:
             pass
-        sql_per_conn[compiled.primary.conn_key or "_"] = compiled.primary.sql
+        sql_per_conn[pkey or "_"] = compiled.primary.sql
         try:
             primary_rows, primary_names = _xsql_exec_on_db(pdb, compiled.primary.sql, {})
         except Exception as pe:
@@ -3676,7 +3693,6 @@ def api_xsql_execute(request):
                     sec_rows, _ = _xsql_exec_on_db(sec_db, sec_sql, {})
                 except Exception:
                     sec_rows = []
-                # Index by join key.
                 key_col = jn.get("secondary_col") or ""
                 idx: Dict[Any, Dict[str, Any]] = {}
                 for r in sec_rows:

@@ -204,6 +204,9 @@ class _Parser:
         select_items = self._parse_select_list()
         self.expect("kw", "FROM")
         from_table = self._parse_column_ref()
+        # Optional table alias on the primary: FROM tbl AS a
+        if self.accept("kw", "AS"):
+            self.expect("id")
         joins: List[JoinClause] = []
         while True:
             # Accept a join prefix: plain JOIN, or LEFT/RIGHT/INNER [JOIN] [OUTER].
@@ -257,11 +260,15 @@ class _Parser:
         return False
 
     def _parse_join(self, side: str = "INNER") -> JoinClause:
-        # Join prefix already consumed. Parse: <table_ref> ON <left> = <right>.
+        # Join prefix already consumed. Parse: <table_ref> [AS alias] ON <left> = <right>.
+        target = self._parse_column_ref()
+        # Optional table alias: AS alias (we don't track aliases in v1; compiler
+        # resolves columns by name within the target table).
+        if self.accept("kw", "AS"):
+            self.expect("id")
+        self.expect("kw", "ON")
         # Use `_parse_comparison` (not `_parse_expression`) for both sides
         # because `_parse_equality` would greedily consume the `=` operator.
-        target = self._parse_column_ref()
-        self.expect("kw", "ON")
         on_left = self._parse_comparison()
         op = self.expect("op", "=").value
         on_right = self._parse_comparison()
@@ -602,13 +609,13 @@ class XSQLCompiler:
                 "side": j.side,
             })
 
-        final_columns = [a if a else c for (e, a) in self.p.select]
+        final_columns = [a if a else self._column_name(e) for (e, a) in self.p.select]
         final_columns += group_cols
         return CompiledQuery(
             primary=primary,
             secondaries=secondaries,
             merges=merges,
-            final_select=[a if a else c for (e, a) in self.p.select],
+            final_select=[a if a else self._column_name(e) for (e, a) in self.p.select],
             final_columns=final_columns,
         )
 

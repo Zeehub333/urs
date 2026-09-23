@@ -120,8 +120,8 @@ urlpatterns = [
     path('api/apps/<str:app_name>/modals/<path:file>', urs_views.api_app_modal, name='api_app_modal'),
     # RML API (proxied from rml_python)
     path('api/rml/metadata', urs_views.api_rml_metadata, name='api_rml_metadata'),
-    path('api/xsql/compile', urs_views.api_xsql_compile, name='api_xsql_compile'),
-    path('api/xsql/execute', urs_views.api_xsql_execute, name='api_xsql_execute'),
+    path('api/xsql/compile/', urs_views.api_xsql_compile, name='api_xsql_compile'),
+    path('api/xsql/execute/', urs_views.api_xsql_execute, name='api_xsql_execute'),
     path('api/rml/parse-sql/', urs_views.api_rml_parse_sql, name='api_rml_parse_sql'),
     path('api/rml/preview', urs_views.api_rml_preview, name='api_rml_preview'),
     path('api/rml/execute', urs_views.api_rml_execute, name='api_rml_execute'),
