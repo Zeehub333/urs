@@ -125,6 +125,9 @@
             <button onclick="openReportSetup()" title="إعداد التقارير" class="w-8 h-8 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-indigo-600 transition">
                 <i class="fa-solid fa-sliders text-sm"></i>
             </button>
+            <button onclick="openXsqlPanel()" title="استعلام XSQL — اتصالات متعددة + دوال خطية" class="w-8 h-8 rounded-full flex items-center justify-center text-amber-600 hover:bg-amber-50 transition">
+                <i class="fa-solid fa-bolt text-sm"></i>
+            </button>
 
             <button onclick="exportToExcel()" title="تصدير إلى Excel (XLSX) بنسق الطباعة" class="w-8 h-8 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-emerald-600 transition">
                 <i class="fa-solid fa-file-excel text-sm"></i>
@@ -492,6 +495,37 @@
     {% if has_rml_wizard %}{% include "rml_wizard_modal.html" %}{% endif %}
     </div><!-- end flex-1 -->
 {% endblock %}
+
+<!-- XSQL panel — استعلام موسّع على اتصالات متعددة + دوال خطية -->
+<div id="xsqlPanel" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 overflow-y-auto p-3 sm:p-6">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-6xl m-auto overflow-hidden flex flex-col" style="height:min(92vh,900px);max-height:92vh">
+        <div class="px-6 py-3 border-b border-slate-200 flex items-center justify-between bg-gradient-to-l from-amber-50 to-white gap-2 shrink-0">
+            <h3 class="text-sm font-bold text-slate-800 flex items-center gap-2">
+                <i class="fa-solid fa-bolt text-amber-500"></i> استعلام XSQL — اتصالات متعددة + دوال خطية
+            </h3>
+            <button onclick="closeXsqlPanel()" class="px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded-xl text-xs">إغلاق</button>
+        </div>
+        <div class="flex-1 min-h-0 flex flex-col p-3 gap-2 overflow-hidden">
+            <div id="xsqlNsBox" class="flex flex-wrap items-center gap-1.5 text-[11px] bg-slate-50 border border-slate-200 rounded-xl p-2"></div>
+            <textarea id="xsqlText" dir="ltr" rows="6" spellcheck="false" placeholder="-- مثال: حوالات منصرفة مع تأكيدات من اتصال آخر
+SELECT a.PublicNumber, a.Amount,
+       XLOOKUP(a.network_id, n.id, n.name, '?') AS network_name
+FROM ns_2.tblIncomingTransfers AS a
+LEFT JOIN ns_6.networks AS n
+    ON a.OutgoingNetworkID = n.id
+WHERE a.Delivered = 1
+LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-xl p-2 bg-white" style="direction:ltr;text-align:left;min-height:140px"></textarea>
+            <div class="flex items-center gap-1.5">
+                <button onclick="xsqlCompile()" class="px-3 py-1.5 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 rounded-xl text-xs font-bold"><i class="fa-solid fa-flask"></i> معاينة</button>
+                <button onclick="xsqlRun()" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold"><i class="fa-solid fa-play"></i> تشغيل</button>
+                <button onclick="xsqlLoadSample()" class="px-3 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-700 rounded-xl text-xs font-bold"><i class="fa-solid fa-lightbulb"></i> مثال</button>
+            </div>
+            <div id="xsqlOut" dir="ltr" class="text-[11px] bg-slate-900 text-emerald-100 rounded-xl p-2 overflow-auto font-mono whitespace-pre-wrap" style="max-height:200px;direction:ltr;text-align:left"></div>
+            <div id="xsqlResults" class="flex-1 min-h-0 border border-slate-200 rounded-xl bg-white overflow-auto"></div>
+        </div>
+    </div>
+</div>
+
 {% block scripts %}
     <script>
         // Injected Django context
@@ -2805,6 +2839,115 @@
             if(typeof lockScroll === 'function') lockScroll();
         }
         function closeReportSetup(){ document.getElementById('reportSetupModal').classList.add('hidden'); if(typeof unlockScroll === 'function') unlockScroll(); }
+
+        // ── XSQL panel: استعلام موسّع على اتصالات متعددة ──
+        function openXsqlPanel(){
+            const m = document.getElementById('xsqlPanel');
+            if(!m){ return; }
+            m.classList.remove('hidden');
+            try{ if(typeof lockScroll === 'function') lockScroll(); }catch(e){}
+            try{ fetchXsqlConnections(); }catch(e){}
+        }
+        function closeXsqlPanel(){ document.getElementById('xsqlPanel').classList.add('hidden'); try{ if(typeof unlockScroll === 'function') unlockScroll(); }catch(e){} }
+        async function fetchXsqlConnections(){
+            try{
+                const r = await fetch('/api/fmlk/metadata');  // generic list endpoint placeholder
+                // Fall back to a hard-coded namespace if the endpoint is unavailable.
+                const ns = document.getElementById('xsqlNsBox');
+                if(!ns) return;
+                ns.innerHTML = ['1','2','6'].map(cid=>(
+                    '<label class="inline-flex items-center gap-1.5 px-2 py-1 bg-white border border-slate-200 rounded-full cursor-pointer hover:bg-slate-50">'
+                    + `<input type="checkbox" checked data-xsql-player-ns="ns_${cid}" class="rounded text-amber-600">`
+                    + `<span class="font-semibold">ns_${cid}</span>`
+                    + '</label>'
+                )).join('');
+            }catch(e){}
+        }
+        async function xsqlCompile(){
+            const sql = (document.getElementById('xsqlText') || {}).value || '';
+            const out = document.getElementById('xsqlOut');
+            if(!sql.trim()){ out.textContent = '-- اكتب استعلام XSQL أولاً.'; return; }
+            const namespaces = xsqlCollectNamespaces();
+            if(!Object.keys(namespaces).length){ out.textContent = '-- اختر اتصالاً واحداً على الأقل.'; return; }
+            out.textContent = '-- تجميع...';
+            try{
+                const r = await fetch('/api/xsql/compile/', {
+                    method:'POST', headers:{'Content-Type':'application/json'},
+                    body: JSON.stringify({sql: sql, namespaces: namespaces}),
+                });
+                const j = await r.json();
+                if(!r.ok || j.error){ out.textContent = 'ERROR: ' + (j.error || ('HTTP '+r.status)); return; }
+                const parts = [];
+                parts.push('-- Primary SQL ('+j.primary_conn+'):');
+                parts.push(j.primary_sql + ';');
+                for(const s of (j.secondaries || [])){
+                    parts.push('');
+                    parts.push('-- Secondary ('+s.conn_key+'.'+s.table+'):');
+                    parts.push(s.sql + ';');
+                }
+                if((j.merges || []).length){
+                    parts.push('');
+                    parts.push('-- Merge plan:');
+                    for(const m of j.merges){
+                        parts.push(`  primary.${m.primary_col}  =  secondary.${m.secondary_table}.${m.secondary_col}  (${m.side})`);
+                    }
+                }
+                out.textContent = parts.join('\n');
+            }catch(e){ out.textContent = 'ERROR: ' + e.message; }
+        }
+        async function xsqlRun(){
+            const sql = (document.getElementById('xsqlText') || {}).value || '';
+            const out = document.getElementById('xsqlOut');
+            const tblHost = document.getElementById('xsqlResults');
+            if(!sql.trim()){ out.textContent = '-- اكتب استعلام XSQL أولاً.'; return; }
+            const namespaces = xsqlCollectNamespaces();
+            if(!Object.keys(namespaces).length){ out.textContent = '-- اختر اتصالاً واحداً على الأقل.'; return; }
+            out.textContent = '-- جاري التنفيذ...';
+            if(tblHost) tblHost.innerHTML = '<p class="text-slate-400 text-center py-4">... جاري الجلب</p>';
+            try{
+                const r = await fetch('/api/xsql/run/', {
+                    method:'POST', headers:{'Content-Type':'application/json'},
+                    body: JSON.stringify({sql: sql, namespaces: namespaces, page: 1, pageSize: 200}),
+                });
+                const j = await r.json();
+                if(!j.ok){ out.textContent = 'ERROR: ' + (j.error || ''); if(tblHost) tblHost.innerHTML=''; return; }
+                const rows = j.rows || [];
+                const cols = j.columns || [];
+                out.textContent = `OK — total=${j.total} rows (showing ${rows.length})`;
+                if(tblHost){
+                    if(!rows.length){
+                        tblHost.innerHTML = '<p class="text-slate-400 text-center py-4">لا توجد نتائج</p>';
+                    } else {
+                        let html = '<div class="overflow-auto" style="max-height:50vh"><table class="w-full text-xs"><thead class="bg-slate-100 sticky top-0"><tr>';
+                        for(const c of cols) html += `<th class="px-2 py-1 text-right border-b border-slate-200 font-bold text-slate-700 whitespace-nowrap">${c}</th>`;
+                        html += '</tr></thead><tbody>';
+                        for(const r of rows){
+                            html += '<tr class="hover:bg-amber-50">';
+                            for(const c of cols){
+                                const v = (typeof r.get === 'function') ? r.get(c) : r[c];
+                                html += `<td class="px-2 py-1 border-b border-slate-100 text-slate-800 whitespace-nowrap">${(v===null||v===undefined)?'':String(v)}</td>`;
+                            }
+                            html += '</tr>';
+                        }
+                        html += '</tbody></table></div>';
+                        tblHost.innerHTML = html;
+                    }
+                }
+            }catch(e){ out.textContent = 'ERROR: ' + e.message; if(tblHost) tblHost.innerHTML=''; }
+        }
+        function xsqlCollectNamespaces(){
+            const ns = {};
+            document.querySelectorAll('[data-xsql-player-ns]:checked').forEach(cb=>{
+                const alias = cb.getAttribute('data-xsql-player-ns');
+                ns[alias] = alias.replace(/^ns_/, '');
+            });
+            return ns;
+        }
+        function xsqlLoadSample(){
+            const ta = document.getElementById('xsqlText');
+            if(!ta) return;
+            ta.value = '-- مثال: حوالات منصرفة مع تأكيدات من اتصال آخر\nSELECT a.PublicNumber, a.Amount,\n       XLOOKUP(a.network_id, n.id, n.name, \"?\") AS network_name\nFROM ns_2.tblIncomingTransfers AS a\nLEFT JOIN ns_6.networks AS n\n    ON a.OutgoingNetworkID = n.id\nWHERE a.Delivered = 1\nLIMIT 50;';
+        }
         function addSetupRow(){ setupRows.push(setupBlankRow()); renderSetupRows(); const l=document.getElementById('setupRowsList'); if(l) l.scrollTop = l.scrollHeight; }
         function removeSetupRow(i){ setupRows.splice(i,1); renderSetupRows(); }
         function clearReportSetup(){ setupRows = []; renderSetupRows(); }

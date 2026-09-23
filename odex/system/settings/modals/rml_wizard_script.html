@@ -2350,7 +2350,7 @@ list.innerHTML = wizardDetail.columns.map((col, idx)=>`
             openExprBuilder(t, false);
         }
         let wbTab = 'home';          // home | insert | fields | columns | data
-        let wbSheet = 'conns';      // conns | fields | rules | columns | groups | detail | charts | docs
+        let wbSheet = 'conns';      // conns | fields | rules | columns | groups | detail | charts | docs | xsql
         let wbExprTarget = -1;       // عمود محدد في شريط الصيغة
         const WB_SHEETS = [
             ['conns','الاتصالات','fa-plug'],
@@ -2361,6 +2361,7 @@ list.innerHTML = wizardDetail.columns.map((col, idx)=>`
             ['detail','التفاصيل','fa-list-check'],
             ['charts','المخططات','fa-chart-bar'],
             ['docs','المستندات','fa-file-lines'],
+            ['xsql','XSQL استعلام موسع','fa-bolt'],
         ];
         function wbInit(){
             try{
@@ -2595,6 +2596,25 @@ list.innerHTML = wizardDetail.columns.map((col, idx)=>`
                     + '<div id="wbConnsHost" class="space-y-2"><p class="text-slate-400 text-center py-4 text-xs">جاري التحميل...</p></div></div>';
                 foot = '<button onclick="loadConnectionsForWizard().then(wbRenderConns)" class="wb-add"><i class="fa-solid fa-rotate"></i> تحديث</button>';
                 setTimeout(()=>{ try{ if(!Object.keys(wizardConnNames).length) loadConnectionsForWizard().then(wbRenderConns); else wbRenderConns(); }catch(e){} }, 0);
+            }
+            else if(wbSheet==='xsql'){
+                html = '<div class="space-y-2">'
+                    + '<div class="wb-panel"><div class="wb-panel-title"><i class="fa-solid fa-bolt text-amber-500"></i> استعلام XSQL موسّع — اتصالات متعددة + دوال خطية</div>'
+                    + '<div class="text-[11px] text-slate-500 mb-1">'
+                    + 'الصياغة: <span class="font-mono">SELECT … FROM ns.tbl AS a [INNER JOIN ns2.tbl AS b ON a.id=b.id] [WHERE …]</span>'
+                    + '<br>الدوال: SUMIF, COUNTIF, SUMIFS, COUNTBLANK, COUNTA, IF, SUM, MIN, MAX, AVG, COUNT, XLOOKUP, VLOOKUP, FILTER.'
+                    + '</div>'
+                    + '<div id="wbXsqlNsBox" class="flex flex-wrap items-center gap-1.5 text-[11px] bg-slate-50 border border-slate-200 rounded-xl p-2 mb-1"></div>'
+                    + '<textarea id="wbXsqlText" dir="ltr" rows="10" spellcheck="false" placeholder="-- اكتب استعلام XSQL هنا\nSELECT a.id, SUMIF(a.amount, a.status, 1) AS delivered\nFROM my_ns.tblIncomingTransfers AS a\nWHERE a.Delivered = 1\nLIMIT 100" class="w-full font-mono text-[11px] border border-slate-200 rounded-xl p-2 bg-white" style="direction:ltr;text-align:left"></textarea>'
+                    + '<div class="flex items-center gap-1.5">'
+                    + '<button onclick="wbXsqlCompile()" class="wb-add bg-indigo-100 text-indigo-700"><i class="fa-solid fa-flask"></i> معاينة (Compile)</button>'
+                    + '<button onclick="wbXsqlRun()" class="wb-add wb-add2 bg-emerald-600 text-white"><i class="fa-solid fa-play"></i> تشغيل (Run)</button>'
+                    + '<button onclick="wbXsqlLoadSample()" class="wb-add wb-add2"><i class="fa-solid fa-lightbulb"></i> مثال</button>'
+                    + '</div>'
+                    + '<div id="wbXsqlOut" class="text-[11px] bg-slate-900 text-emerald-100 rounded-xl p-2 overflow-auto font-mono whitespace-pre-wrap" style="max-height:40vh"></div>'
+                    + '</div></div>';
+                foot = '<span class="text-[10px] text-slate-500">XSQL اختياري — إن تركته فارغاً يستخدم التقرير وضع RML الكلاسيكي</span>';
+                setTimeout(()=>{ try{ wbXsqlRenderNamespaces(); }catch(e){} }, 0);
             }
             body.innerHTML = html;
             const fbar = document.getElementById('wbSheetFoot');
@@ -3290,3 +3310,111 @@ list.innerHTML = wizardDetail.columns.map((col, idx)=>`
         // تهيئة فورية (الصفحة قد تكون محملة بالفعل)
         try{ if(document.readyState !== 'loading') wbInit(); }catch(e){}
         // --- Connections Manager ---
+
+        // ── XSQL: namespace picker + compile/run (designer tab) ─────────
+        let wbXsqlLastResult = null;
+        function wbXsqlRenderNamespaces(){
+            const box = document.getElementById('wbXsqlNsBox');
+            if(!box) return;
+            const pool = Object.keys(wizardConnNames || {});
+            if(!pool.length){
+                box.innerHTML = '<span class="text-rose-500">لا توجد اتصالات. أضف اتصالاً من شاشة الاتصالات أولاً.</span>';
+                return;
+            }
+            const current = (wizardConnections || []).map(String);
+            box.innerHTML = pool.map(cid=>{
+                const on = current.includes(String(cid));
+                return '<label class="inline-flex items-center gap-1.5 px-2 py-1 bg-white border border-slate-200 rounded-full cursor-pointer hover:bg-slate-50">'
+                    + `<input type="checkbox" ${on?'checked':''} data-xsql-ns="ns_${cid}" class="rounded text-amber-600">`
+                    + `<span class="font-semibold">ns_${cid}</span>`
+                    + `<span class="text-slate-400">${wbEsc(wizardConnNames[cid]||'')}</span>`
+                    + '</label>';
+            }).join('');
+        }
+        function wbXsqlCollectNamespaces(){
+            const ns = {};
+            document.querySelectorAll('[data-xsql-ns]:checked').forEach(cb=>{
+                const alias = cb.getAttribute('data-xsql-ns');
+                ns[alias] = alias.replace(/^ns_/, '');
+            });
+            return ns;
+        }
+        async function wbXsqlCompile(){
+            const sql = (document.getElementById('wbXsqlText') || {}).value || '';
+            const out = document.getElementById('wbXsqlOut');
+            if(!sql.trim()){ out.textContent = '-- اكتب استعلام XSQL أولاً.'; return; }
+            const namespaces = wbXsqlCollectNamespaces();
+            if(!Object.keys(namespaces).length){
+                out.textContent = '-- اختر اتصالاً واحداً على الأقل من قائمة Namespaces أعلاه.'; return;
+            }
+            out.textContent = '-- تجميع...';
+            try{
+                const r = await fetch('/api/xsql/compile/', {
+                    method:'POST', headers:{'Content-Type':'application/json'},
+                    body: JSON.stringify({sql: sql, namespaces: namespaces}),
+                });
+                const j = await r.json();
+                if(!r.ok || j.error){ out.textContent = 'ERROR: ' + (j.error || ('HTTP '+r.status)); return; }
+                const parts = [];
+                parts.push('-- Primary SQL ('+j.primary_conn+'):');
+                parts.push(j.primary_sql + ';');
+                for(const s of (j.secondaries || [])){
+                    parts.push('');
+                    parts.push('-- Secondary ('+s.conn_key+'.'+s.table+'):');
+                    parts.push(s.sql + ';');
+                }
+                if((j.merges || []).length){
+                    parts.push('');
+                    parts.push('-- Merge plan:');
+                    for(const m of j.merges){
+                        parts.push(`  primary.${m.primary_col}  =  secondary.${m.secondary_table}.${m.secondary_col}  (${m.side})`);
+                    }
+                }
+                wbXsqlLastResult = j;
+                out.textContent = parts.join('\n');
+            }catch(e){ out.textContent = 'ERROR: ' + e.message; }
+        }
+        async function wbXsqlRun(){
+            const sql = (document.getElementById('wbXsqlText') || {}).value || '';
+            const out = document.getElementById('wbXsqlOut');
+            if(!sql.trim()){ out.textContent = '-- اكتب استعلام XSQL أولاً.'; return; }
+            const namespaces = wbXsqlCollectNamespaces();
+            if(!Object.keys(namespaces).length){
+                out.textContent = '-- اختر اتصالاً واحداً على الأقل.'; return;
+            }
+            out.textContent = '-- جاري التنفيذ...';
+            try{
+                const r = await fetch('/api/xsql/run/', {
+                    method:'POST', headers:{'Content-Type':'application/json'},
+                    body: JSON.stringify({sql: sql, namespaces: namespaces, page: 1, pageSize: 50}),
+                });
+                const j = await r.json();
+                if(!j.ok){ out.textContent = 'ERROR: ' + (j.error || ''); return; }
+                const rows = j.rows || [];
+                const cols = j.columns || [];
+                let s = `OK — total=${j.total} cols=${cols.join(',')}\n`;
+                if(rows.length){
+                    s += cols.join('\t') + '\n';
+                    s += rows.slice(0, 20).map(r=>cols.map(c=>{
+                        const v = (typeof r.get === 'function') ? r.get(c) : r[c];
+                        return (v === null || v === undefined) ? '' : String(v);
+                    }).join('\t')).join('\n');
+                    if(rows.length > 20) s += `\n... +${rows.length-20} more`;
+                } else {
+                    s += '(no rows)';
+                }
+                wbXsqlLastResult = j;
+                out.textContent = s;
+            }catch(e){ out.textContent = 'ERROR: ' + e.message; }
+        }
+        function wbXsqlLoadSample(){
+            const ta = document.getElementById('wbXsqlText');
+            if(!ta) return;
+            const pool = Object.keys(wizardConnNames || {});
+            if(pool.length < 2){
+                ta.value = '-- مثال لاستعلام من اتصال واحد\nSELECT id, amount, Delivered\nFROM conn_a.tblIncomingTransfers\nWHERE Delivered = 1\nLIMIT 100;';
+            } else {
+                const a = pool[0], b = pool[1];
+                ta.value = `-- مثال: استعلام يجمع بين اتصالين مختلفين\nSELECT a.id, a.amount, b.name\nFROM ns_${a}.tblIncomingTransfers AS a\nINNER JOIN ns_${b}.lookup AS b\n    ON a.id = b.id\nWHERE a.Delivered = 1\nLIMIT 100;`;
+            }
+        }
