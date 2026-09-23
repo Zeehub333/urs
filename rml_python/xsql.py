@@ -274,28 +274,54 @@ class _Parser:
         on_right = self._parse_comparison()
         return JoinClause(side=side, target=target, on=BinOp(op, on_left, on_right))
 
+    def _parse_alias_token(self) -> Optional[str]:
+        """Accept either an identifier or a quoted string ("..." or '...') as alias."""
+        t = self.peek()
+        if t is None:
+            return None
+        if t.kind == "id":
+            self.eat()
+            return t.value
+        if t.kind == "str":
+            self.eat()
+            return t.value
+        return None
+
     def _parse_select_list(self) -> List[Tuple[Expr, Optional[str]]]:
         items: List[Tuple[Expr, Optional[str]]] = []
         expr = self._parse_expression()
         alias: Optional[str] = None
         if self.accept("kw", "AS"):
-            t = self.expect("id")
-            alias = t.value
+            alias = self._parse_alias_token()
         items.append((expr, alias))
         while self._accept_comma():
             expr = self._parse_expression()
             alias = None
             if self.accept("kw", "AS"):
-                alias = self.expect("id").value
+                alias = self._parse_alias_token()
             items.append((expr, alias))
         return items
 
     def _parse_column_ref(self) -> ColumnRef:
         parts: List[str] = []
-        t = self.expect("id")
-        parts.append(t.value)
+        # Accept either an identifier or a quoted string as a part
+        # (SQL Server uses `[name]`; we also accept "name" / 'name').
+        t = self.peek()
+        if t is None:
+            raise SyntaxError("Expected identifier, got EOF")
+        if t.kind == "id":
+            self.eat()
+            parts.append(t.value)
+        elif t.kind == "str":
+            self.eat()
+            parts.append(t.value)
+        else:
+            raise SyntaxError(f"Expected identifier at pos {t.pos}, got {t.kind} {t.value!r}")
         while self._accept_dot():
-            nxt = self.expect("id")
+            nxt = self.peek()
+            if nxt is None or nxt.kind not in ("id", "str"):
+                raise SyntaxError(f"Expected identifier after '.', got {nxt.kind if nxt else 'EOF'}")
+            self.eat()
             parts.append(nxt.value)
         return ColumnRef(parts)
 
@@ -393,6 +419,28 @@ class _Parser:
             v = t.value
             return Literal(float(v) if "." in v else int(v))
         if t.kind == "str":
+            # If the string is followed by `.`, treat it as a column-reference
+            # segment (`"ns"."tbl"."col"`); otherwise it's a literal value.
+            nxt = self.toks[self.i + 1] if self.i + 1 < len(self.toks) else None
+            if nxt is not None and nxt.kind == "dot":
+                # Full column reference, possibly multi-part.
+                parts = [t.value]
+                self.eat()
+                while self._accept_dot():
+                    nxt2 = self.peek()
+                    if nxt2 is None or nxt2.kind not in ("id", "str"):
+                        raise SyntaxError(f"Expected identifier after '.', got {nxt2.kind if nxt2 else 'EOF'}")
+                    self.eat()
+                    parts.append(nxt2.value)
+                return ColumnRef(parts)
+            # Otherwise: string literal. If the *following* token is a comma,
+            # an alias keyword (AS), or FROM/WHERE/GROUP/ORDER — and we're at
+            # top of a SELECT item — treat it as an identifier (column name).
+            if nxt is not None and nxt.kind in ("comma", "kw"):
+                kw = nxt.value.upper() if nxt.kind == "kw" else ""
+                if nxt.kind == "comma" or kw in ("AS", "FROM", "WHERE", "GROUP", "ORDER", "LIMIT", "JOIN", "ON", "LEFT", "RIGHT", "INNER"):
+                    self.eat()
+                    return ColumnRef([t.value])
             self.eat()
             return Literal(t.value)
         if t.kind == "kw" and t.value.upper() == "NULL":
@@ -435,6 +483,10 @@ class _Parser:
         raise SyntaxError(f"Unexpected token at pos {t.pos}: {t.kind} {t.value!r}")
 
     def _parse_func_args(self) -> List[Expr]:
+        # Empty argument list is allowed for functions like NOW(), CURRENT_TIMESTAMP.
+        t = self.peek()
+        if t is not None and t.kind == "rparen":
+            return []
         args: List[Expr] = [self._parse_expression()]
         while True:
             t = self.peek()
@@ -660,8 +712,9 @@ class XSQLCompiler:
         if isinstance(expr, FuncCall):
             return self._emit_func(expr, alias)
         if isinstance(expr, ColumnRef):
-            col = self._column_name(expr)
-            return self._q(col), col
+            # Quote each segment so Arabic/keywords stay valid identifiers.
+            col = ".".join(f'"{p}"' for p in expr.parts)
+            return col, expr.parts[-1]
         if isinstance(expr, Literal):
             v = expr.value
             if v is None:
@@ -770,3 +823,164 @@ class XSQLCompiler:
 def compile_xsql(text: str, conn_map: Dict[str, Dict[str, Any]]) -> CompiledQuery:
     parsed = parse(text)
     return XSQLCompiler(parsed, conn_map).compile()
+
+
+# ---------------------------------------------------------------------------
+# 6) RML → XSQL translator.
+# ---------------------------------------------------------------------------
+# Take a parsed RMLReportCompiler (fields + columns + links + table_opts +
+# general_where) and emit a single XSQL string that the existing compiler can
+# plan into per-connection SQL + Python merge.
+# ---------------------------------------------------------------------------
+
+
+def _rml_table_short(t: str) -> str:
+    """Strip schema/owner from a table reference. RML often uses
+    `dbo.tblX` or just `tblX`. We want the bare table name.
+    """
+    s = str(t or "").strip()
+    if not s:
+        return ""
+    if "." in s:
+        s = s.split(".")[-1]
+    return s.strip("[]\"'")
+
+
+def _rml_field_alias_from_name(name: str) -> str:
+    """Pick a safe alias from a field/column Arabic-or-Latin name.
+    We transliterate to ASCII when possible, fallback to lower-snake.
+    """
+    import re as _re
+    s = str(name or "").strip()
+    if not s:
+        return "col"
+    out = _re.sub(r"[^A-Za-z0-9_]+", "_", s).strip("_").lower()
+    return out or "col"
+
+
+def rml_to_xsql(compiler, conn_keys: Optional[List[str]] = None) -> Tuple[str, Dict[str, str]]:
+    """Convert a compiled RML into a single XSQL string + namespace map.
+
+    Parameters
+    ----------
+    compiler : RMLReportCompiler (already-loaded .rml)
+    conn_keys : optional list of namespace aliases to use for the
+                tables referenced by the report. The i-th conn_key is
+                mapped to the i-th <rml_connections> entry in the file
+                (after the default). If None, we auto-assign ns_<i>.
+
+    Returns
+    -------
+    (sql_text, namespace_map)
+        sql_text is a single XSQL string the player can hand to /api/xsql/run/.
+        namespace_map is {"ns_2": "2", "ns_6": "6", ...} ready for that endpoint.
+    """
+    # --- collect fields + their connection groups ---
+    try:
+        fields = list(compiler.fields() or [])
+    except Exception:
+        fields = []
+    try:
+        rml_conns = list(compiler.connections() or [])
+    except Exception:
+        rml_conns = []
+    # Map gid (global connection id from Django) -> rml_conn.id -> namespace.
+    gid_to_ns: Dict[str, str] = {}
+    ns_to_gid: Dict[str, str] = {}
+    for i, rc in enumerate(rml_conns):
+        gid = str(getattr(rc, "connection_id", "") or "")
+        if not gid:
+            continue
+        if conn_keys and i < len(conn_keys):
+            ns = conn_keys[i]
+        else:
+            ns = f"ns_{gid}"
+        gid_to_ns[gid] = ns
+        ns_to_gid[ns] = gid
+    # --- group fields by (table_source, gid) so each FROM block is a real query ---
+    from collections import OrderedDict
+    table_groups: "OrderedDict[Tuple[str,str], list]" = OrderedDict()
+    for f in fields:
+        ts = _rml_table_short(getattr(f, "table_source", "") or "")
+        gid = str(getattr(f, "connection_id", "") or getattr(f, "conn_id", "") or "")
+        if not ts:
+            continue
+        # Default gid: the first connection in the file.
+        if not gid and rml_conns:
+            gid = str(getattr(rml_conns[0], "connection_id", "") or "")
+        if not gid:
+            continue
+        if gid not in gid_to_ns:
+            # An unknown gid (e.g. dropped connection). Synthesize ns.
+            ns = f"ns_{gid}"
+            gid_to_ns[gid] = ns
+            ns_to_gid[ns] = gid
+        table_groups.setdefault((gid, ts), []).append(f)
+    # Pick the base (=first) connection+table as FROM target.
+    if not table_groups:
+        return "SELECT 1 AS empty_xsql", {}
+    (base_gid, base_ts), base_fields = next(iter(table_groups.items()))
+    base_ns = gid_to_ns[base_gid]
+    base_fields_count = len(base_fields)
+    # --- SELECT list ---
+    select_parts: List[str] = []
+    seen_aliases: Dict[str, int] = {}
+    for f in base_fields:
+        fn = getattr(f, "name", "")
+        if not fn:
+            continue
+        # column reference fully qualified by base namespace.
+        alias = _rml_field_alias_from_name(fn)
+        if alias in seen_aliases:
+            seen_aliases[alias] += 1
+            alias = f"{alias}_{seen_aliases[alias]}"
+        else:
+            seen_aliases[alias] = 1
+        select_parts.append(f'"{fn}" AS {alias}')
+    # Secondary tables → LEFT JOIN (we don't know the right join side here).
+    joins_sql: List[str] = []
+    for (gid, ts), flist in list(table_groups.items())[1:]:
+        ns = gid_to_ns[gid]
+        join_cols: List[str] = []
+        for f in flist:
+            fn = getattr(f, "name", "")
+            if fn:
+                join_cols.append(f'"{ns}"."{ts}"."{fn}"')
+        sel_cols_sql = ", ".join(join_cols) if join_cols else "*"
+        joins_sql.append(
+            f'LEFT JOIN "{ns}"."{ts}" ON 1=1 -- pseudo-join; real link via XLOOKUP()'
+        )
+    # --- general_where -> WHERE (best effort) ---
+    gw = ""
+    try:
+        gw = str(compiler.general_where() or "")
+    except Exception:
+        gw = ""
+    # If general_where references columns not in base, drop it (caller may add XLOOKUP).
+    where_sql = ""
+    if gw.strip():
+        # Strip [[...]] and [...]; we keep it raw in WHERE — XSQL parser understands both.
+        # The most common case is `([[tbl.col]] = val)` which maps to base cols.
+        where_sql = gw.strip()
+        if not where_sql.upper().startswith("WHERE"):
+            where_sql = "WHERE " + where_sql
+        # Translate `[[tbl.col]]` → `"tbl"."col"` (no schema) for the base namespace.
+        where_sql = re.sub(r"\[\[([A-Za-z0-9_]+)\.([A-Za-z0-9_]+)\]\]", r'"\1"."\2"', where_sql)
+    # --- assemble XSQL ---
+    parts: List[str] = ["SELECT"]
+    parts.append("    " + ",\n    ".join(select_parts) if select_parts else "    *")
+    parts.append(f'FROM "{base_ns}"."{base_ts}" AS t0')
+    parts.extend(joins_sql)
+    if where_sql:
+        parts.append(where_sql)
+    parts.append(f"-- {base_fields_count} fields from {base_ns}.{base_ts}")
+    sql_text = "\n".join(parts)
+    return sql_text, ns_to_gid
+
+
+def xsql_namespaces_from_rml(compiler) -> Dict[str, str]:
+    """Return the {namespace: gid} map for an RML — used as `namespaces`
+    argument for /api/xsql/run/."""
+    _sql, ns = rml_to_xsql(compiler, conn_keys=None)
+    return ns
+

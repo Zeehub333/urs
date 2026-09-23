@@ -2609,6 +2609,7 @@ list.innerHTML = wizardDetail.columns.map((col, idx)=>`
                     + '<div class="flex items-center gap-1.5">'
                     + '<button onclick="wbXsqlCompile()" class="wb-add bg-indigo-100 text-indigo-700"><i class="fa-solid fa-flask"></i> معاينة (Compile)</button>'
                     + '<button onclick="wbXsqlRun()" class="wb-add wb-add2 bg-emerald-600 text-white"><i class="fa-solid fa-play"></i> تشغيل (Run)</button>'
+                    + '<button onclick="wbXsqlFromCurrentRml()" class="wb-add wb-add2 bg-amber-100 text-amber-700" title="حوّل RML الحالي إلى XSQL تلقائياً"><i class="fa-solid fa-magic-wand-sparkles"></i> من RML الحالي</button>'
                     + '<button onclick="wbXsqlLoadSample()" class="wb-add wb-add2"><i class="fa-solid fa-lightbulb"></i> مثال</button>'
                     + '</div>'
                     + '<div id="wbXsqlOut" class="text-[11px] bg-slate-900 text-emerald-100 rounded-xl p-2 overflow-auto font-mono whitespace-pre-wrap" style="max-height:40vh"></div>'
@@ -3417,4 +3418,34 @@ list.innerHTML = wizardDetail.columns.map((col, idx)=>`
                 const a = pool[0], b = pool[1];
                 ta.value = `-- مثال: استعلام يجمع بين اتصالين مختلفين\nSELECT a.id, a.amount, b.name\nFROM ns_${a}.tblIncomingTransfers AS a\nINNER JOIN ns_${b}.lookup AS b\n    ON a.id = b.id\nWHERE a.Delivered = 1\nLIMIT 100;`;
             }
+        }
+        async function wbXsqlFromCurrentRml(){
+            // استخراج XSQL تلقائياً من ملف RML الحالي (fields/connections/links)
+            // عبر /api/xsql/from-rml/.
+            const ta = document.getElementById('wbXsqlText');
+            const out = document.getElementById('wbXsqlOut');
+            if(!ta || !out){ return; }
+            const cur = (wizardEditMode && wizardEditMode.file) ? wizardEditMode.file : null;
+            if(!cur){
+                out.textContent = '-- لا يوجد ملف RML مفتوح حالياً (هذه الميزة تعمل على تقرير موجود في وضع التعديل).';
+                return;
+            }
+            out.textContent = '-- جاري التحويل من RML إلى XSQL...';
+            try{
+                const r = await fetch('/api/xsql/from-rml/', {
+                    method:'POST', headers:{'Content-Type':'application/json'},
+                    body: JSON.stringify({rml: cur.replace(/\.rml$/, ''), app: (typeof wizApp === 'function' ? wizApp() : (document.getElementById('rmlApp')||{}).value || '')}),
+                });
+                const j = await r.json();
+                if(!r.ok || !j.ok){ out.textContent = 'ERROR: ' + (j.error || ('HTTP '+r.status)); return; }
+                ta.value = j.sql;
+                // Pre-check namespace chips based on the returned namespaces.
+                if(j.namespaces){
+                    Object.keys(j.namespaces).forEach(ns=>{
+                        const cb = document.querySelector(`[data-xsql-ns="${ns}"]`);
+                        if(cb) cb.checked = true;
+                    });
+                }
+                out.textContent = '-- تم توليد XSQL من RML ✓\n-- namespaces: ' + JSON.stringify(j.namespaces);
+            }catch(e){ out.textContent = 'ERROR: ' + e.message; }
         }

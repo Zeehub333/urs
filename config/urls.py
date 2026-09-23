@@ -123,6 +123,7 @@ urlpatterns = [
     path('api/xsql/compile/', urs_views.api_xsql_compile, name='api_xsql_compile'),
     path('api/xsql/execute/', urs_views.api_xsql_execute, name='api_xsql_execute'),
     path('api/xsql/run/', urs_views.api_xsql_run, name='api_xsql_run'),
+    path('api/xsql/from-rml/', urs_views.api_xsql_from_rml, name='api_xsql_from_rml'),
     path('api/rml/parse-sql/', urs_views.api_rml_parse_sql, name='api_rml_parse_sql'),
     path('api/rml/preview', urs_views.api_rml_preview, name='api_rml_preview'),
     path('api/rml/execute', urs_views.api_rml_execute, name='api_rml_execute'),

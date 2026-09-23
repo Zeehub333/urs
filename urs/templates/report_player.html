@@ -1117,63 +1117,18 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                 } else if(ov){ ov.style.display = 'none'; }
             }catch(e){}
         }
-        async function runAsyncReport(body){
-            const r0 = await fetch('/api/rml/execute-async', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
-            let j0 = {};
-            try{ j0 = await r0.json(); }catch(e){}
-            if(!r0.ok) throw new Error((j0 && j0.error) || ('خطأ ' + r0.status));
-            const job = j0.job;
-            showReportProgress(true, 'بدء التنفيذ الخلفي…');
-            let fails = 0;
-            for(;;){
-                await _rptSleep(2000);
-                let j = null;
-                try{
-                    const rj = await fetch('/api/rml/job/' + encodeURIComponent(job));
-                    j = await rj.json();
-                    if(!rj.ok) throw new Error((j && j.error) || ('خطأ ' + rj.status));
-                    fails = 0;
-                }catch(pe){
-                    if(j === null){
-                        fails++;
-                        if(fails > 15){ showReportProgress(false); throw new Error('انقطع الاتصال بالخادم أثناء التنفيذ الخلفي'); }
-                        showReportProgress(true, 'انتظار الخادم…');
-                        continue;
-                    }
-                    throw pe;
-                }
-                const st = j.status;
-                if(st === 'done'){ showReportProgress(false); return {ok:true, data:(j.result||{}), status:200}; }
-                if(st === 'error'){ showReportProgress(false); throw new Error(j.error || 'فشل التنفيذ الخلفي'); }
-                const p = j.progress || {};
-                showReportProgress(true, p.text || 'جاري التنفيذ…', p);
-            }
-        }
         async function postExecuteReport(body){
-            // تنفيذ خلفي أولاً عند العلم المسبق أن المزامن لن يكفي:
-            // تقرير ضخم معروف (إجمالي سابق) أو مهلة سابقة مسجلة — بلا انتظار 45 ثانية
-            const _ak = (()=>{ try{ return 'rml_async_' + currentApp + '_' + currentRml; }catch(e){ return ''; } })();
-            const _wantAsync = (()=>{
-                try{ if(_ak && localStorage.getItem(_ak) === '1') return true; }catch(e){}
-                try{ if((lazyTotal || 0) > 200000) return true; }catch(e){}
-                return false;
-            })();
-            if(_wantAsync) return await runAsyncReport(body);
+            // تنفيذ متزامن (sync) عبر /api/xsql/run/ إن كان XSQL، أو /api/rml/execute للـRML.
             const init = {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)};
+            // اكتشاف وضع XSQL: body يحوي {sql, namespaces} بدون rml.
+            const isXsql = body && body.sql && !body.rml;
+            const url = isXsql ? '/api/xsql/run/' : '/api/rml/execute';
             try{
-                const ctl = new AbortController();
-                const t = setTimeout(()=>{ try{ctl.abort();}catch(e){} }, 45000);
-                let res;
-                try{ res = await fetch('/api/rml/execute', Object.assign({}, init, {signal: ctl.signal})); }
-                finally{ clearTimeout(t); }
+                const res = await fetch(url, init);
                 let data = {};
                 try{ data = await res.json(); }catch(e){}
                 return {ok: res.ok, data: data, status: res.status};
             }catch(e){
-                if(e && (e.name === 'AbortError' || /abort/i.test(String((e && e.message) || '')))){
-                    try{ if(_ak) localStorage.setItem(_ak, '1'); }catch(e2){}
-                    return await runAsyncReport(body);
-                }
                 throw e;
             }
         }
@@ -1205,7 +1160,33 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                 // Note: grouping is applied client-side over loaded rows
                 // (renderGroupingSidebar); groupBy is NOT sent so the main
                 // window-function query stays valid.
-                const _ex = await postExecuteReport({rml: currentRml, app: currentApp, payload});
+                // Convert RML → XSQL on the fly (server-side) and execute as
+                // a distributed query. This lets the player benefit from
+                // XSQL's multi-connection JOIN without saving XSQL separately.
+                let _ex;
+                try{
+                    const _conv = await fetch('/api/xsql/from-rml/', {
+                        method:'POST', headers:{'Content-Type':'application/json'},
+                        body: JSON.stringify({rml: currentRml, app: currentApp}),
+                    });
+                    const _cj = await _conv.json();
+                    if(_cj && _cj.ok){
+                        const xsqlPayload = {
+                            sql: _cj.sql,
+                            namespaces: _cj.namespaces || {},
+                            page: page,
+                            pageSize: effPageSize,
+                            limit: effPageSize === 'all' ? 100000 : effPageSize,
+                            chunkSize: 100000,
+                        };
+                        _ex = await postExecuteReport(xsqlPayload);
+                    } else {
+                        // Fallback to legacy RML execute.
+                        _ex = await postExecuteReport({rml: currentRml, app: currentApp, payload});
+                    }
+                }catch(e){
+                    _ex = await postExecuteReport({rml: currentRml, app: currentApp, payload});
+                }
                 const _ok = _ex.ok, _st = _ex.status;
                 if(_ok){
                     const data = _ex.data;

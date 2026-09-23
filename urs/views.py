@@ -2592,6 +2592,18 @@ def _conn_is_sql_queryable(dj):
     return (getattr(dj, "engine", "") or "").lower() in ("postgres", "oracle")
 
 
+def _rml_get_compiler(rml_name, app_name=None):
+    """Return an RMLReportCompiler for the given .rml file (or None if missing)."""
+    try:
+        from rml_python.compiler import RMLReportCompiler as _RC
+        path = _find_rml_path(rml_name, app_name)
+        if not path or not path.exists():
+            return None
+        return _RC(path=str(path))
+    except Exception:
+        return None
+
+
 def _rml_get_pipeline(rml_name, app_name=None):
     from rml_python.pipeline import OdexPipeline
     path = _find_rml_path(rml_name, app_name)
@@ -3614,6 +3626,15 @@ def _xsql_resolve_conn(conn_key):
 
 def _xsql_exec_on_db(db_obj, sql, params):
     """Execute sql on a live engine and return rows as list[dict]."""
+    # Rollback any in-flight aborted transaction from a previous failure
+    # (e.g. psycopg2 leaves the connection in 'aborted' state until rollback).
+    try:
+        conn = getattr(db_obj, "conn", None)
+        if conn is not None:
+            try: conn.rollback()
+            except Exception: pass
+    except Exception:
+        pass
     cur = db_obj.conn.cursor()
     try:
         # Postgres wants %s placeholders; SQL Server uses {}. Transpile if needed.
@@ -3626,7 +3647,13 @@ def _xsql_exec_on_db(db_obj, sql, params):
             cur.execute(sql, params or {})
         names = [d[0] for d in (cur.description or [])] if cur.description else []
         rows = [dict(zip(names, r)) for r in cur.fetchall()]
+        try: db_obj.conn.commit()
+        except Exception: pass
         return rows, names
+    except Exception:
+        try: db_obj.conn.rollback()
+        except Exception: pass
+        raise
     finally:
         try: cur.close()
         except Exception: pass
@@ -3763,12 +3790,44 @@ def api_xsql_execute(request):
 
 
 @csrf_exempt
+def api_xsql_from_rml(request):
+    """POST {rml, app} → {ok, sql, namespaces}.
+
+    Convert a stored .rml (fields + columns + links + table_opts +
+    general_where) into an equivalent XSQL string the player can execute
+    via /api/xsql/run/. Connection ids referenced by the RML become
+    namespaces `ns_<gid>` in the returned XSQL.
+    """
+    if request.method != "POST":
+        return JsonResponse({"error": "POST required"}, status=405)
+    try:
+        data = json.loads(request.body.decode() or "{}")
+        rml_name = data.get("rml") or ""
+        app_name = data.get("app") or ""
+        if not rml_name:
+            return JsonResponse({"error": "rml required"}, status=400)
+        comp = _rml_get_compiler(rml_name, app_name)
+        if comp is None:
+            return JsonResponse({"error": f"rml not found: {rml_name}"}, status=404)
+        from rml_python.xsql import rml_to_xsql
+        sql, ns_map = rml_to_xsql(comp)
+        return JsonResponse({
+            "ok": True,
+            "rml": rml_name,
+            "app": app_name,
+            "sql": sql,
+            "namespaces": ns_map,
+        }, json_dumps_params={"ensure_ascii": False})
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
 @csrf_exempt
 def api_xsql_run(request):
     """One-shot XSQL endpoint for the designer/player UI.
 
-    POST {sql, namespaces:{alias: connection_id}, page, pageSize} →
-        {ok, columns, rows, total, sql_per_conn, primary_conn, errors}
+    POST {sql, namespaces:{alias: connection_id}, page, pageSize, offset, limit} →
+        {ok, columns, rows, total, sql_per_conn, primary_conn, plan}.
     """
     if request.method != "POST":
         return JsonResponse({"error": "POST required"}, status=405)
@@ -3786,10 +3845,19 @@ def api_xsql_run(request):
         except Exception:
             page = 1
         try:
-            page_size = body.get("pageSize") or body.get("page_size") or 50
+            page_size = body.get("pageSize") or body.get("page_size") or 100
             page_size = int(page_size) if page_size != "all" else None
         except Exception:
-            page_size = 50
+            page_size = 100
+        try:
+            offset = max(0, int(body.get("offset") or ((page - 1) * (page_size or 100))))
+        except Exception:
+            offset = (page - 1) * (page_size or 100)
+        try:
+            limit = body.get("limit") or page_size or 100
+            limit = int(limit) if limit != "all" else None
+        except Exception:
+            limit = page_size or 100
         conn_map: Dict[str, Dict[str, Any]] = {}
         for alias, ck in namespaces.items():
             db_obj, _eng = _xsql_resolve_conn(ck)
@@ -3810,17 +3878,21 @@ def api_xsql_run(request):
         if pdb is None:
             return JsonResponse({"ok": False, "error": f"primary conn {pkey!r} not queryable", "primary_sql": compiled.primary.sql}, status=400)
         sql_per_conn[pkey or "_"] = compiled.primary.sql
-        try:
-            primary_rows, primary_names = _xsql_exec_on_db(pdb, compiled.primary.sql, {})
-        except Exception as pe:
-            return JsonResponse({"ok": False, "error": f"primary query failed: {pe}",
-                                "primary_sql": compiled.primary.sql}, status=500)
 
-        # Merge JOINs: index secondary by key col, attach to primary row.
+        # Lazy chunked fetch: stream primary rows in batches of CHUNK_SIZE
+        # (=100_000 by default). For each chunk we merge any secondary JOIN
+        # in Python (build an index from the secondary table once, then
+        # look up per primary key). This keeps memory bounded regardless of
+        # how big the underlying table is.
+        CHUNK_SIZE = max(1, int(body.get("chunkSize") or 100000))
+        # Build secondary indexes once (full table for now — could also be
+        # lazy/streaming for very large lookups; left as future optimisation).
+        sec_indexes: List[Tuple[Dict[str, Any], Dict[str, str]]] = []
         for jn in (compiled.merges or []):
             sk = str(jn.get("secondary_conn") or "")
             sec_db = (conn_map.get(sk) or {}).get("db")
             if sec_db is None:
+                sec_indexes.append(({}, jn))
                 continue
             sec_sql = f"SELECT * FROM {jn['secondary_table']}"
             sql_per_conn[sk or "_"] = sec_sql
@@ -3832,23 +3904,100 @@ def api_xsql_run(request):
             idx: Dict[Any, Dict[str, Any]] = {}
             for r in sec_rows:
                 idx[r.get(key_col)] = r
-            pc = jn.get("primary_col") or ""
-            for r in primary_rows:
-                r[f"{jn['secondary_table']}.{key_col}"] = idx.get(r.get(pc), {}).get(key_col)
+            sec_indexes.append((idx, jn))
 
-        total = len(primary_rows)
-        if page_size:
-            start = (page - 1) * page_size
-            page_rows = primary_rows[start:start + page_size]
-        else:
-            page_rows = primary_rows
+        # Stream primary rows in chunks. We slice off `offset..offset+limit`
+        # for the response (default page semantics) but total is computed
+        # by counting all rows on the primary (cheap COUNT) without loading
+        # them into memory.
+        try:
+            # Get total cheaply via COUNT(*) of the compiled primary.
+            count_sql = f"SELECT COUNT(*) FROM ({compiled.primary.sql}) _ct"
+            try:
+                _total_rows, _ = _xsql_exec_on_db(pdb, count_sql, {})
+                total = int(_total_rows[0].get("count", 0)) if _total_rows else 0
+            except Exception:
+                total = 0
+            # Adjust LIMIT/OFFSET in the primary SQL so we only stream
+            # the window we actually need. For SQL Server we use
+            # OFFSET ... FETCH NEXT; for PG we use LIMIT/OFFSET.
+            primary_names: List[str] = []
+            all_chunk: List[Dict[str, Any]] = []
+            sql_window = compiled.primary.sql
+            try:
+                from rml_python.engine import _stage_engine_of
+                _eng = _stage_engine_of(pdb)
+            except Exception:
+                _eng = ""
+            if limit:
+                if _eng == "mssql":
+                    sql_window = (
+                        compiled.primary.sql.rstrip(";").rstrip()
+                        + f" ORDER BY 1 OFFSET {int(offset)} ROWS FETCH NEXT {int(limit)} ROWS ONLY"
+                    )
+                else:
+                    sql_window = (
+                        compiled.primary.sql.rstrip(";").rstrip()
+                        + f" LIMIT {int(limit)} OFFSET {int(offset)}"
+                    )
+            sql_per_conn[pkey or "_"] = sql_window
+            cur = pdb.conn.cursor()
+            try:
+                from rml_python.engine import _mssql_transpile_sql, _mssql_bind_values
+                exec_sql = _mssql_transpile_sql(sql_window, convert_binds=True)
+                binds = _mssql_bind_values(sql_window, {})
+                cur.execute(exec_sql, binds)
+                names = [d[0] for d in (cur.description or [])] if cur.description else []
+                primary_names = names
+                # Read in CHUNK_SIZE batches so memory stays bounded for very
+                # large LIMIT windows (e.g. limit=1000000).
+                while True:
+                    batch = cur.fetchmany(CHUNK_SIZE) if hasattr(cur, "fetchmany") else None
+                    if batch is None:
+                        # Fallback for engines without fetchmany.
+                        rows = [dict(zip(names, r)) for r in cur.fetchall()]
+                        all_chunk.extend(rows)
+                        break
+                    if not batch:
+                        break
+                    all_chunk.extend(dict(zip(names, r)) for r in batch)
+            finally:
+                try: cur.close()
+                except Exception: pass
+            try: pdb.conn.commit()
+            except Exception: pass
+        except Exception as pe:
+            return JsonResponse({"ok": False, "error": f"primary query failed: {pe}",
+                                "primary_sql": compiled.primary.sql}, status=500)
+
+        # Apply secondary merges to each chunk.
+        for r in all_chunk:
+            for idx, jn in sec_indexes:
+                key = jn.get("key")
+                if not key:
+                    continue
+                bcol = key[0] if isinstance(key, (list, tuple)) else ""
+                if not bcol:
+                    continue
+                v = r.get(bcol)
+                if v is None:
+                    continue
+                sec_row = idx.get(v) if isinstance(idx, dict) else None
+                if not sec_row:
+                    continue
+                prefix = f"{jn['secondary_table']}."
+                for kn, kv in sec_row.items():
+                    r[prefix + kn] = kv
+
         return JsonResponse({
             "ok": True,
             "columns": primary_names,
-            "rows": page_rows,
+            "rows": all_chunk,
             "total": total,
             "page": page,
-            "pageSize": page_size or "all",
+            "pageSize": limit or "all",
+            "offset": offset,
+            "chunkSize": CHUNK_SIZE,
             "sql_per_conn": sql_per_conn,
             "primary_conn": pkey,
             "plan": {
