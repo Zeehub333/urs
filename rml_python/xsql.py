@@ -34,6 +34,20 @@ _FUNCTIONS = {
     "XLOOKUP", "VLOOKUP",
 }
 
+# Registry for name-based marker metadata. Postgres truncates identifiers
+# at 63 bytes, so long "__py_<func>_<alias>__<args>" markers would lose
+# their args. Instead the emitted alias carries a short hash and the full
+# args string lives here for the same-process executor to resolve.
+# Key: short hash (10 hex chars). Value: "arg1|arg2|..." meta string.
+_MARKER_REGISTRY: Dict[str, str] = {}
+
+
+def _register_marker_meta(meta: str) -> str:
+    import hashlib as _hl
+    h = _hl.md5(meta.encode("utf-8")).hexdigest()[:10]
+    _MARKER_REGISTRY[h] = meta
+    return h
+
 
 @dataclass
 class Token:
@@ -583,7 +597,7 @@ class XSQLCompiler:
     `needs_python_eval=True` so the engine can hydrate and join in Python.
     """
 
-    PYTHON_FUNCTIONS = {"XLOOKUP", "VLOOKUP", "FILTER", "IF"}
+    PYTHON_FUNCTIONS = {"XLOOKUP", "VLOOKUP", "FILTER", "IF", "GET"}
 
     def __init__(self, parsed: ParsedQuery, conn_map: Dict[str, Dict[str, Any]]):
         self.p = parsed
@@ -599,12 +613,44 @@ class XSQLCompiler:
 
         # Detect whether any SELECT expression needs Python eval.
         needs_py = any(self._expr_needs_python(s) for s, _ in self.p.select)
+
+        # If a get/filter/xlookup refers to a column not yet in the SELECT
+        # list, the row dict won't carry it and the resolver will get None.
+        # Inject the referenced columns automatically so name-based resolution
+        # works without forcing the user to spell out every column.
+        def _collect_field_refs(expr) -> List[str]:
+            if isinstance(expr, FuncCall):
+                refs: List[str] = []
+                if expr.name in self.PYTHON_FUNCTIONS:
+                    for a in expr.args:
+                        if isinstance(a, ColumnRef):
+                            refs.append(a.parts[-1])
+                for a in expr.args:
+                    refs.extend(_collect_field_refs(a))
+                return refs
+            if isinstance(expr, BinOp):
+                return _collect_field_refs(expr.left) + _collect_field_refs(expr.right)
+            if isinstance(expr, UnaryOp):
+                return _collect_field_refs(expr.operand)
+            return []
+
+        referenced: List[str] = []
+        for s, _ in self.p.select:
+            referenced.extend(_collect_field_refs(s))
+
         # Grouping keys must be columns.
         group_cols = [self._column_name(c) for c in self.p.group_by]
         for col in group_cols:
             if col:
                 primary_select.append(col)
                 primary_cols.append(col)
+        # Add auto-referenced columns (de-duplicated, only if not already there).
+        existing_cols_lower = {c.lower() for c in primary_cols}
+        for c in referenced:
+            if c and c.lower() not in existing_cols_lower:
+                primary_select.append(self._q(c))
+                primary_cols.append(c)
+                existing_cols_lower.add(c.lower())
 
         # Aggregate / scalar SELECT items.
         for expr, alias in self.p.select:
@@ -699,6 +745,9 @@ class XSQLCompiler:
 
     def _expr_needs_python(self, expr: Any) -> bool:
         if isinstance(expr, FuncCall):
+            # get/filter/xlookup are resolved by NAME from the fields map,
+            # not by hitting the database. They still need Python eval so
+            # the result rows get patched after fetch.
             if expr.name in self.PYTHON_FUNCTIONS:
                 return True
             return any(self._expr_needs_python(a) for a in expr.args)
@@ -731,6 +780,19 @@ class XSQLCompiler:
             return f"({expr.op}{inner})", (alias or "calc")
         return "NULL", (alias or "col")
 
+    def _resolve_field_by_name(self, parts: List[str]) -> Optional[Tuple[str, str]]:
+        """Resolve `get(conn.tbl.col)` or `tbl.col` against the field map.
+
+        The field map is provided by the caller as {conn_alias}.{table}.{column}
+        → connection_id. We don't fetch; we just return the (conn_key, original_col)
+        pair so the Python executor can look up the value in the already-loaded
+        primary row map.
+        """
+        if not parts:
+            return None
+        col = parts[-1]
+        return (col, parts[-1])
+
     def _emit_func(self, fn: FuncCall, alias: Optional[str]) -> Tuple[str, str]:
         """Translate linear functions into SQL where possible.
 
@@ -741,8 +803,9 @@ class XSQLCompiler:
         - COUNTBLANK(range) → SUM(CASE WHEN range IS NULL OR range = '' THEN 1 ELSE 0 END)
         - COUNTA(range) → COUNT(range)  (Postgres) / approximate for SQL Server
         - IF(cond, a, b) → CASE WHEN cond THEN a ELSE b END
-        - FILTER(range, criteria) → handled Python-side (returns the matched value)
-        - XLOOKUP / VLOOKUP → handled Python-side (cross-connection)
+        - GET(conn.tbl.col) → NULL AS marker; resolved by Python from fields map
+        - FILTER(conn.tbl.col, cond) → NULL AS marker; resolved by Python from fields map
+        - XLOOKUP / VLOOKUP → NULL AS marker; resolved by Python from fields map
         """
         name = fn.name
         col = alias or name.lower()
@@ -750,8 +813,6 @@ class XSQLCompiler:
             args_sql = [self._emit_select_expr(a, None)[0] for a in fn.args]
             return f"{name}({', '.join(args_sql)})", col
         if name == "SUMIF":
-            # SUMIF(sum_range, criteria_expr, criteria_value)
-            sum_range, crit_expr, crit_val = fn.args
             sum_sql = self._emit_select_expr(sum_range, None)[0]
             pred = self._eq_predicate(crit_expr, crit_val)
             return f"SUM(CASE WHEN {pred} THEN {sum_sql} END)", col
@@ -784,10 +845,29 @@ class XSQLCompiler:
             a_sql = self._emit_select_expr(a, None)[0]
             b_sql = self._emit_select_expr(b, None)[0]
             return f"CASE WHEN {cond_sql} THEN {a_sql} ELSE {b_sql} END", col
-        # FILTER / XLOOKUP / VLOOKUP handled Python-side — caller adds a marker
-        # column so the engine can post-process.
-        if name in ("FILTER", "XLOOKUP", "VLOOKUP"):
-            marker = f"__py_{name.lower()}_{col}"
+        # Name-based resolvers — get(conn.tbl.col) / filter(conn.tbl.col, cond)
+        # / xlookup(value, conn.tbl.col, conn.tbl.col2). Each emits a NULL marker
+        # column with the args embedded in the alias; the Python executor
+        # looks up the value from the report's fields map (no DB round-trip
+        # for the lookup itself).
+        if name in ("FILTER", "XLOOKUP", "VLOOKUP", "GET"):
+            arg_parts = []
+            for a in fn.args:
+                if isinstance(a, ColumnRef):
+                    # Replace dots inside the marker with `_dot_` so SQL doesn't
+                    # interpret them as schema.table.column separators.
+                    arg_parts.append("_dot_".join(a.parts))
+                elif isinstance(a, Literal):
+                    arg_parts.append(f"lit:{a.value!r}")
+                else:
+                    arg_parts.append(self._emit_select_expr(a, None)[0])
+            meta = "|".join(arg_parts)
+            # Embed a SHORT hash in the SQL alias (Postgres truncates
+            # identifiers at 63 bytes) and keep the full args in the
+            # same-process registry for the executor to resolve.
+            safe_alias = (alias or name.lower()).replace(" ", "_")[:20]
+            h = _register_marker_meta(meta)
+            marker = f"__py_{name.lower()}_{safe_alias}__{h}"
             return f"NULL AS {self._q(marker)}", marker
         return "NULL", col
 

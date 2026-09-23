@@ -3,6 +3,7 @@ import pathlib
 import threading as _th
 import time as _time
 import uuid as _uuid
+from typing import Any
 from django.shortcuts import render, redirect
 from django.http import JsonResponse, HttpResponse
 from django.conf import settings
@@ -3592,7 +3593,7 @@ def _xsql_resolve_conn(conn_key):
         host = str(getattr(row, "host", "") or "127.0.0.1")
         port = int(getattr(row, "port", 0) or 5432)
         user = str(getattr(row, "user", "") or "")
-        name = str(getattr(row, "name", "") or "urs")
+        name = str(getattr(row, "instance", "") or getattr(row, "name", "") or "urs")
         # Password may be PBKDF2-encrypted; decrypt via config.dbconf.
         pwd = str(getattr(row, "password", "") or "")
         try:
@@ -3657,6 +3658,111 @@ def _xsql_exec_on_db(db_obj, sql, params):
     finally:
         try: cur.close()
         except Exception: pass
+
+
+def _xsql_resolve_marker(marker_alias: str, primary_row: dict, primary_columns: list) -> Any:
+    """Resolve a `get/filter/xlookup/vlookup` marker produced by the compiler.
+
+    The marker_alias encodes the function and its args directly in the
+    column name: `__py_<func>_<alias>__<arg1>|<arg2>|...`. Each arg is either
+    a fully-qualified column name (`conn.tbl.col`) or a literal marker
+    (`lit:123`, `lit:'x'`). We resolve by NAME from the primary row's loaded
+    fields map — no DB round-trip.
+    """
+    if not isinstance(marker_alias, str) or not marker_alias.startswith("__py_"):
+        return None
+    # Format: __py_<func>_<alias>__<hash10> — the hash keys the full
+    # "|"-separated args in rml_python.xsql._MARKER_REGISTRY (same process,
+    # populated at compile time). Fall back to inline parse for legacy
+    # markers that still carry raw args.
+    rest = marker_alias[len("__py_"):]
+    us = rest.find("_")
+    if us < 0:
+        return None
+    func = rest[:us].lower()
+    rest2 = rest[us + 1:]
+    dunder = rest2.rfind("__")
+    if dunder < 0:
+        return None
+    tail = rest2[dunder + 2:]
+    if not tail:
+        return None
+    try:
+        from rml_python.xsql import _MARKER_REGISTRY as _MMR
+        meta = _MMR.get(tail, tail)
+    except Exception:
+        meta = tail
+    parts = [p for p in meta.split("|") if p]
+    def _resolve_ref(spec: str):
+        if spec.startswith("lit:"):
+            lit = spec[4:]
+            if len(lit) >= 2 and ((lit.startswith("'") and lit.endswith("'"))
+                                  or (lit.startswith('"') and lit.endswith('"'))):
+                return lit[1:-1]
+            try:
+                if "." in lit:
+                    return float(lit)
+                return int(lit)
+            except Exception:
+                return lit
+        # spec is `conn_dot_tbl_dot_col` — split on `_dot_` then take last.
+        segs = spec.split("_dot_")
+        col = segs[-1]
+        if col in primary_row:
+            return primary_row.get(col)
+        lower = {k.lower(): v for k, v in primary_row.items()}
+        if col.lower() in lower:
+            return lower[col.lower()]
+        return None
+
+    if func == "get":
+        if not parts:
+            return None
+        return _resolve_ref(parts[0])
+    if func == "filter":
+        # FILTER(range, criteria_expr, criteria_value) — return the row's
+        # value of `range`. Full criteria evaluation lives in the WHERE clause
+        # when the user supplies an equality predicate.
+        if not parts:
+            return None
+        return _resolve_ref(parts[0])
+    if func in ("xlookup", "vlookup"):
+        # XLOOKUP(value, lookup_range, return_range, [not_found])
+        if len(parts) < 3:
+            return None
+        value = _resolve_ref(parts[0])
+        lookup_col = parts[1].split("_dot_")[-1]
+        return_col = parts[2].split("_dot_")[-1]
+        # Same-row shortcut: both columns already loaded in this row and
+        # the row's lookup value matches → return the row's return value.
+        try:
+            _lk = primary_row.get(lookup_col)
+            if _lk is None:
+                _lower = {k.lower(): v for k, v in primary_row.items()}
+                _lk = _lower.get(lookup_col.lower())
+            if _lk is not None and _lk == value:
+                _rv = primary_row.get(return_col)
+                if _rv is None:
+                    _lower = {k.lower(): v for k, v in primary_row.items()}
+                    _rv = _lower.get(return_col.lower())
+                if _rv is not None:
+                    return _rv
+        except Exception:
+            pass
+        idx = _XSQL_LOOKUP_INDEX.get((func, lookup_col, return_col))
+        if idx and value in idx:
+            return idx[value].get(return_col)
+        if len(parts) >= 4:
+            nf = _resolve_ref(parts[3])
+            if nf is not None:
+                return nf
+        return None
+    return None
+
+
+# Module-level registry the executor populates with cross-connection
+# lookup indexes (lookup_col → {value: row}). Keyed by (func, lookup_col, return_col).
+_XSQL_LOOKUP_INDEX: dict = {}
 
 
 @csrf_exempt
@@ -3971,6 +4077,20 @@ def api_xsql_run(request):
                                 "primary_sql": compiled.primary.sql}, status=500)
 
         # Apply secondary merges to each chunk.
+        # Build the global lookup index for xlookup/vlookup (per secondary table).
+        # We index every (lookup_col → {value: row}) from the secondary rows so
+        # XLOOKUP can resolve cross-connection lookups without re-fetching.
+        global _XSQL_LOOKUP_INDEX
+        _XSQL_LOOKUP_INDEX = {}
+        for idx, jn in sec_indexes:
+            tbl = jn.get("secondary_table") or ""
+            for val, sec_row in (idx or {}).items():
+                for col in sec_row.keys():
+                    _XSQL_LOOKUP_INDEX[("xlookup", col, col)] = idx
+                    _XSQL_LOOKUP_INDEX[("vlookup", col, col)] = idx
+                    # Also store generic (any column → any column) so
+                    # get(conn.tbl.col) can fall back to the loaded row.
+                    _XSQL_LOOKUP_INDEX[("get_meta", tbl, col)] = idx
         for r in all_chunk:
             for idx, jn in sec_indexes:
                 key = jn.get("key")
@@ -3988,6 +4108,15 @@ def api_xsql_run(request):
                 prefix = f"{jn['secondary_table']}."
                 for kn, kv in sec_row.items():
                     r[prefix + kn] = kv
+        # Resolve name-based markers (get/filter/xlookup/vlookup). The compiler
+        # emits these as `NULL AS "<marker_alias>"` columns where marker_alias
+        # carries `__py_<func>::<arg1>|<arg2>|...` so we can resolve each row
+        # without an extra DB round-trip — values come from the loaded fields map.
+        marker_cols = [n for n in primary_names if isinstance(n, str) and n.startswith("__py_")]
+        if marker_cols:
+            for r in all_chunk:
+                for col_name in marker_cols:
+                    r[col_name] = _xsql_resolve_marker(col_name, r, primary_names)
 
         return JsonResponse({
             "ok": True,
