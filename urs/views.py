@@ -3539,6 +3539,162 @@ def api_rml_job(request, job_id):
     return JsonResponse(out, json_dumps_params={"ensure_ascii": False})
 
 
+# ---------------------------------------------------------------------------
+# XSQL endpoints: compile + execute an extended SQL string against one or
+# more queryable connections (see rml_python/xsql.py).
+# ---------------------------------------------------------------------------
+
+def _xsql_resolve_conn(conn_key):
+    """Return (engine_obj, db_engine_str) for a Django Connection id.
+
+    Falls back to (None, '') when the connection cannot be resolved or is
+    not queryable (e.g. API mirrors).
+    """
+    try:
+        from .models import Connection as _DC
+        row = _DC.objects.filter(id=int(conn_key)).first()
+    except Exception:
+        row = None
+    if row is None:
+        return None, ""
+    eng = str(getattr(row, "engine", "") or "").lower()
+    is_queryable = bool(getattr(row, "is_queryable", True))
+    if not is_queryable or eng not in ("postgres", "postgresql", "sqlserver", "oracle"):
+        return None, eng
+    return row, eng
+
+
+def _xsql_exec_on_db(db_obj, sql, params):
+    """Execute sql on a live engine and return rows as list[dict]."""
+    cur = db_obj.conn.cursor()
+    try:
+        cur.execute(sql, params or {})
+        names = [d[0] for d in (cur.description or [])] if cur.description else []
+        rows = [dict(zip(names, r)) for r in cur.fetchall()]
+        return rows, names
+    finally:
+        try: cur.close()
+        except Exception: pass
+
+
+@csrf_exempt
+def api_xsql_compile(request):
+    """POST {sql, conn_keys:[...]} → {ok, primary_sql, secondaries, plan}."""
+    if request.method != "POST":
+        return JsonResponse({"error": "POST required"}, status=405)
+    try:
+        body = json.loads(request.body.decode() or "{}")
+        sql_text = (body.get("sql") or "").strip()
+        if not sql_text:
+            return JsonResponse({"error": "sql required"}, status=400)
+        from rml_python.xsql import compile_xsql, parse as _xparse
+        try:
+            parsed = _xparse(sql_text)
+        except Exception as pe:
+            return JsonResponse({"error": f"parse error: {pe}"}, status=400)
+        conn_keys = body.get("conn_keys") or ["1"]
+        # Build conn_map keyed by alias in the SQL (first segment before .table).
+        conn_map = {}
+        for ck in conn_keys:
+            db_obj, _eng = _xsql_resolve_conn(ck)
+            conn_map[str(ck)] = {"engine": _eng, "db": db_obj}
+        try:
+            compiled = compile_xsql(sql_text, conn_map)
+        except Exception as ce:
+            return JsonResponse({"error": f"compile error: {ce}"}, status=400)
+        return JsonResponse({
+            "ok": True,
+            "primary_sql": compiled.primary.sql,
+            "primary_conn": compiled.primary.conn_key,
+            "primary_columns": compiled.primary.columns,
+            "secondaries": [
+                {"conn_key": s.conn_key, "schema": s.schema, "table": s.table, "sql": s.sql}
+                for s in compiled.secondaries
+            ],
+            "merges": compiled.merges,
+            "final_columns": compiled.final_columns,
+        }, json_dumps_params={"ensure_ascii": False})
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@csrf_exempt
+def api_xsql_execute(request):
+    """POST {sql, conn_keys:[...]} → {ok, rows, columns, sql_per_conn}."""
+    if request.method != "POST":
+        return JsonResponse({"error": "POST required"}, status=405)
+    try:
+        body = json.loads(request.body.decode() or "{}")
+        sql_text = (body.get("sql") or "").strip()
+        conn_keys = body.get("conn_keys") or ["1"]
+        if not sql_text:
+            return JsonResponse({"error": "sql required"}, status=400)
+        from rml_python.xsql import compile_xsql
+        conn_map = {}
+        for ck in conn_keys:
+            db_obj, _eng = _xsql_resolve_conn(ck)
+            conn_map[str(ck)] = {"engine": _eng, "db": db_obj}
+        try:
+            compiled = compile_xsql(sql_text, conn_map)
+        except Exception as ce:
+            return JsonResponse({"error": f"compile error: {ce}"}, status=400)
+
+        sql_per_conn = {}
+        all_rows: List[Dict[str, Any]] = []
+
+        # Run primary SQL.
+        pdb = (conn_map.get(compiled.primary.conn_key) or {}).get("db")
+        if pdb is None:
+            return JsonResponse({"error": f"primary conn {compiled.primary.conn_key!r} not queryable"}, status=400)
+        try:
+            pdb.connect()
+        except Exception:
+            pass
+        sql_per_conn[compiled.primary.conn_key or "_"] = compiled.primary.sql
+        try:
+            primary_rows, primary_names = _xsql_exec_on_db(pdb, compiled.primary.sql, {})
+        except Exception as pe:
+            return JsonResponse({
+                "error": f"primary query failed: {pe}",
+                "primary_sql": compiled.primary.sql,
+            }, status=500)
+
+        # For each JOIN, fetch the secondary table once and merge.
+        if compiled.merges:
+            for jn in compiled.merges:
+                sk = str(jn.get("secondary_conn") or "")
+                sec_db = (conn_map.get(sk) or {}).get("db")
+                if sec_db is None:
+                    continue
+                try:
+                    sec_db.connect()
+                except Exception:
+                    pass
+                sec_sql = f"SELECT * FROM {jn['secondary_table']}"
+                sql_per_conn[sk or "_"] = sec_sql
+                try:
+                    sec_rows, _ = _xsql_exec_on_db(sec_db, sec_sql, {})
+                except Exception:
+                    sec_rows = []
+                # Index by join key.
+                key_col = jn.get("secondary_col") or ""
+                idx: Dict[Any, Dict[str, Any]] = {}
+                for r in sec_rows:
+                    idx[r.get(key_col)] = r
+                pc = jn.get("primary_col") or ""
+                for r in primary_rows:
+                    r[f"{jn['secondary_table']}.{key_col}"] = idx.get(r.get(pc), {}).get(key_col)
+
+        return JsonResponse({
+            "ok": True,
+            "rows": primary_rows,
+            "columns": primary_names,
+            "sql_per_conn": sql_per_conn,
+        }, json_dumps_params={"ensure_ascii": False})
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
 @csrf_exempt
 def api_rml_execute(request):
     pipe = None
