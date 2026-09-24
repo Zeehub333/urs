@@ -3543,3 +3543,329 @@ list.innerHTML = wizardDetail.columns.map((col, idx)=>`
                 out.textContent = '-- تم توليد XSQL من RML ✓\n-- namespaces: ' + JSON.stringify(j.namespaces);
             }catch(e){ out.textContent = 'ERROR: ' + e.message; }
         }
+
+/* ===== XSQL assist: autocomplete + signature tooltip + current-param highlight =====
+   xsqlAssist_init(textareaId, providerFn)
+   providerFn() -> {tables:[{name,short,conn}], fields(tableName)->[cols],
+                    allFields:()->[cols], namespaces:[{alias,conn,label}]} */
+var xsqlAssist_providers = (typeof xsqlAssist_providers !== 'undefined') ? xsqlAssist_providers : {};
+var xsqlAssist_bound = (typeof xsqlAssist_bound !== 'undefined') ? xsqlAssist_bound : false;
+var xsqlAssist_state = null;
+var XSQL_FN_CATALOG = [
+ {n:'SUM', p:[['x','العمود أو التعبير']], d:'مجموع القيم.'},
+ {n:'MIN', p:[['x','العمود أو التعبير']], d:'أصغر قيمة.'},
+ {n:'MAX', p:[['x','العمود أو التعبير']], d:'أكبر قيمة.'},
+ {n:'AVG', p:[['x','العمود أو التعبير']], d:'المتوسط الحسابي.'},
+ {n:'COUNT', p:[['x','العمود أو *']], d:'عدد الصفوف غير الفارغة.'},
+ {n:'SUMIF', p:[['sum_range','نطاق الجمع'],['criteria_expr','عمود الشرط'],['criteria_value','قيمة الشرط']], d:'مجموع مشروط بشرط واحد.'},
+ {n:'SUMIFS', p:[['sum_range','نطاق الجمع'],['c1_range','نطاق الشرط الأول'],['c1_val','قيمة الشرط الأول']], v:1, d:'مجموع بشروط متعددة (تتكرر أزواج النطاق/القيمة).'},
+ {n:'COUNTIF', p:[['criteria_expr','عمود الشرط'],['criteria_value','قيمة الشرط']], d:'عدد الصفوف المطابقة لشرط.'},
+ {n:'COUNTBLANK', p:[['range','النطاق']], d:'عدد الخلايا الفارغة.'},
+ {n:'COUNTA', p:[['range','النطاق']], d:'عدد الخلايا غير الفارغة.'},
+ {n:'IF', p:[['cond','الشرط'],['a','القيمة إذا تحقق'],['b','القيمة إذا لم يتحقق']], d:'قيمة شرطية.'},
+ {n:'FILTER', p:[['range','النطاق'],['criteria_expr','عمود الشرط'],['criteria_value','قيمة الشرط']], d:'قيمة أول صف مطابق (تُحل في Python).'},
+ {n:'XLOOKUP', p:[['value','قيمة البحث'],['lookup_range','نطاق البحث'],['return_range','نطاق الإرجاع'],['[not_found]','البديل عند عدم المطابقة (اختياري)']], d:'بحث وإرجاع عبر الاتصالات.'},
+ {n:'VLOOKUP', p:[['value','قيمة البحث'],['lookup_range','نطاق البحث'],['return_range','نطاق الإرجاع'],['[not_found]','البديل عند عدم المطابقة (اختياري)']], d:'مثل XLOOKUP (يفترض ترتيب نطاق البحث).'},
+ {n:'GET', p:[['ref','ns.tbl.col أو tbl.col أو col']], d:'قيمة حقل بالاسم من الحقول المحملة.'},
+ {n:'SUMBY', p:[['amt_col','عمود المبلغ'],['group_col','عمود المجموعة']], d:'مجموع النافذة لكل مجموعة (يبقي الصفوف).'},
+ {n:'COUNTBY', p:[['group_col','عمود المجموعة']], d:'عدد صفوف المجموعة في كل صف.'},
+ {n:'SERIAL', p:[['start','البداية'],['end','النهاية'],['step','حجم الخطوة']], d:'سلسلة أرقام/تواريخ (generate_series).'}
+];
+var XSQL_KEYWORDS = ['SELECT','FROM','WHERE','GROUP BY','ORDER BY','LIMIT','INNER JOIN','LEFT JOIN','RIGHT JOIN','ON','AND','OR','NOT','AS','ASC','DESC','DISTINCT'];
+function xsqlAssist_esc(s){ return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function xsqlAssist_init(textareaId, providerFn){
+    xsqlAssist_providers[textareaId] = providerFn;
+    xsqlAssist_bind();
+}
+function xsqlAssist_bind(){
+    if(xsqlAssist_bound) return;
+    xsqlAssist_bound = true;
+    document.addEventListener('input', function(e){
+        if(e.target && e.target.id && xsqlAssist_providers[e.target.id]) xsqlAssist_update(e.target);
+    });
+    document.addEventListener('keydown', function(e){
+        const ta = e.target;
+        if(!ta || !ta.id || !xsqlAssist_providers[ta.id]) return;
+        const st = xsqlAssist_state;
+        if(st && st.ta === ta && st.open){
+            if(e.key === 'ArrowDown'){ e.preventDefault(); xsqlAssist_move(1); return; }
+            if(e.key === 'ArrowUp'){ e.preventDefault(); xsqlAssist_move(-1); return; }
+            if(e.key === 'Enter' || e.key === 'Tab'){ e.preventDefault(); xsqlAssist_accept(); return; }
+            if(e.key === 'Escape'){ e.preventDefault(); xsqlAssist_hide(); return; }
+        }
+    });
+    document.addEventListener('keyup', function(e){
+        const ta = e.target;
+        if(!ta || !ta.id || !xsqlAssist_providers[ta.id]) return;
+        if(['Enter','Tab','Escape','ArrowUp','ArrowDown'].indexOf(e.key) >= 0) return;
+        xsqlAssist_update(ta);
+    });
+    document.addEventListener('click', function(e){
+        const ta = e.target;
+        if(ta && ta.id && xsqlAssist_providers[ta.id]){ xsqlAssist_update(ta); return; }
+        if(!e.target.closest || !e.target.closest('#xsqlAssist_pop,#xsqlAssist_sig')) xsqlAssist_hide();
+    });
+    document.addEventListener('focusout', function(e){
+        setTimeout(function(){ xsqlAssist_hide(); }, 160);
+    });
+}
+function xsqlAssist_caret(ta){
+    const cs = getComputedStyle(ta);
+    const div = document.createElement('div');
+    ['fontFamily','fontSize','fontWeight','lineHeight','letterSpacing','paddingTop','paddingLeft','paddingRight','paddingBottom','borderTopWidth','borderLeftWidth','whiteSpace','wordWrap','overflowWrap'].forEach(function(p){ try{ div.style[p] = cs[p]; }catch(_){} });
+    div.style.position = 'absolute'; div.style.visibility = 'hidden'; div.style.whiteSpace = 'pre-wrap'; div.style.wordWrap = 'break-word';
+    try{ div.style.width = (ta.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)) + 'px'; }catch(_){ div.style.width = ta.clientWidth + 'px'; }
+    div.textContent = ta.value.substring(0, ta.selectionStart);
+    const sp = document.createElement('span'); sp.textContent = '\u200b';
+    div.appendChild(sp);
+    document.body.appendChild(div);
+    const r = ta.getBoundingClientRect(), d = div.getBoundingClientRect(), s = sp.getBoundingClientRect();
+    let lh = parseFloat(cs.lineHeight);
+    if(!lh || isNaN(lh)) lh = parseFloat(cs.fontSize) * 1.4 || 18;
+    const pos = {x: r.left + (s.left - d.left), y: r.top + (s.top - d.top) - ta.scrollTop, lh: lh};
+    div.remove();
+    return pos;
+}
+function xsqlAssist_sigInfo(text, pos){
+    let depth = 0, argIndex = 0, inStr = null, i = pos - 1, callParen = -1;
+    for(; i >= 0; i--){
+        const ch = text[i];
+        if(inStr){
+            if(ch === inStr){
+                if(i > 0 && text[i-1] === inStr){ i--; }
+                else inStr = null;
+            }
+            continue;
+        }
+        if(ch === "'" || ch === '"'){ inStr = ch; continue; }
+        if(ch === ')'){ depth++; continue; }
+        if(ch === '('){
+            if(depth === 0){ callParen = i; break; }
+            depth--; continue;
+        }
+        if(ch === ',' && depth === 0){ argIndex++; continue; }
+        if(ch === ';' && depth === 0){ return null; }
+    }
+    if(callParen < 0) return null;
+    let j = callParen - 1;
+    while(j >= 0 && /\s/.test(text[j])) j--;
+    const end = j;
+    while(j >= 0 && /[A-Za-z_0-9$#]/.test(text[j])) j--;
+    const name = text.slice(j+1, end+1);
+    if(!name || !/^[A-Za-z_][A-Za-z0-9_$#]*$/.test(name)) return null;
+    return {name: name.toUpperCase(), argIndex: argIndex};
+}
+function xsqlAssist_sigHtml(info){
+    const cat = XSQL_FN_CATALOG.find(function(f){ return f.n === info.name; });
+    if(!cat) return null;
+    let sig;
+    if(cat.v){
+        const shown = cat.p.map(function(p, idx){ return idx === Math.min(info.argIndex, cat.p.length-1) ? '<b>' + xsqlAssist_esc(p[0]) + '</b>' : xsqlAssist_esc(p[0]); }).join(', ');
+        sig = xsqlAssist_esc(cat.n) + '(' + shown + (info.argIndex >= cat.p.length ? ', <b>…</b>' : ', …') + ')';
+    } else {
+        const parts = cat.p.map(function(p, idx){ return idx === info.argIndex ? '<b>' + xsqlAssist_esc(p[0]) + '</b>' : xsqlAssist_esc(p[0]); });
+        sig = xsqlAssist_esc(cat.n) + '(' + parts.join(', ') + ')';
+    }
+    let pdesc = '';
+    if(info.argIndex < cat.p.length){ pdesc = cat.p[info.argIndex][1]; }
+    let html = '<div style="font-family:monospace;font-size:12px" dir="ltr">' + sig + '</div>';
+    html += '<div style="font-size:11px;color:#cbd5e1;margin-top:2px">' + xsqlAssist_esc(cat.d);
+    if(pdesc) html += ' <span style="color:#fbbf24">← ' + xsqlAssist_esc(pdesc) + '</span>';
+    html += '</div>';
+    return html;
+}
+function xsqlAssist_suggest(ta, provider){
+    const pos = ta.selectionStart;
+    const before = ta.value.slice(0, pos);
+    let token = '', tokenStart = pos, head = null;
+    const m = before.match(/([A-Za-z_][A-Za-z0-9_$#]*)$/);
+    if(m){
+        token = m[0]; tokenStart = pos - token.length;
+        if(tokenStart > 0 && before[tokenStart-1] === '.'){
+            const hm = before.slice(0, tokenStart-1).match(/([A-Za-z_][A-Za-z0-9_$#]*)$/);
+            if(hm) head = hm[1];
+            else return null;
+        }
+    } else if(pos > 0 && before[pos-1] === '.'){
+        const hm = before.slice(0, pos-1).match(/([A-Za-z_][A-Za-z0-9_$#]*)$/);
+        if(!hm) return null;
+        head = hm[1];
+    } else {
+        return null;
+    }
+    let data = {};
+    try{ data = provider() || {}; }catch(_){ data = {}; }
+    const tables = data.tables || [], namespaces = data.namespaces || [];
+    let fieldsOf = function(){ return []; }, allFields = [];
+    try{ if(typeof data.fields === 'function') fieldsOf = data.fields; }catch(_){}
+    try{ if(typeof data.allFields === 'function') allFields = data.allFields() || []; }catch(_){}
+    const up = token.toUpperCase();
+    let items = [];
+    if(head){
+        const hu = head.toUpperCase();
+        const t = tables.find(function(x){ return x.short.toUpperCase() === hu || x.name.toUpperCase() === hu; });
+        if(t){
+            fieldsOf(t.name).forEach(function(c){ if(String(c).toUpperCase().startsWith(up)) items.push({text: String(c), kind:'col', detail: t.short}); });
+        } else {
+            const ns = namespaces.find(function(n){ return n.alias.toUpperCase() === hu; });
+            if(ns){
+                tables.filter(function(t){ return String(t.conn) === String(ns.conn); }).forEach(function(t){ if(t.short.toUpperCase().startsWith(up)) items.push({text: t.short, kind:'tbl', detail: ns.alias}); });
+            }
+        }
+    } else {
+        XSQL_FN_CATALOG.forEach(function(f){ if(f.n.startsWith(up)) items.push({text: f.n, kind:'fn', detail: f.d}); });
+        if(up.length >= 2) XSQL_KEYWORDS.forEach(function(k){ if(k.startsWith(up)) items.push({text: k, kind:'kw', detail: ''}); });
+        namespaces.forEach(function(n){ if(n.alias.toUpperCase().startsWith(up)) items.push({text: n.alias, kind:'ns', detail: n.label || ''}); });
+        tables.forEach(function(t){ if(t.short.toUpperCase().startsWith(up)) items.push({text: t.short, kind:'tbl', detail: ''}); });
+        if(up.length >= 2) allFields.forEach(function(c){ if(String(c).toUpperCase().startsWith(up)) items.push({text: String(c), kind:'col', detail: ''}); });
+    }
+    const seen = {}, out = [];
+    items.forEach(function(it){ if(!seen[it.text]){ seen[it.text] = 1; out.push(it); } });
+    if(!out.length) return null;
+    return {items: out.slice(0, 25), tokenStart: tokenStart};
+}
+function xsqlAssist_el(id, bg){
+    let el = document.getElementById(id);
+    if(!el){
+        el = document.createElement('div');
+        el.id = id;
+        el.style.cssText = 'position:fixed;z-index:9999;display:none;' + bg;
+        document.body.appendChild(el);
+    }
+    return el;
+}
+function xsqlAssist_update(ta){
+    if(!ta) return;
+    // signature tooltip (always, when inside a call)
+    try{
+        const info = xsqlAssist_sigInfo(ta.value, ta.selectionStart);
+        const sig = document.getElementById('xsqlAssist_sig');
+        if(info){
+            const html = xsqlAssist_sigHtml(info);
+            if(html){
+                const el = xsqlAssist_el('xsqlAssist_sig', 'background:#0f172a;color:#e2e8f0;border-radius:10px;padding:8px 10px;max-width:min(430px,90vw);box-shadow:0 10px 30px rgba(0,0,0,.35);font-size:12px;');
+                el.innerHTML = html;
+                el.style.display = 'block';
+                const p = xsqlAssist_caret(ta);
+                let y = p.y - el.offsetHeight - 8;
+                if(y < 8) y = p.y + p.lh + 8;
+                el.style.left = Math.max(8, Math.min(p.x, window.innerWidth - 440)) + 'px';
+                el.style.top = y + 'px';
+            } else if(sig){ sig.style.display = 'none'; }
+        } else if(sig){ sig.style.display = 'none'; }
+    }catch(_){}
+    // autocomplete popup
+    let provider = function(){ return {}; };
+    try{ provider = xsqlAssist_providers[ta.id] || provider; }catch(_){}
+    let sug = null;
+    try{ sug = xsqlAssist_suggest(ta, provider); }catch(_){ sug = null; }
+    const pop = document.getElementById('xsqlAssist_pop');
+    if(!sug){
+        if(pop) pop.style.display = 'none';
+        xsqlAssist_state = null;
+        return;
+    }
+    xsqlAssist_state = {ta: ta, items: sug.items, sel: 0, tokenStart: sug.tokenStart, open: true};
+    xsqlAssist_renderPop(ta);
+}
+function xsqlAssist_kindAr(k){
+    return k === 'fn' ? 'دالة' : k === 'kw' ? 'كلمة' : k === 'tbl' ? 'جدول' : k === 'col' ? 'عمود' : k === 'ns' ? 'نطاق' : '';
+}
+function xsqlAssist_renderPop(ta){
+    const st = xsqlAssist_state;
+    if(!st) return;
+    const el = xsqlAssist_el('xsqlAssist_pop', 'background:#fff;border:1px solid #e2e8f0;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.2);min-width:230px;max-width:min(360px,90vw);max-height:240px;overflow-y:auto;font-size:12px;');
+    let html = '';
+    st.items.forEach(function(it, idx){
+        html += '<div data-xa="' + idx + '" style="display:flex;align-items:center;gap:8px;padding:5px 10px;cursor:pointer;' + (idx === st.sel ? 'background:#eef2ff;' : '') + '">'
+            + '<span style="font-size:10px;color:#fff;background:' + (it.kind==='fn' ? '#7c3aed' : it.kind==='kw' ? '#64748b' : it.kind==='tbl' ? '#059669' : it.kind==='col' ? '#2563eb' : '#d97706') + ';border-radius:6px;padding:1px 6px">' + xsqlAssist_kindAr(it.kind) + '</span>'
+            + '<span style="font-family:monospace" dir="ltr">' + xsqlAssist_esc(it.text) + '</span>'
+            + (it.detail ? '<span style="color:#94a3b8;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + xsqlAssist_esc(String(it.detail).slice(0, 42)) + '</span>' : '')
+            + '</div>';
+    });
+    el.innerHTML = html;
+    el.style.display = 'block';
+    Array.prototype.forEach.call(el.querySelectorAll('[data-xa]'), function(d){
+        d.onmousedown = function(ev){ ev.preventDefault(); xsqlAssist_pick(parseInt(d.getAttribute('data-xa'), 10)); };
+    });
+    const p = xsqlAssist_caret(ta);
+    el.style.left = Math.max(8, Math.min(p.x, window.innerWidth - 370)) + 'px';
+    el.style.top = (p.y + p.lh + 6) + 'px';
+    const selEl = el.querySelector('[data-xa="' + st.sel + '"]');
+    if(selEl && selEl.scrollIntoView) selEl.scrollIntoView({block: 'nearest'});
+}
+function xsqlAssist_move(d){
+    const st = xsqlAssist_state;
+    if(!st) return;
+    st.sel = (st.sel + d + st.items.length) % st.items.length;
+    xsqlAssist_renderPop(st.ta);
+}
+function xsqlAssist_pick(idx){
+    const st = xsqlAssist_state;
+    if(!st) return;
+    if(typeof idx === 'number') st.sel = idx;
+    const it = st.items[st.sel];
+    if(!it) return;
+    const ta = st.ta, pos = ta.selectionStart;
+    let ins = it.text;
+    if(it.kind === 'fn'){
+        const after = ta.value.slice(pos);
+        if(after.charAt(0) !== '(') ins += '(';
+    }
+    ta.value = ta.value.slice(0, st.tokenStart) + ins + ta.value.slice(pos);
+    const np = st.tokenStart + ins.length;
+    try{ ta.setSelectionRange(np, np); }catch(_){}
+    ta.focus();
+    xsqlAssist_hidePop();
+    try{ ta.dispatchEvent(new Event('input', {bubbles: true})); }catch(_){}
+}
+function xsqlAssist_accept(){ xsqlAssist_pick(); }
+function xsqlAssist_hide(){
+    xsqlAssist_hidePop();
+    const sig = document.getElementById('xsqlAssist_sig');
+    if(sig) sig.style.display = 'none';
+    xsqlAssist_state = null;
+}
+function xsqlAssist_hidePop(){
+    const pop = document.getElementById('xsqlAssist_pop');
+    if(pop) pop.style.display = 'none';
+    if(xsqlAssist_state) xsqlAssist_state.open = false;
+}
+if(typeof window !== 'undefined'){ window.xsqlAssist_init = xsqlAssist_init; }
+try{
+    xsqlAssist_init('wbXsqlText', function(){
+        let tables = [], fieldsByTable = {}, allCols = [], namespaces = [];
+        try{
+            const pairs = (typeof wbXsqlFieldTables === 'function') ? wbXsqlFieldTables() : [];
+            pairs.forEach(function(p){
+                const short = String(p.tbl).split('.').pop();
+                tables.push({name: String(p.tbl), short: short, conn: String(p.cid)});
+            });
+        }catch(_){}
+        try{
+            (typeof wizardFields !== 'undefined' ? wizardFields : []).forEach(function(f){
+                const ts = String(f.table_source || f.tableSource || '');
+                const nm = String(f.name || '');
+                if(nm) allCols.push(nm);
+                if(!fieldsByTable[ts]) fieldsByTable[ts] = [];
+                if(nm && fieldsByTable[ts].indexOf(nm) < 0) fieldsByTable[ts].push(nm);
+            });
+        }catch(_){}
+        try{
+            Object.keys(typeof wizardConnNames !== 'undefined' ? wizardConnNames : {}).forEach(function(cid){
+                namespaces.push({alias: 'ns_' + cid, conn: String(cid), label: String(wizardConnNames[cid] || '')});
+            });
+        }catch(_){}
+        return {
+            tables: tables,
+            fields: function(tname){
+                if(fieldsByTable[tname]) return fieldsByTable[tname];
+                const short = String(tname).split('.').pop();
+                for(const k in fieldsByTable){ if(String(k).split('.').pop() === short) return fieldsByTable[k]; }
+                return [];
+            },
+            allFields: function(){ return allCols; },
+            namespaces: namespaces
+        };
+    });
+}catch(_){}
