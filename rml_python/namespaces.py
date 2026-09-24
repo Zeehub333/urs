@@ -264,9 +264,14 @@ def _resolve_expression(expr_text: str, fields: Optional[List[Any]],
     - String literals (single quotes) are never touched.
     - table_map: optional {field_lower: table_alias} — when given, refs are
       emitted qualified as "alias"."COL" (for multi-table/JOIN queries).
+    - A leading `=` (Excel-style formula marker) is stripped: `=expr` means
+      "this column is an expression". Previously such input errored at the DB.
     """
     if not expr_text:
         return expr_text or ""
+    _stripped = str(expr_text).lstrip()
+    if _stripped.startswith("=") and not _stripped.startswith("=="):
+        expr_text = _stripped[1:]
     # T-SQL ISNULL(a, b) → COALESCE (works on Postgres + Oracle + SQL Server)
     expr_text = re.sub(r"(?i)\bISNULL\s*\(", "COALESCE(", expr_text)
     # T-SQL CAST targets → portable (DATETIME unknown to Postgres/Oracle)

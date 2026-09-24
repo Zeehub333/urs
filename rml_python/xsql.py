@@ -31,7 +31,7 @@ _KEYWORDS = {
 _FUNCTIONS = {
     "SUM", "MIN", "MAX", "AVG", "COUNT", "SUMIF", "SUMIFS",
     "COUNTBLANK", "COUNTIF", "COUNTA", "IF", "FILTER",
-    "XLOOKUP", "VLOOKUP",
+    "XLOOKUP", "VLOOKUP", "SUMBY", "COUNTBY", "SERIAL",
 }
 
 # Registry for name-based marker metadata. Postgres truncates identifiers
@@ -301,14 +301,29 @@ class _Parser:
             return t.value
         return None
 
+    def _strip_formula_prefix(self) -> bool:
+        """Consume a leading `=` (Excel-style formula marker) if present.
+
+        `=expr` means "this column is an expression"; a bare item without
+        `=` keeps its legacy meaning (column ref / literal). Previously a
+        leading `=` was a syntax error, so this is purely additive.
+        """
+        t = self.peek()
+        if t is not None and t.kind == "op" and t.value == "=":
+            self.eat()
+            return True
+        return False
+
     def _parse_select_list(self) -> List[Tuple[Expr, Optional[str]]]:
         items: List[Tuple[Expr, Optional[str]]] = []
+        self._strip_formula_prefix()
         expr = self._parse_expression()
         alias: Optional[str] = None
         if self.accept("kw", "AS"):
             alias = self._parse_alias_token()
         items.append((expr, alias))
         while self._accept_comma():
+            self._strip_formula_prefix()
             expr = self._parse_expression()
             alias = None
             if self.accept("kw", "AS"):
@@ -603,10 +618,24 @@ class XSQLCompiler:
         self.p = parsed
         # conn_map: {conn_key: {"engine": "postgres"|"sqlserver", "schema": default_schema}}
         self.conn_map = conn_map
+        self._cur_conn = ""
+        self._cur_dialect = "pg"
+
+    def _primary_dialect(self, primary_conn: str) -> str:
+        """'mssql' for SQL Server primaries, else 'pg' (postgres-style)."""
+        try:
+            eng = str((self.conn_map or {}).get(primary_conn or "", {}).get("engine", "") or "").lower()
+        except Exception:
+            eng = ""
+        if "mssql" in eng or "sqlserver" in eng:
+            return "mssql"
+        return "pg"
 
     def compile(self) -> CompiledQuery:
         primary_conn, primary_schema, primary_table = _normalize_ref(self.p.from_table.parts, self.conn_map)
         primary_conn = self._resolve_conn(primary_conn)
+        self._cur_conn = primary_conn or ""
+        self._cur_dialect = self._primary_dialect(primary_conn)
         primary_cols: List[str] = []
         primary_aliases: Dict[str, str] = {}
         primary_select: List[str] = []
@@ -806,13 +835,45 @@ class XSQLCompiler:
         - GET(conn.tbl.col) → NULL AS marker; resolved by Python from fields map
         - FILTER(conn.tbl.col, cond) → NULL AS marker; resolved by Python from fields map
         - XLOOKUP / VLOOKUP → NULL AS marker; resolved by Python from fields map
+        - SUMBY(amt_col, group_col) → SUM(amt) OVER (PARTITION BY grp)
+        - COUNTBY(group_col) → COUNT(*) OVER (PARTITION BY grp)
+        - SERIAL(start, end, step) → generate_series / GENERATE_SERIES
         """
         name = fn.name
         col = alias or name.lower()
         if name in ("SUM", "MIN", "MAX", "AVG", "COUNT"):
             args_sql = [self._emit_select_expr(a, None)[0] for a in fn.args]
             return f"{name}({', '.join(args_sql)})", col
+        if name == "SUMBY":
+            # SUMBY(amt_col, group_col): sum of amt at the repetition level
+            # of group_col, i.e. a windowed total per group.
+            if len(fn.args) != 2:
+                raise ValueError("SUMBY needs exactly 2 args: SUMBY(amt_col, group_col)")
+            amt_sql = self._emit_select_expr(fn.args[0], None)[0]
+            grp_sql = self._emit_select_expr(fn.args[1], None)[0]
+            return f"SUM({amt_sql}) OVER (PARTITION BY {grp_sql})", col
+        if name == "COUNTBY":
+            # COUNTBY(group_col): row count at the repetition level of group_col.
+            if len(fn.args) != 1:
+                raise ValueError("COUNTBY needs exactly 1 arg: COUNTBY(group_col)")
+            grp_sql = self._emit_select_expr(fn.args[0], None)[0]
+            return f"COUNT(*) OVER (PARTITION BY {grp_sql})", col
+        if name == "SERIAL":
+            # SERIAL(start, end, step): fill a date/time/number series.
+            # The 3rd arg is the STEP size (like GENERATE_SERIES(start, stop, step)).
+            if len(fn.args) != 3:
+                raise ValueError("SERIAL needs exactly 3 args: SERIAL(start, end, step)")
+            start_sql = self._emit_select_expr(fn.args[0], None)[0]
+            end_sql = self._emit_select_expr(fn.args[1], None)[0]
+            step_sql = self._emit_select_expr(fn.args[2], None)[0]
+            if getattr(self, "_cur_dialect", "pg") == "mssql":
+                # SQL Server 2022+; numeric series only.
+                return f"GENERATE_SERIES({start_sql}, {end_sql}, {step_sql})", col
+            return f"generate_series({start_sql}, {end_sql}, {step_sql})", col
         if name == "SUMIF":
+            if len(fn.args) != 3:
+                raise ValueError("SUMIF needs exactly 3 args: SUMIF(sum_range, criteria_expr, criteria_value)")
+            sum_range, crit_expr, crit_val = fn.args[0], fn.args[1], fn.args[2]
             sum_sql = self._emit_select_expr(sum_range, None)[0]
             pred = self._eq_predicate(crit_expr, crit_val)
             return f"SUM(CASE WHEN {pred} THEN {sum_sql} END)", col
