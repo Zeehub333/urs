@@ -361,6 +361,38 @@ def _resolve_expression(expr_text: str, fields: Optional[List[Any]],
     parts = re.split(r"('(?:[^']|'')*')", expr_text)
     for i in range(0, len(parts), 2):
         seg = parts[i]
+        # get(...) transparent wrapper (XSQL-style field access).
+        # A single bare name is re-bracketed (`get(col)` → `[col]`) so it
+        # keeps the exact validated/quoted semantics of `[col]`; dotted or
+        # bracketed inners splice as-is (`get(tbl.col)` → `tbl.col`,
+        # `get([tbl.col])` → `[tbl.col]`). Not preceded by word/dot chars
+        # (so `target.get(x)` and `budget(` stay literal). Nested get()
+        # unwraps inside-out (cap 4 rounds). Args with parens (get(SUM(x)))
+        # or quotes are left untouched — same passthrough as before.
+        def _get_rep(_m: re.Match) -> str:
+            _inner = (_m.group(1) or "").strip()
+            if not _inner:
+                return _m.group(0)
+            if _inner[0] in ("'", '"'):
+                return _m.group(0)
+            if re.search(r"[\[\]{}()]", _inner):
+                return _inner
+            # single name (Latin or Arabic, may contain spaces) → bracket it
+            # so validation/quoting match [name] exactly; dotted stays bare
+            # for the table-aware passes below.
+            if "." not in _inner and re.fullmatch(
+                    r"[A-Za-z_0-9\u0600-\u06FF][A-Za-z_0-9\u0600-\u06FF \t]*", _inner):
+                return f"[{_inner}]"
+            return _inner
+
+        for _gi in range(4):
+            _nseg, _nn = re.subn(
+                r"(?<![\w$#\.\"'\u0600-\u06FF])get\s*\(([^()]*)\)",
+                _get_rep,
+                seg, flags=re.IGNORECASE)
+            if not _nn:
+                break
+            seg = _nseg
         # T-SQL leftovers: alias.[col] / alias."col" where alias is not a known
         # table — bind when col matches exactly one report field, else a clear error.
         _known_tables = {_norm_tname(getattr(f, "table_source", None) or "")

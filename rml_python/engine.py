@@ -1981,16 +1981,73 @@ class RMLReportEngine:
                     found.add(key)
         # strip single-quoted literals
         segs = re.split(r"('(?:[^']|'')*')", str(text or ""))
+        try:
+            from .namespaces import _BARE2_RE as _bare2re
+        except Exception:
+            _bare2re = None
         for i in range(0, len(segs), 2):
             seg = segs[i]
-            for m in re.finditer(r'(?<!\.)"([A-Za-z_][A-Za-z0-9_]*)"(?!\.)', seg):
+            # get(...) transparency (mirrors _resolve_expression): detect refs
+            # inside the wrapper exactly as if it weren't there.
+            scan = seg
+            for _gi in range(4):
+                _ns, _nn = re.subn(r"(?<![\w$#\.\"'\u0600-\u06FF])get\s*\(([^()]*)\)",
+                                   r"\1", scan, flags=re.IGNORECASE)
+                if not _nn:
+                    break
+                scan = _ns
+            for m in re.finditer(r'(?<!\.)"([A-Za-z_][A-Za-z0-9_]*)"(?!\.)', scan):
                 if m.group(1).lower() in field_table:
                     found.add(m.group(1).lower())
             names = sorted(field_table.keys(), key=len, reverse=True)
             if names:
                 alt = "|".join(re.escape(n) for n in names)
-                for m in re.finditer(r"(?<!\.)\b(" + alt + r")\b(?!\.)", seg, re.IGNORECASE):
+                for m in re.finditer(r"(?<!\.)\b(" + alt + r")\b(?!\.)", scan, re.IGNORECASE):
                     found.add(m.group(1).lower())
+            # bare table.field with explicit table binding (longest-match,
+            # Arabic-aware): `tbl.col` binds to tbl even when `col` also
+            # exists in other tables (mirrors the SQL emitter, which binds
+            # table-first via <fields>, not via the last-wins flat map).
+            if _bare2re is not None:
+                try:
+                    _all_fields = list(getattr(self, "fields", []) or [])
+                except Exception:
+                    _all_fields = []
+                try:
+                    # Build from <fields> directly (NOT from the flat map: its
+                    # last-wins values drop tables whose fields were all
+                    # overwritten by same-named fields of other tables).
+                    _known_t = {self._norm_table(str(getattr(_f, "table_source", "") or ""))
+                                for _f in _all_fields}
+                except Exception:
+                    _known_t = set()
+                for _bm in _bare2re.finditer(scan):
+                    _hd, _words = _bm.group(1), _bm.group(2)
+                    try:
+                        if _bm.end() < len(scan) and scan[_bm.end()] == "(":
+                            continue
+                        if self._norm_table(_hd) not in _known_t:
+                            continue
+                    except Exception:
+                        continue
+                    _toks = str(_words or "").split()
+                    for _k in range(len(_toks), 0, -1):
+                        _cand = " ".join(_toks[:_k]).strip().lower()
+                        if not _cand or _cand == "*":
+                            continue
+                        if _cand not in field_table:
+                            continue
+                        try:
+                            _owned = any(
+                                str(getattr(_f, "name", "") or "").strip().lower() == _cand
+                                and self._norm_table(getattr(_f, "table_source", "") or "")
+                                == self._norm_table(_hd)
+                                for _f in _all_fields)
+                        except Exception:
+                            _owned = False
+                        if _owned:
+                            found.add(_cand)
+                            break
         return found
 
     def _link_index(self) -> List[Dict[str, str]]:

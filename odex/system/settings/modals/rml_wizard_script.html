@@ -862,7 +862,7 @@
             if(!name){ notify('اختر الحقل أولاً', 'info'); return; }
             const cid = document.getElementById('exprBConn').value;
             const t = document.getElementById('exprBTable').value;
-            const token = `[${cid}.${t}.${name}]`;
+            const token = `get(${cid}.${t}.${name})`;
             const _k = exprBTgt.kind || 'expr';
             let ref = null, key = 'expr', render = null;
             const qkind = _k === 'rule' ? 'rule' : _k === 'general' ? 'general' : _k === 'where' ? 'where' : (exprBTgt.isDetail ? 'dcol' : 'col');
@@ -3225,13 +3225,41 @@ list.innerHTML = wizardDetail.columns.map((col, idx)=>`
         function wbColSource(col){
             // مصدر قيم العمود: مباشر (الجدول الافتراضي) | عبر رابط | بلا رابط
             const refs = [];
-            String((col && col.expr) || '').replace(/\[([A-Za-z0-9_][A-Za-z0-9_.]*)\]|\{([A-Za-z0-9_][A-Za-z0-9_.]*)\}/g, (m, a, b)=>{
+            let raw = String((col && col.expr) || '');
+            // get(...) شفاف تماماً كما في المحرك: نفك الغلاف أولاً
+            for(let gi=0; gi<4; gi++){
+                const nu = raw.replace(/get\s*\(([^()]*)\)/gi, '$1');
+                if(nu === raw) break;
+                raw = nu;
+            }
+            raw.replace(/\[([A-Za-z0-9_][A-Za-z0-9_.]*)\]|\{([A-Za-z0-9_][A-Za-z0-9_.]*)\}/g, (m, a, b)=>{
                 const inner = a || b;
                 const parts = String(inner).split('.');
                 const f = wbFieldByName(parts[parts.length-1]);
                 if(f) refs.push(f);
                 return m;
             });
+            // مراجع عارية tbl.col (بما فيها العربية بمسافات): أطول مطابقة
+            // للحقل داخل الجدول المذكور صراحة — مثل محلل المحرك.
+            try{
+                const nobr = raw.replace(/'[^']*'/g, ' ');
+                const tblNorm = (s)=>String(s||'').split('.').pop().trim().toLowerCase();
+                const re = /([A-Za-z_][A-Za-z0-9_$#]*)\.([A-Za-z_0-9\u0600-\u06FF]+(?:[ \t]+[A-Za-z_0-9\u0600-\u06FF]+)*)/g;
+                let bm;
+                while((bm = re.exec(nobr))){
+                    const head = bm[1], words = bm[2];
+                    const after = nobr[bm.index + bm[0].length];
+                    if(after === '(') continue;
+                    const toks = String(words).split(/\s+/);
+                    for(let k=toks.length; k>0; k--){
+                        const cand = toks.slice(0,k).join(' ').trim().toLowerCase();
+                        if(!cand || cand === '*') continue;
+                        const hit = (wizardFields||[]).find(f=>String(f.name||'').trim().toLowerCase()===cand
+                            && tblNorm(f.table_source||f.tableSource||'')===tblNorm(head));
+                        if(hit){ refs.push(hit); break; }
+                    }
+                }
+            }catch(e){}
             if(!refs.length) return {label:'—', cls:''};
             const def = wbDefaultKey();
             const seen = {};
