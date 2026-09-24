@@ -1063,6 +1063,7 @@ def api_app_files(request, app_name):
             break
     return JsonResponse({"app": app_name, "rml": rml_files, "fml": fml_files, "counts": {"rml": len(rml_files), "fml": len(fml_files)}})
 
+@csrf_exempt
 def api_apps_sync(request):
     """POST /api/apps/sync/ — re-sync system folders → DB (for UI editable)"""
     if request.method != "POST":
@@ -4144,6 +4145,7 @@ def api_xsql_run(request):
         return JsonResponse({"ok": False, "error": str(e)}, status=500)
 
 
+@csrf_exempt
 def api_rml_execute(request):
     pipe = None
     try:
