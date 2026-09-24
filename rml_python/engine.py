@@ -1138,7 +1138,30 @@ def _build_select(columns: List[RMLColumn], fields: Optional[List] = None,
                 base_sql = expr
         else:  # direct
             if re.match(r'^[A-Za-z_][A-Za-z0-9_\.]*$', raw):
-                base_sql = raw if raw.strip().upper() == "NULL" else _q(raw)
+                if raw.strip().upper() == "NULL":
+                    base_sql = raw
+                else:
+                    # Bare XSQL-style `table.col` resolved against <fields>
+                    # above (staged TEMP aliases, quoted idents) wins over
+                    # quoting the literal table name — but ONLY when the head
+                    # is a known table; raw SQL passthrough is unchanged.
+                    _use_rx = False
+                    if "." in raw:
+                        try:
+                            from .namespaces import _norm_tname as _nt
+                            _hd = raw.split(".")[0]
+                            _known2 = {_nt(getattr(_f, "table_source", None) or "")
+                                       for _f in (fields or [])}
+                            try:
+                                _known2 |= {str(_v or "").strip().lower() for _v in (table_map or {}).values()}
+                                _known2 |= {_nt(_k) for _k in (_abt or {})}
+                            except Exception:
+                                pass
+                            if _hd and _nt(_hd) in _known2:
+                                _use_rx = True
+                        except Exception:
+                            pass
+                    base_sql = expr if _use_rx else _q(raw)
             else:
                 base_sql = expr
         # Apply per-column where_clause (resolved the same way). Keeps backward compat when empty.
@@ -2145,6 +2168,16 @@ class RMLReportEngine:
             if fobj is not None:
                 out.add(self._norm_table(getattr(fobj, "table_source", "") or ""))
                 qkeys.add(str(getattr(fobj, "name", "") or "").lower())
+        # Bare XSQL-style `table.field` refs (no brackets): same longest-match
+        # logic the SQL emitter uses, so JOIN planning sees exactly what the
+        # emitter will resolve (shared helper in namespaces.py — no drift).
+        try:
+            from .namespaces import bare_ref_tables as _bare_rt
+            for _tn, _fk in _bare_rt(str(text or ""), fields).items():
+                out.add(_tn)
+                qkeys.add(_fk)
+        except Exception:
+            pass
         for r in self._refs_in_text(text, ftm):
             if r in qkeys:
                 continue

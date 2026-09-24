@@ -19,6 +19,71 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 FIELD_REF_RE = re.compile(r"\[([A-Za-z0-9_][A-Za-z0-9_.]*)\]|\{([A-Za-z0-9_][A-Za-z0-9_.]*)\}")
 NS_REF_RE = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)\b")
 
+# Bare XSQL-style refs: `table.field` (no brackets).
+# Word runs may contain spaces (Arabic field names); hard delimiters are
+# , ; ( ) = < > ! and arithmetic ops — field names never contain those.
+# NOTE: 3-part `conn.table.field` is intentionally NOT matched here: the file
+# converter always emits 2-part `table.field` (table+field fully identify the
+# field; a leading segment is a schema name or a typo and must stay literal,
+# exactly like the emitter below treats it).
+_BARE2_RE = re.compile(
+    r"(?<![\w$#\"'\u0600-\u06FF.\]])"
+    r"([A-Za-z_][A-Za-z0-9_$#]*)"
+    r"\.([A-Za-z_0-9\u0600-\u06FF]+(?:[ \t]+[A-Za-z_0-9\u0600-\u06FF]+)*)"
+)
+
+
+def _bare_longest_field(words_text: str, table_head: str, by_name: Dict[str, List[Any]]) -> Optional[Tuple[Any, str, str]]:
+    """Longest leading field-name match of `words_text` inside `table_head`.
+
+    Returns (field_obj, canonical_key, dropped_remainder) or None.
+    `*` and empty candidates never match (SELECT t.* stays literal).
+    """
+    toks = str(words_text or "").split()
+    for i in range(len(toks), 0, -1):
+        cand = " ".join(toks[:i])
+        if not cand or cand == "*":
+            continue
+        cands = by_name.get(cand.strip().lower(), [])
+        for f in cands:
+            if _norm_tname(getattr(f, "table_source", None) or "") == _norm_tname(table_head):
+                key = str(getattr(f, "name", cand)).strip().lower()
+                return f, key, " ".join(toks[i:])
+    return None
+
+
+def bare_ref_tables(text: str, fields: Optional[List[Any]]) -> Dict[str, str]:
+    """{table_norm: field_key} for bare `table.field` refs in `text`.
+
+    Shared by the execution planner so routing (JOIN vs merge) sees the same
+    references the SQL emitter resolves. Single-quoted literals, double-quoted
+    spans and [...]/{...} spans are ignored. Unknown tables/fields are
+    ignored (literal SQL passthrough, same as the emitter).
+    """
+    out: Dict[str, str] = {}
+    if not text or not fields:
+        return out
+    try:
+        by_name: Dict[str, List[Any]] = {}
+        for f in (fields or []):
+            n = getattr(f, "name", None)
+            if n:
+                by_name.setdefault(str(n).strip().lower(), []).append(f)
+        segs = re.split(r"('(?:[^']|'')*')", str(text or ""))
+        for qi in range(0, len(segs), 2):
+            seg = segs[qi]
+            for part in re.split(r'(\{[^{}]*\}|\[[^\]]*\]|"[^"]*")', seg)[0::2]:
+                for m in _BARE2_RE.finditer(part):
+                    head, words = m.group(1), m.group(2)
+                    hit = _bare_longest_field(words, head, by_name)
+                    if hit is None:
+                        continue
+                    f, key, _dropped = hit
+                    out.setdefault(_norm_tname(getattr(f, "table_source", None) or head), key)
+    except Exception:
+        pass
+    return out
+
 
 def _candidate_dirs() -> List[pathlib.Path]:
     roots = []
@@ -441,6 +506,37 @@ def _resolve_expression(expr_text: str, fields: Optional[List[Any]],
                 return m.group(0)  # not a namespace → regular SQL (table.column)
             return f"({resolved})"
         seg = NS_REF_RE.sub(_ns_sub, seg)
+
+        # Apply only outside "..." spans (emitted "alias"."COL" must survive).
+        _qparts = re.split(r'("[^"]*")', seg)
+        for _qi in range(0, len(_qparts), 2):
+            _qp = _qparts[_qi]
+
+            def _bare_rep(m: re.Match, _qp: str = _qp) -> str:
+                # Bare XSQL-style `table.field` (no brackets): resolve against
+                # <fields> exactly like [table.field] does. Precedence: explicit
+                # [...]/{...} already resolved above; known file namespaces keep
+                # NS_REF_RE's verdict (handled just above). Unknown table heads
+                # stay literal (today's passthrough for raw SQL); unknown fields
+                # on a KNOWN table also stay literal (never raise here — the DB
+                # reports genuinely unknown columns, same as raw SQL today).
+                head, words = m.group(1), m.group(2)
+                if head.lower() in (registry or {}):
+                    return m.group(0)
+                if _norm_tname(head) not in _known_tables:
+                    return m.group(0)
+                # function call, e.g. schema.func( — leave for the DB
+                k = m.end()
+                if k < len(_qp) and _qp[k] == "(":
+                    return m.group(0)
+                hit = _bare_longest_field(words, head, by_name)
+                if hit is None:
+                    return m.group(0)
+                f, key, dropped = hit
+                return _emit(key, f) + ((" " + dropped) if dropped else "")
+
+            _qparts[_qi] = _BARE2_RE.sub(_bare_rep, _qp)
+        seg = "".join(_qparts)
         seg = _qualify_bare(seg)
         parts[i] = seg
     return "".join(parts)
