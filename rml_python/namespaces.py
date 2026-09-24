@@ -188,6 +188,95 @@ def _conn_accepted(tok: str, fconns: set, conn_map: Optional[Dict[str, str]]) ->
     return False
 
 
+def _split_top_commas(s: str) -> Optional[List[str]]:
+    """Split on top-level commas (paren-aware, quote-aware for ' and ")."""
+    parts, depth, cur = [], 0, []
+    k = 0
+    n = len(s)
+    while k < n:
+        ch = s[k]
+        if ch == "'":
+            j = k + 1
+            while j < n:
+                if s[j] == "'":
+                    if j + 1 < n and s[j + 1] == "'":
+                        j += 2
+                        continue
+                    break
+                j += 1
+            cur.append(s[k:j + 1 if j < n else n])
+            k = j + 1 if j < n else n
+            continue
+        if ch == '"':
+            j = s.find('"', k + 1)
+            if j < 0:
+                cur.append(s[k:])
+                break
+            cur.append(s[k:j + 1])
+            k = j + 1
+            continue
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        if ch == "," and depth == 0:
+            parts.append("".join(cur))
+            cur = []
+        else:
+            cur.append(ch)
+        k += 1
+    parts.append("".join(cur))
+    return parts
+
+
+_IF_CALL_RE = re.compile(r"(?<![\w$#\.\"'\u0600-\u06FF])IF\s*\(", re.IGNORECASE)
+
+
+def _transpile_if_calls(text: str, _depth: int = 0) -> str:
+    """Rewrite `IF(cond, a, b)` → `CASE WHEN cond THEN a ELSE b END`.
+
+    Operates on the full text with a literal-aware balanced scan so string
+    args (N'...') survive intact. Nested IF() resolves across rounds (each
+    round removes exactly one IF(). Malformed calls (wrong arity, unbalanced
+    parens) are left untouched — same DB error as before this feature.
+    """
+    if not text or _depth > 8:
+        return text
+    m = _IF_CALL_RE.search(text)
+    if not m:
+        return text
+    depth, k, n = 1, m.end(), len(text)
+    while k < n and depth > 0:
+        ch = text[k]
+        if ch == "'":
+            j = k + 1
+            while j < n:
+                if text[j] == "'":
+                    if j + 1 < n and text[j + 1] == "'":
+                        j += 2
+                        continue
+                    break
+                j += 1
+            k = j + 1 if j < n else n
+            continue
+        if ch == '"':
+            j = text.find('"', k + 1)
+            k = n if j < 0 else j + 1
+            continue
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        k += 1
+    if depth != 0:
+        return text
+    args = _split_top_commas(text[m.end():k - 1])
+    if len(args) != 3 or not args[0].strip():
+        return text[:k] + _transpile_if_calls(text[k:], _depth + 1)
+    repl = f"CASE WHEN {args[0].strip()} THEN {args[1].strip()} ELSE {args[2].strip()} END"
+    return _transpile_if_calls(text[:m.start()] + repl + text[k:], _depth + 1)
+
+
 def resolve_ns_member(ns: str, member: str, registry: Dict[str, Tuple[str, pathlib.Path]],
                       visited: Optional[set] = None) -> Optional[str]:
     """Resolve `ns.member` to a SQL fragment, or None if not a known namespace.
@@ -272,6 +361,11 @@ def _resolve_expression(expr_text: str, fields: Optional[List[Any]],
     _stripped = str(expr_text).lstrip()
     if _stripped.startswith("=") and not _stripped.startswith("=="):
         expr_text = _stripped[1:]
+    # IF(cond, a, b) → CASE WHEN cond THEN a ELSE b END (XSQL-style).
+    # Full-text pre-pass (runs before literal splitting because args often
+    # contain N'...' literals). Literal-aware balanced scan; unknown arity
+    # or unbalanced parens stay literal (DB error, as before this feature).
+    expr_text = _transpile_if_calls(expr_text)
     # T-SQL ISNULL(a, b) → COALESCE (works on Postgres + Oracle + SQL Server)
     expr_text = re.sub(r"(?i)\bISNULL\s*\(", "COALESCE(", expr_text)
     # T-SQL CAST targets → portable (DATETIME unknown to Postgres/Oracle)

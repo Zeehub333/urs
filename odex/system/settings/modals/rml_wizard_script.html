@@ -1026,6 +1026,22 @@
             {fn:'ROW_NUMBER', tpl:'ROW_NUMBER() OVER (ORDER BY |)', hint:'ترقيم الصفوف'},
             {fn:'RANK', tpl:'RANK() OVER (ORDER BY |)', hint:'رتبة الصف'}
         ];
+        const XSQL_FNS = [
+            // دوال XSQL الخطية (تُترجم في المحرك؛ IF تُترجم CASE WHEN)
+            {fn:'SUMIF', tpl:'SUMIF(|, , )', hint:'مجموع مشروط'},
+            {fn:'SUMIFS', tpl:'SUMIFS(|, , )', hint:'مجموع بشروط'},
+            {fn:'COUNTIF', tpl:'COUNTIF(|, )', hint:'عدد مشروط'},
+            {fn:'COUNTBLANK', tpl:'COUNTBLANK(|)', hint:'عدد الفارغ'},
+            {fn:'COUNTA', tpl:'COUNTA(|)', hint:'عدد غير الفارغ'},
+            {fn:'IF', tpl:'IF(|, , )', hint:'شرط (يُترجم CASE WHEN)'},
+            {fn:'FILTER', tpl:'FILTER(|, , )', hint:'قيمة أول مطابق'},
+            {fn:'XLOOKUP', tpl:'XLOOKUP(|, , )', hint:'بحث وإرجاع'},
+            {fn:'VLOOKUP', tpl:'VLOOKUP(|, , )', hint:'بحث مرتب وإرجاع'},
+            {fn:'GET', tpl:'GET(|)', hint:'قيمة حقل بالاسم'},
+            {fn:'SUMBY', tpl:'SUMBY(|, )', hint:'مجموع النافذة'},
+            {fn:'COUNTBY', tpl:'COUNTBY(|)', hint:'عدد المجموعة'},
+            {fn:'SERIAL', tpl:'SERIAL(|, , )', hint:'سلسلة أرقام/تواريخ'}
+        ];
         function exprACPool(){
             // [{code (داخل الأقواس), name, hint}] — اسم + [رقم_الاتصال.الجدول.الحقل] بالترتيب
             const pool = [], seen = new Set();
@@ -1041,6 +1057,14 @@
         function exprAuto(input, target){
             const pos = (input.selectionStart !== undefined && input.selectionStart !== null) ? input.selectionStart : (input.value || '').length;
             const before = (input.value || '').slice(0, pos);
+            // بادئة = (نمط إكسل): اعرض كل الدوال مباشرة — = وحدها تعني "تعبير"
+            // (== و != و <= و >= للمقارنة ولا تُطلق الإكمال)
+            if(/(^|[\s,(])=$/.test(before)){
+                const matches = XSQL_FNS.concat(SQL_FNS).slice(0, 12)
+                    .map(f=>({kind:'fn', code:f.fn, tpl:f.tpl, hint:f.hint}));
+                showExprAC(input, target, matches);
+                return;
+            }
             // $rule.var — اقتراحات قواعد الأعمال
             const dm = before.match(/\$([A-Za-z0-9_]*\.?[A-Za-z0-9_]*)$/);
             if(dm){
@@ -1077,12 +1101,12 @@
                 showExprAC(input, target, matches);
                 return;
             }
-            // دوال SQL: كلمة إنجليزية (حرفان+) بعد بداية/مسافة/قوس/فاصلة/عامل — وليست داخل [ ]
+            // دوال SQL/XSQL: كلمة إنجليزية (حرفان+) بعد بداية/مسافة/قوس/فاصلة/عامل — وليست داخل [ ]
             if(/\[[^\]\[]*$/.test(before)){ hideExprAC(); return; }
             const wm = before.match(/([A-Za-z_][A-Za-z0-9_]*)$/);
             if(wm && wm[1].length >= 2){
                 const w = wm[1].toUpperCase();
-                const matches = SQL_FNS.filter(f=>f.fn.indexOf(w) === 0).slice(0, 8)
+                const matches = SQL_FNS.concat(XSQL_FNS).filter(f=>f.fn.indexOf(w) === 0).slice(0, 8)
                     .map(f=>({kind:'fn', code:f.fn, tpl:f.tpl, hint:f.hint}));
                 if(!matches.length){ hideExprAC(); return; }
                 showExprAC(input, target, matches);
@@ -1220,7 +1244,11 @@
         function closeExprExpand(){ document.getElementById('exprExpandModal').classList.add('hidden'); exprXTgt = null; try{ hideExprAC(); }catch(e){} }
         function saveExprExpand(){
             if(!exprXTgt) return;
-            const v = document.getElementById('exprExpandTa').value;
+            let v = document.getElementById('exprExpandTa').value;
+            try{
+                const kk = String(exprXTgt.target).split(':')[0];
+                if(kk === 'col' || kk === 'where' || kk === 'dcol' || kk === 'rule') v = normalizeExprLeadingEq(v);
+            }catch(e){}
             exprACSet(exprXTgt.target, v);
             const k = String(exprXTgt.target).split(':')[0];
             try{
@@ -1883,6 +1911,27 @@ list.innerHTML = wizardDetail.columns.map((col, idx)=>`
             try{ const ov = document.getElementById('rmlSaveProg'); if(ov){ ov.remove(); } }catch(e){}
             try{ const np = document.getElementById('notifyPersist'); if(np){ np.innerHTML=''; } }catch(e){}
         }
+        function normalizeExprLeadingEq(v){
+            // Excel-style: expressions must start with `=`, constants stay bare.
+            // Constants = numbers, quoted strings, NULL/TRUE/FALSE. Everything
+            // else non-empty (refs, calls, operators) gets `=` prepended.
+            const s = String(v ?? '');
+            if(!s.trim()) return s;
+            const t = s.trimStart();
+            if(t.startsWith('=')) return s;
+            if(/^(-?\d+(\.\d+)?|NULL|TRUE|FALSE)$/i.test(t)) return s;
+            if(/^'([^']|'')*'$/.test(t) || /^"[^"]*"$/.test(t) || /^[Nn]'([^']|'')*'$/.test(t)) return s;
+            return '=' + t;
+        }
+        function normalizePayloadExprs(p){
+            // Apply = normalization to every expression-kind value in place.
+            try{
+                (p.columns || []).forEach(c=>{ if(c && typeof c.expr === 'string') c.expr = normalizeExprLeadingEq(c.expr); });
+                (p.columns || []).forEach(c=>{ if(c && typeof c.where_clause === 'string' && c.where_clause.trim()) c.where_clause = normalizeExprLeadingEq(c.where_clause); });
+                (((p.detail || {}).columns) || []).forEach(c=>{ if(c && typeof c.expr === 'string') c.expr = normalizeExprLeadingEq(c.expr); });
+            }catch(e){}
+            return p;
+        }
         function buildRmlPayloadForSave(){
             const err = document.getElementById('rmlError');
             if(!err){ return {ok:false, error:'rmlError div not found'}; }
@@ -1932,6 +1981,7 @@ list.innerHTML = wizardDetail.columns.map((col, idx)=>`
                 if(!wizardDetail.columns.length || !wizardDetail.columns.every(c=>c.alias && c.expr)){ return fail('أضف عموداً فرعياً واحداً على الأقل (اسم معروض + تعبير)', 4); }
             }
             const mode = wizardEditMode ? 'update' : 'create';
+            normalizePayloadExprs(payload);
             return {ok:true, payload, mode};
         }
         async function submitAddRmlQuick(){
@@ -2005,6 +2055,7 @@ list.innerHTML = wizardDetail.columns.map((col, idx)=>`
                     if(!wizardDetail.columns.length || !wizardDetail.columns.every(c=>c.alias && c.expr)){ err.textContent='أضف عموداً فرعياً واحداً على الأقل (اسم معروض + تعبير)'; err.classList.remove('hidden'); showRmlStep(4); return; }
                 }
                 const mode = wizardEditMode ? 'update' : 'create';
+                normalizePayloadExprs(payload);
                 if(window._rmlSaving){ console.log('[submitAddRml] already saving — skip'); return; }
                 window._rmlSaving = true;
                 try{
