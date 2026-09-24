@@ -97,12 +97,47 @@ def _candidate_dirs() -> List[pathlib.Path]:
     return roots
 
 
+# Process-wide registry cache: rescan only when files change (mtime
+# signature). build_registry() runs several times per report request and
+# each scan parses every RML/CML file — cached hits skip all that I/O.
+_REG_CACHE: Dict[str, Any] = {"sig": None, "reg": {}}
+
+
+def _registry_sig() -> Optional[tuple]:
+    """Mtime signature of all scannable files (None when unscannable)."""
+    try:
+        parts = []
+        for base in _candidate_dirs():
+            for pat in ("*.rml", "*/*.rml", "*.cml", "*/*.cml"):
+                for p in sorted(base.glob(pat)):
+                    try:
+                        parts.append((str(p), p.stat().st_mtime_ns))
+                    except Exception:
+                        pass
+        ex_dir = REPO_ROOT / "rml_python" / "examples"
+        if ex_dir.exists():
+            for p in sorted(ex_dir.glob("*.rml")):
+                try:
+                    parts.append((str(p), p.stat().st_mtime_ns))
+                except Exception:
+                    pass
+        return tuple(parts)
+    except Exception:
+        return None
+
+
 def build_registry() -> Dict[str, Tuple[str, pathlib.Path]]:
     """Scan RML + CML files for metadata namespace attributes.
 
     Returns {namespace_lower: (kind, path)} where kind in ("rml", "cml").
     First match wins; files without namespace are skipped.
     """
+    try:
+        _sig = _registry_sig()
+        if _sig is not None and _sig == _REG_CACHE.get("sig"):
+            return dict(_REG_CACHE.get("reg") or {})
+    except Exception:
+        _sig = None
     registry: Dict[str, Tuple[str, pathlib.Path]] = {}
 
     def _metadata_ns(path: pathlib.Path, kind: str) -> Optional[str]:
@@ -134,6 +169,12 @@ def build_registry() -> Dict[str, Tuple[str, pathlib.Path]]:
             ns = _metadata_ns(path, "rml")
             if ns and ns.lower() not in registry:
                 registry[ns.lower()] = ("rml", path)
+    try:
+        if _sig is not None:
+            _REG_CACHE["sig"] = _sig
+            _REG_CACHE["reg"] = dict(registry)
+    except Exception:
+        pass
     return registry
 
 

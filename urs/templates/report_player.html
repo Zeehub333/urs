@@ -104,7 +104,7 @@
 
         <!-- Center: Search, Filters & Presets (full-featured) -->
         <div class="flex-1 max-w-2xl mx-6 hidden lg:flex items-center gap-2">
-            <div id="searchTagsContainer" class="flex-1 flex items-center flex-wrap gap-1.5 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 min-h-[32px] focus-within:border-indigo-500 focus-within:ring-1 focus-within:ring-indigo-500 transition">
+            <div id="searchTagsContainer" class="flex-1 flex items-center flex-wrap gap-1.5 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 min-h-[32px] max-h-[76px] overflow-y-auto custom-scroll focus-within:border-indigo-500 focus-within:ring-1 focus-within:ring-indigo-500 transition">
                 <i class="fa-solid fa-search text-slate-400 text-sm ml-1"></i>
                 <div id="activeTagsList" class="flex flex-wrap gap-1.5"></div>
                 <input type="text" id="searchInput" placeholder="بحث ذكي: نص، رقم، تاريخ، 09:00... (& للجمع، ، للتخيير)..." class="bg-transparent border-none text-xs focus:outline-none flex-1 min-w-[140px] text-slate-700 py-1">
@@ -152,7 +152,7 @@
 
     <!-- Mobile search bar -->
     <div class="lg:hidden bg-white border-b border-slate-200 px-4 py-2 flex items-center gap-2">
-        <div class="flex-1 flex items-center flex-wrap gap-1.5 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5">
+        <div class="flex-1 flex items-center flex-wrap gap-1.5 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 max-h-[76px] overflow-y-auto custom-scroll">
             <i class="fa-solid fa-search text-slate-400 text-sm"></i>
             <div id="activeTagsListMobile" class="flex flex-wrap gap-1.5"></div>
             <input type="text" id="searchInputMobile" placeholder="ابحث..." class="bg-transparent border-none text-xs focus:outline-none flex-1 min-w-[100px]">
@@ -694,7 +694,7 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
         // Lazy loading state
         let lazyLoadedRows = [];
         let lazyPage = 1;
-        let lazyPageSize = 1000;
+        let lazyPageSize = 2500;
         let lazyTotal = 0;
         let lazyTotalPages = 0;
         let lazyLoading = false;
@@ -724,7 +724,7 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
             if(m !== 'table' && m !== 'cards') return;
             docViewModeSet(m);
             paintDocViewToggle();
-            if(m === 'table'){ if(lazyPageSize === 1) lazyPageSize = 1000; }
+            if(m === 'table'){ if(lazyPageSize === 1) lazyPageSize = 2500; }
             else lazyPageSize = 1;
             resetLazyState();
             fetchReportFromAPI();
@@ -1169,6 +1169,8 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                 const useAll = !append && (apiReportType() !== 'doc' || effDocTable()) && hasActiveFilters() && groupingOn;
                 const effPageSize = useAll ? 'all' : lazyPageSize;
                 const payload = buildApiPayload(page, effPageSize);
+                // الصفحات التالية تعرف الإجمالي مسبقاً — تخطي COUNT(*) (أبطأ استعلام غالباً)
+                if(append && lazyTotal > 0) payload.skipTotal = true;
                 // Note: grouping is applied client-side over loaded rows
                 // (renderGroupingSidebar); groupBy is NOT sent so the main
                 // window-function query stays valid.
@@ -1181,8 +1183,11 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                     const data = _ex.data;
                     if(data && data.error) throw new Error(data.error);
                     lastApiData = data;
-                    lazyTotal = data.total || 0;
-                    lazyTotalPages = data.totalPages || Math.ceil(lazyTotal / lazyPageSize) || 1;
+                    // total = -1 عند skipTotal: الإجمالي معروف من الصفحة الأولى — لا تصفّره
+                    if(typeof data.total === 'number' && data.total >= 0){
+                        lazyTotal = data.total || 0;
+                        lazyTotalPages = data.totalPages || Math.ceil(lazyTotal / lazyPageSize) || 1;
+                    }
                     if(useAll) lazyDone = true;
                     // Doc reports show one record per page (unless كشف واحد = table layout)
                     if(apiReportType() === 'doc' && !effDocTable() && lazyPageSize !== 1){
@@ -1858,7 +1863,7 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                 if(entries[0].isIntersecting && !lazyLoading && !lazyDone){
                     fetchReportFromAPI(true);
                 }
-            }, { root: container, rootMargin: '300px' });
+            }, { root: container, rootMargin: '1200px' });
             lazyObserver.observe(sentinel);
         }
         function renderGroupingSidebar(allRows) {
@@ -2512,15 +2517,22 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
         function renderSearchTags() {
             const container = document.getElementById('activeTagsList');
             const mobileContainer = document.getElementById('activeTagsListMobile');
+            // أبناء الوسوم الذكية للقائمة المنبثقة (لا تُعرض inline حتى لا يزيح البحثُ الجدول)
+            try{ window._smartTagKids = {}; }catch(e){}
+            const escT = (s)=>String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
             let html = '';
             activeFilters.forEach((f, idx) => {
                 const isOr = !!f.orGroup;
-                let opSym, label;
+                let opSym, label, fullTitle = '', smartPop = '';
                 if(f && (Array.isArray(f.any) || Array.isArray(f.all))){
                     opSym = '⚡';
                     const kids = f.any || f.all;
                     const joiner = Array.isArray(f.any) ? ' أو ' : ' و ';
-                    label = `${f._smart || 'بحث ذكي'} ∋ (` + kids.map(smartNodeLabel).join(joiner) + `)`;
+                    fullTitle = `${f._smart || 'بحث ذكي'} ∋ (` + kids.map(smartNodeLabel).join(joiner) + `)`;
+                    try{ window._smartTagKids[idx] = {smart: (f._smart || 'بحث ذكي'), kids: kids, joiner: joiner}; }catch(e){}
+                    // ملخص مضغوط بعدد الأعمدة — التفاصيل في منبثقة عائمة لا تزيح الجدول
+                    label = `${f._smart || 'بحث ذكي'} ∋ (${kids.length} ${kids.length === 1 ? 'عمود' : 'أعمدة'})`;
+                    smartPop = ` onclick="openSmartTagPop(${idx}, event)" title="${escT(fullTitle)} — اضغط لعرض الأعمدة" style="cursor:pointer"`;
                 } else if(f.op === 'in' || f.op === 'in_list'){
                     opSym = '∋';
                     label = `${f._smart || 'تفاصيل'} (${((f.value || []).length)} مستند)`;
@@ -2528,14 +2540,52 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                     opSym = ((o)=> o === 'gt' ? '>' : o === 'lt' ? '<' : o === 'gte' ? '≥' : o === 'lte' ? '≤' : o === 'contains' ? '∋' : o === 'startswith' ? '⇥' : o === 'endswith' ? '⇤' : o === 'not_contains' ? '∌' : o === 'not_equals' ? '≠' : o === 'inyear' ? 'سنة' : o === 'inmonth' ? 'شهر' : o === 'since' ? 'منذ' : o === 'inday' ? 'يوم' : o === 'between' ? '⇋' : '=')(f.op);
                     label = `${f._smart ? (f._smart + ' ') : ''}${f.field} ${opSym} ${f.value !== undefined && f.value !== '' ? cleanMidnight(f.value) : ((cleanMidnight(f.valFrom) || '') + ' - ' + (cleanMidnight(f.valTo) || ''))}`;
                 }
-                html += `<span class="inline-flex items-center gap-1.5 ${isOr ? 'bg-amber-50 text-amber-700' : 'bg-indigo-50 text-indigo-700'} px-2.5 py-1 rounded-lg text-xs font-semibold">
+                html += `<span class="inline-flex items-center gap-1.5 ${isOr ? 'bg-amber-50 text-amber-700' : 'bg-indigo-50 text-indigo-700'} px-2.5 py-1 rounded-lg text-xs font-semibold max-w-full">
                     ${isOr ? '<span class="text-[9px] font-bold bg-amber-200 rounded px-1">أو</span>' : ''}
-                    <span onclick="openTagEditor(${idx})" class="cursor-pointer hover:underline" title="تعديل العامل">${label}</span>
-                    <button onclick="removeFilter(${idx})" class="hover:text-indigo-900"><i class="fa-solid fa-xmark text-[10px]"></i></button>
+                    <span ${smartPop ? smartPop : `onclick="openTagEditor(${idx})" title="تعديل العامل"`} class="cursor-pointer hover:underline truncate max-w-[220px]">${label}</span>
+                    <button onclick="removeFilter(${idx})" class="hover:text-indigo-900 shrink-0"><i class="fa-solid fa-xmark text-[10px]"></i></button>
                 </span>`;
             });
             if(container) container.innerHTML = html;
             if(mobileContainer) mobileContainer.innerHTML = html;
+        }
+        function closeSmartTagPop(){
+            try{ const p = document.getElementById('smartTagPop'); if(p) p.remove(); }catch(e){}
+        }
+        function openSmartTagPop(idx, ev){
+            // قائمة الأعمدة المطابقة في منبثقة عائمة (fixed) — لا تزيح الجدول أبداً
+            try{
+                if(ev){ ev.stopPropagation(); ev.preventDefault(); }
+                const info = ((window._smartTagKids || {})[idx]) || null;
+                if(!info || !info.kids || !info.kids.length){ openTagEditor(idx); return; }
+                closeSmartTagPop();
+                const escH = (s)=>String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                const pop = document.createElement('div');
+                pop.id = 'smartTagPop';
+                pop.style.cssText = 'position:fixed;z-index:130;background:#fff;border:1px solid #e2e8f0;border-radius:12px;box-shadow:0 16px 40px rgba(0,0,0,.22);min-width:260px;max-width:min(420px,92vw);max-height:50vh;display:flex;flex-direction:column;overflow:hidden;font-size:12px;';
+                let rows = '';
+                info.kids.forEach((k)=>{
+                    rows += `<div class="px-3 py-1.5 border-b border-slate-100 text-slate-700" dir="auto">${escH(smartNodeLabel(k))}</div>`;
+                });
+                pop.innerHTML = `<div class="px-3 py-2 bg-indigo-50 text-indigo-800 font-bold flex items-center justify-between gap-2"><span class="truncate">${escH(info.smart)} ∋ (${info.kids.length} ${info.kids.length === 1 ? 'عمود' : 'أعمدة'})</span><button onclick="closeSmartTagPop()" class="text-indigo-400 hover:text-indigo-700 shrink-0"><i class="fa-solid fa-xmark text-[11px]"></i></button></div>`
+                    + `<div class="overflow-y-auto custom-scroll">${rows}</div>`
+                    + `<div class="px-3 py-1.5 text-[10px] text-slate-400 bg-slate-50">تُدمج بـ «${escH(info.joiner || ' أو ')}» — احذف الوسم وأعد البحث للتعديل</div>`;
+                document.body.appendChild(pop);
+                const r = pop.getBoundingClientRect();
+                let x = (ev && ev.clientX !== undefined) ? ev.clientX : Math.max(8, window.innerWidth - r.width - 16);
+                let y = (ev && ev.clientY !== undefined) ? ev.clientY + 10 : 120;
+                x = Math.max(8, Math.min(x, window.innerWidth - r.width - 8));
+                y = Math.max(8, Math.min(y, window.innerHeight - r.height - 8));
+                pop.style.left = x + 'px'; pop.style.top = y + 'px';
+                if(!window.__smartTagPopBound){
+                    window.__smartTagPopBound = true;
+                    document.addEventListener('mousedown', (e)=>{
+                        const p = document.getElementById('smartTagPop');
+                        if(p && !p.contains(e.target)) closeSmartTagPop();
+                    });
+                    document.addEventListener('keydown', (e)=>{ if(e.key === 'Escape') closeSmartTagPop(); });
+                }
+            }catch(e){ try{ openTagEditor(idx); }catch(e2){} }
         }
         function removeFilter(idx) {
             activeFilters.splice(idx, 1);

@@ -5,6 +5,8 @@ Supports: filtering (Odoo-style), sorting, pagination (Oracle OFFSET/FETCH), gro
 """
 from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
+import datetime as _dt_mod
+import decimal as _dec_mod
 import re
 from types import SimpleNamespace
 from pathlib import Path as _Path
@@ -30,23 +32,22 @@ except ImportError:
 _API_ROWS_CACHE: Dict[str, Any] = {}
 
 def _fmt_cell(v: Any) -> Any:
-    """تبسيط عرض القيم: التاريخ بدون وقت منتصف الليل، وفصل التاريخ عن الوقت بمسافة."""
+    """تبسيط عرض القيم: التاريخ بدون وقت منتصف الليل، وفصل التاريخ عن الوقت بمسافة.
+
+    datetime/decimal على مستوى الوحدة (كانت تُستورد مع كل خلية — آلاف
+    الاستيرادات لكل صفحة تكلف زمناً ملموساً عند الصفحات الكبيرة).
+    """
     try:
-        import datetime as _dt
-        if isinstance(v, _dt.datetime):
+        if isinstance(v, _dt_mod.datetime):
             if v.hour == 0 and v.minute == 0 and v.second == 0 and v.microsecond == 0:
                 return v.strftime("%Y-%m-%d")
             return v.strftime("%Y-%m-%d %H:%M:%S")
-        if isinstance(v, _dt.date):
+        if isinstance(v, _dt_mod.date):
             return v.strftime("%Y-%m-%d")
-        if isinstance(v, _dt.time):
+        if isinstance(v, _dt_mod.time):
             return v.strftime("%H:%M:%S")
-        try:
-            import decimal as _dec2
-            if isinstance(v, _dec2.Decimal):
-                return int(v) if v == int(v) else float(v)
-        except Exception:
-            pass
+        if isinstance(v, _dec_mod.Decimal):
+            return int(v) if v == int(v) else float(v)
     except Exception:
         pass
     return v
@@ -6025,35 +6026,43 @@ class RMLReportEngine:
         result_rows: List[Dict[str, Any]] = []
         total = 0
         try:
+            _skip_total = bool(payload.get("skipTotal") or payload.get("skip_total"))
+        except Exception:
+            _skip_total = False
+        try:
             # Ensure connection (on the routed base DB)
             if not getattr(base_db, "conn", None):
                 try:
                     base_db.connect()
                 except Exception:
                     pass
-            # Get total
-            try:
-                if getattr(base_db, "conn", None):
-                    base_db.conn.rollback()  # clear any poisoned txn so the REAL error surfaces
-            except Exception:
-                pass
-            self._report_progress({"stage": "count", "text": "حساب عدد السجلات..."})
-            cur = self._exec_on(base_db, count_sql_simple, count_params_simple)
-            try:
-                row = cur.fetchone()
-                total = row[0] if row else 0
-                # Handle GROUP BY case where count returns multiple rows
-                if group_by and row and len(row) > 1:
-                    # If grouped, total is number of groups
-                    cur2 = self._exec_on(base_db, f"SELECT COUNT(*) FROM (SELECT 1 FROM {from_q}{where_clause}{group_clause})", where_params)
-                    try:
-                        total = cur2.fetchone()[0]
-                    finally:
-                        try: cur2.close()
-                        except: pass
-            finally:
-                try: cur.close()
-                except: pass
+            # Get total (skippable: the player already knows it on page 2+ and
+            # COUNT(*) over huge filtered tables is often the slowest query)
+            if _skip_total:
+                total = -1
+            else:
+                try:
+                    if getattr(base_db, "conn", None):
+                        base_db.conn.rollback()  # clear any poisoned txn so the REAL error surfaces
+                except Exception:
+                    pass
+                self._report_progress({"stage": "count", "text": "حساب عدد السجلات..."})
+                cur = self._exec_on(base_db, count_sql_simple, count_params_simple)
+                try:
+                    row = cur.fetchone()
+                    total = row[0] if row else 0
+                    # Handle GROUP BY case where count returns multiple rows
+                    if group_by and row and len(row) > 1:
+                        # If grouped, total is number of groups
+                        cur2 = self._exec_on(base_db, f"SELECT COUNT(*) FROM (SELECT 1 FROM {from_q}{where_clause}{group_clause})", where_params)
+                        try:
+                            total = cur2.fetchone()[0]
+                        finally:
+                            try: cur2.close()
+                            except: pass
+                finally:
+                    try: cur.close()
+                    except: pass
 
             # Get paged rows (raw -> cross-DB merges -> strip helpers -> format)
             try:
@@ -6066,13 +6075,25 @@ class RMLReportEngine:
             cur = self._exec_on(base_db, sql, params)
             try:
                 cols = [d[0].lower() for d in cur.description] if cur.description else []
-                raw_rows = [dict(zip(cols, r)) for r in cur.fetchall()] if cols else []
-                raw_rows = self._apply_merges(raw_rows, exec_plan)
-                for _k in strip_extra:
-                    for _r in raw_rows:
-                        _r.pop(_k, None)
-                        _r.pop(str(_k).lower(), None)
-                result_rows = [{k: _fmt_cell(v) for k, v in _r.items()} for _r in raw_rows]
+                if not cols:
+                    result_rows = []
+                else:
+                    _strip = {str(_k) for _k in (strip_extra or set())}
+                    _strip |= {str(_k).lower() for _k in (strip_extra or set())}
+                    _fetched = cur.fetchall()
+                    # zip + strip helpers first, merges second, format last
+                    # (was: dict pass + a double loop per strip key + format;
+                    # merges must precede _fmt_cell so merged values format too)
+                    _rr = []
+                    _append = _rr.append
+                    for _r in _fetched:
+                        _d = dict(zip(cols, _r))
+                        if _strip:
+                            for _k in _strip:
+                                _d.pop(_k, None)
+                        _append(_d)
+                    raw_rows = self._apply_merges(_rr, exec_plan)
+                    result_rows = [{k: _fmt_cell(v) for k, v in _r.items()} for _r in raw_rows]
             finally:
                 try: cur.close()
                 except: pass
