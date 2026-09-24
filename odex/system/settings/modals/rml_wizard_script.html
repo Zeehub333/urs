@@ -1072,11 +1072,22 @@
                     if(!nm) return;
                     const tb = String(f.table_source || f.tableSource || '').split('.').pop().trim();
                     const cn = String(f.conn_id || f.connection_id || '');
-                    (byCol[nm] = byCol[nm] || []).push({table: tb, conn: cn});
+                    (byCol[nm] = byCol[nm] || []).push({table: tb, conn: cn, col: String(f.name || '').trim()});
                 });
             }catch(e){}
             return {defs: defs, byCol: byCol};
         }
+        /* أسماء الجداول المستوردة (مختصرة، صغيرة) — لتمييز مقطع الجدول أثناء كتابة get() */
+        window.__exprKnownTables = function(){
+            const s = new Set();
+            try{
+                (wizardFields || []).forEach(f=>{
+                    const tb = String(f.table_source || f.tableSource || '').split('.').pop().trim().toLowerCase();
+                    if(tb) s.add(tb);
+                });
+            }catch(e){}
+            return s;
+        };
         window.__exprGetWarn = function(argText){
             try{
                 const a = String(argText || '').trim().replace(/^N'/i, "'");
@@ -1086,9 +1097,16 @@
                 const mp = __exprDefaultsMap();
                 if(!mp.defs.size) return '';
                 const norm = (s)=>String(s || '').split('.').pop().trim().toLowerCase();
-                const outside = (mp.byCol[a.toLowerCase()] || []).filter(c=>!mp.defs.has(norm(c.table)));
+                const colName = (c)=>String((c && c.col) || a);
+                // تطابق تام أولاً، ثم بادئة فريدة (تحذير مبكر أثناء الكتابة)
+                let cands = mp.byCol[a.toLowerCase()] || [];
+                if(!cands.length){
+                    const keys = Object.keys(mp.byCol).filter(k=>k.indexOf(a.toLowerCase()) === 0);
+                    if(keys.length === 1) cands = mp.byCol[keys[0]] || [];
+                }
+                const outside = cands.filter(c=>!mp.defs.has(norm(c.table)));
                 if(!outside.length) return '';
-                const full = outside.slice(0, 3).map(c=>'get(' + (c.conn ? c.conn + '.' : '') + (c.table || '') + '.' + a + ')');
+                const full = outside.slice(0, 3).map(c=>'get(' + (c.conn ? c.conn + '.' : '') + (c.table || '') + '.' + colName(c) + ')');
                 return '⚠ ' + xsqlAssist_esc('خارج الجدول الافتراضي — اكتب: ' + full.join(' أو '));
             }catch(e){ return ''; }
         };
@@ -3799,25 +3817,61 @@ function xsqlAssist_sigInfo(text, pos){
     while(j >= 0 && /[A-Za-z_0-9$#]/.test(text[j])) j--;
     const name = text.slice(j+1, end+1);
     if(!name || !/^[A-Za-z_][A-Za-z0-9_$#]*$/.test(name)) return null;
-    // نص الوسيط الحالي (حتى المؤشر) + عدد النقاط فيه — لرسم مقاطع get(اتصال.جدول.عمود)
+    // نص الوسيط الحالي (حتى المؤشر) + مقطع المؤشر (seg = نقاط قبله) + نقاط الوسيط الكامل —
+    // لرسم مقاطع get(اتصال.جدول.عمود) بتزامن صحيح مع ما يُكتب.
     let argText = '';
     try{ argText = (text.slice(argStart, pos) || '').trim(); }catch(_){ argText = ''; }
-    let dots = 0;
-    try{
-        let q = null;
-        for(const c of argText){ if(q){ if(c === q) q = null; } else if(c === "'" || c === '"') q = c; else if(c === '.') dots++; }
-    }catch(_){}
-    return {name: name.toUpperCase(), argIndex: argIndex, argText: argText, dots: dots};
+    const countDots = (s)=>{
+        let q = null, n = 0;
+        try{
+            for(const c of (s || '')){ if(q){ if(c === q) q = null; } else if(c === "'" || c === '"') q = c; else if(c === '.') n++; }
+        }catch(_){}
+        return n;
+    };
+    const seg = countDots(argText);
+    // نهاية الوسيط الكامل: أول فاصلة/قوس إغلاق على العمق صفر بعد المؤشر (مع احترام النصوص)
+    let argEnd = text.length, d2 = 0, q2 = null;
+    for(let k = pos; k < text.length; k++){
+        const c = text[k];
+        if(q2){ if(c === q2){ if(k + 1 < text.length && text[k+1] === q2) k++; else q2 = null; } continue; }
+        if(c === "'" || c === '"'){ q2 = c; continue; }
+        if(c === '('){ d2++; continue; }
+        if(c === ')'){ if(d2 === 0){ argEnd = k; break; } d2--; continue; }
+        if(c === ',' && d2 === 0){ argEnd = k; break; }
+        if(c === ';' && d2 === 0){ argEnd = k; break; }
+    }
+    let totalDots = seg;
+    try{ totalDots = countDots(text.slice(argStart, argEnd)); }catch(_){}
+    return {name: name.toUpperCase(), argIndex: argIndex, argText: argText, dots: seg, seg: seg, totalDots: totalDots};
 }
 function xsqlAssist_sigHtml(info){
     const cat = XSQL_FN_CATALOG.find(function(f){ return f.n === info.name; });
     if(!cat) return null;
-    // مقاطع GET تُقرأ بالنقاط: get(col) → [col]، get(tbl.col) → [table,col]، get(c.t.col) → الكل
+    // مقاطع GET متزامنة مع المؤشر: المقطع الحالي = نقاط قبل المؤشر، والشكل = نقاط الوسيط الكامل.
+    // بلا نقاط: رقمي → اتصال، اسم جدول معروف → جدول، وإلا عمود مختصر.
+    const __isKnownTable = (nm)=>{
+        try{
+            if(typeof window.__exprKnownTables === 'function'){
+                const t = window.__exprKnownTables();
+                if(t && t.has) return t.has(String(nm || '').trim().toLowerCase());
+            }
+        }catch(_){}
+        return false;
+    };
     let boldIdx = [info.argIndex], curP = null;
     if(info.name === 'GET'){
-        const d = Math.min(info.dots || 0, 2);
-        boldIdx = d === 0 ? [2] : d === 1 ? [1, 2] : [0, 1, 2];
-        curP = cat.p[2];
+        const td = info.totalDots || 0, sg = info.seg || 0;
+        if(td === 0){
+            const a = (info.argText || '').trim();
+            const pi = /^[0-9]+$/.test(a) ? 0 : (a && __isKnownTable(a) ? 1 : 2);
+            boldIdx = [pi]; curP = cat.p[pi];
+        } else if(td === 1){
+            const pi = sg === 0 ? 1 : 2;
+            boldIdx = [pi]; curP = cat.p[pi];
+        } else {
+            const pi = Math.min(sg, 2);
+            boldIdx = [pi]; curP = cat.p[pi];
+        }
     } else if(info.argIndex < cat.p.length){
         curP = cat.p[cat.v ? Math.min(info.argIndex, cat.p.length - 1) : info.argIndex];
     }
