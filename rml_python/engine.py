@@ -353,7 +353,8 @@ def _resolve_filter_field(field: str, columns: Optional[List] = None,
                            fields: Optional[List] = None,
                            table_map: Optional[Dict[str, str]] = None,
                            conn_map: Optional[Dict[str, str]] = None,
-                           rules: Optional[List[Any]] = None) -> str:
+                           rules: Optional[List[Any]] = None,
+                           default_tables: Optional[Any] = None) -> str:
     """SQL fragment for WHERE/GROUP BY from a frontend field.
 
     Handles computed/aggregated column exprs: strips DISTINCT, and for
@@ -406,10 +407,11 @@ def _resolve_filter_field(field: str, columns: Optional[List] = None,
                         refs.add(m.group(1))
         if len(refs) == 1:
             only = next(iter(refs))
-            return _rx(f"[{only}]", fields, {}, set(), table_map, conn_map)
+            return _rx(f"[{only}]", fields, {}, set(), table_map, conn_map,
+                       default_tables=default_tables)
         alias = getattr(col, "alias", None) or field
         raise ValueError(f'لا يمكن التصفية على العمود التجميعي "{alias}" — صفِّ على عمود التاريخ أو العمود الأساس بدلاً منه.')
-    out = _rx(raw, fields, {}, set(), table_map, conn_map)
+    out = _rx(raw, fields, {}, set(), table_map, conn_map, default_tables=default_tables)
     if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", out.strip() or ""):
         return _q(out.strip())
     return out
@@ -575,7 +577,8 @@ def _ar_col_sql(col_expr: str) -> str:
 def _build_where(filters: List[Dict[str, Any]], start_idx: int = 1, columns: Optional[List] = None,
                  fields: Optional[List] = None, table_map: Optional[Dict[str, str]] = None,
                  conn_map: Optional[Dict[str, str]] = None,
-                 _join: str = "AND", rules: Optional[List[Any]] = None) -> Tuple[str, Dict[str, Any]]:
+                 _join: str = "AND", rules: Optional[List[Any]] = None,
+                 default_tables: Optional[Any] = None) -> Tuple[str, Dict[str, Any]]:
     """
     Build dynamic WHERE clause from Odoo-style search tags.
     Each filter: {field: str, op: str, value: Any, valFrom/valTo for between}
@@ -643,7 +646,8 @@ def _build_where(filters: List[Dict[str, Any]], start_idx: int = 1, columns: Opt
                 sub_where, sub_params = _build_where(
                     subs, start_idx=1000000 + i * 1000,
                     columns=columns, fields=fields, table_map=table_map,
-                    conn_map=conn_map, _join="OR", rules=rules)
+                    conn_map=conn_map, _join="OR", rules=rules,
+                    default_tables=default_tables)
                 if sub_where.startswith(" WHERE "):
                     clauses.append("(" + sub_where[len(" WHERE "):] + ")")
                     params.update(sub_params)
@@ -659,7 +663,8 @@ def _build_where(filters: List[Dict[str, Any]], start_idx: int = 1, columns: Opt
                 sub_where, sub_params = _build_where(
                     subs, start_idx=1500000 + i * 1000,
                     columns=columns, fields=fields, table_map=table_map,
-                    conn_map=conn_map, _join="AND", rules=rules)
+                    conn_map=conn_map, _join="AND", rules=rules,
+                    default_tables=default_tables)
                 if sub_where.startswith(" WHERE "):
                     clauses.append("(" + sub_where[len(" WHERE "):] + ")")
                     params.update(sub_params)
@@ -745,7 +750,8 @@ def _build_where(filters: List[Dict[str, Any]], start_idx: int = 1, columns: Opt
                     params[p] = f.get("value")
             continue
         db_field = _db_expr_for_field(field, columns)
-        qfield = _resolve_filter_field(field, columns, fields, table_map, conn_map, rules)
+        qfield = _resolve_filter_field(field, columns, fields, table_map, conn_map, rules,
+                                         default_tables=default_tables)
         is_date = _col_is_date(col, field)
         date_kind = _col_date_kind(col, field) if is_date else ""
         # Impossible-match guards: a value that can never match the column type
@@ -1030,7 +1036,8 @@ def _build_select(columns: List[RMLColumn], fields: Optional[List] = None,
                    rules: Optional[List[Any]] = None,
                    outer_table: Optional[str] = None,
                    default_schema: Optional[str] = None,
-                   alias_by_table: Optional[Dict[str, str]] = None) -> str:
+                   alias_by_table: Optional[Dict[str, str]] = None,
+                   default_tables: Optional[Any] = None) -> str:
     """
     Build SELECT clause handling 4 column types + new fields/columns split:
     - <field name=DB col> defines base fields usable in direct display or computation.
@@ -1046,6 +1053,8 @@ def _build_select(columns: List[RMLColumn], fields: Optional[List] = None,
     - aggregated: expr like "COUNT(*)" or "SUM([salary])" -> as alias
     - where_clause: wraps any of the above in CASE WHEN ... THEN ... ELSE NULL END
     - conn_map: {rml-local connection id: global id} for [conn.table.col] validation.
+    - default_tables: normed default-table names (explicit <table_opts>
+      is_default) — bare get(col) outside them must be conn.table.col.
     """
     from .namespaces import _resolve_expression, build_registry
     if ns_registry is None:
@@ -1062,7 +1071,8 @@ def _build_select(columns: List[RMLColumn], fields: Optional[List] = None,
         raw = (col.expr or col.name or "").strip()
         if rules and "$" in raw:
             raw = _expand_rv(raw, rules)
-        expr = _resolve_expression(raw, fields, ns_registry, _visited, table_map, conn_map, _abt)
+        expr = _resolve_expression(raw, fields, ns_registry, _visited, table_map, conn_map, _abt,
+                                     default_tables=default_tables)
         base_sql: str
         if raw.strip().upper() == "NULL":
             # Merge placeholder for cross-DB columns (filled post-fetch)
@@ -1172,7 +1182,8 @@ def _build_select(columns: List[RMLColumn], fields: Optional[List] = None,
             if rules and "$" in wc:
                 from .rulevars import expand_rule_vars as _expand_rv2
                 wc = _expand_rv2(wc, rules)
-            wc = _rx(wc, fields, ns_registry, _visited, table_map, conn_map, _abt)
+            wc = _rx(wc, fields, ns_registry, _visited, table_map, conn_map, _abt,
+                       default_tables=default_tables)
         base_sql = _apply_column_where(base_sql, wc)
         parts.append(f"{base_sql} AS {alias_q}")
     return ", ".join(parts) if parts else "*"
@@ -1988,11 +1999,20 @@ class RMLReportEngine:
         for i in range(0, len(segs), 2):
             seg = segs[i]
             # get(...) transparency (mirrors _resolve_expression): detect refs
-            # inside the wrapper exactly as if it weren't there.
+            # inside the wrapper exactly as if it weren't there; a 3-part
+            # conn.table.col maps to table.col for table-first binding.
+            def _get_scan_rep(_m):
+                _in = (_m.group(1) or "").strip()
+                if re.search(r"[\[\]{}'\"]", _in):
+                    return _in
+                _pp = [p.strip() for p in _in.split(".")]
+                if len(_pp) == 3 and all(_pp):
+                    return f"{_pp[1]}.{_pp[2]}"
+                return _in
             scan = seg
             for _gi in range(4):
                 _ns, _nn = re.subn(r"(?<![\w$#\.\"'\u0600-\u06FF])get\s*\(([^()]*)\)",
-                                   r"\1", scan, flags=re.IGNORECASE)
+                                   _get_scan_rep, scan, flags=re.IGNORECASE)
                 if not _nn:
                     break
                 scan = _ns
@@ -2095,6 +2115,11 @@ class RMLReportEngine:
                 return ("none", None)
             scope_norm = self._norm_table(scope_norm)
             fields = getattr(self, "fields", []) or []
+            try:
+                from .namespaces import _unwrap_get_for_plan as _uget
+                raw = _uget(raw)
+            except Exception:
+                pass
 
             def _fields_with(name, table=None):
                 out = []
@@ -2273,6 +2298,33 @@ class RMLReportEngine:
                 pass
             self._conn_map_cache = m
         return self._conn_map_cache or {}
+
+    def _rx_defaults(self) -> set:
+        """Normed tables explicitly marked is_default in <table_opts> (cached).
+
+        Only explicit markings count: bare `get(col)` outside these tables
+        must be written conn.table.col. Files without markings keep the
+        legacy behavior (empty set = no enforcement).
+        """
+        try:
+            cached = getattr(self, "_rx_defaults_cache", None)
+            if cached is not None:
+                return cached
+        except Exception:
+            pass
+        out: set = set()
+        try:
+            from .namespaces import default_norms_from_opts
+            comp = getattr(self, "compiler", None)
+            if comp is not None and hasattr(comp, "table_opts"):
+                out = default_norms_from_opts(comp.table_opts() or [])
+        except Exception:
+            out = set()
+        try:
+            self._rx_defaults_cache = out
+        except Exception:
+            pass
+        return out
 
     def _match_qualified(self, inner: str, field_table: Dict[str, str]) -> Optional[str]:
         """Resolve a dotted [table.col] / [conn.table.col] ref to its field key.
@@ -5377,7 +5429,8 @@ class RMLReportEngine:
         if not core_raw:
             alias = getattr(col, "alias", None) or "العمود"
             raise ValueError(f'لا يمكن مقارنة العمود المنسق "{alias}" بهذه العملية — قارن بالمساواة/الاحتواء على النص المعروض.')
-        out = _rx(core_raw, fields, {}, set(), table_map, self._conn_map())
+        out = _rx(core_raw, fields, {}, set(), table_map, self._conn_map(),
+                    default_tables=self._rx_defaults())
         if re.search(r"\bTO_CHAR\s*\(", out, re.IGNORECASE) or "||" in out:
             alias = getattr(col, "alias", None) or "العمود"
             raise ValueError(f'لا يمكن مقارنة العمود المنسق "{alias}" بهذه العملية — قارن بالمساواة/الاحتواء على النص المعروض.')
@@ -5488,7 +5541,8 @@ class RMLReportEngine:
             try:
                 reg = build_registry() if re.search(r"\[|[A-Za-z_]+\.[A-Za-z_]+", raw) else {}
                 keys.append(_resolve_expression(raw, fields, reg, set(), table_map, conn_map,
-                                                alias_by_table or _alias_by_table(fields, table_map)))
+                                                alias_by_table or _alias_by_table(fields, table_map),
+                                                default_tables=self._rx_defaults()))
             except Exception:
                 continue
         seen, out = set(), []
@@ -5544,7 +5598,8 @@ class RMLReportEngine:
                 from .rulevars import expand_rule_vars as _erv
                 raw = _erv(raw, _rules)
             return _resolve_expression(raw, getattr(self, "fields", []) or [], reg, set(),
-                                       table_map, conn_map or self._conn_map())
+                                       table_map, conn_map or self._conn_map(),
+                                       default_tables=self._rx_defaults())
         except Exception as e:
             raise ValueError(f"الشرط العام للتقرير غير صالح: {e}")
 
@@ -5568,18 +5623,20 @@ class RMLReportEngine:
                                                  else ("mssql" if _is_mssql_db(plan.get("base_db")) else "oracle")),
                                         conn_map=self._conn_map(),
                                         rules=getattr(self, "rules", []),
-                                        alias_by_table=_abt_plan)
+                                        alias_by_table=_abt_plan,
+                                        default_tables=self._rx_defaults())
         for _ex, _al in (extra_selects or []):
             select_clause += f", {_ex} AS {_q(_al)}"
         for _ex, _al in (plan.get("extra") or []):
             select_clause += f", {_ex} AS {_q(_al)}"
         where_clause, where_params = _build_where(filters or [], columns=columns,
                                                  fields=getattr(self, "fields", []), table_map=table_map,
-                                                 conn_map=self._conn_map(), rules=getattr(self, "rules", []))
+                                                 conn_map=self._conn_map(), rules=getattr(self, "rules", []),
+                                                 default_tables=self._rx_defaults())
         where_clause = self._apply_general_where(where_clause, table_map, self._conn_map())
         group_clause = ""
         if group_by:
-            group_clause = f" GROUP BY {_resolve_filter_field(group_by, columns, getattr(self, 'fields', []), table_map, self._conn_map(), getattr(self, 'rules', []))}"
+            group_clause = f" GROUP BY {_resolve_filter_field(group_by, columns, getattr(self, 'fields', []), table_map, self._conn_map(), getattr(self, 'rules', []), default_tables=self._rx_defaults())}"
         order_clause = _build_order_by(sort, columns=columns)
         try:
             _ms_base = _is_mssql_db(plan.get("base_db"))
@@ -5612,7 +5669,8 @@ class RMLReportEngine:
                 if _scol:
                     _sres = _resolve_filter_field(
                         _scol, columns, getattr(self, "fields", []),
-                        table_map, self._conn_map())
+                        table_map, self._conn_map(),
+                        default_tables=self._rx_defaults())
                     for k in _don:
                         if _nq(k) == _nq(_sres):
                             _umatch.add(_nq(k))
@@ -5926,10 +5984,11 @@ class RMLReportEngine:
         where_clause, where_params = _build_where(base_f, columns=exec_plan["columns"],
                                                  fields=getattr(self, "fields", []),
                                                  table_map=exec_plan["table_map"],
-                                                 conn_map=self._conn_map(), rules=getattr(self, "rules", []))
+                                                 conn_map=self._conn_map(), rules=getattr(self, "rules", []),
+                                                 default_tables=self._rx_defaults())
         where_clause = self._apply_general_where(where_clause, exec_plan["table_map"], self._conn_map())
         from_q = exec_plan["from_q"]
-        group_clause = f" GROUP BY {_resolve_filter_field(group_by, exec_plan['columns'], getattr(self, 'fields', []), exec_plan['table_map'], self._conn_map(), getattr(self, 'rules', []))}" if group_by else ""
+        group_clause = f" GROUP BY {_resolve_filter_field(group_by, exec_plan['columns'], getattr(self, 'fields', []), exec_plan['table_map'], self._conn_map(), getattr(self, 'rules', []), default_tables=self._rx_defaults())}" if group_by else ""
         if outer_f:
             _ow, _op = _build_outer_where(outer_f, outer_cols, rules=getattr(self, "rules", []))
             if _ow:
@@ -6115,7 +6174,7 @@ class RMLReportEngine:
                         [target], getattr(self, "fields", []), table_map=None,
                         dialect=("pg" if _is_pg else ("mssql" if _is_ms else "oracle")),
                         conn_map=self._conn_map(), rules=getattr(self, "rules", []),
-                        alias_by_table=None)
+                        alias_by_table=None, default_tables=self._rx_defaults())
                     _btmp = self._staged_temp_of(plan.get("base_norm"))
                     if _btmp:
                         _bq = _q(_btmp)
@@ -6142,7 +6201,8 @@ class RMLReportEngine:
                                       dialect=("pg" if _is_pg else ("mssql" if _is_mssql_db(plan.get("base_db")) else "oracle")),
                                       conn_map=self._conn_map(),
                                       rules=getattr(self, "rules", []),
-                                      alias_by_table=self._plan_alias_map(plan))
+                                      alias_by_table=self._plan_alias_map(plan),
+                                      default_tables=self._rx_defaults())
         try:
             if isinstance(limit, str) and str(limit).strip().lower() in ("all", "unlimited"):
                 n = None  # unlimited: no FETCH cap
@@ -6334,7 +6394,8 @@ class RMLReportEngine:
                                         conn_map=self._conn_map(),
                                         rules=getattr(self, "rules", []),
                                         outer_table=table,
-                                        default_schema=schema)
+                                        default_schema=schema,
+                                        default_tables=self._rx_defaults())
         return {"det": det, "table": table, "dkey": dkey, "dcols": dcols,
                 "base_cols": base_cols, "fk_lookup_cols": fk_lookup_cols,
                 "from_q": from_q, "schema": schema, "_ddb": _ddb,
@@ -6707,8 +6768,10 @@ class RMLReportEngine:
         _gf = self._apply_remote_filters(filters, _gp)
         gfields = getattr(self, "fields", [])
         where_clause, params = _build_where(_gf or [], columns=_gp["columns"], fields=gfields,
-                                            table_map=_gp["table_map"], conn_map=self._conn_map(), rules=getattr(self, "rules", []))
-        _gdb = _resolve_filter_field(key, _gp["columns"], gfields, _gp["table_map"], self._conn_map(), getattr(self, "rules", []))
+                                            table_map=_gp["table_map"], conn_map=self._conn_map(), rules=getattr(self, "rules", []),
+                                            default_tables=self._rx_defaults())
+        _gdb = _resolve_filter_field(key, _gp["columns"], gfields, _gp["table_map"], self._conn_map(), getattr(self, "rules", []),
+                                     default_tables=self._rx_defaults())
         gdb = _gp["base_db"]
         try:
             _is_pg = _is_pg_db(gdb)
@@ -6815,8 +6878,8 @@ class RMLReportEngine:
         _gp = self._plan_structure(active_table, filters, None, group_by)
         _gf = self._apply_remote_filters(filters, _gp)
         gfields = getattr(self, "fields", [])
-        where_clause, params = _build_where(_gf, columns=_gp["columns"], fields=gfields, table_map=_gp["table_map"], conn_map=self._conn_map(), rules=getattr(self, "rules", []))
-        _gdb = _resolve_filter_field(group_by, _gp["columns"], gfields, _gp["table_map"], self._conn_map(), getattr(self, "rules", []))
+        where_clause, params = _build_where(_gf, columns=_gp["columns"], fields=gfields, table_map=_gp["table_map"], conn_map=self._conn_map(), rules=getattr(self, "rules", []), default_tables=self._rx_defaults())
+        _gdb = _resolve_filter_field(group_by, _gp["columns"], gfields, _gp["table_map"], self._conn_map(), getattr(self, "rules", []), default_tables=self._rx_defaults())
         sql = f"SELECT {_gdb}, COUNT(*) as cnt FROM {_gp['from_q']}{where_clause} GROUP BY {_gdb} ORDER BY cnt DESC"
         gdb = _gp["base_db"]
         try:
@@ -6867,7 +6930,8 @@ class RMLReportEngine:
                 fl = fmap.get(r)
                 if fl and not self._is_number_dtype(getattr(fl, "data_type", None)):
                     return None, None
-            inner_sql = _rx(inner, fields, {}, set(), None)
+            inner_sql = _rx(inner, fields, {}, set(), None,
+                              default_tables=self._rx_defaults())
             if func in ("SUM", "AVG", "COUNT"):
                 return f"NVL({func}({inner_sql}), 0)", next(iter(tables))
             return f"{func}({inner_sql})", next(iter(tables))
@@ -7097,6 +7161,7 @@ class RMLReportEngine:
             fields=getattr(self, "fields", []),
             table_map=exec_plan.get("table_map") or {},
             conn_map=self._conn_map(), rules=getattr(self, "rules", []),
+            default_tables=self._rx_defaults(),
         )
         where_clause = self._apply_general_where(
             where_clause, exec_plan.get("table_map") or {}, self._conn_map())
@@ -7292,7 +7357,7 @@ class RMLReportEngine:
                     if tbl == base_norm:
                         _bd = plan.get("base_disp") or base_norm
                         from_q = f"{base_schema_q + '.' if base_schema_q else ''}{_q(_bd)}"
-                        wc, wp = _build_where(base_only_filters, columns=cols_for_summary, fields=fields, table_map=None, conn_map=self._conn_map(), rules=getattr(self, "rules", []))
+                        wc, wp = _build_where(base_only_filters, columns=cols_for_summary, fields=fields, table_map=None, conn_map=self._conn_map(), rules=getattr(self, "rules", []), default_tables=self._rx_defaults())
                         cur = self._exec_on(base_db, f"SELECT {expr} as s FROM {from_q}{wc}", wp)
                     else:
                         # Secondary table: same-DB -> EXISTS semi-join; cross-DB -> two-phase keys
@@ -7311,7 +7376,7 @@ class RMLReportEngine:
                             if not key:
                                 continue
                             bcol, scol = key
-                            bwc, bwp = _build_where(base_only_filters, columns=cols_for_summary, fields=fields, table_map=None, conn_map=self._conn_map(), rules=getattr(self, "rules", []))
+                            bwc, bwp = _build_where(base_only_filters, columns=cols_for_summary, fields=fields, table_map=None, conn_map=self._conn_map(), rules=getattr(self, "rules", []), default_tables=self._rx_defaults())
                             # qualify base refs inside EXISTS subquery to base table
                             _bd = plan.get("base_disp") or base_norm
                             bfrom = f"{base_schema_q + '.' if base_schema_q else ''}{_q(_bd)}"
@@ -7326,7 +7391,7 @@ class RMLReportEngine:
                             bcol, scol = key
                             _bd2 = plan.get("base_disp") or base_norm
                             bfrom = f"{base_schema_q + '.' if base_schema_q else ''}{_q(_bd2)}"
-                            bwc, bwp = _build_where(base_only_filters, columns=cols_for_summary, fields=fields, table_map=None, conn_map=self._conn_map(), rules=getattr(self, "rules", []))
+                            bwc, bwp = _build_where(base_only_filters, columns=cols_for_summary, fields=fields, table_map=None, conn_map=self._conn_map(), rules=getattr(self, "rules", []), default_tables=self._rx_defaults())
                             c0 = self._exec_on(base_db, f"SELECT DISTINCT {_q(bcol)} FROM {bfrom}{bwc}", bwp)
                             try:
                                 bkeys = [r[0] for r in c0.fetchall() if r[0] is not None]

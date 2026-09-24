@@ -64,6 +64,10 @@ def bare_ref_tables(text: str, fields: Optional[List[Any]]) -> Dict[str, str]:
     if not text or not fields:
         return out
     try:
+        text = _unwrap_get_for_plan(text)
+    except Exception:
+        pass
+    try:
         by_name: Dict[str, List[Any]] = {}
         for f in (fields or []):
             n = getattr(f, "name", None)
@@ -139,6 +143,45 @@ def _norm_tname(t: str) -> str:
     if "." in s:
         s = s.split(".")[-1]
     return s.upper()
+
+
+def default_norms_from_opts(table_opts: Optional[List[Dict[str, str]]]) -> set:
+    """Normed names of tables explicitly marked is_default in <table_opts>."""
+    out = set()
+    try:
+        for to in (table_opts or []):
+            if (to or {}).get("is_default") and (to or {}).get("name"):
+                out.add(_norm_tname((to or {})["name"]))
+    except Exception:
+        pass
+    out.discard("")
+    return out
+
+
+_GET_UNWRAP_RE = re.compile(r"(?<![\w$#\.\"'\u0600-\u06FF])get\s*\(([^()]*)\)", re.IGNORECASE)
+
+
+def _unwrap_get_for_plan(text: str) -> str:
+    """Planner view of get() args: `get(conn.tbl.col)` → `tbl.col`, else as-is.
+
+    Only the wrapper is removed (nested get() across rounds, cap 4);
+    bracketed/quoted inners are preserved for the bracket passes.
+    """
+    def _rep(m: re.Match) -> str:
+        inner = (m.group(1) or "").strip()
+        if re.search(r"[\[\]{}'\"]", inner):
+            return inner
+        pts = [p.strip() for p in inner.split(".")]
+        if len(pts) == 3 and all(pts):
+            return f"{pts[1]}.{pts[2]}"
+        return inner
+    out = str(text or "")
+    for _ in range(4):
+        nu, n = _GET_UNWRAP_RE.subn(_rep, out)
+        if not n:
+            break
+        out = nu
+    return out
 
 
 def _quote_literal(value: str) -> str:
@@ -307,18 +350,24 @@ def resolve_ns_member(ns: str, member: str, registry: Dict[str, Tuple[str, pathl
                     if str(getattr(c, "id", "") or "").strip()}
         except Exception:
             cmap = {}
+        try:
+            _own_defs = default_norms_from_opts(comp.table_opts() if hasattr(comp, "table_opts") else [])
+        except Exception:
+            _own_defs = set()
         # rule first
         for r in comp.rules():
             if r.name.lower() == member.lower():
                 if not (r.expr or "").strip():
                     raise ValueError(f"Rule '{member}' in namespace '{ns}' has no expression")
-                return _resolve_expression(r.expr, comp.fields(), registry, visited, None, cmap)
+                return _resolve_expression(r.expr, comp.fields(), registry, visited, None, cmap,
+                                           default_tables=_own_defs)
         # then computed/display column
         for c in comp.columns():
             if (c.name and c.name.lower() == member.lower()) or (c.alias and c.alias.lower() == member.lower()):
                 if not (c.expr or "").strip():
                     raise ValueError(f"Column '{member}' in namespace '{ns}' has no expression")
-                return _resolve_expression(c.expr, comp.fields(), registry, visited, None, cmap)
+                return _resolve_expression(c.expr, comp.fields(), registry, visited, None, cmap,
+                                           default_tables=_own_defs)
         raise ValueError(f"Unknown member '{member}' in namespace '{ns}' ({path.name})")
 
     # kind == "cml"
@@ -337,7 +386,8 @@ def _resolve_expression(expr_text: str, fields: Optional[List[Any]],
                         visited: Optional[set] = None,
                         table_map: Optional[Dict[str, str]] = None,
                         conn_map: Optional[Dict[str, str]] = None,
-                        alias_by_table: Optional[Dict[str, str]] = None) -> str:
+                        alias_by_table: Optional[Dict[str, str]] = None,
+                        default_tables: Optional[Any] = None) -> str:
     """Resolve [field] refs (validated) and ns.member refs inside an expression.
 
     Supported bracket forms (validated against the file's <fields>):
@@ -355,6 +405,11 @@ def _resolve_expression(expr_text: str, fields: Optional[List[Any]],
       emitted qualified as "alias"."COL" (for multi-table/JOIN queries).
     - A leading `=` (Excel-style formula marker) is stripped: `=expr` means
       "this column is an expression". Previously such input errored at the DB.
+    - get() grammar: `get(col)` (bare only when col's table is default-marked
+      via default_tables), `get(tbl.col)`, `get(conn.tbl.col)` (validated +
+      qualified). A bare `get(col)` whose field lives outside the default
+      table raises with the exact full form to write. default_tables is a set
+      (or iterable) of table names; empty/None keeps the legacy behavior.
     """
     if not expr_text:
         return expr_text or ""
@@ -382,6 +437,11 @@ def _resolve_expression(expr_text: str, fields: Optional[List[Any]],
         n = getattr(f, "name", None)
         if n:
             by_name.setdefault(str(n).strip().lower(), []).append(f)
+    try:
+        _default_norms = {_norm_tname(t) for t in (default_tables or []) if str(t or "").strip()}
+    except Exception:
+        _default_norms = set()
+    _default_norms.discard("")
 
     def _emit(key: str, f: Optional[Any] = None) -> str:
         if table_map and key in table_map:
@@ -456,13 +516,21 @@ def _resolve_expression(expr_text: str, fields: Optional[List[Any]],
     for i in range(0, len(parts), 2):
         seg = parts[i]
         # get(...) transparent wrapper (XSQL-style field access).
-        # A single bare name is re-bracketed (`get(col)` → `[col]`) so it
-        # keeps the exact validated/quoted semantics of `[col]`; dotted or
-        # bracketed inners splice as-is (`get(tbl.col)` → `tbl.col`,
-        # `get([tbl.col])` → `[tbl.col]`). Not preceded by word/dot chars
-        # (so `target.get(x)` and `budget(` stay literal). Nested get()
-        # unwraps inside-out (cap 4 rounds). Args with parens (get(SUM(x)))
-        # or quotes are left untouched — same passthrough as before.
+        # - `get(col)` → `[col]` (validated/quoted exactly like `[col]`),
+        #   EXCEPT when the designer marked a default table and col's field
+        #   lives outside it → loud error with the full conn.table.col form.
+        # - `get(tbl.col)` → `tbl.col` (table-aware passes below resolve it).
+        # - `get(conn.tbl.col)` → validated ([conn.table.col] semantics) and
+        #   emitted qualified; unknown shapes stay literal (DB reports them).
+        # Not preceded by word/dot chars (so `target.get(x)` stays literal).
+        # Nested get() unwraps inside-out (cap 4 rounds). Args with parens
+        # (get(SUM(x))) or quotes are left untouched — same passthrough.
+        def _full_get_form(_f: Any) -> str:
+            _conns = sorted(_field_conns(_f)) or ["؟"]
+            _tbl = str(getattr(_f, "table_source", "") or "").strip()
+            _cn = str(getattr(_f, "name", "") or "").strip()
+            return f"get({_conns[0]}.{_tbl}.{_cn})"
+
         def _get_rep(_m: re.Match) -> str:
             _inner = (_m.group(1) or "").strip()
             if not _inner:
@@ -471,11 +539,46 @@ def _resolve_expression(expr_text: str, fields: Optional[List[Any]],
                 return _m.group(0)
             if re.search(r"[\[\]{}()]", _inner):
                 return _inner
+            _pts = [p.strip().strip('"') for p in _inner.split(".")]
+            if len(_pts) == 3 and all(_pts):
+                _ctok, _tbl3, _col3 = _pts
+                _f3 = _find_in_table(_col3, _tbl3)
+                if _f3 is not None:
+                    if not _conn_accepted(_ctok, _field_conns(_f3), conn_map):
+                        _have = sorted(_field_conns(_f3)) or ["؟"]
+                        raise ValueError(
+                            f"get({_inner}) — الاتصال '{_ctok}' لا يملك الحقل "
+                            f"'{_col3}' في جدول '{_tbl3}' (مربوط بـ "
+                            f"({'، '.join(_have)})) — راجع قائمة الاتصالات")
+                    return _emit(str(getattr(_f3, "name", _col3)).strip().lower(), _f3)
+                # unknown table (or unknown field on a known table): splice
+                # the wrapper off and let the DB report the real name, same
+                # passthrough as before this feature.
+                return _inner
             # single name (Latin or Arabic, may contain spaces) → bracket it
             # so validation/quoting match [name] exactly; dotted stays bare
             # for the table-aware passes below.
             if "." not in _inner and re.fullmatch(
                     r"[A-Za-z_0-9\u0600-\u06FF][A-Za-z_0-9\u0600-\u06FF \t]*", _inner):
+                if _default_norms:
+                    _cands = by_name.get(_inner.strip().lower(), [])
+                    _outside = [c for c in _cands
+                                if _norm_tname(getattr(c, "table_source", None) or "")
+                                not in _default_norms]
+                    if _outside:
+                        if len(_cands) == 1:
+                            raise ValueError(
+                                f"get({_inner}) مختصر غير مسموح — الحقل "
+                                f"'{str(getattr(_cands[0], 'name', _inner)).strip()}' في جدول "
+                                f"'{str(getattr(_cands[0], 'table_source', '')).strip()}' "
+                                f"وهو ليس الجدول الافتراضي؛ اكتب "
+                                f"{_full_get_form(_cands[0])} كاملاً (اتصال.جدول.عمود)")
+                        _tables = sorted({_norm_tname(getattr(c, "table_source", None) or "") or "؟"
+                                          for c in _cands})
+                        _alts = "، ".join(sorted({_full_get_form(c) for c in _cands}))
+                        raise ValueError(
+                            f"get({_inner}) ملتبس — موجود في ({'، '.join(_tables)}) "
+                            f"ولا يحسمه اختصار؛ اكتب الصيغة الكاملة (اتصال.جدول.عمود): {_alts}")
                 return f"[{_inner}]"
             return _inner
 
