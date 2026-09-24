@@ -104,6 +104,7 @@
 
         <!-- Center: Search, Filters & Presets (full-featured) -->
         <div class="flex-1 max-w-2xl mx-6 hidden lg:flex items-center gap-2">
+            <select id="searchColSel" onchange="setSearchCol(this.value)" title="عمود البحث — فارغ = كل الأعمدة المطابقة (ذكي)" class="shrink-0 max-w-[150px] bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-slate-600 focus:outline-none focus:border-indigo-500 cursor-pointer"></select>
             <div id="searchTagsContainer" class="flex-1 flex items-center flex-wrap gap-1.5 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 min-h-[32px] max-h-[76px] overflow-y-auto custom-scroll focus-within:border-indigo-500 focus-within:ring-1 focus-within:ring-indigo-500 transition">
                 <i class="fa-solid fa-search text-slate-400 text-sm ml-1"></i>
                 <div id="activeTagsList" class="flex flex-wrap gap-1.5"></div>
@@ -152,6 +153,7 @@
 
     <!-- Mobile search bar -->
     <div class="lg:hidden bg-white border-b border-slate-200 px-4 py-2 flex items-center gap-2">
+        <select id="searchColSelMobile" onchange="setSearchCol(this.value)" title="عمود البحث" class="shrink-0 max-w-[110px] bg-white border border-slate-200 rounded-lg px-1.5 py-1.5 text-xs text-slate-600 focus:outline-none focus:border-indigo-500 cursor-pointer"></select>
         <div class="flex-1 flex items-center flex-wrap gap-1.5 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 max-h-[76px] overflow-y-auto custom-scroll">
             <i class="fa-solid fa-search text-slate-400 text-sm"></i>
             <div id="activeTagsListMobile" class="flex flex-wrap gap-1.5"></div>
@@ -927,6 +929,7 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
             document.getElementById('reportTitleDisplay').textContent = DJANGO_RML_DISPLAY || 'تقرير الموارد البشرية للاختبار';
             loadPresets();
             setupSearchInput();
+            try{ refreshSearchColOptions(); }catch(e){}
             applyUrlFilters();
             restoreLastSort();
             renderSearchTags();
@@ -1475,6 +1478,7 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
             updateLazyStats();
             setupLazyObserver();
             renderDocView();
+            try{ refreshSearchColOptions(); }catch(e){}
         }
 
         function detailMasterKey(row){
@@ -2358,6 +2362,95 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
             if(/^-?\d+(\.\d+)?$/.test(q)) return {kind:'number', value:q, label:q};
             return {kind:'text', value:q, label:q};
         }
+        // ── عمود البحث اليدوي: قيد اختياري على مربع البحث — فلتر أحادي (WHERE بسيط)
+        // بدل OR عبر كل أعمدة النوع المطابق. فارغ = البحث الذكي الحالي. ──
+        function searchColStoreKey(){
+            try{ return 'rml_searchcol_' + (currentApp || 'app') + '_' + (currentRml || 'rml'); }
+            catch(e){ return 'rml_searchcol_default'; }
+        }
+        function getSearchCol(){
+            try{
+                const s = document.getElementById('searchColSel');
+                if(s && s.value) return s.value;
+                const m = document.getElementById('searchColSelMobile');
+                if(m && m.value) return m.value;
+                return localStorage.getItem(searchColStoreKey()) || '';
+            }catch(e){ return ''; }
+        }
+        function setSearchCol(v){
+            try{
+                v = String(v || '');
+                const s = document.getElementById('searchColSel');
+                if(s) s.value = v;
+                const m = document.getElementById('searchColSelMobile');
+                if(m) m.value = v;
+                try{
+                    if(v) localStorage.setItem(searchColStoreKey(), v);
+                    else localStorage.removeItem(searchColStoreKey());
+                }catch(e){}
+                const inp = document.getElementById('searchInput');
+                if(inp) inp.placeholder = v ? `ابحث في «${v}» ثم Enter…` : 'بحث ذكي: نص، رقم، تاريخ، 09:00... (& للجمع، ، للتخيير)...';
+                const mi = document.getElementById('searchInputMobile');
+                if(mi) mi.placeholder = v ? `في «${v}»…` : 'ابحث...';
+            }catch(e){}
+        }
+        function refreshSearchColOptions(){
+            // خيارات = أعمدة التقرير المرئية فعلياً (آخر بيانات أو queryColumns)
+            try{
+                const cols = (typeof allCols === 'function' ? allCols() : (typeof queryColumns !== 'undefined' ? queryColumns : [])) || [];
+                const names = [];
+                const seen = new Set();
+                cols.forEach(c=>{
+                    const a = String((c && (c.alias || c.name)) || '').trim();
+                    if(a && !seen.has(a)){ seen.add(a); names.push(a); }
+                });
+                const escO = (s)=>String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+                const sig = names.join('￨');
+                if(window._searchColSig === sig) return; // الأعمدة لم تتغير — لا تعبث باختيار المستخدم
+                window._searchColSig = sig;
+                const html = `<option value="">كل الأعمدة (ذكي)</option>` + names.map(a=>`<option value="${escO(a)}">${escO(a)}</option>`).join('');
+                const cur = getSearchCol();
+                ['searchColSel', 'searchColSelMobile'].forEach(id=>{
+                    const s = document.getElementById(id);
+                    if(s){ s.innerHTML = html; s.value = names.indexOf(cur) >= 0 ? cur : ''; }
+                });
+                setSearchCol(names.indexOf(cur) >= 0 ? cur : '');
+            }catch(e){}
+        }
+        function singleColFilter(col, sc, kindOf){
+            // فلتر أحادي لجزء بحث عادي على عمود محدد يدوياً — يعكس منطق الفروع
+            // المتعددة أعلاه لكن بشرط واحد فقط. null = غير متوافق → الذكي العام.
+            try{
+                const k = (kindOf(col) || 'text');
+                const tag = (node)=>{ node._smart = '🎯'; return node; };
+                if(sc.kind === 'number'){
+                    if(k === 'number') return tag({field: col, op: 'equals', value: sc.value});
+                    if(k === 'text' || k === 'list' || k === 'status') return tag({field: col, op: 'contains', value: sc.value});
+                    return tag({field: col, op: 'equals', value: sc.value}); // حراس 1=0 يمنعون كسر SQL
+                }
+                if(sc.kind === 'text'){
+                    if(k === 'number') return tag({field: col, op: 'equals', value: sc.value});
+                    return tag({field: col, op: 'contains', value: sc.value});
+                }
+                if(sc.kind === 'time'){
+                    if(k === 'time') return tag({field: col, op: 'equals', value: sc.value});
+                    if(k === 'text' || k === 'list' || k === 'status') return tag({field: col, op: 'contains', value: sc.value});
+                    return tag({field: col, op: 'equals', value: sc.value});
+                }
+                if(sc.kind === 'date'){
+                    if(k === 'date') return tag({field: col, op: 'equals', value: sc.value});
+                    if(k === 'datetime') return tag({field: col, op: 'between', valFrom: sc.value + ' 00:00:00', valTo: sc.value + ' 23:59:59'});
+                    if(k === 'text' || k === 'list' || k === 'status') return tag({field: col, op: 'contains', value: sc.value});
+                    return tag({field: col, op: 'equals', value: sc.value});
+                }
+                if(sc.kind === 'daterange'){
+                    if(k === 'date' || k === 'datetime') return tag({field: col, op: 'between', valFrom: sc.from, valTo: sc.to});
+                    if(k === 'text' || k === 'list' || k === 'status') return tag({field: col, op: 'between', valFrom: sc.from, valTo: sc.to});
+                    return null; // رقمي/وقت + نطاق تواريخ = بلا معنى → الذكي العام
+                }
+            }catch(e){}
+            return null;
+        }
         function setupSearchInput() {
             const input = document.getElementById('searchInput');
             const mobileInput = document.getElementById('searchInputMobile');
@@ -2405,6 +2498,15 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                         const sc = smartClassify(part);
                         const cols = (typeof queryColumns !== 'undefined' ? queryColumns : []) || [];
                         const kindOf = (a)=>{ try{ return setupFieldKind(a); }catch(e){ return 'text'; } };
+                        // عمود يدوي محدد → فلتر أحادي على هذا العمود فقط (WHERE بسيط بلا OR)
+                        // الصيغة الصريحة (حقل=قيمة) أعلاه تتجاوز هذا القيد دائماً.
+                        try{
+                            const forced = (typeof getSearchCol === 'function' ? getSearchCol() : '');
+                            if(forced){
+                                const single = singleColFilter(forced, sc, kindOf);
+                                if(single) return single;
+                            }
+                        }catch(e){}
                         let subs = [];
                         if(sc.kind === 'number'){
                             // رقمي فقط — لا وقت ولا تاريخ
