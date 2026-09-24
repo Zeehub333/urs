@@ -1037,7 +1037,7 @@
             {fn:'FILTER', tpl:'FILTER(|, , )', hint:'قيمة أول مطابق'},
             {fn:'XLOOKUP', tpl:'XLOOKUP(|, , )', hint:'بحث وإرجاع'},
             {fn:'VLOOKUP', tpl:'VLOOKUP(|, , )', hint:'بحث مرتب وإرجاع'},
-            {fn:'GET', tpl:'GET(|)', hint:'قيمة حقل بالاسم'},
+            {fn:'GET', tpl:'GET(|)', hint:'قيمة حقل — get(اتصال.جدول.عمود) خارج الافتراضي'},
             {fn:'SUMBY', tpl:'SUMBY(|, )', hint:'مجموع النافذة'},
             {fn:'COUNTBY', tpl:'COUNTBY(|)', hint:'عدد المجموعة'},
             {fn:'SERIAL', tpl:'SERIAL(|, , )', hint:'سلسلة أرقام/تواريخ'}
@@ -1054,9 +1054,96 @@
             (wizardDetail?.columns || []).filter(f=>f.name).forEach(f=>push(f.name, f.name, 'فرعي'));
             return pool;
         }
+        /* تحذير get() السياقي: المختصر get(col) خارج الجدول الافتراضي مرفوض في المحرك —
+           نعرض الصيغة الكاملة الجاهزة (اتصال.جدول.عمود) أثناء الكتابة. يستهلكه xsqlAssist_sigHtml. */
+        function __exprDefaultsMap(){
+            const defs = new Set(), byCol = {};
+            try{
+                Object.keys(wizardTableOpts || {}).forEach(k=>{
+                    if((wizardTableOpts[k] || {}).is_default){
+                        const tbl = String(k.split('||').slice(1).join('||') || '').split('.').pop().trim().toLowerCase();
+                        if(tbl) defs.add(tbl);
+                    }
+                });
+            }catch(e){}
+            try{
+                (wizardFields || []).forEach(f=>{
+                    const nm = String(f.name || '').trim().toLowerCase();
+                    if(!nm) return;
+                    const tb = String(f.table_source || f.tableSource || '').split('.').pop().trim();
+                    const cn = String(f.conn_id || f.connection_id || '');
+                    (byCol[nm] = byCol[nm] || []).push({table: tb, conn: cn});
+                });
+            }catch(e){}
+            return {defs: defs, byCol: byCol};
+        }
+        window.__exprGetWarn = function(argText){
+            try{
+                const a = String(argText || '').trim().replace(/^N'/i, "'");
+                if(!a || a.indexOf('.') >= 0) return '';
+                if(/^[0-9]+$/.test(a) || /^'.*'$/.test(a) || /^".*"$/.test(a)) return '';
+                if(!/^[A-Za-z_0-9\u0600-\u06FF][A-Za-z_0-9\u0600-\u06FF \t]*$/.test(a)) return '';
+                const mp = __exprDefaultsMap();
+                if(!mp.defs.size) return '';
+                const norm = (s)=>String(s || '').split('.').pop().trim().toLowerCase();
+                const outside = (mp.byCol[a.toLowerCase()] || []).filter(c=>!mp.defs.has(norm(c.table)));
+                if(!outside.length) return '';
+                const full = outside.slice(0, 3).map(c=>'get(' + (c.conn ? c.conn + '.' : '') + (c.table || '') + '.' + a + ')');
+                return '⚠ ' + xsqlAssist_esc('خارج الجدول الافتراضي — اكتب: ' + full.join(' أو '));
+            }catch(e){ return ''; }
+        };
+        /* توقيع الدالة لحقول الإدخال: نفس دليل xsqlAssist_sigHtml (الاسم - النوع - الشرح)
+           مع تمييز الباراميتر الحالي — يعمل داخل أقواس أي دالة في حقول الأعمدة/الشروط/الموسع. */
+        function exprSigBox(){
+            let box = document.getElementById('exprSigBox');
+            if(!box){
+                box = document.createElement('div');
+                box.id = 'exprSigBox';
+                box.className = 'hidden fixed z-[96] rounded-xl shadow-xl text-xs';
+                box.style.cssText += 'background:#0f172a;color:#e2e8f0;border-radius:10px;padding:8px 10px;max-width:min(400px,92vw);box-shadow:0 10px 30px rgba(0,0,0,.35);font-size:12px;';
+                document.body.appendChild(box);
+            }
+            return box;
+        }
+        function exprSigTip(input){
+            try{
+                if(!input || !input.isConnected){ hideExprSig(); return; }
+                const pos = (input.selectionStart !== undefined && input.selectionStart !== null) ? input.selectionStart : (input.value || '').length;
+                const info = xsqlAssist_sigInfo(input.value || '', pos);
+                const html = info ? xsqlAssist_sigHtml(info) : null;
+                if(!html){ hideExprSig(); return; }
+                const box = exprSigBox();
+                box.innerHTML = html;
+                box.classList.remove('hidden');
+                box.style.display = 'block';
+                if(input.tagName === 'TEXTAREA'){
+                    const p = xsqlAssist_caret(input);
+                    let y = p.y - box.offsetHeight - 8;
+                    if(y < 8) y = p.y + p.lh + 8;
+                    box.style.left = Math.max(8, Math.min(p.x, window.innerWidth - 410)) + 'px';
+                    box.style.top = y + 'px';
+                } else {
+                    const r = input.getBoundingClientRect();
+                    box.style.top = Math.min(window.innerHeight - 120, r.bottom + 4) + 'px';
+                    box.style.left = Math.max(8, Math.min(r.left, window.innerWidth - 410)) + 'px';
+                }
+            }catch(e){ hideExprSig(); }
+        }
+        function hideExprSig(){
+            const box = document.getElementById('exprSigBox');
+            if(box){ box.classList.add('hidden'); box.style.display = 'none'; }
+        }
+        function exprFnSig(code){
+            try{
+                const c = (XSQL_FN_CATALOG || []).find(f=>f.n === String(code || '').toUpperCase());
+                if(!c || !c.p) return '…';
+                return c.p.map(p=>p[0]).join(', ') + (c.v ? ', …' : '');
+            }catch(e){ return '…'; }
+        }
         function exprAuto(input, target){
             const pos = (input.selectionStart !== undefined && input.selectionStart !== null) ? input.selectionStart : (input.value || '').length;
             const before = (input.value || '').slice(0, pos);
+            try{ exprSigTip(input); }catch(e){}
             // بادئة = (نمط إكسل): اعرض كل الدوال مباشرة — = وحدها تعني "تعبير"
             // (== و != و <= و >= للمقارنة ولا تُطلق الإكمال)
             if(/(^|[\s,(])=$/.test(before)){
@@ -1137,7 +1224,11 @@
             }catch(e){}
             paintExprAC();
             box.classList.remove('hidden');
-            try{ input.onkeydown = exprACKey; }catch(e){}
+            try{
+                input.onkeydown = exprACKey;
+                input.onkeyup = function(){ try{ exprSigTip(input); }catch(e){} };
+                input.onclick = function(){ try{ exprSigTip(input); }catch(e){} };
+            }catch(e){}
         }
         function paintExprAC(){
             if(!exprAC) return;
@@ -1148,7 +1239,7 @@
                 return it.hint ? `<span class="text-[10px] opacity-60 truncate max-w-[140px]">${wbEsc(it.hint)}</span>` : '<span class="text-[10px] opacity-60 shrink-0">حقل</span>';
             };
             const main = (it)=>{
-                if(it.kind === 'fn') return `<span>${wbEsc(it.code)}(...)</span>`;
+                if(it.kind === 'fn') return `<span>${wbEsc(it.code)}<span class="opacity-70">(${wbEsc(exprFnSig(it.code))})</span></span>`;
                 if(it.kind === 'rule') return `<span>${wbEsc(it.code)}</span>`;
                 return `<span>[${wbEsc(it.code)}]</span>`;
             };
@@ -1179,6 +1270,7 @@
             exprACSet(st.target, input.value);
             hideExprAC();
             try{ input.focus(); }catch(e){}
+            try{ exprSigTip(input); }catch(e){}
         }
         function exprACSet(target, v){
             try{
@@ -1202,12 +1294,14 @@
         function hideExprAC(){
             const box = document.getElementById('exprACBox');
             if(box) box.classList.add('hidden');
-            if(exprAC && exprAC.input){ try{ exprAC.input.onkeydown = null; }catch(e){} }
+            if(exprAC && exprAC.input){ try{ exprAC.input.onkeydown = null; exprAC.input.onkeyup = null; exprAC.input.onclick = null; }catch(e){} }
             exprAC = null;
         }
         if(!window.__exprACBound){
             window.__exprACBound = true;
             document.addEventListener('mousedown', (e)=>{
+                const sig = document.getElementById('exprSigBox');
+                if(sig && !sig.contains(e.target) && (!exprAC || e.target !== exprAC.input)) hideExprSig();
                 if(!exprAC) return;
                 const box = document.getElementById('exprACBox');
                 if(box && !box.contains(e.target) && e.target !== exprAC.input) hideExprAC();
@@ -1238,10 +1332,10 @@
             const ta = document.getElementById('exprExpandTa');
             ta.value = v;
             document.getElementById('exprExpandModal').classList.remove('hidden');
-            try{ ta.oninput = function(){ exprAuto(ta, target); }; ta.onkeydown = null; }catch(e){}
+            try{ ta.oninput = function(){ exprAuto(ta, target); }; ta.onkeydown = exprACKey; ta.onkeyup = function(){ try{ exprSigTip(ta); }catch(e){} }; ta.onclick = function(){ try{ exprSigTip(ta); }catch(e){} }; }catch(e){}
             setTimeout(function(){ try{ ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }catch(e){} }, 50);
         }
-        function closeExprExpand(){ document.getElementById('exprExpandModal').classList.add('hidden'); exprXTgt = null; try{ hideExprAC(); }catch(e){} }
+        function closeExprExpand(){ document.getElementById('exprExpandModal').classList.add('hidden'); exprXTgt = null; try{ hideExprAC(); }catch(e){} try{ hideExprSig(); }catch(e){} }
         function saveExprExpand(){
             if(!exprXTgt) return;
             let v = document.getElementById('exprExpandTa').value;
@@ -3602,25 +3696,26 @@ list.innerHTML = wizardDetail.columns.map((col, idx)=>`
 var xsqlAssist_providers = (typeof xsqlAssist_providers !== 'undefined') ? xsqlAssist_providers : {};
 var xsqlAssist_bound = (typeof xsqlAssist_bound !== 'undefined') ? xsqlAssist_bound : false;
 var xsqlAssist_state = null;
+/* دليل الباراميترات: p = [[الاسم, النوع, الشرح], ...] — يُعرض (الاسم - النوع) مع تمييز الباراميتر الحالي */
 var XSQL_FN_CATALOG = [
- {n:'SUM', p:[['x','العمود أو التعبير']], d:'مجموع القيم.'},
- {n:'MIN', p:[['x','العمود أو التعبير']], d:'أصغر قيمة.'},
- {n:'MAX', p:[['x','العمود أو التعبير']], d:'أكبر قيمة.'},
- {n:'AVG', p:[['x','العمود أو التعبير']], d:'المتوسط الحسابي.'},
- {n:'COUNT', p:[['x','العمود أو *']], d:'عدد الصفوف غير الفارغة.'},
- {n:'SUMIF', p:[['sum_range','نطاق الجمع'],['criteria_expr','عمود الشرط'],['criteria_value','قيمة الشرط']], d:'مجموع مشروط بشرط واحد.'},
- {n:'SUMIFS', p:[['sum_range','نطاق الجمع'],['c1_range','نطاق الشرط الأول'],['c1_val','قيمة الشرط الأول']], v:1, d:'مجموع بشروط متعددة (تتكرر أزواج النطاق/القيمة).'},
- {n:'COUNTIF', p:[['criteria_expr','عمود الشرط'],['criteria_value','قيمة الشرط']], d:'عدد الصفوف المطابقة لشرط.'},
- {n:'COUNTBLANK', p:[['range','النطاق']], d:'عدد الخلايا الفارغة.'},
- {n:'COUNTA', p:[['range','النطاق']], d:'عدد الخلايا غير الفارغة.'},
- {n:'IF', p:[['cond','الشرط'],['a','القيمة إذا تحقق'],['b','القيمة إذا لم يتحقق']], d:'قيمة شرطية.'},
- {n:'FILTER', p:[['range','النطاق'],['criteria_expr','عمود الشرط'],['criteria_value','قيمة الشرط']], d:'قيمة أول صف مطابق (تُحل في Python).'},
- {n:'XLOOKUP', p:[['value','قيمة البحث'],['lookup_range','نطاق البحث'],['return_range','نطاق الإرجاع'],['[not_found]','البديل عند عدم المطابقة (اختياري)']], d:'بحث وإرجاع عبر الاتصالات.'},
- {n:'VLOOKUP', p:[['value','قيمة البحث'],['lookup_range','نطاق البحث'],['return_range','نطاق الإرجاع'],['[not_found]','البديل عند عدم المطابقة (اختياري)']], d:'مثل XLOOKUP (يفترض ترتيب نطاق البحث).'},
- {n:'GET', p:[['ref','ns.tbl.col أو tbl.col أو col']], d:'قيمة حقل بالاسم من الحقول المحملة.'},
- {n:'SUMBY', p:[['amt_col','عمود المبلغ'],['group_col','عمود المجموعة']], d:'مجموع النافذة لكل مجموعة (يبقي الصفوف).'},
- {n:'COUNTBY', p:[['group_col','عمود المجموعة']], d:'عدد صفوف المجموعة في كل صف.'},
- {n:'SERIAL', p:[['start','البداية'],['end','النهاية'],['step','حجم الخطوة']], d:'سلسلة أرقام/تواريخ (generate_series).'}
+ {n:'SUM', p:[['x','تعبير','العمود أو التعبير المراد جمعه']], d:'مجموع القيم.'},
+ {n:'MIN', p:[['x','تعبير','العمود أو التعبير']], d:'أصغر قيمة.'},
+ {n:'MAX', p:[['x','تعبير','العمود أو التعبير']], d:'أكبر قيمة.'},
+ {n:'AVG', p:[['x','تعبير','العمود أو التعبير']], d:'المتوسط الحسابي.'},
+ {n:'COUNT', p:[['x','تعبير | *','العمود أو * لعدد الصفوف']], d:'عدد الصفوف غير الفارغة.'},
+ {n:'SUMIF', p:[['sum_range','مرجع عمود','نطاق الجمع'],['criteria_expr','مرجع عمود','عمود الشرط'],['criteria_value','قيمة','قيمة الشرط للمقارنة']], d:'مجموع مشروط بشرط واحد.'},
+ {n:'SUMIFS', p:[['sum_range','مرجع عمود','نطاق الجمع'],['c1_range','مرجع عمود','نطاق الشرط الأول'],['c1_val','قيمة','قيمة الشرط الأول']], v:1, d:'مجموع بشروط متعددة (تتكرر أزواج النطاق/القيمة).'},
+ {n:'COUNTIF', p:[['criteria_expr','مرجع عمود','عمود الشرط'],['criteria_value','قيمة','قيمة الشرط للمقارنة']], d:'عدد الصفوف المطابقة لشرط.'},
+ {n:'COUNTBLANK', p:[['range','مرجع عمود','النطاق المراد فحصه']], d:'عدد الخلايا الفارغة.'},
+ {n:'COUNTA', p:[['range','مرجع عمود','النطاق المراد فحصه']], d:'عدد الخلايا غير الفارغة.'},
+ {n:'IF', p:[['cond','شرط','تعبير المقارنة (يُترجم CASE WHEN)'],['a','قيمة','القيمة إذا تحقق الشرط'],['b','قيمة','القيمة إذا لم يتحقق']], d:'قيمة شرطية.'},
+ {n:'FILTER', p:[['range','مرجع عمود','النطاق المراد إرجاع قيمته'],['criteria_expr','مرجع عمود','عمود الشرط'],['criteria_value','قيمة','قيمة الشرط']], d:'قيمة أول صف مطابق (تُحل في Python).'},
+ {n:'XLOOKUP', p:[['value','قيمة','قيمة البحث'],['lookup_range','مرجع عمود','نطاق البحث'],['return_range','مرجع عمود','نطاق الإرجاع'],['[not_found]','قيمة (اختياري)','البديل عند عدم المطابقة']], d:'بحث وإرجاع عبر الاتصالات.'},
+ {n:'VLOOKUP', p:[['value','قيمة','قيمة البحث'],['lookup_range','مرجع عمود','نطاق البحث'],['return_range','مرجع عمود','نطاق الإرجاع'],['[not_found]','قيمة (اختياري)','البديل عند عدم المطابقة']], d:'مثل XLOOKUP (يفترض ترتيب نطاق البحث).'},
+ {n:'GET', p:[['conn','رقم الاتصال','مطلوب فقط خارج الجدول الافتراضي — وإلا اتركه'],['table','الجدول','مطلوب فقط خارج الجدول الافتراضي — وإلا اتركه'],['col','العمود','اسم الحقل (يكفي وحده داخل الجدول الافتراضي)']], d:'قيمة حقل بالاسم — الصيغة الكاملة get(اتصال.جدول.عمود)، والمختصر get(عمود) للجدول الافتراضي فقط.'},
+ {n:'SUMBY', p:[['amt_col','مرجع عمود رقمي','عمود المبلغ المراد جمعه'],['group_col','مرجع عمود','عمود المجموعة (مستوى التكرار)']], d:'مجموع النافذة لكل مجموعة (يبقي الصفوف).'},
+ {n:'COUNTBY', p:[['group_col','مرجع عمود','عمود المجموعة (مستوى التكرار)']], d:'عدد صفوف المجموعة في كل صف.'},
+ {n:'SERIAL', p:[['start','قيمة','قيمة البداية'],['end','قيمة','قيمة النهاية'],['step','قيمة','حجم الخطوة']], d:'سلسلة أرقام/تواريخ (generate_series).'}
 ];
 var XSQL_KEYWORDS = ['SELECT','FROM','WHERE','GROUP BY','ORDER BY','LIMIT','INNER JOIN','LEFT JOIN','RIGHT JOIN','ON','AND','OR','NOT','AS','ASC','DESC','DISTINCT'];
 function xsqlAssist_esc(s){ return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
@@ -3678,7 +3773,7 @@ function xsqlAssist_caret(ta){
     return pos;
 }
 function xsqlAssist_sigInfo(text, pos){
-    let depth = 0, argIndex = 0, inStr = null, i = pos - 1, callParen = -1;
+    let depth = 0, argIndex = 0, inStr = null, i = pos - 1, callParen = -1, argStart = -1;
     for(; i >= 0; i--){
         const ch = text[i];
         if(inStr){
@@ -3691,10 +3786,10 @@ function xsqlAssist_sigInfo(text, pos){
         if(ch === "'" || ch === '"'){ inStr = ch; continue; }
         if(ch === ')'){ depth++; continue; }
         if(ch === '('){
-            if(depth === 0){ callParen = i; break; }
+            if(depth === 0){ callParen = i; argStart = i + 1; break; }
             depth--; continue;
         }
-        if(ch === ',' && depth === 0){ argIndex++; continue; }
+        if(ch === ',' && depth === 0){ argIndex++; argStart = i + 1; continue; }
         if(ch === ';' && depth === 0){ return null; }
     }
     if(callParen < 0) return null;
@@ -3704,25 +3799,44 @@ function xsqlAssist_sigInfo(text, pos){
     while(j >= 0 && /[A-Za-z_0-9$#]/.test(text[j])) j--;
     const name = text.slice(j+1, end+1);
     if(!name || !/^[A-Za-z_][A-Za-z0-9_$#]*$/.test(name)) return null;
-    return {name: name.toUpperCase(), argIndex: argIndex};
+    // نص الوسيط الحالي (حتى المؤشر) + عدد النقاط فيه — لرسم مقاطع get(اتصال.جدول.عمود)
+    let argText = '';
+    try{ argText = (text.slice(argStart, pos) || '').trim(); }catch(_){ argText = ''; }
+    let dots = 0;
+    try{
+        let q = null;
+        for(const c of argText){ if(q){ if(c === q) q = null; } else if(c === "'" || c === '"') q = c; else if(c === '.') dots++; }
+    }catch(_){}
+    return {name: name.toUpperCase(), argIndex: argIndex, argText: argText, dots: dots};
 }
 function xsqlAssist_sigHtml(info){
     const cat = XSQL_FN_CATALOG.find(function(f){ return f.n === info.name; });
     if(!cat) return null;
-    let sig;
-    if(cat.v){
-        const shown = cat.p.map(function(p, idx){ return idx === Math.min(info.argIndex, cat.p.length-1) ? '<b>' + xsqlAssist_esc(p[0]) + '</b>' : xsqlAssist_esc(p[0]); }).join(', ');
-        sig = xsqlAssist_esc(cat.n) + '(' + shown + (info.argIndex >= cat.p.length ? ', <b>…</b>' : ', …') + ')';
-    } else {
-        const parts = cat.p.map(function(p, idx){ return idx === info.argIndex ? '<b>' + xsqlAssist_esc(p[0]) + '</b>' : xsqlAssist_esc(p[0]); });
-        sig = xsqlAssist_esc(cat.n) + '(' + parts.join(', ') + ')';
+    // مقاطع GET تُقرأ بالنقاط: get(col) → [col]، get(tbl.col) → [table,col]، get(c.t.col) → الكل
+    let boldIdx = [info.argIndex], curP = null;
+    if(info.name === 'GET'){
+        const d = Math.min(info.dots || 0, 2);
+        boldIdx = d === 0 ? [2] : d === 1 ? [1, 2] : [0, 1, 2];
+        curP = cat.p[2];
+    } else if(info.argIndex < cat.p.length){
+        curP = cat.p[cat.v ? Math.min(info.argIndex, cat.p.length - 1) : info.argIndex];
     }
-    let pdesc = '';
-    if(info.argIndex < cat.p.length){ pdesc = cat.p[info.argIndex][1]; }
+    const parts = cat.p.map(function(p, idx){ return boldIdx.indexOf(idx) >= 0 ? '<b>' + xsqlAssist_esc(p[0]) + '</b>' : xsqlAssist_esc(p[0]); });
+    let sig = xsqlAssist_esc(cat.n) + '(' + parts.join(', ') + (cat.v ? ', …' : '') + ')';
     let html = '<div style="font-family:monospace;font-size:12px" dir="ltr">' + sig + '</div>';
-    html += '<div style="font-size:11px;color:#cbd5e1;margin-top:2px">' + xsqlAssist_esc(cat.d);
-    if(pdesc) html += ' <span style="color:#fbbf24">← ' + xsqlAssist_esc(pdesc) + '</span>';
-    html += '</div>';
+    html += '<div style="font-size:11px;color:#cbd5e1;margin-top:2px">' + xsqlAssist_esc(cat.d) + '</div>';
+    if(curP){
+        html += '<div style="font-size:11px;margin-top:3px;color:#fbbf24">← <b>' + xsqlAssist_esc(curP[0]) + '</b>'
+            + ' <span style="color:#7dd3fc">[' + xsqlAssist_esc(curP[1] || '') + ']</span>'
+            + ' <span style="color:#cbd5e1">' + xsqlAssist_esc(curP[2] || '') + '</span></div>';
+    }
+    // تحذير سياقي (قاعدة الجدول الافتراضي داخل get) — يوفّره المضيف عبر window.__exprGetWarn
+    try{
+        if(info.name === 'GET' && typeof window.__exprGetWarn === 'function'){
+            const w = window.__exprGetWarn(info.argText || '');
+            if(w) html += '<div style="font-size:11px;margin-top:3px;color:#fca5a5">' + w + '</div>';
+        }
+    }catch(_){}
     return html;
 }
 function xsqlAssist_suggest(ta, provider){
@@ -3822,15 +3936,23 @@ function xsqlAssist_update(ta){
 function xsqlAssist_kindAr(k){
     return k === 'fn' ? 'دالة' : k === 'kw' ? 'كلمة' : k === 'tbl' ? 'جدول' : k === 'col' ? 'عمود' : k === 'ns' ? 'نطاق' : '';
 }
+function xsqlAssist_fnSig(name){
+    try{
+        const c = (XSQL_FN_CATALOG || []).find(function(f){ return f.n === String(name || '').toUpperCase(); });
+        if(!c || !c.p) return '…';
+        return c.p.map(function(p){ return p[0]; }).join(', ') + (c.v ? ', …' : '');
+    }catch(_){ return '…'; }
+}
 function xsqlAssist_renderPop(ta){
     const st = xsqlAssist_state;
     if(!st) return;
     const el = xsqlAssist_el('xsqlAssist_pop', 'background:#fff;border:1px solid #e2e8f0;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.2);min-width:230px;max-width:min(360px,90vw);max-height:240px;overflow-y:auto;font-size:12px;');
     let html = '';
     st.items.forEach(function(it, idx){
+        const mono = it.kind === 'fn' ? it.text + '(' + xsqlAssist_fnSig(it.text) + ')' : it.text;
         html += '<div data-xa="' + idx + '" style="display:flex;align-items:center;gap:8px;padding:5px 10px;cursor:pointer;' + (idx === st.sel ? 'background:#eef2ff;' : '') + '">'
             + '<span style="font-size:10px;color:#fff;background:' + (it.kind==='fn' ? '#7c3aed' : it.kind==='kw' ? '#64748b' : it.kind==='tbl' ? '#059669' : it.kind==='col' ? '#2563eb' : '#d97706') + ';border-radius:6px;padding:1px 6px">' + xsqlAssist_kindAr(it.kind) + '</span>'
-            + '<span style="font-family:monospace" dir="ltr">' + xsqlAssist_esc(it.text) + '</span>'
+            + '<span style="font-family:monospace" dir="ltr">' + xsqlAssist_esc(mono) + '</span>'
             + (it.detail ? '<span style="color:#94a3b8;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + xsqlAssist_esc(String(it.detail).slice(0, 42)) + '</span>' : '')
             + '</div>';
     });
