@@ -21,6 +21,8 @@
         body.form-view-on #gridFooter { display: none !important; }
         body.form-view-on #formPanel { position: static; padding: 0; overflow: visible; flex: 1 1 auto; min-height: 0; }
         body.form-view-on #formPanel > div { max-width: none; margin: 0; border-radius: 0; border: 0; max-height: none; height: 100%; box-shadow: none; }
+        #formHeaderActions { display: none; }
+        body.form-view-on #formHeaderActions { display: inline-flex; }
 {% endblock %}
 {% block sidebar %}
     <!-- Sidebar — kept for navigation (Forms + Reports) -->
@@ -103,6 +105,16 @@
             <div class="flex items-center gap-2 flex-wrap">
                 <div class="flex items-center gap-1">
                     <a href="/app/{{ app_name }}/" title="رجوع" class="w-8 h-8 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 transition"><i class="fa-solid fa-arrow-right"></i></a>
+                    <span id="formHeaderActions" class="hidden items-center gap-1">
+                        <span class="w-px h-6 bg-slate-200 mx-1"></span>
+                        <button onclick="closePanel()" title="رجوع للجدول" class="w-8 h-8 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-slate-800 transition"><i class="fa-solid fa-arrow-right"></i></button>
+                        <span id="formPanelActionsBar" class="flex items-center gap-1"></span>
+                        <button onclick="toggleFormInfo()" title="لوحة معلومات السجل والرقابة" class="w-8 h-8 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-indigo-600 transition"><i class="fa-solid fa-circle-info"></i></button>
+                        <button onclick="saveAndNew()" title="حفظ وجديد" class="w-8 h-8 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-teal-600 transition"><i class="fa-solid fa-floppy-disk-circle-arrow-right"></i></button>
+                        <button onclick="saveAndClose()" title="حفظ" class="w-8 h-8 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-emerald-600 transition"><i class="fa-solid fa-floppy-disk"></i></button>
+                        <button onclick="closePanel()" title="إلغاء" class="w-8 h-8 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-rose-600 transition"><i class="fa-solid fa-xmark"></i></button>
+                        <span class="w-px h-6 bg-slate-200 mx-1"></span>
+                    </span>
                     <span class="text-xs bg-indigo-50 text-indigo-700 px-3 py-1 rounded-full font-bold hidden sm:inline">{{ fml_metadata.displayName }}</span>
                     <select onchange="playerModelGo(this)" title="الموديلات" class="hidden md:block bg-slate-50 border border-slate-200 rounded-full px-3 py-1.5 text-xs font-bold text-slate-600 max-w-[170px]">
                         <option value="">الموديلات ({{ fml_files|length }})</option>
@@ -155,13 +167,6 @@
                                 <div id="formPanelTitle" class="font-bold truncate">سجل جديد</div>
                                 <div id="formPanelSub" class="text-[11px] text-indigo-100 truncate">—</div>
                             </div>
-                        </div>
-                        <div class="flex items-center gap-1.5 shrink-0">
-                            <span id="formPanelActionsBar" class="flex items-center gap-1.5"></span>
-                            <button onclick="toggleFormInfo()" title="لوحة معلومات السجل والرقابة" class="w-9 h-9 rounded-full bg-white/20 hover:bg-white/30 text-white flex items-center justify-center transition"><i class="fa-solid fa-circle-info text-sm"></i></button>
-                            <button onclick="saveAndNew()" title="حفظ وجديد" class="w-9 h-9 rounded-full bg-white/20 hover:bg-white/30 text-white flex items-center justify-center transition"><i class="fa-solid fa-floppy-disk-circle-arrow-right text-sm"></i></button>
-                            <button onclick="saveAndClose()" title="حفظ" class="w-9 h-9 rounded-full bg-white hover:bg-indigo-50 text-indigo-700 flex items-center justify-center transition shadow"><i class="fa-solid fa-floppy-disk text-sm"></i></button>
-                            <button onclick="closePanel()" title="إلغاء" class="w-9 h-9 rounded-full bg-white/20 hover:bg-white/30 text-white flex items-center justify-center transition"><i class="fa-solid fa-xmark text-sm"></i></button>
                         </div>
                     </div>
                     <div id="formTabsWrap" class="px-2 py-2 overflow-x-auto border-b border-slate-100 shrink-0">
