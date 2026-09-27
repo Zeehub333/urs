@@ -1390,7 +1390,7 @@ def api_models_design_save(request, app_name):
     """POST /api/apps/<app>/models/design/ — حفظ مصمم الموديل كـ .fmlk.
 
     Body: {file?, table_ar, table_en, table?, model_type(form|rule), schema?, category?, description?,
-           connection?, icon?, tabs?[{id,name,alias,sort_order,visibleIf}],
+           connection?, icon?, tabs?[{id,name,alias,sort_order,visibleIf,is_main}],
            fields: [{name, alias, data_type, inputType?, primary_key?, required?, nullable?, editable?,
                       default_mode(fixed|formula|empty)?, default_value?, formula?, validation?,
                       tab?, category?, icon?, destination?, options?([str|{value,label,color}]),
@@ -1479,6 +1479,10 @@ def api_models_design_save(request, app_name):
         tabs_el = ET.SubElement(fml, "tabs")
         _tabs = data.get("tabs") or [{"id": "main", "name": table_ar or table_en,
                                       "alias": table_ar or table_en, "sort_order": 1}]
+        _mains = [(_t.get("alias") or _t.get("name") or _t.get("id") or "?") for _t in _tabs
+                  if str(_t.get("is_main", _t.get("isMain", ""))).strip().lower() in ("1", "true", "yes", "y")]
+        if len(_mains) > 1:
+            return JsonResponse({"error": f"is_main مكرر — تبويب واحد فقط ({'، '.join(_mains)})"}, status=400)
         for _ti, _t in enumerate(_tabs, start=1):
             tab = ET.SubElement(tabs_el, "tab")
             _tid = (str(_t.get("id") or _t.get("name") or "main")).strip() or "main"
@@ -1491,6 +1495,8 @@ def api_models_design_save(request, app_name):
                 tab.set("sort_order", str(_ti))
             if _t.get("visibleIf") or _t.get("visible_if"):
                 tab.set("visibleIf", str(_t.get("visibleIf") or _t.get("visible_if")))
+            if str(_t.get("is_main", _t.get("isMain", ""))).strip().lower() in ("1", "true", "yes", "y"):
+                tab.set("is_main", "1")
         _first_tab = ((_tabs[0].get("id") or _tabs[0].get("name") or "main") if _tabs else "main")
         fields_el = ET.SubElement(fml, "fields")
         for i, f in enumerate(fields, start=1):

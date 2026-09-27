@@ -137,9 +137,9 @@
 
         <!-- Main -->
         <main class="flex-1 flex flex-col overflow-hidden min-h-0 bg-slate-50">
-            <!-- Form modal (add / edit): full-screen, first tab on top + horizontal tabs below + record info -->
-            <div id="formPanel" class="hidden fixed inset-0 z-50 bg-slate-900/55 backdrop-blur-sm overflow-hidden" onclick="if(event.target===this)closePanel()">
-                <div class="bg-white shadow-2xl w-full h-screen max-h-none m-0 flex flex-col overflow-hidden rounded-none">
+            <!-- Form modal (add / edit): floating card over a visible page (no dim — base.html stays visible) -->
+            <div id="formPanel" class="hidden fixed inset-0 z-50 overflow-y-auto p-4 sm:p-8 justify-center" onclick="if(event.target===this)closePanel()">
+                <div class="bg-white shadow-2xl border border-slate-200 w-full max-w-6xl m-auto flex flex-col overflow-hidden rounded-2xl max-h-[calc(100vh-3rem)]">
                     <div class="px-5 py-4 flex items-center justify-between gap-3 bg-gradient-to-l from-indigo-600 via-indigo-600 to-violet-600 text-white shrink-0">
                         <div class="flex items-center gap-3 min-w-0">
                             <span class="w-10 h-10 rounded-2xl bg-white/20 flex items-center justify-center text-base shrink-0"><i class="fa-solid fa-pen-to-square"></i></span>
@@ -895,20 +895,33 @@
             const wrap = document.getElementById('fwDetailWrap');
             if(!wrap) return;
             const dets = fwDetails();
+            let mkey = '';
+            try{ mkey = fwMasterKey() || ''; }catch(e){}
             wrap.innerHTML = dets.map((d, i)=>{
                 const cols = (d.columns || []).filter(c=>c.name !== d.detail);
                 const rows = fwDetailRows[i] || [];
+                // عمود ID = العمود المرجعي لمطابقة one_to_many (يُختم خادمياً عند الحفظ)
+                let refAlias = d.detail;
+                try{
+                    const rc = (d.columns || []).find(c=>c.name === d.detail);
+                    if(rc && (rc.alias || rc.name)) refAlias = rc.alias || rc.name;
+                }catch(e){}
                 return `<div class="fmlk-category p-4">
                     <div class="flex items-center justify-between mb-2">
                         <div class="text-xs font-bold text-slate-700 flex items-center gap-2"><i class="fa-solid fa-diagram-project text-violet-600"></i> ${escHtml(d.alias || d.table)} <span class="text-[10px] text-slate-400 font-normal">(${rows.length})</span></div>
                         <button onclick="fwDetailAddRow(${i})" class="px-2.5 py-1 bg-violet-50 hover:bg-violet-100 text-violet-700 rounded-lg text-[11px] font-bold"><i class="fa-solid fa-plus"></i> إضافة سطر</button>
                     </div>
-                    <div class="overflow-x-auto border border-slate-200 rounded-xl"><table class="w-full text-[11px]">
-                        <thead class="bg-slate-50 text-slate-600"><tr>${cols.map(c=>`<th class="p-1.5 text-right whitespace-nowrap">${escHtml(c.alias || c.name)}</th>`).join('')}<th class="w-10"></th></tr></thead>
-                        <tbody>${rows.map((r, ri)=>`<tr class="border-t border-slate-100">${cols.map(c=>{
+                    <div class="overflow-x-auto border border-slate-200 rounded-xl"><table class="w-full text-[11px]" dir="rtl">
+                        <thead class="bg-slate-100 text-slate-700"><tr><th class="p-1.5 text-right whitespace-nowrap w-28"><span class="inline-block px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 text-[10px] font-bold ml-1">ID</span>${escHtml(refAlias)}</th>${cols.map(c=>`<th class="p-1.5 text-right whitespace-nowrap">${escHtml(c.alias || c.name)}</th>`).join('')}<th class="w-10"></th></tr></thead>
+                        <tbody>${rows.map((r, ri)=>{
+                            const refVal = (r[d.detail] ?? '') !== '' ? String(r[d.detail]) : (mkey !== '' ? String(mkey) : '(New)');
+                            const isNew = (r[d.detail] ?? '') === '';
+                            return `<tr class="border-t border-slate-100 ${isNew ? 'bg-indigo-50/60' : 'bg-white'}">`
+                            + `<td class="p-1"><input value="${escAttr(refVal)}" readonly tabindex="-1" title="العمود المرجعي للمطابقة one_to_many" class="w-full bg-slate-100 border border-slate-200 rounded-lg px-2 py-1.5 text-slate-500 font-mono" dir="ltr"></td>`
+                            + cols.map(c=>{
                             const t = String(c.data_type || '').toUpperCase();
                             const inp = /INT|NUMERIC|DECIMAL|FLOAT|DOUBLE|REAL|NUMBER/.test(t) ? 'number' : 'text';
-                            return `<td class="p-1"><input type="${inp}" data-drow="${i}" data-dcol="${escAttr(c.name)}" data-didx="${ri}" value="${escAttr(r[c.name] ?? '')}" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5"></td>`; }).join('')}<td class="p-1 text-center"><button onclick="fwDetailDelRow(${i},${ri})" class="text-rose-400 hover:text-rose-600 px-1"><i class="fa-solid fa-trash"></i></button></td></tr>`).join('') || `<tr><td colspan="${cols.length + 1}" class="p-3 text-center text-slate-400">لا سطور — أضف سطراً</td></tr>`}</tbody>
+                            return `<td class="p-1"><input type="${inp}" data-drow="${i}" data-dcol="${escAttr(c.name)}" data-didx="${ri}" value="${escAttr(r[c.name] ?? '')}" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5"></td>`; }).join('') + `<td class="p-1 text-center"><button onclick="fwDetailDelRow(${i},${ri})" class="text-rose-400 hover:text-rose-600 px-1"><i class="fa-solid fa-trash"></i></button></td></tr>`; }).join('') || `<tr><td colspan="${cols.length + 2}" class="p-3 text-center text-slate-400">لا سطور — أضف سطراً</td></tr>`}</tbody>
                     </table></div>
                 </div>`;
             }).join('');
@@ -2449,7 +2462,7 @@
             document.querySelectorAll('[data-field]').forEach(el => { el.value = ''; });
             document.getElementById('formPanelTitle').textContent = 'سجل جديد';
             try{ document.getElementById('formPanelSub').textContent = 'إدخال بيانات جديدة — التبويب الأول فوق وبقيتها تحته'; }catch(e){}
-            document.getElementById('formPanel').classList.remove('hidden');
+            document.getElementById('formPanel').classList.remove('hidden'); document.getElementById('formPanel').classList.add('flex');
             if(typeof lockScroll === 'function') lockScroll();
             if(window.FMLK) try{ FMLK.widgetsRefresh(); }catch(e){}
             try{ renderDetailSection(); }catch(e){}
@@ -2493,7 +2506,7 @@
             });
             document.getElementById('formPanelTitle').textContent = 'تعديل السجل';
             try{ document.getElementById('formPanelSub').textContent = 'تحرير بيانات السجل الحالي'; }catch(e){}
-            document.getElementById('formPanel').classList.remove('hidden');
+            document.getElementById('formPanel').classList.remove('hidden'); document.getElementById('formPanel').classList.add('flex');
             if(typeof lockScroll === 'function') lockScroll();
             refreshNav();
             if(window.FMLK) try{ FMLK.widgetsRefresh(); }catch(e){}
@@ -2503,6 +2516,7 @@
             const p = document.getElementById('formPanel');
             if(p.classList.contains('hidden')) return;
             p.classList.add('hidden');
+            p.classList.remove('flex');
             if(typeof unlockScroll === 'function') unlockScroll();
         }
         document.addEventListener('keydown', (e) => {

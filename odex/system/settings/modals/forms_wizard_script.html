@@ -44,7 +44,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             fwConnId = ''; fwConnName = ''; fwSchema = ''; fwTablesCache = [];
             fwMainTable = ''; fwMainColsCache = [];
             fwInputs = []; fwBranches = [];
-            fwTabs = [{id:'البيانات الأساسية', name:'البيانات الأساسية', alias:'البيانات الأساسية', order:1, visibleIf:''}];
+            fwTabs = [{id:'البيانات الأساسية', name:'البيانات الأساسية', alias:'البيانات الأساسية', order:1, visibleIf:'', is_main:true}];
             ['fmlProgName','fmlDisplayName','fmlFileName','fmlCategory','fmlDescription'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
             const fc = document.getElementById('fmlCategory'); if(fc) fc.value = 'عام';
             const fi = document.getElementById('fmlIcon'); if(fi) fi.value = 'fa-pen-to-square';
@@ -91,7 +91,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                 if(md.table){ const ms = document.getElementById('fmlMainTable'); if(ms){ ms.value = fwMatchTableOpt(md.table, md.schema); await fwMainTableChanged(); } }
                 // التبويبات
                 const tabs = data.tabs || [];
-                fwTabs = tabs.length ? tabs.map((t, i)=>({id: t.alias || t.name || t.id, name: t.alias || t.name || t.id, alias: t.alias || t.name || t.id, order: t.sortOrder || (i+1), visibleIf: t.visibleIf || t.visible_if || ''})) : fwTabs;
+                fwTabs = tabs.length ? tabs.map((t, i)=>({id: t.alias || t.name || t.id, name: t.alias || t.name || t.id, alias: t.alias || t.name || t.id, order: t.sortOrder || (i+1), visibleIf: t.visibleIf || t.visible_if || '', is_main: !!(t.is_main || t.isMain)})) : fwTabs;
                 // المدخلات من الحقول (الوجهة الافتراضية: الأساسي)
                 fwInputs = (data.fields || []).map(f=>({
                     key: fwInputKey(md.table || '', f.name), table: md.table || '', name: f.name, alias: f.alias || f.name,
@@ -1204,8 +1204,9 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                     <button onclick="fwAddTab()" class="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded-lg font-bold"><i class="fa-solid fa-plus"></i> إضافة تبويب</button>
                 </div>
                 <div class="space-y-1.5">${fwTabs.map((t, i)=>`
-                    <div class="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
+                    <div class="flex items-center gap-2 bg-slate-50 border ${t.is_main ? '!border-amber-300' : 'border-slate-200'} rounded-xl px-3 py-2">
                         <span class="w-6 h-6 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center text-[11px] font-bold">${t.order || (i+1)}</span>
+                        <button onclick="fwTabMain(${i})" title="${t.is_main ? 'التبويب الرئيسي المثبت فوق — اضغط للإلغاء' : 'تثبيت فوق كتبويب رئيسي (واحد فقط)'}" class="${t.is_main ? 'text-amber-500' : 'text-slate-300 hover:text-amber-400'} px-1"><i class="fa-solid fa-star text-sm"></i></button>
                         <input value="${fwEsc(t.alias || '')}" oninput="fwTabRename(${i},this.value)" placeholder="اسم التبويب" class="wb-inp !py-1 flex-1">
                         <input value="${fwEsc(t.visibleIf || '')}" oninput="fwTabs[${i}].visibleIf=this.value;fwVisAC(this)" onkeydown="return fwVisACKey(event,this)" onblur="fwVisHideSoon()" placeholder="شرط الإظهار field==v" class="wb-inp !py-1 flex-1 font-mono" dir="ltr">
                         <span class="text-[10px] text-slate-400 whitespace-nowrap">${fwInputs.filter(x=>x.tab===t.id).length} مدخل</span>
@@ -1214,10 +1215,16 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                         <button onclick="fwDelTab(${i})" class="text-rose-400 hover:text-rose-600 px-1"><i class="fa-solid fa-trash"></i></button>
                     </div>`).join('')}
                 </div>
-                <p class="text-[11px] text-slate-500 mt-2">إسناد المدخلات للتبويبات من ورقة «المدخلات» (عمود التبويب). التبويب المحذوف تُنقل مدخلاته للأول.</p>
+                <p class="text-[11px] text-slate-500 mt-2">إسناد المدخلات للتبويبات من ورقة «المدخلات» (عمود التبويب). التبويب المحذوف تُنقل مدخلاته للأول. النجمة = التبويب الرئيسي المثبت فوق في المودال (واحد فقط).</p>
             </div>`;
         }
-        function fwAddTab(){ const n = 'تبويب ' + (fwTabs.length + 1); fwTabs.push({id: n + '_' + Date.now(), name: n, alias: n, order: fwTabs.length + 1, visibleIf:''}); fwRenderSheet(); }
+        function fwAddTab(){ const n = 'تبويب ' + (fwTabs.length + 1); fwTabs.push({id: n + '_' + Date.now(), name: n, alias: n, order: fwTabs.length + 1, visibleIf:'', is_main:false}); fwRenderSheet(); }
+        function fwTabMain(i){
+            // تبويب رئيسي واحد فقط: التحديد ينقل النجمة، وإعادة الضغط تلغيها
+            const on = !fwTabs[i].is_main;
+            fwTabs.forEach((t, k)=>{ t.is_main = (k === i) && on; });
+            try{ fwRenderSheet(); }catch(e){}
+        }
         function fwTabRename(i, v){ fwTabs[i].alias = v; fwTabs[i].name = v; }
         function fwTabMove(i, d){ const j = i + d; if(j < 0 || j >= fwTabs.length) return; const t = fwTabs[i]; fwTabs[i] = fwTabs[j]; fwTabs[j] = t; fwTabs.forEach((x, k)=>x.order = k+1); fwRenderSheet(); }
         function fwDelTab(i){
@@ -1401,7 +1408,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                 category: document.getElementById('fmlCategory').value.trim() || 'عام',
                 description: document.getElementById('fmlDescription').value.trim(),
                 icon: document.getElementById('fmlIcon').value,
-                tabs: fwTabs.map((t, i)=>({id: t.id, name: t.alias || t.name, alias: t.alias || t.name, sort_order: i + 1, visibleIf: t.visibleIf || ''})),
+                tabs: fwTabs.map((t, i)=>({id: t.id, name: t.alias || t.name, alias: t.alias || t.name, sort_order: i + 1, visibleIf: t.visibleIf || '', is_main: !!t.is_main})),
                 fields, details, overwrite: !!fwEditMode
             };
         }
