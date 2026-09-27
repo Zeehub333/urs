@@ -1393,7 +1393,7 @@ def api_models_design_save(request, app_name):
            connection?, icon?, tabs?[{id,name,alias,sort_order,visibleIf,is_main}],
            fields: [{name, alias, data_type, inputType?, primary_key?, required?, nullable?, editable?,
                       default_mode(fixed|formula|empty)?, default_value?, formula?, validation?,
-                      tab?, category?, icon?, destination?, options?([str|{value,label,color}]),
+                      tab?, category?, icon?, is_main_col?, destination?, options?([str|{value,label,color}]),
                       options_source?[{table,schema,column}], refTable?...,
                       config?{parent_field,sync_source,...}}],
            details?[{table,alias,master,detail,rel_type,columns:[{name,alias,data_type,input_type}]}],
@@ -1453,6 +1453,8 @@ def api_models_design_save(request, app_name):
                 return JsonResponse({"error": f"الحقل {nm}: الصيغة فارغة — اكتب صيغة بـ [ ] أو اتركه فارغاً لليدوي"}, status=400)
         if pks > 1:
             pass  # composite PK مسموح
+        if sum(1 for f in fields if str(f.get("is_main_col", f.get("isMainCol", ""))).strip().lower() in ("1", "true", "yes", "y")) > 1:
+            return JsonResponse({"error": "is_main_col مكرر — عمود رئيسي واحد فقط"}, status=400)
         fname = (data.get("file") or table_en).strip()
         if not fname.endswith((".fmlk", ".fml")):
             fname += ".fmlk"
@@ -1530,6 +1532,8 @@ def api_models_design_save(request, app_name):
                     el.set("colSpan", str(max(1, min(12, _cs))))
             except Exception:
                 pass
+            if str(f.get("is_main_col", f.get("isMainCol", ""))).strip().lower() in ("1", "true", "yes", "y"):
+                el.set("is_main_col", "1")
             mode = (f.get("default_mode") or "empty").lower()
             if mode == "fixed":
                 dv = f.get("default_value", f.get("default", ""))

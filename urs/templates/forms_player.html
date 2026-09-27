@@ -4,6 +4,9 @@
 {% block head_css %}
         .fmlk-tab-active { background: #4f46e5; color: white; border-color: #4f46e5; }
         .fmlk-category { border: 1px solid #e2e8f0; border-radius: 12px; background: white; }
+        .fmlk-hero { border: 2px solid #c7d2fe; border-radius: 14px; background: linear-gradient(to left, #eef2ff, #ffffff); padding: 16px; margin-bottom: 12px; }
+        .fmlk-hero .fx-label { font-size: 14px; }
+        .fmlk-hero .fx-inp { font-size: 15px; padding-top: 10px; padding-bottom: 10px; }
         .fmlk-field-left { grid-column: span 1; }
         .fmlk-field-full { grid-column: 1 / -1; }
         @media (max-width: 768px) { .fmlk-field-left { grid-column: 1 / -1; } }
@@ -847,15 +850,25 @@
             cats.forEach((catName, ci) => {
                 // مدخلات الوجهات المتفرعة تُعرض في شبكة التفاصيل لا في النموذج الرئيسي
                 const catFields = fields.filter(f => (f.category || 'عام') === catName && (!f.destination || f.destination === 'main'));
+                // العمود الرئيسي (is_main_col): أولاً بعرض الشاشة كاملاً، وتحته البقية جريد 2×2
+                let heroHtml = '';
+                let rest = catFields;
+                const hi = catFields.findIndex(f => f.is_main_col || f.isMainCol);
+                if(hi >= 0){
+                    const hero = catFields[hi];
+                    rest = catFields.filter((_, k)=>k !== hi);
+                    heroHtml = `<div class="fmlk-hero" data-vis-field="${escAttr(hero.name)}">${renderInput(hero)}</div>`;
+                }
                 html += `<div data-tab-content="cat${ci}" style="${ci !== 0 ? 'display:none' : ''}">`;
+                html += heroHtml;
                 html += `<div class="fmlk-category p-4 mb-4">
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">`;
-                catFields.forEach(f => {
+                rest.forEach(f => {
                     const span = f.colSpan > 1 ? 'fmlk-field-full' : 'fmlk-field-left';
                     const input = renderInput(f);
                     html += `<div class="${span}" data-vis-field="${escAttr(f.name)}">${input}</div>`;
                 });
-                if(!catFields.length) html += `<div class="col-span-full text-center py-6 text-slate-400 text-xs">لا توجد حقول في هذه الفئة</div>`;
+                if(!rest.length && hi < 0) html += `<div class="col-span-full text-center py-6 text-slate-400 text-xs">لا توجد حقول في هذه الفئة</div>`;
                 html += `</div></div>`;
                 html += `</div>`;
             });

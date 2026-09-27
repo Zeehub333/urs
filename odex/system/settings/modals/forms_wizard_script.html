@@ -109,6 +109,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                     displayOnly: !!(f.displayOnly || f.display_only),
                     displayExpr: f.displayExpr || f.display_expr || '',
                     visibleIf: f.visibleIf || f.visible_if || '',
+                    is_main_col: !!(f.is_main_col || f.isMainCol),
                     config: f.config || {}
                 }));
                 // الجداول المتفرعة
@@ -843,7 +844,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                     <thead class="bg-slate-50 text-slate-600"><tr>
                         <th class="p-1.5 text-right">الوجهة</th><th class="p-1.5 text-right">الحقل</th><th class="p-1.5 text-right">اسم العرض *</th>
                         <th class="p-1.5">الأيقونة</th><th class="p-1.5">نوع البيانات</th><th class="p-1.5">التبويب</th>
-                        <th class="p-1.5" title="مطلوب">مطلوب</th><th class="p-1.5" title="محسوب">محسوب</th><th class="p-1.5" title="قابل للإدخال">إدخال</th><th class="p-1.5" title="شرط الإظهار: field==قيمة ويمكن && و ||">إظهار مشروط</th><th class="p-1.5" title="تعبير عرض فقط: {col} أو حساب بنفس صياغة المحسوب — لا يُخزن">تعبير العرض ✦</th><th class="p-1.5"></th>
+                        <th class="p-1.5" title="عمود رئيسي؟ — أول حقل بعرض الشاشة كاملاً وتحته البقية جريد (واحد فقط)">★ رئيسي؟</th><th class="p-1.5" title="مطلوب">مطلوب</th><th class="p-1.5" title="محسوب">محسوب</th><th class="p-1.5" title="قابل للإدخال">إدخال</th><th class="p-1.5" title="شرط الإظهار: field==قيمة ويمكن && و ||">إظهار مشروط</th><th class="p-1.5" title="تعبير عرض فقط: {col} أو حساب بنفس صياغة المحسوب — لا يُخزن">تعبير العرض ✦</th><th class="p-1.5"></th>
                     </tr></thead>
                     <tbody>${fwInputs.map((r, i)=>`
                         <tr class="border-t border-slate-100 ${r.displayOnly ? 'bg-amber-50/50' : ''}">
@@ -853,6 +854,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                             <td class="p-1"><select onchange="fwInputs[${i}].icon=this.value" class="wb-inp !py-1 font-mono" dir="ltr"><option value="">—</option>${FW_ICONS.map(ic=>`<option value="${ic}" ${r.icon===ic?'selected':''}>${ic}</option>`).join('')}</select></td>
                             <td class="p-1 whitespace-nowrap"><button onclick="fwOpenType(${i})" class="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg font-bold">${fwEsc(fwTypeLabel(r.inputType))}${(r.options||[]).length || (r.options_source||[]).length || r.refTable ? ' •' : ''}</button><div class="text-[9px] text-slate-400">${fwEsc(r.dataType || '')}</div></td>
                             <td class="p-1"><select onchange="fwInputs[${i}].tab=this.value" class="wb-inp !py-1">${fwTabs.map(t=>`<option value="${fwEsc(t.id)}" ${r.tab===t.id?'selected':''}>${fwEsc(t.alias)}</option>`).join('')}</select></td>
+                            <td class="p-1 text-center"><button onclick="fwInputMain(${i})" title="${r.is_main_col ? 'العمود الرئيسي — اضغط للإلغاء' : 'تعيين عموداً رئيسياً (واحد فقط)'}" class="${r.is_main_col ? 'text-amber-500' : 'text-slate-300 hover:text-amber-400'}"><i class="fa-solid fa-star"></i></button></td>
                             <td class="p-1 text-center"><input type="checkbox" ${r.required?'checked':''} onchange="fwInputs[${i}].required=this.checked" class="w-4 h-4 accent-rose-600"></td>
                             <td class="p-1 text-center"><input type="checkbox" ${r.computed?'checked':''} onchange="fwInputs[${i}].computed=this.checked;fwRenderSheet()" class="w-4 h-4 accent-indigo-600"></td>
                             <td class="p-1 text-center"><input type="checkbox" ${r.editable?'checked':''} onchange="fwInputs[${i}].editable=this.checked" class="w-4 h-4 accent-emerald-600"></td>
@@ -860,7 +862,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                             <td class="p-1"><input value="${fwEsc(r.displayExpr || '')}" oninput="fwInputs[${i}].displayExpr=this.value" dir="ltr" placeholder="{col} أو [a]+[b]" title="عرض فقط — مرجع {col} من جدول العرض أو حساب. يُقرأ ولا يُخزن" class="wb-inp !py-1 font-mono"></td>
                             <td class="p-1"><button onclick="fwDelInput(${i})" class="text-rose-400 hover:text-rose-600 px-1"><i class="fa-solid fa-trash"></i></button><button onclick="fwMoveInput(${i},-1)" title="لأعلى" class="text-slate-400 hover:text-indigo-600 px-1"><i class="fa-solid fa-arrow-up text-[10px]"></i></button><button onclick="fwMoveInput(${i},1)" title="لأسفل" class="text-slate-400 hover:text-indigo-600 px-1"><i class="fa-solid fa-arrow-down text-[10px]"></i></button></td>
                         </tr>
-                        ${r.computed ? `<tr class="border-t border-indigo-100 bg-indigo-50/40"><td class="p-1 text-[10px] text-indigo-700 font-bold" colspan="2">تعبير الحساب <span class="font-mono" dir="ltr">[col]</span></td><td class="p-1" colspan="9"><input value="${fwEsc(r.expr || '')}" oninput="fwInputs[${i}].expr=this.value" dir="ltr" placeholder="[qty] * [price]" list="fwInputNames" class="wb-inp !py-1 font-mono"></td></tr>` : ''}`).join('') || '<tr><td colspan="12" class="p-4 text-center text-slate-400">لا مدخلات — استورد أعمدة الجدول الأساسي</td></tr>'}
+                        ${r.computed ? `<tr class="border-t border-indigo-100 bg-indigo-50/40"><td class="p-1 text-[10px] text-indigo-700 font-bold" colspan="2">تعبير الحساب <span class="font-mono" dir="ltr">[col]</span></td><td class="p-1" colspan="11"><input value="${fwEsc(r.expr || '')}" oninput="fwInputs[${i}].expr=this.value" dir="ltr" placeholder="[qty] * [price]" list="fwInputNames" class="wb-inp !py-1 font-mono"></td></tr>` : ''}`).join('') || '<tr><td colspan="13" class="p-4 text-center text-slate-400">لا مدخلات — استورد أعمدة الجدول الأساسي</td></tr>'}
                     </tbody>
                 </table>
                 </div>
@@ -990,6 +992,12 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             fwRenderSheet();
         }
         function fwDelInput(i){ fwInputs.splice(i,1); fwRenderSheet(); }
+        function fwInputMain(i){
+            // عمود رئيسي واحد فقط: التعيين ينقل النجمة، وإعادة الضغط تلغيها
+            const on = !fwInputs[i].is_main_col;
+            fwInputs.forEach((x, k)=>{ x.is_main_col = (k === i) && on; });
+            try{ fwRenderSheet(); }catch(e){}
+        }
         function fwNameLocked(r){
             // الاسم البرمجي مقفل إن كان عموداً موجوداً بالقاعدة، وقابل للتحرير إن لم يوجد
             try{
@@ -1387,6 +1395,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                 primary_key: /^(id|ID)$/.test(x.name.trim()) && i === 0,
                 default_mode: x.computed ? 'formula' : 'empty', formula: x.computed ? (x.expr || '') : '',
                 tab: x.tab || fwTabs[0].id, category: fwTabAlias(x.tab || fwTabs[0].id),
+                is_main_col: !!x.is_main_col,
                 icon: x.icon || '', destination: 'main', visibleIf: x.visibleIf || '',
                 options: x.options || [], options_source: x.options_source || [],
                 refTable: x.refTable || '', refFk: x.refFk || '', refDisplay: x.refDisplay || '',
