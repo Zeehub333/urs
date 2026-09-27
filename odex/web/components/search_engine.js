@@ -3,9 +3,9 @@
  *
  * الواجهة (حسب المواصفة):
  *   [مربع البحث] [زر بحث] [استيراد من إكسل] [تصفية متقدمة]
- *   - الكتابة تعرض قائمة الأعمدة المطابقة (اختيار العمود، لا بحث فوري).
- *   - البحث في اسم_العمود المحدد من القائمة المسدلة فقط.
- *   - لا بحث فوري: التنفيذ بزر Enter أو زر البحث فقط → يبني استعلام WHERE.
+ *   - اكتب القيمة أولاً → تظهر قائمة الأعمدة المطابقة → اختر العمود.
+ *   - النص المكتوب هو القيمة دائماً ولا يُمس عند اختيار العمود.
+ *   - لا بحث فوري: التنفيذ بزر Enter أو زر البحث فقط → يبني استعلام WHERE (وسم).
  *
  * الاستخدام:
  *   SearchEngine.mount(el, {
@@ -59,7 +59,7 @@
             '<div class="se-wrap flex items-center gap-1.5 w-full" dir="rtl">' +
             '<div class="se-box relative flex-1 flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 focus-within:border-indigo-500 focus-within:ring-1 focus-within:ring-indigo-500 transition min-w-0">' +
             '<i class="fa-solid fa-search text-slate-400 text-xs shrink-0"></i>' +
-            '<input id="' + uid + 'q" type="text" autocomplete="off" spellcheck="false" class="flex-1 min-w-[80px] bg-transparent border-none text-xs focus:outline-none text-slate-700 py-1" placeholder="' + esc(opts.placeholder || 'ابحث… (اكتب لعرض الأعمدة، ثم Enter)') + '">' +
+            '<input id="' + uid + 'q" type="text" autocomplete="off" spellcheck="false" class="flex-1 min-w-[80px] bg-transparent border-none text-xs focus:outline-none text-slate-700 py-1" placeholder="' + esc(opts.placeholder || 'اكتب القيمة… (القائمة لاختيار العمود، ثم Enter)') + '">' +
             '<button id="' + uid + 'colbtn" type="button" title="العمود المحدد — اضغط لعرض القائمة" class="shrink-0 max-w-[150px] truncate text-[11px] font-bold px-2 py-1 rounded-lg bg-white border border-slate-200 text-slate-600 hover:border-indigo-400 hover:text-indigo-700"></button>' +
             '<div id="' + uid + 'pop" class="hidden absolute top-full mt-1 right-0 left-0 z-[120] bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden text-xs max-h-[240px] overflow-y-auto custom-scroll"></div>' +
             '</div>' +
@@ -155,10 +155,8 @@
             saveCol();
             paintColBtn();
             closePop();
-            // جاهزية لقيمة البحث: إبقاء النص إن كان قيمة، وإلا تنظيف اسم العمود المكتوب
-            var cur = (q.value || '').trim();
-            var lbl = colLabel(c).toLowerCase();
-            if (cur && (cur.toLowerCase() === lbl || lbl.indexOf(cur.toLowerCase()) === 0)) q.value = '';
+            // القيمة أولاً: النص المكتوب هو قيمة البحث ويبقى كما هو دائماً —
+            // اختيار العمود لا يمسه، ثم Enter لبناء الوسم.
             try {
                 q.placeholder = 'القيمة في «' + colLabel(c) + '» ثم Enter…';
                 q.focus();

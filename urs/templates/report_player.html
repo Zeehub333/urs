@@ -2520,14 +2520,14 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                 const box = document.getElementById('searchEngineBox');
                 if(box && !window._seMain) window._seMain = SearchEngine.mount(box, {
                     columns: colProvider, onSearch: onSearch, onAdvanced: adv,
-                    onImportValues: onImport, persistKey: key,
-                    placeholder: 'ابحث… (اكتب لعرض الأعمدة، اختر عموداً، ثم Enter)'
+                    onImportValues: onImport,                     persistKey: key,
+                    placeholder: 'اكتب القيمة… ثم اختر العمود من القائمة ثم Enter'
                 });
                 const mb = document.getElementById('searchEngineBoxMobile');
                 if(mb && !window._seMobile) window._seMobile = SearchEngine.mount(mb, {
                     columns: colProvider, onSearch: onSearch, onAdvanced: adv,
-                    onImportValues: onImport, persistKey: key,
-                    placeholder: 'ابحث… ثم Enter'
+                    onImportValues: onImport,                     persistKey: key,
+                    placeholder: 'القيمة… ثم العمود ثم Enter'
                 });
             }catch(e){}
         }
