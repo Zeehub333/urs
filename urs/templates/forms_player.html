@@ -717,7 +717,7 @@
                 if(c) root.insertBefore(c, card);
                 card.remove();
             });
-            ['stTop', 'stStripWrap', 'stBelow', 'stTopTitle', 'stBelowTitle'].forEach(id=>{ const n = document.getElementById(id); if(n) n.remove(); });
+            ['stTop', 'stStripWrap', 'stBelow', 'stTopTitle', 'stBelowTitle', 'stWrapRow', 'stMain', 'stLogoCol'].forEach(id=>{ const n = document.getElementById(id); if(n) n.remove(); });
             const contents = Array.prototype.slice.call(root.querySelectorAll(':scope > [data-tab-content]'));
             if(!contents.length){ window._formStacked = false; return; }
             // ترتيب ثابت مستقل عن مواضع DOM (النقل بين الحاويات كان يعيد ترتيب الشريط عند كل تحديد)
@@ -727,18 +727,34 @@
                 const wrap = document.getElementById('formTabsWrap');
                 if(wrap) wrap.style.display = 'none';
             }catch(e){}
+            // صف علوي: المحتوى (مرن) + عمود الشعار الجانبي (عريض، ارتفاع كامل بلا سكرول)
+            const wrapRow = document.createElement('div');
+            wrapRow.id = 'stWrapRow';
+            wrapRow.className = 'flex flex-col lg:flex-row gap-4 items-start';
+            const main = document.createElement('div');
+            main.id = 'stMain';
+            main.className = 'flex-1 min-w-0';
+            const logoCol = document.createElement('div');
+            logoCol.id = 'stLogoCol';
+            logoCol.className = 'w-full lg:w-60 shrink-0 self-start lg:sticky lg:top-4 rounded-2xl border-2 border-dashed border-slate-200 bg-white p-3';
+            root.appendChild(wrapRow);
+            wrapRow.appendChild(main);
+            wrapRow.appendChild(logoCol);
             const top = document.createElement('div');
             top.id = 'stTop';
             const stripWrap = document.createElement('div');
             stripWrap.id = 'stStripWrap';
             stripWrap.className = 'mt-4';
             stripWrap.innerHTML = '<div id="stStrip" class="flex gap-1.5 overflow-x-auto custom-scroll border-b border-slate-200 pr-1"></div>';
-            root.appendChild(top);
-            root.appendChild(stripWrap);
+            main.appendChild(top);
+            main.appendChild(stripWrap);
             const below = document.createElement('div');
             below.id = 'stBelow';
             below.className = 'mt-3';
-            root.appendChild(below);
+            main.appendChild(below);
+            if(window._heroLogo && window._heroLogo.html){
+                logoCol.innerHTML = `<div class="fmlk-hero-logo" data-vis-field="${escAttr(window._heroLogo.name)}">${window._heroLogo.html}</div>`;
+            }
             window._stackActive = null;
             stackRender();
         }
@@ -821,6 +837,14 @@
                 }).join('');
                 const sw = document.getElementById('stStripWrap');
                 if(sw) sw.style.display = others.length ? '' : 'none';
+                // عمود الشعار: ظاهر فقط مع تبويب البطل (يُخفى إن أُخفي تبويبه)
+                const logoCol = document.getElementById('stLogoCol');
+                if(logoCol){
+                    let showLogo = !!(window._heroLogo && window._heroLogo.html);
+                    if(showLogo && window._heroLogo.tab)
+                        showLogo = vis.some(c=>c.getAttribute('data-tab-content') === window._heroLogo.tab);
+                    logoCol.style.display = showLogo ? '' : 'none';
+                }
             }catch(e){}
         }
         function stackPickTab(id){
@@ -849,11 +873,12 @@
             const fields = data.fields || [];
             const cats = fmlMeta.cats && fmlMeta.cats.length ? fmlMeta.cats : ['عام'];
             let html = '';
+            try{ window._heroLogo = null; }catch(e){}
             cats.forEach((catName, ci) => {
                 // مدخلات الوجهات المتفرعة تُعرض في شبكة التفاصيل لا في النموذج الرئيسي
                 const catFields = fields.filter(f => (f.category || 'عام') === catName && (!f.destination || f.destination === 'main'));
-                // العمود الرئيسي (is_main_col): أولاً بعرض الشاشة كاملاً، وتحته البقية جريد 2×2.
-                // حقل صورة/شعار في نفس الفئة: بلا تسمية، مربع بورتريه بجانب الرئيسي.
+                // العمود الرئيسي (is_main_col): أولاً بعرض كامل، وتحته البقية جريد 2×2.
+                // حقل صورة/شعار في نفس الفئة: يُلتقط لعمود جانبي عريض بارتفاع كامل بلا سكرول.
                 const isLogoField = (f)=>{
                     const t = String(f.dataType || f.data_type || f.type || '').toLowerCase();
                     if(t === 'image' || t === 'media') return true;
@@ -866,16 +891,13 @@
                 if(hi >= 0){
                     const hero = catFields[hi];
                     rest = catFields.filter((_, k)=>k !== hi);
-                    let logoHtml = '';
                     const li = rest.findIndex(f => isLogoField(f) && f.name !== hero.name);
                     if(li >= 0){
                         const logo = rest[li];
                         rest = rest.filter((_, k)=>k !== li);
-                        logoHtml = `<div class="fmlk-hero-logo w-28 sm:w-32 shrink-0 aspect-[3/4] rounded-2xl border-2 border-dashed border-slate-200 bg-white p-2 overflow-y-auto custom-scroll" data-vis-field="${escAttr(logo.name)}">${renderInput(logo)}</div>`;
+                        try{ window._heroLogo = {name: logo.name, tab: 'cat' + ci, html: renderInput(logo)}; }catch(e){ window._heroLogo = null; }
                     }
-                    heroHtml = logoHtml
-                        ? `<div class="flex gap-3 items-stretch mb-3"><div class="fmlk-hero flex-1 min-w-0" data-vis-field="${escAttr(hero.name)}">${renderInput(hero)}</div>${logoHtml}</div>`
-                        : `<div class="fmlk-hero mb-3" data-vis-field="${escAttr(hero.name)}">${renderInput(hero)}</div>`;
+                    heroHtml = `<div class="fmlk-hero mb-3" data-vis-field="${escAttr(hero.name)}">${renderInput(hero)}</div>`;
                 }
                 html += `<div data-tab-content="cat${ci}" style="${ci !== 0 ? 'display:none' : ''}">`;
                 html += heroHtml;
