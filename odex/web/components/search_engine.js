@@ -193,12 +193,10 @@
         }
 
         function submit(forceCol) {
+            // نص فارغ = طلب مسح البحث (المضيف يصفّر فلاتره ويعيد التحميل)
             var text = (q.value || '').trim();
             closePop();
-            if (!text) {
-                try { q.focus(); } catch (e) {}
-                return;
-            }
+            if (!text) { try { q.focus(); } catch (e) {} }
             onSearch({ column: (forceCol !== undefined ? forceCol : state.column), text: text });
         }
 

@@ -2266,14 +2266,46 @@ def api_fmlk_delete(request):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
+@csrf_exempt
 def api_fmlk_records(request):
+    # GET (legacy): ?fml=&app=&page=&pageSize=[&filters=JSON]
+    # POST (search): {fml, app, page, pageSize, filters:[{field,op,value,valFrom,valTo}]}
+    # filters → server-side WHERE (same node shape as RML: any/all groups).
     fml = request.GET.get("fml", "hr_form")
     app = request.GET.get("app")
     page = int(request.GET.get("page", "1") or 1)
     pageSize = int(request.GET.get("pageSize", "50") or 50)
+    filters = None
+    if request.method == "POST":
+        try:
+            data = json.loads(request.body.decode() or "{}")
+        except Exception:
+            data = {}
+        fml = data.get("fml", fml)
+        app = data.get("app", app)
+        try:
+            page = int(data.get("page") or page)
+        except (TypeError, ValueError):
+            pass
+        try:
+            ps = data.get("pageSize", data.get("page_size", pageSize))
+            pageSize = ps if isinstance(ps, str) and ps.strip().lower() == "all" else int(ps or pageSize)
+        except (TypeError, ValueError):
+            pass
+        if isinstance(data.get("filters"), list):
+            filters = data.get("filters")
+    else:
+        _fj = request.GET.get("filters")
+        if _fj:
+            try:
+                _f = json.loads(_fj)
+                if isinstance(_f, list):
+                    filters = _f
+            except Exception:
+                filters = None
     try:
         eng = _fmlk_get_engine(fml, app)
-        res = eng.list_records(page=page, page_size=pageSize)
+        res = eng.list_records(filters=filters, page=page, page_size=pageSize)
         return JsonResponse(res)
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=400)

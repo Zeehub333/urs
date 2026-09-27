@@ -228,24 +228,14 @@
                 </aside>
             </div>
 
-            <!-- Pagination -->
+            <!-- Status (no pagination: infinite scroll renders in chunks) -->
             <footer class="bg-white border-t border-slate-200 px-4 py-2 flex items-center justify-between text-xs text-slate-600 shrink-0">
                 <div class="flex items-center gap-2">
-                    <span>عرض</span>
-                    <select id="pageSizeSel" onchange="changePageSize(this.value)" class="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 font-semibold text-slate-800 focus:outline-none">
-                        <option value="10">10</option>
-                        <option value="25" selected>25</option>
-                        <option value="50">50</option>
-                        <option value="100">100</option>
-                        <option value="all">الكل</option>
-                    </select>
-                    <span>سجل من أصل <strong id="totalRecordsCount">0</strong> سجل</span>
+                    <span>عرض <strong id="renderedCount">0</strong> من أصل <strong id="totalRecordsCount">0</strong> سجل</span>
                     <span id="lazyStatus" class="text-indigo-600 font-bold"></span>
                 </div>
                 <div class="flex items-center gap-2">
-                    <button onclick="changePage(-1)" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg font-medium">السابق</button>
-                    <span class="font-semibold text-slate-800">الصفحة <span id="currentPageNum">1</span> من <span id="totalPagesNum">1</span></span>
-                    <button onclick="changePage(1)" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg font-medium">التالي</button>
+                    <span id="renderStatus" class="text-slate-400"></span>
                 </div>
             </footer>
         </main>
@@ -2075,11 +2065,18 @@
         }
 
         let loadError = '';
+        let serverFilters = []; // WHERE خادمي من محرك البحث (نص/إكسل) — يُرسل مع كل دفعة
+        async function fetchRecordsPage(page, pageSize){
+            // POST يحمل الفلاتر (GET القديمة بلا فلاتر ما تزال مدعومة خادمياً)
+            const res = await fetch('/api/fmlk/records', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({fml: currentFml, app: currentApp, page: page, pageSize: pageSize, filters: serverFilters})});
+            const data = await res.json();
+            if (data.error) throw new Error(data.error);
+            return data;
+        }
         async function loadAllRecords() {
             try {
-                const res = await fetch('/api/fmlk/records?fml=' + encodeURIComponent(currentFml) + '&app=' + encodeURIComponent(currentApp) + '&page=1&pageSize=' + FETCH_SIZE);
-                const data = await res.json();
-                if (data.error) throw new Error(data.error);
+                const data = await fetchRecordsPage(1, FETCH_SIZE);
                 loadError = '';
                 allRows = data.rows || [];
                 serverTotal = (typeof data.total === 'number') ? data.total : allRows.length;
@@ -2145,9 +2142,7 @@
             updateLoadMore();
             try{
                 const next = serverPage + 1;
-                const res = await fetch('/api/fmlk/records?fml=' + encodeURIComponent(currentFml) + '&app=' + encodeURIComponent(currentApp) + '&page=' + next + '&pageSize=' + FETCH_SIZE);
-                const data = await res.json();
-                if(data.error) throw new Error(data.error);
+                const data = await fetchRecordsPage(next, FETCH_SIZE);
                 const have = new Set(allRows.map((r, i)=>String(rowId(r, i))));
                 let added = 0;
                 (data.rows || []).forEach(r=>{
@@ -3106,6 +3101,56 @@
             }catch(e){}
             return null;
         }
+        function buildServerFilters(column, text){
+            // نص المحرك ← عقد WHERE خادمية: عمود محدد أحادي، وبلا عمود توسعة ذكية OR.
+            // الصيغة: مقاطع [,،] = أو، و& داخل المقطع = و — نفس دلالات العميل سابقاً.
+            const t = String(text || '').trim();
+            if(!t) return [];
+            const cols = ((typeof visibleFields === 'function' ? visibleFields() : []) || []).filter(f=>f && f.name);
+            if(!cols.length) return [];
+            const kindByName = {};
+            cols.forEach(f=>{ try{ kindByName[f.name] = formFieldKind(f); }catch(e){ kindByName[f.name] = 'text'; } });
+            const singleFor = (col, sc, raw)=>{
+                const n = gridSingleFilter(col, sc);
+                if(n) return n;
+                // احتياط: اسم العمود الفعلي (الخادم يحل الأسماء لا الألقاب)
+                let nm = String(col || '');
+                try{
+                    const hit = cols.find(f=>String(f.alias || '') === nm || String(f.name || '') === nm);
+                    if(hit) nm = hit.name;
+                }catch(e){}
+                const k = kindByName[nm] || 'text';
+                return (k === 'number') ? {field: nm, op: 'equals', value: raw} : {field: nm, op: 'contains', value: raw};
+            };
+            const multiFor = (sc)=>{
+                const subs = [];
+                if(sc.kind === 'number') cols.forEach(f=>{ if(kindByName[f.name] === 'number') subs.push({field: f.name, op: 'equals', value: sc.value}); });
+                else if(sc.kind === 'text') cols.forEach(f=>{ if(kindByName[f.name] === 'text') subs.push({field: f.name, op: 'contains', value: sc.value}); });
+                else if(sc.kind === 'time') cols.forEach(f=>{ const k = kindByName[f.name]; if(k === 'time') subs.push({field: f.name, op: 'equals', value: sc.value}); else if(k === 'text') subs.push({field: f.name, op: 'contains', value: sc.value}); });
+                else if(sc.kind === 'date') cols.forEach(f=>{ const k = kindByName[f.name]; if(k === 'date') subs.push({field: f.name, op: 'equals', value: sc.value}); else if(k === 'datetime') subs.push({field: f.name, op: 'between', valFrom: sc.value + ' 00:00:00', valTo: sc.value + ' 23:59:59'}); else if(k === 'text') subs.push({field: f.name, op: 'contains', value: sc.value}); });
+                else if(sc.kind === 'daterange') cols.forEach(f=>{ const k = kindByName[f.name]; if(k === 'date' || k === 'datetime' || k === 'text') subs.push({field: f.name, op: 'between', valFrom: sc.from, valTo: sc.to}); });
+                return subs;
+            };
+            const branches = [];
+            t.split(/[,،]/).map(s=>s.trim()).filter(Boolean).forEach(seg=>{
+                const nodes = [];
+                seg.split('&').map(p=>p.trim()).filter(Boolean).forEach(p=>{
+                    const sc = smartClassify(p);
+                    if(column){
+                        nodes.push(singleFor(column, sc, p));
+                    } else {
+                        const subs = multiFor(sc);
+                        if(subs.length > 1) nodes.push({any: subs});
+                        else if(subs.length === 1) nodes.push(subs[0]);
+                        else nodes.push({field: cols[0].name, op: 'contains', value: p});
+                    }
+                });
+                if(!nodes.length) return;
+                branches.push(nodes.length > 1 ? {all: nodes} : nodes[0]);
+            });
+            if(!branches.length) return [];
+            return branches.length > 1 ? [{any: branches}] : branches;
+        }
         function filteredRows() {
             const rawQ = ((typeof gridQuery !== 'undefined' && gridQuery.text ? gridQuery.text : gridSearch) || '').trim();
             const forceCol = (typeof gridQuery !== 'undefined' ? gridQuery.column : '') || '';
@@ -3204,34 +3249,39 @@
                     }catch(e){ return []; }
                 },
                 onSearch: ({column, text})=>{
-                    gridQuery = {column: colKey(column), text: String(text || '')};
+                    // بحث خادمي: النص ← WHERE في قاعدة البيانات (لا ترشيح عميل)
+                    const t = String(text || '').trim();
+                    gridQuery = {column: '', text: ''};
+                    if(!t){
+                        if(!serverFilters.length) return; // لا شيء نشط — بلا إعادة تحميل
+                        serverFilters = [];
+                    } else {
+                        serverFilters = buildServerFilters(colKey(column), t);
+                    }
                     currentPage = 1;
-                    renderGrid();
+                    loadAllRecords();
                 },
                 onAdvanced: ()=>{ try{ openAdvFilterModal(); }catch(e){} },
                 showAdvanced: false, // زر المضيف (مع عدّاد الوسوم) يبقى بجانب المحرك
                 onImportValues: ({column, values, count, truncated, filename})=>{
+                    // استيراد خادمي: IN على كامل الجدول (لا ترشيح عميل جزئي)
                     const key2 = colKey(column);
                     if(!key2){ try{ notify('اختر العمود من القائمة أولاً ثم استورد الإكسل', 'info'); }catch(e){} return; }
                     if(!values || !values.length){ try{ notify('ملف ' + filename + ' بلا قيم', 'info'); }catch(e){} return; }
-                    advFilters.push({field: key2, op: 'in', value: values});
+                    let nm = key2;
+                    try{
+                        const hit = ((typeof visibleFields === 'function' ? visibleFields() : []) || []).find(f=>String(f.alias || '') === key2 || String(f.name || '') === key2);
+                        if(hit) nm = hit.name;
+                    }catch(e){}
+                    serverFilters = [{field: nm, op: 'in', value: values}];
+                    gridQuery = {column: '', text: ''};
                     currentPage = 1;
-                    renderAdvTags();
-                    renderGrid();
-                    try{ notify(`📥 ${count} قيمة من ${filename}${truncated ? ' (الأولى فقط)' : ''}`, 'success'); }catch(e){}
+                    loadAllRecords();
+                    try{ notify(`📥 ${count} قيمة من ${filename}${truncated ? ' (الأولى فقط)' : ''} → ${nm}`, 'success'); }catch(e){}
                 },
                 persistKey: key,
                 placeholder: 'اكتب القيمة… ثم اختر العمود من القائمة ثم Enter'
             });
-        }
-        function changePageSize(v) {
-            pageSize = v;
-            currentPage = 1;
-            renderGrid();
-        }
-        function changePage(d) {
-            currentPage += d;
-            renderGrid();
         }
         function openDesigner(){
             location.href = `/app/${currentApp}/forms-designer/?file=` + encodeURIComponent(currentFml || '');
@@ -3248,16 +3298,20 @@
             if (checked) selectedIds.add(id);
             else selectedIds.delete(id);
             updateSelectedCount();
-            renderGrid();
+            paintHeadCheck();
         }
         function toggleSelectPage(checked) {
+            // تحديد الصفوف المعروضة حالياً (بلا إعادة عرض تحافظ على موضع التمرير)
             pagedRowsCache.forEach(r => {
                 const id = String(r.__rid);
                 if (checked) selectedIds.add(id);
                 else selectedIds.delete(id);
             });
+            try{
+                document.querySelectorAll('#tableBody input[type=checkbox], #cardsView input[type=checkbox]').forEach(b=>{ b.checked = !!checked; });
+            }catch(e){}
             updateSelectedCount();
-            renderGrid();
+            paintHeadCheck();
         }
         function updateSelectedCount() {
             const el = document.getElementById('selectedCount');
@@ -3280,19 +3334,19 @@
             });
         }
         let pagedRowsCache = [];
+        const RENDER_CHUNK = 300; // دفعة العرض الملحقة عند التمرير (بلا ترقيم صفحات)
+        let renderRows = [], renderCols = [], renderedCount = 0, renderObserver = null;
         function renderGrid() {
             const cols = visibleFields();
             const rows = sortedRows(filteredRows());
-            const total = rows.length;
-            const pSize = pageSize === 'all' ? Math.max(total, 1) : parseInt(pageSize);
-            const totalPages = Math.max(1, Math.ceil(total / pSize));
-            if (currentPage > totalPages) currentPage = totalPages;
-            const start = (currentPage - 1) * pSize;
-            const paged = pageSize === 'all' ? rows : rows.slice(start, start + pSize);
-            pagedRowsCache = paged.map((r, i) => ({...r, __rid: rowId(r, allRows.indexOf(r))}));
-            document.getElementById('totalRecordsCount').innerText = total;
-            document.getElementById('currentPageNum').innerText = currentPage;
-            document.getElementById('totalPagesNum').innerText = totalPages;
+            renderRows = rows; renderCols = cols; renderedCount = 0;
+            pagedRowsCache = [];
+            renderTableHead(cols);
+            try{ document.getElementById('tableBody').innerHTML = ''; }catch(e){}
+            try{ document.getElementById('cardsView').innerHTML = ''; }catch(e){}
+            appendRenderChunk();
+            const tt = document.getElementById('totalRecordsCount');
+            if(tt) tt.innerText = rows.length;
             renderGroupSidebar(rows);
             updateSelectedCount();
             const isList = viewMode === 'list';
@@ -3300,16 +3354,87 @@
             const cv = document.getElementById('cardsView');
             cv.classList.toggle('hidden', isList);
             cv.style.display = isList ? 'none' : '';
-            if (isList) renderTable(cols, paged, start);
-            else renderCards(cols, paged, start);
             try{ paintBlankPanel(); }catch(e){}
             try{ fmlkResolveListDisplays(); }catch(e){}
             try{ bindLazyScroll(); }catch(e){}
             try{ maybeLazyFill(); }catch(e){}
+            try{ setupRenderObserver(); }catch(e){}
         }
-        function renderTable(cols, paged, start) {
-            const allChecked = paged.length > 0 && paged.every((r, i) => selectedIds.has(String(rowId(r, allRows.indexOf(r)))));
-            let head = `<tr><th class="freeze-col-head w-10 px-2 py-1 text-center border-b border-slate-200"><input type="checkbox" ${allChecked ? 'checked' : ''} onchange="toggleSelectPage(this.checked)" class="rounded text-indigo-600"></th><th class="w-12 px-2 py-1 text-center border-b border-slate-200 bg-slate-100 font-bold">#</th>`;
+        function updateRenderedCount(){
+            try{
+                const rc = document.getElementById('renderedCount');
+                if(rc) rc.innerText = renderedCount;
+                const tt = document.getElementById('totalRecordsCount');
+                if(tt) tt.innerText = renderRows.length;
+                const rs = document.getElementById('renderStatus');
+                if(rs) rs.textContent = renderedCount < renderRows.length ? 'مرر لعرض المزيد…' : '';
+            }catch(e){}
+            try{ paintHeadCheck(); }catch(e){}
+        }
+        function removeRenderSentinel(){
+            try{ const s = document.getElementById('renderSentinel'); if(s) s.remove(); }catch(e){}
+        }
+        function sentinelHtml(more){
+            if(!more) return '';
+            const span = (renderCols.length || 1) + 2;
+            if(viewMode === 'list') return `<tr id="renderSentinel"><td colspan="${span}" class="text-center py-3 text-slate-400 text-xs"><i class="fa-solid fa-spinner fa-spin text-indigo-400"></i> عرض المزيد…</td></tr>`;
+            return `<div id="renderSentinel" class="col-span-full text-center py-3 text-slate-400 text-xs"><i class="fa-solid fa-spinner fa-spin text-indigo-400"></i> عرض المزيد…</div>`;
+        }
+        function appendRenderChunk(){
+            if(renderedCount >= renderRows.length){
+                // كل المحمّل معروض — اجلب دفعات الخادم المتبقية (بحث/تمر而不停)
+                removeRenderSentinel();
+                updateRenderedCount();
+                try{ loadMoreRecords(); }catch(e){}
+                return;
+            }
+            const start = renderedCount;
+            const slice = renderRows.slice(start, start + RENDER_CHUNK);
+            removeRenderSentinel();
+            if(viewMode === 'list'){
+                const tb = document.getElementById('tableBody');
+                if(tb) tb.insertAdjacentHTML('beforeend', tableRowsHtml(renderCols, slice, start));
+            } else {
+                const cv = document.getElementById('cardsView');
+                if(cv) cv.insertAdjacentHTML('beforeend', cardsHtml(renderCols, slice, start));
+            }
+            renderedCount += slice.length;
+            pagedRowsCache = pagedRowsCache.concat(slice.map(r=>({...r, __rid: rowId(r, allRows.indexOf(r))})));
+            const more = renderedCount < renderRows.length;
+            if(viewMode === 'list'){
+                const tb = document.getElementById('tableBody');
+                if(tb && more) tb.insertAdjacentHTML('beforeend', sentinelHtml(true));
+            } else {
+                const cv = document.getElementById('cardsView');
+                if(cv && more) cv.insertAdjacentHTML('beforeend', sentinelHtml(true));
+            }
+            updateRenderedCount();
+            try{ setupRenderObserver(); }catch(e){}
+            try{ fmlkResolveListDisplays(); }catch(e){}
+        }
+        function setupRenderObserver(){
+            try{
+                if(renderObserver) renderObserver.disconnect();
+                const sent = document.getElementById('renderSentinel');
+                const wrap = document.getElementById('formTableWrap');
+                if(!sent || !wrap) return;
+                renderObserver = new IntersectionObserver(es=>{
+                    if(es[0] && es[0].isIntersecting) appendRenderChunk();
+                }, {root: wrap, rootMargin: '600px'});
+                renderObserver.observe(sent);
+            }catch(e){}
+        }
+        function paintHeadCheck(){
+            // مزامنة checkbox الترويسة مع الصفوف المعروضة (بلا إعادة عرض)
+            try{
+                const box = document.querySelector('#tableHeader input[type=checkbox]');
+                if(!box) return;
+                const rows = renderRows.slice(0, renderedCount);
+                box.checked = rows.length > 0 && rows.every(r=>selectedIds.has(String(rowId(r, allRows.indexOf(r)))));
+            }catch(e){}
+        }
+        function renderTableHead(cols) {
+            let head = `<tr><th class="freeze-col-head w-10 px-2 py-1 text-center border-b border-slate-200"><input type="checkbox" onchange="toggleSelectPage(this.checked)" class="rounded text-indigo-600"></th><th class="w-12 px-2 py-1 text-center border-b border-slate-200 bg-slate-100 font-bold">#</th>`;
             cols.forEach(f => {
                 const hasF = columnFilters[f.name] && columnFilters[f.name].length;
                 head += `<th class="px-2 py-1 font-bold border-b border-slate-200 ${hasF ? '!bg-indigo-50' : 'bg-slate-50'} text-slate-700 cursor-pointer hover:bg-slate-100 select-none" onclick="openColMenu(event, '${f.name}')"><div class="flex items-center justify-between gap-1"><span class="truncate">${f.alias}</span><span class="text-slate-400 text-[10px]">${activeSort.column === f.name ? (activeSort.direction === 'asc' ? '▲' : '▼') : ''}<i class="fa-solid fa-chevron-down"></i>${hasF ? '<i class="fa-solid fa-filter text-indigo-600" title="مصفّى"></i>' : ''}</span></div></th>`;
@@ -3318,8 +3443,13 @@
             if(recordActions.length) head += `<th class="px-2 py-1 font-bold border-b border-slate-200 bg-slate-50 text-slate-700 text-center">إجراءات</th>`;
             head += '</tr>';
             document.getElementById('tableHeader').innerHTML = head;
+            paintHeadCheck();
+        }
+        function tableRowsHtml(cols, paged, start) {
+            const recordActions = (customActions || []).filter(a => (a.level || 'record') === 'record');
             let body = '';
             if (!paged.length) {
+                if(start > 0) return '';
                 body = loadError
                     ? `<tr><td colspan="${cols.length + 2}" class="text-center py-12 text-rose-500 text-xs">تعذر تحميل السجلات: ${loadError}</td></tr>`
                     : `<tr><td colspan="${cols.length + 2}" class="text-center py-12 text-slate-400">لا توجد بيانات مطابقة</td></tr>`;
@@ -3340,12 +3470,20 @@
                     body += '</tr>';
                 });
             }
-            document.getElementById('tableBody').innerHTML = body;
+            return body;
         }
-        function renderCards(cols, paged, start) {
+        function renderTable(cols, paged, start, append) {
+            // توافق: عرض كامل أو إلحاق دفعة (التمرير اللانهائي يستخدم tableRowsHtml مباشرة)
+            if(!append){
+                renderTableHead(cols);
+                try{ document.getElementById('tableBody').innerHTML = ''; }catch(e){}
+            }
+            try{ document.getElementById('tableBody').insertAdjacentHTML('beforeend', tableRowsHtml(cols, paged, start)); }catch(e){}
+        }
+        function cardsHtml(cols, paged, start) {
             const recordActions = (customActions || []).filter(a => (a.level || 'record') === 'record');
             let html = '';
-            if (!paged.length) html = '<div class="col-span-full text-center py-12 text-slate-400 text-sm">لا توجد بيانات مطابقة</div>';
+            if (!paged.length) html = start > 0 ? '' : '<div class="col-span-full text-center py-12 text-slate-400 text-sm">لا توجد بيانات مطابقة</div>';
             paged.forEach((r, i) => {
                 const id = String(rowId(r, allRows.indexOf(r)));
                 const checked = selectedIds.has(id) ? 'checked' : '';
@@ -3373,7 +3511,12 @@
                     ${recordActions.length ? `<div class="flex items-center justify-center gap-1.5 flex-wrap pt-2" onclick="event.stopPropagation()">${recordActions.map(a => actionBtn(a, id, true)).join('')}</div>` : ''}
                 </div>`;
             });
-            document.getElementById('cardsView').innerHTML = html;
+            return html;
+        }
+        function renderCards(cols, paged, start, append) {
+            // توافق: عرض كامل أو إلحاق دفعة
+            if(!append){ try{ document.getElementById('cardsView').innerHTML = ''; }catch(e){} }
+            try{ document.getElementById('cardsView').insertAdjacentHTML('beforeend', cardsHtml(cols, paged, start)); }catch(e){}
         }
         function renderGroupSidebar(rows) {
             const bar = document.getElementById('groupSidebar');
