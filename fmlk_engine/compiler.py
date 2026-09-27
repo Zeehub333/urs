@@ -156,8 +156,9 @@ class FMLKTab:
     alias: str
     sort_order: int = 0
     visible_if: Optional[str] = None  # شرط إظهار التبويب — نفس صيغة الحقول
+    is_main: bool = False  # تبويب واحد فقط: يُثبَّت فوق في مودال الإدخال، والبقية تحته
     raw_attrs: Dict[str, str] = field(default_factory=dict)
-    def to_dict(self): return {"id": self.id, "name": self.name, "alias": self.alias, "sortOrder": self.sort_order, "visibleIf": self.visible_if, "visible_if": self.visible_if}
+    def to_dict(self): return {"id": self.id, "name": self.name, "alias": self.alias, "sortOrder": self.sort_order, "visibleIf": self.visible_if, "visible_if": self.visible_if, "is_main": bool(self.is_main), "isMain": bool(self.is_main)}
 
 @dataclass
 class FMLKDetail:
@@ -274,15 +275,33 @@ class FMLKFormCompiler:
                 alias = get("alias", default=name)
                 order = int(get("sort_order", "sortOrder", default=str(idx)) or idx)
                 tvis = get("visibleIf", "visible_if", "visible-if", "showIf", "show_if", "show-if")
-                result.append(FMLKTab(id=str(tid), name=str(name), alias=str(alias), sort_order=order, visible_if=(str(tvis).strip() if tvis else None), raw_attrs=dict(el.attrib)))
+                _main_raw = get("is_main", "isMain", "is-main", "main")
+                _is_main = str(_main_raw or "").strip().lower() in ("1", "true", "yes", "y")
+                result.append(FMLKTab(id=str(tid), name=str(name), alias=str(alias), sort_order=order, visible_if=(str(tvis).strip() if tvis else None), is_main=_is_main, raw_attrs=dict(el.attrib)))
         # If no <tabs>, infer from fields' tab values
         if not result:
             fields = self.fields()
             tab_names = sorted({f.tab for f in fields if f.tab})
             for idx, tn in enumerate(tab_names, start=1):
                 result.append(FMLKTab(id=tn, name=tn, alias=tn, sort_order=idx))
+        _mains = [t for t in result if t.is_main]
+        if len(_mains) > 1:
+            _names = "، ".join([t.alias or t.name for t in _mains])
+            raise ValueError(
+                f"is_main مكرر — تبويب واحد فقط يُثبَّت فوق ({_names}): "
+                f"أبقِ is_main على تبويب واحد واحذفه من البقية")
         self._tabs = sorted(result, key=lambda x: x.sort_order)
         return self._tabs
+
+    def main_tab(self) -> Optional[FMLKTab]:
+        """التبويب المثبت فوق (is_main) أو None — يُحتسب بعد tabs()."""
+        try:
+            for t in (self.tabs() or []):
+                if t.is_main:
+                    return t
+        except Exception:
+            pass
+        return None
 
     def details(self) -> List[FMLKDetail]:
         """الجداول المتفرعة one-to-many من <details><detail table master detail>."""

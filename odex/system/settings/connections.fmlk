@@ -2,7 +2,7 @@
 <fml>
   <fml_metadata name="connections" displayName="الاتصالات" table="urs_connection" model_type="form" schema="main_hq_2026" connection="urs_local" category="البيانات" icon="fa-pen-to-square" description="سجل اتصالات قواعد البيانات — يدار بمشغل النماذج"/>
   <tabs>
-    <tab id="أساسية" name="أساسية" alias="أساسية" sort_order="1"/>
+    <tab id="أساسية" name="أساسية" alias="أساسية" sort_order="1" is_main="1"/>
     <tab id="الاتصال" name="الاتصال" alias="الاتصال" sort_order="2" visibleIf="conn_type!=iot"/>
     <tab id="المصادقة" name="المصادقة" alias="المصادقة" sort_order="3" visibleIf="conn_type!=iot"/>
     <tab id="أجهزة IoT" name="أجهزة IoT" alias="أجهزة IoT" sort_order="4" visibleIf="conn_type==iot"/>
