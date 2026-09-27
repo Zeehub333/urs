@@ -727,7 +727,7 @@
             const stripWrap = document.createElement('div');
             stripWrap.id = 'stStripWrap';
             stripWrap.className = 'mt-4';
-            stripWrap.innerHTML = '<div class="text-[11px] font-bold text-slate-400 mb-1.5 px-1">تبويبات أخرى:</div><div id="stStrip" class="flex gap-1.5 overflow-x-auto custom-scroll border-b border-slate-200 pr-1"></div>';
+            stripWrap.innerHTML = '<div id="stStrip" class="flex gap-1.5 overflow-x-auto custom-scroll border-b border-slate-200 pr-1"></div>';
             root.appendChild(top);
             root.appendChild(stripWrap);
             const below = document.createElement('div');
@@ -780,12 +780,9 @@
                     title.className = 'flex items-center gap-2 px-1 mb-2';
                     top.parentNode.insertBefore(title, top);
                 }
-                let nf = 0;
-                try{ nf = first ? first.querySelectorAll('[data-field]').length : 0; }catch(e){}
                 title.innerHTML = first
                     ? '<span class="w-7 h-7 rounded-full bg-indigo-600 text-white text-xs font-bold flex items-center justify-center shrink-0">✓</span>'
                     + '<span class="font-bold text-sm text-slate-800">' + escHtml(stackAlias(firstId)) + '</span>'
-                    + (nf ? '<span class="text-[10px] text-slate-400 bg-slate-100 rounded-full px-2 py-0.5">' + nf + ' حقل</span>' : '')
                     : '';
                 title.style.display = first ? '' : 'none';
                 top.style.display = first ? '' : 'none';
@@ -803,11 +800,8 @@
                     btitle.className = 'flex items-center gap-2 px-1 mb-2';
                     below.parentNode.insertBefore(btitle, below);
                 }
-                let mf = 0;
-                try{ mf = sel ? sel.querySelectorAll('[data-field]').length : 0; }catch(e){}
                 btitle.innerHTML = sel
                     ? '<span class="font-bold text-sm text-slate-700">' + escHtml(stackAlias(window._stackActive)) + '</span>'
-                    + (mf ? '<span class="text-[10px] text-slate-400 bg-slate-100 rounded-full px-2 py-0.5">' + mf + ' حقل</span>' : '')
                     : '';
                 btitle.style.display = sel ? '' : 'none';
                 below.style.display = sel ? '' : 'none';
