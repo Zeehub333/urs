@@ -3,9 +3,10 @@
  *
  * الواجهة (حسب المواصفة):
  *   [مربع البحث] [زر بحث] [استيراد من إكسل] [تصفية متقدمة]
- *   - اكتب القيمة أولاً → تظهر قائمة الأعمدة المطابقة → اختر العمود.
+ *   - اكتب القيمة أولاً → تظهر قائمة «ابحث عن القيمة في العمود».
+ *   - النقر على صف ينفّذ فوراً في عموده؛ Enter ينفّذ في الصف المميز أو العمود المحدد.
  *   - النص المكتوب هو القيمة دائماً ولا يُمس عند اختيار العمود.
- *   - لا بحث فوري: التنفيذ بزر Enter أو زر البحث فقط → يبني استعلام WHERE (وسم).
+ *   - لا بحث فوري أثناء الكتابة: التنفيذ بالنقر/Enter/زر البحث فقط → وسم WHERE.
  *
  * الاستخدام:
  *   SearchEngine.mount(el, {
@@ -108,37 +109,64 @@
         }
 
         function filteredCols() {
+            // القيمة أولاً: المطابق اسماً أولاً ثم بقية الأعمدة (الكل قابل للبحث فيه)
             var t = (q.value || '').trim().toLowerCase();
             if (!t) return state.cols.slice(0, 60);
-            return state.cols.filter(function (c) {
-                return colLabel(c).toLowerCase().indexOf(t) >= 0;
-            }).slice(0, 60);
+            var hit = [], rest = [];
+            state.cols.forEach(function (c) {
+                if (colLabel(c).toLowerCase().indexOf(t) >= 0) hit.push(c);
+                else rest.push(c);
+            });
+            return hit.concat(rest).slice(0, 60);
         }
 
         function paintPop() {
             var items = filteredCols();
-            state.hi = -1;
+            state.items = items;
+            if (state.hi >= items.length) state.hi = -1;
+            var text = (q.value || '').trim();
             if (!items.length) {
-                pop.innerHTML = '<div class="px-3 py-2.5 text-slate-400 text-center">لا أعمدة مطابقة</div>';
+                pop.innerHTML = '<div class="px-3 py-2.5 text-slate-400 text-center">لا أعمدة متاحة</div>';
             } else {
-                pop.innerHTML = '<div class="px-3 py-1.5 text-[10px] font-bold text-slate-400 bg-slate-50 border-b border-slate-100">اختر العمود — ثم Enter للبحث فيه</div>' +
-                    items.map(function (c, i) {
-                        var key = esc(String(c.alias || c.name || ''));
-                        var sel = (String(c.alias || c.name || '') === state.column) ? ' <i class="fa-solid fa-check text-emerald-500"></i>' : '';
-                        return '<div data-sei="' + i + '" class="px-3 py-1.5 cursor-pointer hover:bg-indigo-50 text-slate-700 flex items-center justify-between gap-2" dir="auto"><span class="truncate">' + esc(colLabel(c)) + '</span>' + sel + '</div>';
-                    }).join('');
+                var head = text
+                    ? '<div class="px-3 py-1.5 text-[10px] font-bold text-slate-400 bg-slate-50 border-b border-slate-100">ابحث عن «' + esc(text.slice(0, 40)) + '» في… (نقرة تنفّذ فوراً)</div>'
+                    : '<div class="px-3 py-1.5 text-[10px] font-bold text-slate-400 bg-slate-50 border-b border-slate-100">اختر العمود ثم اكتب القيمة</div>';
+                pop.innerHTML = head + items.map(function (c, i) {
+                    var sel = (String(c.alias || c.name || '') === state.column) ? ' <i class="fa-solid fa-check text-emerald-500 shrink-0"></i>' : '';
+                    var body = text
+                        ? '<span class="truncate">🔍 «' + esc(text.slice(0, 40)) + '» في <b>' + esc(colLabel(c)) + '</b></span>'
+                        : '<span class="truncate">' + esc(colLabel(c)) + '</span>';
+                    return '<div data-sei="' + i + '" class="px-3 py-1.5 cursor-pointer text-slate-700 flex items-center justify-between gap-2' + (i === state.hi ? ' bg-indigo-100' : ' hover:bg-indigo-50') + '" dir="auto">' + body + sel + '</div>';
+                }).join('');
                 Array.prototype.forEach.call(pop.querySelectorAll('[data-sei]'), function (d) {
+                    var idx = parseInt(d.getAttribute('data-sei'), 10);
+                    d.onmouseover = function () {
+                        if (state.hi !== idx) { state.hi = idx; paintHi(); }
+                    };
                     d.onmousedown = function (ev) {
                         ev.preventDefault();
-                        pickCol(items[parseInt(d.getAttribute('data-sei'), 10)]);
+                        var c = (state.items || [])[idx];
+                        // نقرة على «ابحث عن القيمة في العمود» تنفّذ فوراً؛ بلا نص مجرد اختيار
+                        if ((q.value || '').trim()) pickCol(c, true);
+                        else pickCol(c, false);
                     };
                 });
             }
-            pop.dataset.items = JSON.stringify(items.map(function (c) { return c.alias || c.name; }));
+        }
+
+        function paintHi() {
+            try {
+                Array.prototype.forEach.call(pop.querySelectorAll('[data-sei]'), function (d) {
+                    var on = parseInt(d.getAttribute('data-sei'), 10) === state.hi;
+                    d.classList.toggle('bg-indigo-100', on);
+                    if (!on) d.classList.add('hover:bg-indigo-50');
+                });
+            } catch (e) {}
         }
 
         function openPop() {
             refreshColumns();
+            state.hi = -1;
             paintPop();
             state.open = true;
             pop.classList.remove('hidden');
@@ -146,31 +174,32 @@
 
         function closePop() {
             state.open = false;
+            state.hi = -1;
             pop.classList.add('hidden');
         }
 
-        function pickCol(c) {
+        function pickCol(c, submitAfter) {
             if (!c) return;
             state.column = String(c.alias || c.name || '');
             saveCol();
             paintColBtn();
             closePop();
-            // القيمة أولاً: النص المكتوب هو قيمة البحث ويبقى كما هو دائماً —
-            // اختيار العمود لا يمسه، ثم Enter لبناء الوسم.
+            // النص المكتوب هو القيمة ويبقى كما هو دائماً — اختيار العمود لا يمسه.
             try {
                 q.placeholder = 'القيمة في «' + colLabel(c) + '» ثم Enter…';
                 q.focus();
             } catch (e) {}
+            if (submitAfter) submit(state.column);
         }
 
-        function submit() {
+        function submit(forceCol) {
             var text = (q.value || '').trim();
             closePop();
             if (!text) {
                 try { q.focus(); } catch (e) {}
                 return;
             }
-            onSearch({ column: state.column, text: text });
+            onSearch({ column: (forceCol !== undefined ? forceCol : state.column), text: text });
         }
 
         function doImport(file) {
@@ -211,9 +240,24 @@
         q.addEventListener('focus', function () { openPop(); });
         q.addEventListener('click', function () { if (!state.open) openPop(); });
         q.addEventListener('keydown', function (e) {
-            if (e.key === 'Enter') { e.preventDefault(); submit(); }
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                // تمييز نشط ← نفّذ في عموده فوراً؛ وإلا العمود المحدد حالياً
+                if (state.open && state.hi >= 0 && (state.items || [])[state.hi]) {
+                    var c = state.items[state.hi];
+                    pickCol(c, true);
+                } else submit();
+            }
             else if (e.key === 'Escape') { closePop(); }
-            else if (e.key === 'ArrowDown' && !state.open) { e.preventDefault(); openPop(); }
+            else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                e.preventDefault();
+                if (!state.open) { openPop(); return; }
+                var n = (state.items || []).length;
+                if (!n) return;
+                if (e.key === 'ArrowDown') state.hi = (state.hi + 1) % n;
+                else state.hi = (state.hi - 1 + n) % n;
+                paintHi();
+            }
         });
         colBtn.addEventListener('click', function () {
             if (state.open) closePop();
