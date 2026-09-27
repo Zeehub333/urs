@@ -3145,6 +3145,76 @@ def api_rml_distinct(request):
         return JsonResponse({"error": str(e)}, status=500)
 
 @csrf_exempt
+def api_search_import_excel(request):
+    """POST /api/search/import-excel/ (multipart file=) — قيم بحث من ملف إكسل.
+
+    يقرأ أول عمود غير فارغ من أول ورقة (xlsx/xlsm حتى 10MB) ويعيد القيم
+    النصية مفرّدة بالترتيب (بحد أقصى 5000) لبناء فلتر IN على عمود محدد.
+    → {values, count, truncated, filename}
+    """
+    if request.method != "POST":
+        return JsonResponse({"error": "POST required"}, status=405)
+    try:
+        f = request.FILES.get("file")
+        if not f:
+            return JsonResponse({"error": "file required"}, status=400)
+        ext = (f.name.rsplit(".", 1)[-1] if "." in (f.name or "") else "").lower()
+        if ext not in ("xlsx", "xlsm"):
+            return JsonResponse({"error": "xlsx/xlsm only"}, status=400)
+        if (f.size or 0) > 10 * 1024 * 1024 or (f.size or 0) <= 0:
+            return JsonResponse({"error": "empty or >10MB"}, status=400)
+        raw = f.read()
+        if len(raw) > 10 * 1024 * 1024:
+            return JsonResponse({"error": ">10MB"}, status=400)
+        if raw[:2] != b"PK":
+            return JsonResponse({"error": "not a valid xlsx file"}, status=400)
+        import io as _io
+        from openpyxl import load_workbook as _load_wb
+        wb = _load_wb(filename=_io.BytesIO(raw), read_only=True, data_only=True)
+        try:
+            ws = wb.active
+            if ws is None:
+                return JsonResponse({"error": "empty workbook"}, status=400)
+            # أول عمود فيه قيم (نمسح A..J) — نتجاوز الرؤوس النصية الصرفة تلقائياً؟
+            # لا: نعيد كل القيم غير الفارغة، والمضيف يبني IN (القيم الزائدة لا تضر).
+            col_idx = None
+            for ci in range(1, 11):
+                for row in ws.iter_rows(min_col=ci, max_col=ci, max_row=50, values_only=True):
+                    v = row[0] if row else None
+                    if v is not None and str(v).strip() != "":
+                        col_idx = ci
+                        break
+                if col_idx is not None:
+                    break
+            if col_idx is None:
+                return JsonResponse({"error": "no values in first columns"}, status=400)
+            values, seen = [], set()
+            truncated = False
+            for row in ws.iter_rows(min_col=col_idx, max_col=col_idx, values_only=True):
+                v = row[0] if row else None
+                if v is None:
+                    continue
+                s = str(v).strip()
+                if not s or s in seen:
+                    continue
+                seen.add(s)
+                values.append(s)
+                if len(values) >= 5000:
+                    truncated = True
+                    break
+        finally:
+            try:
+                wb.close()
+            except Exception:
+                pass
+        return JsonResponse({"values": values, "count": len(values),
+                             "truncated": truncated, "filename": f.name or ""},
+                            json_dumps_params={"ensure_ascii": False})
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@csrf_exempt
 def api_rml_groups(request):
     """Server-side grouping over ALL records (sidebar, not the page).
 

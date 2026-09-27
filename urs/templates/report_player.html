@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 {% block title %}{{ app.ar }} — {{ rml_metadata.displayName }} — مشغل التقارير{% endblock %}
 {% block head_css %}
         body { background-color: #f8fafc; }
@@ -102,14 +103,10 @@
             </div>
         </div>
 
-        <!-- Center: Search, Filters & Presets (full-featured) -->
-        <div class="flex-1 max-w-2xl mx-6 hidden lg:flex items-center gap-2">
-            <select id="searchColSel" onchange="setSearchCol(this.value)" title="عمود البحث — فارغ = كل الأعمدة المطابقة (ذكي)" class="shrink-0 max-w-[150px] bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-slate-600 focus:outline-none focus:border-indigo-500 cursor-pointer"></select>
-            <div id="searchTagsContainer" class="flex-1 flex items-center flex-wrap gap-1.5 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 min-h-[32px] max-h-[76px] overflow-y-auto custom-scroll focus-within:border-indigo-500 focus-within:ring-1 focus-within:ring-indigo-500 transition">
-                <i class="fa-solid fa-search text-slate-400 text-sm ml-1"></i>
-                <div id="activeTagsList" class="flex flex-wrap gap-1.5"></div>
-                <input type="text" id="searchInput" placeholder="بحث ذكي: نص، رقم، تاريخ، 09:00... (& للجمع، ، للتخيير)..." class="bg-transparent border-none text-xs focus:outline-none flex-1 min-w-[140px] text-slate-700 py-1">
-            </div>
+        <!-- Center: SearchEngine (unified search) + active filter tags -->
+        <div class="flex-1 max-w-2xl mx-6 hidden lg:flex lg:flex-col gap-1 min-w-0">
+            <div id="searchEngineBox" class="w-full"></div>
+            <div id="activeTagsList" class="flex flex-wrap gap-1.5 max-h-[76px] overflow-y-auto custom-scroll"></div>
         </div>
 
         <!-- Left: Actions — all features -->
@@ -151,14 +148,10 @@
         </div>
     </header>
 
-    <!-- Mobile search bar -->
-    <div class="lg:hidden bg-white border-b border-slate-200 px-4 py-2 flex items-center gap-2">
-        <select id="searchColSelMobile" onchange="setSearchCol(this.value)" title="عمود البحث" class="shrink-0 max-w-[110px] bg-white border border-slate-200 rounded-lg px-1.5 py-1.5 text-xs text-slate-600 focus:outline-none focus:border-indigo-500 cursor-pointer"></select>
-        <div class="flex-1 flex items-center flex-wrap gap-1.5 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 max-h-[76px] overflow-y-auto custom-scroll">
-            <i class="fa-solid fa-search text-slate-400 text-sm"></i>
-            <div id="activeTagsListMobile" class="flex flex-wrap gap-1.5"></div>
-            <input type="text" id="searchInputMobile" placeholder="ابحث..." class="bg-transparent border-none text-xs focus:outline-none flex-1 min-w-[100px]">
-        </div>
+    <!-- Mobile search bar (SearchEngine unified) -->
+    <div class="lg:hidden bg-white border-b border-slate-200 px-4 py-2 flex flex-col gap-1">
+        <div id="searchEngineBoxMobile" class="w-full"></div>
+        <div id="activeTagsListMobile" class="flex flex-wrap gap-1.5 max-h-[76px] overflow-y-auto custom-scroll"></div>
     </div>
 
     <div class="flex-1 flex overflow-hidden min-h-0">
@@ -541,6 +534,7 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
 </div>
 
 {% block scripts %}
+    <script src="{% static 'components/search_engine.js' %}"></script>
     <script>
         // Injected Django context
         const DJANGO_RML = "{{ rml_file|escapejs }}";
@@ -921,7 +915,11 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                 const arr = JSON.parse(q);
                 if(Array.isArray(arr)) arr.forEach(f=>{
                     if(f && Array.isArray(f.any)) activeFilters.push({any: f.any, _smart: f._smart, orGroup: f.orGroup});
-                    else if(f && f.field && f.op) activeFilters.push({field: f.field, op: f.op, value: f.value, valFrom: f.valFrom, valTo: f.valTo});
+                    else if(f && f.field && f.op){
+                        // فلاتر IN ضخمة (إكسل) لا تُحفظ في الرابط — تُتجاهل عند الاسترجاع
+                        if(typeof f.value === 'string' && f.value.indexOf('__skipped_') === 0) return;
+                        activeFilters.push({field: f.field, op: f.op, value: f.value, valFrom: f.valFrom, valTo: f.valTo});
+                    }
                 });
             }catch(e){}
         }
@@ -930,6 +928,7 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
             loadPresets();
             setupSearchInput();
             try{ refreshSearchColOptions(); }catch(e){}
+            try{ mountReportSearchEngine(); }catch(e){}
             applyUrlFilters();
             restoreLastSort();
             renderSearchTags();
@@ -2370,6 +2369,9 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
         }
         function getSearchCol(){
             try{
+                // المحرك الموحد مصدر الحقيقة عند تركيبه — يحمل نفس مفتاح الحفظ
+                if(window._seMain){ const c = window._seMain.getColumn(); if(c) return c; }
+                if(window._seMobile){ const c = window._seMobile.getColumn(); if(c) return c; }
                 const s = document.getElementById('searchColSel');
                 if(s && s.value) return s.value;
                 const m = document.getElementById('searchColSelMobile');
@@ -2380,6 +2382,8 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
         function setSearchCol(v){
             try{
                 v = String(v || '');
+                if(window._seMain){ try{ window._seMain.setColumn(v); }catch(e){} }
+                if(window._seMobile){ try{ window._seMobile.setColumn(v); }catch(e){} }
                 const s = document.getElementById('searchColSel');
                 if(s) s.value = v;
                 const m = document.getElementById('searchColSelMobile');
@@ -2395,6 +2399,8 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
             }catch(e){}
         }
         function refreshSearchColOptions(){
+            // المحرك الموحد يسحب الأعمدة حياً عبر المزود — لا حاجة لتعبئة القوائم القديمة
+            if(window._seMain || window._seMobile) return;
             // خيارات = أعمدة التقرير المرئية فعلياً (آخر بيانات أو queryColumns)
             try{
                 const cols = (typeof allCols === 'function' ? allCols() : (typeof queryColumns !== 'undefined' ? queryColumns : [])) || [];
@@ -2451,12 +2457,62 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
             }catch(e){}
             return null;
         }
+        // ── SearchEngine الموحد: تركيب + ربط بخط الأنابيب الحالي ──
+        function mountReportSearchEngine(){
+            if(typeof SearchEngine === 'undefined' || !SearchEngine.mount) return;
+            const colProvider = ()=>{
+                try{
+                    const cols = (typeof allCols === 'function' ? allCols() : (typeof queryColumns !== 'undefined' ? queryColumns : [])) || [];
+                    return cols.map(c=>({name: c.name || c.alias || '', alias: c.alias || c.name || ''})).filter(c=>c.alias);
+                }catch(e){ return []; }
+            };
+            const onSearch = ({column, text})=>{
+                try{ setSearchCol(column || ''); }catch(e){}
+                submitReportSearch(text);
+            };
+            const onImport = ({column, values, count, truncated, filename})=>{
+                const col = column || getSearchCol() || '';
+                if(!col){ try{ notify('اختر العمود من القائمة أولاً ثم استورد الإكسل', 'info'); }catch(e){} return; }
+                if(!values || !values.length){ try{ notify('ملف ' + filename + ' بلا قيم', 'info'); }catch(e){} return; }
+                activeFilters.push({field: col, op: 'in', value: values, _smart: '📥 إكسل'});
+                renderSearchTags();
+                syncUrlFilters();
+                refreshApiData();
+                try{ notify(`📥 ${count} قيمة من ${filename}${truncated ? ' (الأولى فقط)' : ''} → ${col}`, 'success'); }catch(e){}
+            };
+            const adv = ()=>{ try{ openAdvancedFilterModal(); }catch(e){} };
+            const key = searchColStoreKey();
+            try{
+                const box = document.getElementById('searchEngineBox');
+                if(box && !window._seMain) window._seMain = SearchEngine.mount(box, {
+                    columns: colProvider, onSearch: onSearch, onAdvanced: adv,
+                    onImportValues: onImport, persistKey: key,
+                    placeholder: 'ابحث… (اكتب لعرض الأعمدة، اختر عموداً، ثم Enter)'
+                });
+                const mb = document.getElementById('searchEngineBoxMobile');
+                if(mb && !window._seMobile) window._seMobile = SearchEngine.mount(mb, {
+                    columns: colProvider, onSearch: onSearch, onAdvanced: adv,
+                    onImportValues: onImport, persistKey: key,
+                    placeholder: 'ابحث… ثم Enter'
+                });
+            }catch(e){}
+        }
         function setupSearchInput() {
             const input = document.getElementById('searchInput');
             const mobileInput = document.getElementById('searchInputMobile');
             const handler = async function(e) {
                 if (e.key === 'Enter' && this.value.trim() !== '') {
-                    let val = this.value.trim();
+                    await submitReportSearch(this.value.trim());
+                }
+            };
+            if(input) input.addEventListener('keydown', handler);
+            if(mobileInput) mobileInput.addEventListener('keydown', handler);
+        }
+        // تنفيذ البحث: نفس خط الأنابيب للإدخال القديم ومحرك SearchEngine (Enter/زر)
+        async function submitReportSearch(val){
+            val = String(val || '').trim();
+            if(!val) return;
+            {
                     // الفواصل (، ,) = أو — و (&) = و (داخل نفس المقطع)
                     const segments = val.split(/[,،]/).map(s=>s.trim()).filter(s=>s!=='');
                     const detCols = ((apiDetail() && apiDetail().columns) || []);
@@ -2575,15 +2631,18 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                     }
                     if(branches.length > 1) activeFilters.push({any: branches, _smart: '⚡ أو'});
                     else if(branches.length === 1) activeFilters.push(branches[0]);
-                    this.value = '';
-                    if(mobileInput) mobileInput.value='';
+                    try{
+                        const _si = document.getElementById('searchInput');
+                        if(_si) _si.value = '';
+                        const _sm = document.getElementById('searchInputMobile');
+                        if(_sm) _sm.value = '';
+                        if(window._seMain){ try{ window._seMain.setText(''); }catch(e){} }
+                        if(window._seMobile){ try{ window._seMobile.setText(''); }catch(e){} }
+                    }catch(e){}
                     renderSearchTags();
                     syncUrlFilters();
                     refreshApiData();
-                }
-            };
-            if(input) input.addEventListener('keydown', handler);
-            if(mobileInput) mobileInput.addEventListener('keydown', handler);
+            }
         }
         function refreshMyReportButtons(){
             try{
@@ -2637,7 +2696,9 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                     smartPop = ` onclick="openSmartTagPop(${idx}, event)" title="${escT(fullTitle)} — اضغط لعرض الأعمدة" style="cursor:pointer"`;
                 } else if(f.op === 'in' || f.op === 'in_list'){
                     opSym = '∋';
-                    label = `${f._smart || 'تفاصيل'} (${((f.value || []).length)} مستند)`;
+                    const _n = ((f.value || []).length);
+                    const _unit = (f._smart && f._smart.indexOf('📥') >= 0) ? 'قيمة' : 'مستند';
+                    label = `${f._smart || 'تفاصيل'} (${_n} ${_unit}) — ${f.field || ''}`;
                 } else {
                     opSym = ((o)=> o === 'gt' ? '>' : o === 'lt' ? '<' : o === 'gte' ? '≥' : o === 'lte' ? '≤' : o === 'contains' ? '∋' : o === 'startswith' ? '⇥' : o === 'endswith' ? '⇤' : o === 'not_contains' ? '∌' : o === 'not_equals' ? '≠' : o === 'inyear' ? 'سنة' : o === 'inmonth' ? 'شهر' : o === 'since' ? 'منذ' : o === 'inday' ? 'يوم' : o === 'between' ? '⇋' : '=')(f.op);
                     label = `${f._smart ? (f._smart + ' ') : ''}${f.field} ${opSym} ${f.value !== undefined && f.value !== '' ? cleanMidnight(f.value) : ((cleanMidnight(f.valFrom) || '') + ' - ' + (cleanMidnight(f.valTo) || ''))}`;
@@ -3572,7 +3633,8 @@ try{
             try{
                 const url = new URL(location.href);
                 url.searchParams.delete('setup');
-                if(activeFilters.length) url.searchParams.set('filters', JSON.stringify(activeFilters));
+                // فلاتر IN الضخمة (استيراد إكسل) تُستبدل بعلامة — الرابط لا يحتمل آلاف القيم
+                if(activeFilters.length) url.searchParams.set('filters', JSON.stringify(activeFilters, (k, v)=>(Array.isArray(v) && v.length > 50) ? ('__skipped_' + v.length) : v));
                 else url.searchParams.delete('filters');
                 if(activeSort && activeSort.column) url.searchParams.set('sort', JSON.stringify({column: activeSort.column, direction: activeSort.direction === 'desc' ? 'desc' : 'asc'}));
                 else url.searchParams.delete('sort');

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 {% block title %}{{ app.ar }} — {{ fml_metadata.displayName }} — مشغل الادخالات{% endblock %}
 {% block head_css %}
         .fmlk-tab-active { background: #4f46e5; color: white; border-color: #4f46e5; }
@@ -162,8 +163,7 @@
 
             <!-- Grid toolbar -->
             <div class="px-3 py-1.5 flex items-center gap-2 text-xs shrink-0 bg-white border-b border-slate-200">
-                <i class="fa-solid fa-search text-slate-400"></i>
-                <input id="gridSearch" type="text" placeholder="بحث ذكي: نص، رقم، تاريخ، 09:00... (& للجمع، ، للتخيير)..." oninput="onGridSearch(this.value)" class="flex-1 min-w-[120px] bg-transparent border-none focus:outline-none text-slate-700">
+                <div id="gridSearchEngine" class="flex-1 min-w-[120px]"></div>
                 <button onclick="openAdvFilterModal()" title="تصفية متقدمة (عوامل على الحقول)" class="relative inline-flex items-center gap-1 px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg font-bold whitespace-nowrap"><i class="fa-solid fa-sliders"></i> تصفية <span id="advCount" class="hidden min-w-[18px] h-[18px] px-1 rounded-full bg-indigo-600 text-white text-[10px] items-center justify-center"></span></button>
                 <span id="selectedCount" class="text-slate-400 whitespace-nowrap"></span>
                 <div id="activeGroupIndicator" class="hidden items-center gap-2 bg-indigo-50 text-indigo-700 px-3 py-1 rounded-lg font-medium">
@@ -394,6 +394,7 @@
     </div>
     {% endblock %}
 {% block scripts %}
+    <script src="{% static 'components/search_engine.js' %}"></script>
     <script>
         // Injected by Django
         let currentFml = "{{ fml_file|escapejs }}";
@@ -410,6 +411,7 @@
         let groupCol = null;
         let groupVal = null;
         let gridSearch = '';
+        let gridQuery = {column: '', text: ''}; // SearchEngine الموحد: عمود + نص (Enter/زر فقط)
         let currentPage = 1;
         let pageSize = 25;
         // التحميل التدريجي من الخادم (الجهات > 1000): دفعات FETCH_SIZE عبر lazy scroll
@@ -3080,8 +3082,32 @@
         }
 
         // ── Grid (table with report-player features) ──
+        function gridSingleFilter(colName, sc){
+            // فلتر أحادي لعمود محدد (SearchEngine) يُطابَق عبر matchAdv — يعكس singleColFilter
+            try{
+                const cols = visibleFields();
+                const f = cols.find(c=>c.name === colName || c.alias === colName);
+                if(!f) return null;
+                const k = formFieldKind(f);
+                const F = f.name;
+                if(sc.kind === 'number') return (k === 'number') ? {field: F, op: 'equals', value: sc.value} : {field: F, op: 'contains', value: sc.value};
+                if(sc.kind === 'text') return (k === 'number') ? {field: F, op: 'equals', value: sc.value} : {field: F, op: 'contains', value: sc.value};
+                if(sc.kind === 'time') return (k === 'time') ? {field: F, op: 'equals', value: sc.value} : {field: F, op: 'contains', value: sc.value};
+                if(sc.kind === 'date'){
+                    if(k === 'date') return {field: F, op: 'equals', value: sc.value};
+                    if(k === 'datetime') return {field: F, op: 'between', valFrom: sc.value + ' 00:00:00', valTo: sc.value + ' 23:59:59'};
+                    return {field: F, op: 'contains', value: sc.value};
+                }
+                if(sc.kind === 'daterange'){
+                    if(k === 'date' || k === 'datetime' || k === 'text') return {field: F, op: 'between', valFrom: sc.from, valTo: sc.to};
+                    return null;
+                }
+            }catch(e){}
+            return null;
+        }
         function filteredRows() {
-            const rawQ = gridSearch.trim();
+            const rawQ = ((typeof gridQuery !== 'undefined' && gridQuery.text ? gridQuery.text : gridSearch) || '').trim();
+            const forceCol = (typeof gridQuery !== 'undefined' ? gridQuery.column : '') || '';
             // الفواصل (، ,) = أو — و (&) = و — كل جزء يُصنّف ذكياً على حدة
             const orGroups = rawQ ? rawQ.split(/[,،]/).map(s=>s.trim()).filter(Boolean)
                 .map(seg=>seg.split('&').map(p=>p.trim()).filter(Boolean).map(p=>smartClassify(p))) : [];
@@ -3108,6 +3134,14 @@
             };
             const matchSmart = (r)=>{
                 if(!orGroups.length) return true;
+                // عمود محدد (SearchEngine): كل جزء يُطابَق في هذا العمود فقط
+                if(forceCol){
+                    return orGroups.some(parts=>parts.every(sc=>{
+                        const node = gridSingleFilter(forceCol, sc);
+                        if(!node) return matchPart(r, sc);
+                        return matchAdv(r, node);
+                    }));
+                }
                 return orGroups.some(parts=>parts.every(sc=>matchPart(r, sc)));
             };
             return allRows.filter(r => {
@@ -3145,6 +3179,49 @@
             gridSearch = v;
             currentPage = 1;
             renderGrid();
+        }
+        // ── SearchEngine الموحد في شبكة النماذج (لا بحث فوري: Enter/زر فقط) ──
+        function mountGridSearchEngine(){
+            if(typeof SearchEngine === 'undefined' || !SearchEngine.mount) return;
+            if(window._seGrid) return;
+            const box = document.getElementById('gridSearchEngine');
+            if(!box) return;
+            const colKey = (c)=>{
+                try{
+                    const vf = (typeof visibleFields === 'function' ? visibleFields() : []) || [];
+                    const hit = vf.find(f=>String(f.alias || '') === String(c || '') || String(f.name || '') === String(c || ''));
+                    return hit ? hit.name : (c || '');
+                }catch(e){ return c || ''; }
+            };
+            const key = 'se_col_forms_' + (currentApp || 'app') + '_' + (currentFml || 'fml');
+            window._seGrid = SearchEngine.mount(box, {
+                columns: ()=>{
+                    try{
+                        return ((typeof visibleFields === 'function' ? visibleFields() : []) || [])
+                            .filter(f=>f && f.name)
+                            .map(f=>({name: f.name, alias: f.alias || f.name}));
+                    }catch(e){ return []; }
+                },
+                onSearch: ({column, text})=>{
+                    gridQuery = {column: colKey(column), text: String(text || '')};
+                    currentPage = 1;
+                    renderGrid();
+                },
+                onAdvanced: ()=>{ try{ openAdvFilterModal(); }catch(e){} },
+                showAdvanced: false, // زر المضيف (مع عدّاد الوسوم) يبقى بجانب المحرك
+                onImportValues: ({column, values, count, truncated, filename})=>{
+                    const key2 = colKey(column);
+                    if(!key2){ try{ notify('اختر العمود من القائمة أولاً ثم استورد الإكسل', 'info'); }catch(e){} return; }
+                    if(!values || !values.length){ try{ notify('ملف ' + filename + ' بلا قيم', 'info'); }catch(e){} return; }
+                    advFilters.push({field: key2, op: 'in', value: values});
+                    currentPage = 1;
+                    renderAdvTags();
+                    renderGrid();
+                    try{ notify(`📥 ${count} قيمة من ${filename}${truncated ? ' (الأولى فقط)' : ''}`, 'success'); }catch(e){}
+                },
+                persistKey: key,
+                placeholder: 'ابحث… (اكتب لعرض الأعمدة، اختر عموداً، ثم Enter)'
+            });
         }
         function changePageSize(v) {
             pageSize = v;
@@ -3579,7 +3656,7 @@
                 : op === 'contains' ? '∋' : op === 'startswith' ? '⇥' : op === 'endswith' ? '⇤'
                 : op === 'not_contains' ? '∌' : op === 'not_equals' ? '≠'
                 : op === 'inyear' ? 'سنة' : op === 'inmonth' ? 'شهر' : op === 'since' ? 'منذ'
-                : op === 'between' ? '⇋' : '=';
+                : op === 'in' || op === 'in_list' ? '∋' : op === 'between' ? '⇋' : '=';
         }
         function advFieldLabel(name){
             try{ const f = fieldDef(name); return (f && f.alias) || name; }catch(e){ return name; }
@@ -3606,9 +3683,11 @@
             if(bAnd){ bAnd.className = 'px-2.5 py-1 ' + (orOn ? 'bg-white text-indigo-700' : 'bg-indigo-600 text-white'); }
             if(bOr){ bOr.className = 'px-2.5 py-1 ' + (orOn ? 'bg-amber-500 text-white' : 'bg-white text-indigo-700'); }
             box.innerHTML = advFilters.map((f, idx)=>{
-                const vv = (f.value !== undefined && f.value !== '')
-                    ? advCleanMidnight(f.value)
-                    : ((advCleanMidnight(f.valFrom) || '') + ' - ' + (advCleanMidnight(f.valTo) || ''));
+                const vv = Array.isArray(f.value)
+                    ? ('📥 (' + f.value.length + ' قيمة)')
+                    : ((f.value !== undefined && f.value !== '')
+                        ? advCleanMidnight(f.value)
+                        : ((advCleanMidnight(f.valFrom) || '') + ' - ' + (advCleanMidnight(f.valTo) || '')));
                 return `<span class="inline-flex items-center gap-1.5 bg-indigo-600 text-white px-2.5 py-1 rounded-lg font-semibold">${escHtml(advFieldLabel(f.field))} ${advOpSym(f.op)} ${escHtml(vv)}<button onclick="removeAdvFilter(${idx})" class="hover:text-indigo-200" title="إزالة"><i class="fa-solid fa-xmark text-[10px]"></i></button></span>`;
             }).join('');
         }
@@ -3640,6 +3719,11 @@
                 const s = sv.trim();
                 const kind = fmlAdvKind(f.field);
                 const op = f.op || 'equals';
+                if(op === 'in' || op === 'in_list'){
+                    // قيم مستوردة (إكسل): مطابقة تامة بعد التقليم
+                    const arr = Array.isArray(f.value) ? f.value : String(f.value ?? '').split(/[,،\n]/);
+                    return arr.some(v=>String(v ?? '').trim() !== '' && String(v ?? '').trim() === s);
+                }
                 if(op === 'between'){
                     const a = String(f.valFrom ?? '').trim(), b = String(f.valTo ?? '').trim();
                     if(kind === 'number'){
@@ -4013,6 +4097,7 @@
             btn.disabled = false;
         }
 
+        try{ mountGridSearchEngine(); }catch(e){}
         loadFml(currentFml);
     </script>
 {% endblock %}

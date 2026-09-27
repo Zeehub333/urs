@@ -140,6 +140,7 @@ urlpatterns = [
     path('api/rml/distinct', urs_views.api_rml_distinct, name='api_rml_distinct'),
     path('api/rml/groups', urs_views.api_rml_groups, name='api_rml_groups'),
     path('api/rml/joins', urs_views.api_rml_joins, name='api_rml_joins'),
+    path('api/search/import-excel/', urs_views.api_search_import_excel, name='api_search_import_excel'),
     path('api/presets/', urs_views.api_presets_list, name='api_presets_list'),
     path('api/presets/create/', urs_views.api_presets_create, name='api_presets_create'),
     path('api/presets/delete/', urs_views.api_presets_delete, name='api_presets_delete'),
