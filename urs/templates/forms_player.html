@@ -137,25 +137,31 @@
 
         <!-- Main -->
         <main class="flex-1 flex flex-col overflow-hidden min-h-0 bg-slate-50">
-            <!-- Form right-side drawer (add / edit) -->
-            <div id="formPanel" class="hidden fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm" onclick="if(event.target===this)closePanel()">
-                <div class="bg-white shadow-2xl h-full w-full max-w-2xl ml-auto flex flex-col overflow-hidden rounded-l-2xl">
-                    <div class="px-4 py-3 flex items-center justify-between bg-slate-50 border-b border-slate-200 gap-2">
-                        <span id="formPanelTitle" class="text-sm font-bold text-slate-800">سجل جديد</span>
-                        <div class="flex items-center gap-2">
+            <!-- Form modal (add / edit): elegant centered card, first tab on top, rest stacked below -->
+            <div id="formPanel" class="hidden fixed inset-0 z-50 bg-slate-900/55 backdrop-blur-sm overflow-y-auto p-4 sm:p-6 flex items-center justify-center" onclick="if(event.target===this)closePanel()">
+                <div class="bg-white shadow-2xl w-full max-w-3xl m-auto flex flex-col overflow-hidden rounded-2xl max-h-[calc(100vh-3rem)]">
+                    <div class="px-5 py-4 flex items-center justify-between gap-3 bg-gradient-to-l from-indigo-600 via-indigo-600 to-violet-600 text-white shrink-0">
+                        <div class="flex items-center gap-3 min-w-0">
+                            <span class="w-10 h-10 rounded-2xl bg-white/20 flex items-center justify-center text-base shrink-0"><i class="fa-solid fa-pen-to-square"></i></span>
+                            <div class="min-w-0">
+                                <div id="formPanelTitle" class="font-bold truncate">سجل جديد</div>
+                                <div id="formPanelSub" class="text-[11px] text-indigo-100 truncate">—</div>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-2 shrink-0">
                             <span id="formPanelActionsBar" class="flex items-center gap-2"></span>
-                            <button onclick="saveAndNew()" class="px-4 py-1.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-semibold">حفظ وجديد</button>
-                            <button onclick="saveAndClose()" class="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold">حفظ</button>
-                            <button onclick="closePanel()" class="px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs">إلغاء</button>
-                            <button onclick="closePanel()" class="w-8 h-8 rounded-full hover:bg-slate-200 text-slate-400 flex items-center justify-center ms-1"><i class="fa-solid fa-xmark"></i></button>
+                            <button onclick="saveAndNew()" class="px-4 py-1.5 bg-white/20 hover:bg-white/30 text-white rounded-xl text-xs font-semibold transition">حفظ وجديد</button>
+                            <button onclick="saveAndClose()" class="px-4 py-1.5 bg-white hover:bg-indigo-50 text-indigo-700 rounded-xl text-xs font-bold transition">حفظ</button>
+                            <button onclick="closePanel()" class="px-4 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs transition">إلغاء</button>
+                            <button onclick="closePanel()" title="إغلاق" class="w-8 h-8 rounded-full hover:bg-white/20 text-white/90 flex items-center justify-center ms-1 transition"><i class="fa-solid fa-xmark"></i></button>
                         </div>
                     </div>
-                    <div class="px-2 py-2 overflow-x-auto border-b border-slate-100">
+                    <div id="formTabsWrap" class="px-2 py-2 overflow-x-auto border-b border-slate-100 shrink-0">
                         <div id="tabsBar" class="flex items-center gap-1 min-w-max">
                             <div class="text-xs text-slate-400 px-4">جاري تحميل التبويبات...</div>
                         </div>
                     </div>
-                    <div id="formRoot" class="flex-1 min-h-0 overflow-y-auto custom-scroll p-4 max-w-6xl mx-auto w-full space-y-4">
+                    <div id="formRoot" class="flex-1 min-h-0 overflow-y-auto custom-scroll p-4 sm:p-5 w-full bg-slate-50/60">
                         <div class="text-center py-8 text-slate-400 text-sm">جاري تحميل البيانات...</div>
                     </div>
                 </div>
@@ -645,6 +651,130 @@
             document.querySelectorAll('[data-tab-content]').forEach(el => {
                 el.style.display = el.dataset.tabContent === tabId ? 'block' : 'none';
             });
+            try{ stackNormalize(); }catch(e){}
+        }
+        // ── التبويبات المكدسة في مودال النموذج: الأول فوق، والبقية تحته (أكورديون) ──
+        function stackAlias(id){
+            try{
+                const b = document.querySelector('#tabsBar [data-tab="' + id + '"]');
+                if(b && b.textContent.trim()) return b.textContent.trim();
+            }catch(e){}
+            if(id === 'cat_details') return 'التفاصيل';
+            return id;
+        }
+        function stackSetOpen(card, on){
+            if(!card) return;
+            card.dataset.open = on ? '1' : '0';
+            const body = card.querySelector('[data-stbody]');
+            if(body) body.style.display = on ? '' : 'none';
+            const chev = card.querySelector('[data-stchev]');
+            if(chev) chev.style.transform = on ? 'rotate(180deg)' : '';
+            card.classList.toggle('border-indigo-300', !!on);
+            card.classList.toggle('ring-1', !!on);
+            card.classList.toggle('ring-indigo-100', !!on);
+            const num = card.querySelector('[data-stnum]');
+            if(num){
+                num.classList.toggle('bg-indigo-600', !!on);
+                num.classList.toggle('text-white', !!on);
+                num.classList.toggle('bg-indigo-100', !on);
+                num.classList.toggle('text-indigo-700', !on);
+            }
+        }
+        function stackMakeCard(content, idx, open){
+            const id = content.getAttribute('data-tab-content');
+            content.style.display = '';
+            const n = (()=>{ try{ return content.querySelectorAll('[data-field]').length; }catch(e){ return 0; } })();
+            const card = document.createElement('div');
+            card.className = 'bg-white border border-slate-200 rounded-2xl overflow-hidden mb-3 shadow-sm';
+            card.setAttribute('data-stcard', id);
+            card.innerHTML =
+                '<button type="button" onclick="stackToggleCard(\'' + String(id).replace(/'/g, "\\'") + '\')" class="w-full flex items-center gap-2.5 px-4 py-3 hover:bg-slate-50 text-right transition">'
+                + '<span data-stnum class="w-7 h-7 rounded-full text-xs font-bold flex items-center justify-center shrink-0 bg-indigo-100 text-indigo-700">' + (idx + 1) + '</span>'
+                + '<span class="flex-1 font-bold text-sm text-slate-800 truncate">' + escHtml(stackAlias(id)) + '</span>'
+                + (n ? '<span class="text-[10px] text-slate-400 bg-slate-100 rounded-full px-2 py-0.5 shrink-0">' + n + ' حقل</span>' : '')
+                + '<i data-stchev class="fa-solid fa-chevron-down text-slate-400 text-xs transition-transform shrink-0"></i>'
+                + '</button>'
+                + '<div data-stbody class="px-4 pb-4"></div>';
+            content.parentNode.insertBefore(card, content);
+            card.querySelector('[data-stbody]').appendChild(content);
+            stackSetOpen(card, !!open);
+            return card;
+        }
+        function stackFormTabs(){
+            const root = document.getElementById('formRoot');
+            if(!root){ window._formStacked = false; return; }
+            const contents = Array.prototype.slice.call(root.querySelectorAll(':scope > [data-tab-content]'));
+            if(!contents.length){ window._formStacked = false; return; }
+            window._formStacked = true;
+            try{
+                const wrap = document.getElementById('formTabsWrap');
+                if(wrap) wrap.style.display = 'none';
+            }catch(e){}
+            let opened = false;
+            contents.forEach((content, i)=>{
+                if(content.closest('[data-stcard]')) return;
+                const hidden = content.dataset.visHidden === '1';
+                const card = stackMakeCard(content, i, false);
+                if(hidden){ card.style.display = 'none'; return; }
+                if(!opened){ stackSetOpen(card, true); opened = true; }
+            });
+            stackNormalize();
+        }
+        function stackAppendDetailsCard(){
+            // قسم التفاصيل يُلحق بعد renderForm — بطاقة مغلقة تحته (مع تنظيف بقايا قديمة)
+            try{
+                const root = document.getElementById('formRoot');
+                if(!root) return;
+                root.querySelectorAll('[data-stcard]').forEach(card=>{
+                    if(!card.querySelector('[data-tab-content]')) card.remove();
+                });
+                if(!window._formStacked){ stackFormTabs(); return; }
+                const content = root.querySelector(':scope > [data-tab-content="cat_details"]');
+                if(!content || content.closest('[data-stcard]')) return;
+                const idx = root.querySelectorAll('[data-stcard]').length;
+                stackMakeCard(content, idx, false);
+            }catch(e){}
+        }
+        function stackToggleCard(id){
+            try{
+                const card = document.querySelector('#formRoot [data-stcard="' + id + '"]');
+                if(!card || card.style.display === 'none') return;
+                stackSetOpen(card, card.dataset.open !== '1');
+            }catch(e){}
+        }
+        function stackOpenCard(id){
+            try{
+                const root = document.getElementById('formRoot');
+                if(!root) return;
+                root.querySelectorAll('[data-stcard]').forEach(c=>{
+                    if(c.style.display === 'none') return;
+                    stackSetOpen(c, c.getAttribute('data-stcard') === id);
+                });
+            }catch(e){}
+        }
+        function stackNormalize(){
+            // يعيد فرض: المحتوى ظاهر (إلا المؤرشف إخفاؤه)، وبطاقة مفتوحة واحدة على الأقل
+            if(!window._formStacked) return;
+            const root = document.getElementById('formRoot');
+            if(!root) return;
+            root.querySelectorAll('[data-stcard]').forEach(card=>{
+                const content = card.querySelector('[data-tab-content]');
+                if(!content) return;
+                if(content.dataset.visHidden === '1'){ card.style.display = 'none'; return; }
+                card.style.display = '';
+                content.style.display = '';
+            });
+            let anyOpen = false;
+            root.querySelectorAll('[data-stcard]').forEach(c=>{
+                if(c.dataset.open === '1' && c.style.display !== 'none') anyOpen = true;
+            });
+            if(!anyOpen){
+                let target = null;
+                root.querySelectorAll('[data-stcard]').forEach(c=>{
+                    if(!target && c.style.display !== 'none') target = c;
+                });
+                root.querySelectorAll('[data-stcard]').forEach(c=>stackSetOpen(c, c === target));
+            }
         }
 
         function renderForm(data) {
@@ -672,6 +802,7 @@
             try{ if(typeof uiEnhanceDates === 'function') uiEnhanceDates(root); }catch(e){}
             try{ connTypeHook(); }catch(e){}
             try{ fmlkVisibleApply(); }catch(e){}
+            try{ stackFormTabs(); }catch(e){}
         }
 
         // ── تبويبة التفاصيل: الجداول المتفرعة one-to-many كشبكة أسفل النموذج ──
@@ -687,11 +818,17 @@
             document.querySelectorAll('#tabsBar [data-tab="cat_details"]').forEach(b=>b.remove());
             document.querySelectorAll('[data-tab-content="cat_details"]').forEach(b=>b.remove());
             const dets = fwDetails();
-            if(!dets.length){ fwDetailRows = []; return; }
+            if(!dets.length){
+                fwDetailRows = [];
+                // بلا تفاصيل: أزل بقايا بطاقة سجل سابق (المحتوى حُذف أعلاه وبقيت القشرة)
+                try{ document.querySelectorAll('#formRoot [data-stcard="cat_details"]').forEach(c=>{ if(!c.querySelector('[data-tab-content]')) c.remove(); }); }catch(e){}
+                return;
+            }
             const bar = document.getElementById('tabsBar');
             if(bar) bar.insertAdjacentHTML('beforeend', `<span class="text-slate-300">›</span><button onclick="switchTab('cat_details')" data-tab="cat_details" class="tab-btn px-4 py-1.5 rounded-full text-xs font-medium border whitespace-nowrap bg-white border-slate-200 text-slate-600">التفاصيل</button>`);
             const root = document.getElementById('formRoot');
             if(root) root.insertAdjacentHTML('beforeend', `<div data-tab-content="cat_details" style="display:none"><div id="fwDetailWrap" class="space-y-4"></div></div>`);
+            try{ stackAppendDetailsCard(); }catch(e){}
             fwDetailRows = dets.map(()=>[]);
             const key = fwMasterKey();
             for(let i = 0; i < dets.length; i++){
@@ -817,6 +954,7 @@
                 return b && b.style.display !== 'none';
             });
             if(!anyOpen && firstVisible >= 0) switchTab('cat' + firstVisible);
+            try{ stackNormalize(); }catch(e){}
         }
 
         // ── نموذج الاتصالات: نوع الاتصال يقود قائمة المحركات والمنفذ ──
@@ -2263,6 +2401,7 @@
             renderForm(fmlMeta);
             document.querySelectorAll('[data-field]').forEach(el => { el.value = ''; });
             document.getElementById('formPanelTitle').textContent = 'سجل جديد';
+            try{ document.getElementById('formPanelSub').textContent = 'إدخال بيانات جديدة — التبويب الأول فوق وبقيتها تحته'; }catch(e){}
             document.getElementById('formPanel').classList.remove('hidden');
             if(typeof lockScroll === 'function') lockScroll();
             if(window.FMLK) try{ FMLK.widgetsRefresh(); }catch(e){}
@@ -2306,6 +2445,7 @@
                 });
             });
             document.getElementById('formPanelTitle').textContent = 'تعديل السجل';
+            try{ document.getElementById('formPanelSub').textContent = 'تحرير بيانات السجل الحالي'; }catch(e){}
             document.getElementById('formPanel').classList.remove('hidden');
             if(typeof lockScroll === 'function') lockScroll();
             refreshNav();
@@ -2318,6 +2458,21 @@
             p.classList.add('hidden');
             if(typeof unlockScroll === 'function') unlockScroll();
         }
+        document.addEventListener('keydown', (e) => {
+            // إغلاق مودال النموذج بـ Escape — ليس أثناء تحرير حقل (قوائم منسدلة/تواريخ)
+            try{
+                if(e.key !== 'Escape') return;
+                const t = e.target;
+                if(t && (t.tagName === 'SELECT' || t.tagName === 'TEXTAREA' || (t.tagName === 'INPUT' && t.type !== 'button'))) return;
+                const p = document.getElementById('formPanel');
+                if(!p || p.classList.contains('hidden')) return;
+                const dyn = document.getElementById('dynamicActionModal');
+                if(dyn && !dyn.classList.contains('hidden')) return;
+                const ov = document.getElementById('errModal');
+                if(ov && !ov.classList.contains('hidden')) return;
+                closePanel();
+            }catch(ee){}
+        });
 
         // ── سجل المراقبة لكل سجل: table_column_pkvalue ──
         function monitorRecordId(rec){
