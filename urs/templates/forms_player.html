@@ -715,6 +715,8 @@
             ['stTop', 'stStripWrap', 'stBelow', 'stTopTitle', 'stBelowTitle'].forEach(id=>{ const n = document.getElementById(id); if(n) n.remove(); });
             const contents = Array.prototype.slice.call(root.querySelectorAll(':scope > [data-tab-content]'));
             if(!contents.length){ window._formStacked = false; return; }
+            // ترتيب ثابت مستقل عن مواضع DOM (النقل بين الحاويات كان يعيد ترتيب الشريط عند كل تحديد)
+            window._stackOrder = contents.map(c=>c.getAttribute('data-tab-content'));
             window._formStacked = true;
             try{
                 const wrap = document.getElementById('formTabsWrap');
@@ -745,7 +747,16 @@
                 const strip = document.getElementById('stStrip');
                 const below = document.getElementById('stBelow');
                 if(!root || !top || !strip || !below) return;
-                const vis = stackVisibleContents();
+                const visUnsorted = stackVisibleContents();
+                // رتّب حسب _stackOrder الثابت (لا حسب DOM) — أي محتوى جديد يُلحق بالنهاية
+                const order = window._stackOrder || [];
+                const rank = (c)=>{
+                    const id = c.getAttribute('data-tab-content');
+                    let ix = order.indexOf(id);
+                    if(ix < 0){ order.push(id); ix = order.length - 1; }
+                    return ix;
+                };
+                const vis = visUnsorted.slice().sort((a, b)=>rank(a) - rank(b));
                 let first = vis.length ? vis[0] : null;
                 const mi = stackMainCatIndex();
                 if(mi >= 0){
