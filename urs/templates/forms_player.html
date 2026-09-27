@@ -1147,6 +1147,16 @@
                     case 'email':
                         input = `<div class="fx-wrap"><span class="fx-ic"><i class="fa-solid fa-envelope"></i></span><input type="email" data-field="${field.name}" value="${escAttr(val)}" placeholder="example@domain.com" ${patternAttr} ${minLenAttr} ${maxLenAttr} class="fx-inp font-mono" dir="ltr"/></div>`;
                         break;
+                    case 'ip_address': {
+                        const _parts = String(val ?? '').split('.');
+                        const _octs = [0, 1, 2, 3].map(k=>String(_parts[k] ?? '').replace(/\D/g, '').slice(0, 3));
+                        input = `<div class="flex items-center gap-1" dir="ltr">`
+                            + `<span class="w-8 h-8 shrink-0 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center" title="عنوان IPv4"><i class="fa-solid fa-network-wired text-xs"></i></span>`
+                            + [0, 1, 2, 3].map(k=>`${k ? '<span class="text-slate-300 font-bold select-none">.</span>' : ''}<input data-ip-octet="${escAttr(field.name)}" data-idx="${k}" value="${escAttr(_octs[k])}" inputmode="numeric" placeholder="0" maxlength="3" autocomplete="off" spellcheck="false" oninput="FMLK.ipOctet(this)" onkeydown="return FMLK.ipKey(this,event)" onpaste="FMLK.ipPaste('${field.name}',event)" onblur="FMLK.ipBlur(this)" class="fx-inp font-mono text-center !px-1" style="width:3.4rem"/>`).join('')
+                            + `</div>` + hiddenField(field, _octs.every(o=>o === '') ? '' : _octs.join('.'));
+                        setTimeout(()=>{ try{ FMLK.ipSync(field.name); }catch(e){} }, 0);
+                        break;
+                    }
                     case 'file':
                         input = `<div class="w-full h-24 fx-box border-dashed flex items-center justify-center text-slate-400 text-xs" style="border-style:dashed"><i class="fa-solid fa-image ml-1"></i> ${escHtml(ph) || 'صورة'}</div>`;
                         break;
@@ -1563,6 +1573,67 @@
                 const wrap = h ? h.closest('div') : null;
                 const lbl = wrap ? wrap.querySelector('span.text-xs') : null;
                 if(lbl){ lbl.textContent = checked ? 'مفعّل' : 'معطّل'; lbl.className = 'text-xs font-bold ' + (checked ? 'text-emerald-600' : 'text-slate-400'); }
+            },
+            ipBoxes(name){
+                const boxes = Array.prototype.slice.call(document.querySelectorAll(`input[data-ip-octet="${CSS.escape(name)}"]`));
+                boxes.sort((a, b)=>((+a.dataset.idx) || 0) - ((+b.dataset.idx) || 0));
+                return boxes;
+            },
+            ipSync(name){
+                // دمج الخانات الأربع في المخفي + حلقة اكتمال خضراء (فارغ كلياً = '')
+                const boxes = this.ipBoxes(name);
+                if(!boxes.length) return '';
+                const vals = boxes.map(b=>(b.value || '').replace(/\D/g, '').slice(0, 3));
+                const joined = vals.every(v=>v === '') ? '' : vals.join('.');
+                try{ fmlkSetHidden(name, joined); }catch(e){}
+                const full = vals.every(v=>v !== '' && +v >= 0 && +v <= 255);
+                boxes.forEach(b=>{
+                    b.classList.toggle('!border-emerald-400', full);
+                });
+                return joined;
+            },
+            ipOctet(el){
+                const name = el.getAttribute('data-ip-octet') || '';
+                el.value = (el.value || '').replace(/\D/g, '').slice(0, 3);
+                if(el.value.length >= 3){
+                    const boxes = this.ipBoxes(name);
+                    const i = boxes.indexOf(el);
+                    if(i >= 0 && i < boxes.length - 1) boxes[i + 1].focus();
+                }
+                this.ipSync(name);
+            },
+            ipKey(el, ev){
+                const k = ev.key;
+                const name = el.getAttribute('data-ip-octet') || '';
+                const boxes = this.ipBoxes(name);
+                const i = boxes.indexOf(el);
+                if(k === '.'){ if(i >= 0 && i < boxes.length - 1) boxes[i + 1].focus(); ev.preventDefault(); return false; }
+                if(k === 'Backspace' && !el.value && i > 0){ boxes[i - 1].focus(); return true; }
+                if(k === 'ArrowRight' && i < boxes.length - 1){ boxes[i + 1].focus(); ev.preventDefault(); return false; }
+                if(k === 'ArrowLeft' && i > 0){ boxes[i - 1].focus(); ev.preventDefault(); return false; }
+                if(k && k.length === 1 && !/\d/.test(k)) { ev.preventDefault(); return false; }
+                return true;
+            },
+            ipPaste(name, ev){
+                try{
+                    const t = ((ev.clipboardData || {}).getData('text') || '');
+                    const m = t.match(/(\d{1,3})\D+(\d{1,3})\D+(\d{1,3})\D+(\d{1,3})/);
+                    if(!m) return;
+                    ev.preventDefault();
+                    const boxes = this.ipBoxes(name);
+                    for(let k = 0; k < 4 && k < boxes.length; k++){
+                        let v = (m[k + 1] || '').replace(/\D/g, '').slice(0, 3);
+                        if(v !== '') v = String(Math.min(255, parseInt(v, 10)));
+                        boxes[k].value = v;
+                    }
+                    this.ipSync(name);
+                    if(boxes.length) boxes[Math.min(3, boxes.length - 1)].focus();
+                }catch(e){}
+            },
+            ipBlur(el){
+                const name = el.getAttribute('data-ip-octet') || '';
+                if((el.value || '') !== '') el.value = String(Math.min(255, parseInt(el.value || '0', 10) || 0));
+                this.ipSync(name);
             },
             statusSync(name, value){
                 // الحالات radio: حدّث القيمة المخفية وأعد تلوين الأزرار
@@ -2242,6 +2313,11 @@
             try{
                 const bt = String((f && (f.dataType || f.data_type || f.type)) || '').toLowerCase();
                 const it = String((f && f.inputType) || '').toLowerCase();
+                if(it === 'ip_address' || it === 'ipaddress' || it === 'ip'){
+                    const v = String(raw ?? '').trim();
+                    if(v) return `<span class="font-mono whitespace-nowrap" dir="ltr">${escHtml(v)}</span>`;
+                    return '<span class="text-slate-300">—</span>';
+                }
                 if(bt === 'boolean' || it === 'boolean'){
                     const v = String(raw ?? '').trim().toLowerCase();
                     const on = (v === 'true' || v === '1' || v === 't' || v === 'yes' || raw === true || raw === 1);

@@ -1,5 +1,5 @@
 """
-FMLK field-type registry — 8 traditional + 15 relational field types.
+FMLK field-type registry — 9 traditional + 15 relational field types.
 
 Each entry describes one inputType: Arabic label, description, usage example,
 category (traditional = single-table simple data, relational = cross-table),
@@ -17,6 +17,7 @@ ALIASES: Dict[str, List[str]] = {
     "boolean": ["boolean", "checkbox", "bool", "check"],
     "select": ["select", "dropdown", "choice", "list", "combobox"],
     "password": ["password", "passwd", "pwd", "secret", "passcode"],
+    "ip_address": ["ip_address", "ipaddress", "ip", "ipv4", "ip_address_field"],
     "list-input": ["list-input", "list_input", "listinput", "iplist", "ip_list", "string_list", "value_list", "multi_text"],
     "cascading_select": ["cascading_select", "cascading", "cascade", "dependent_select", "linked_select", "linkedselect"],
     "multiselect": ["multiselect", "multi_select", "multiselect_tags", "select2", "tags", "tag"],
@@ -45,6 +46,7 @@ CONFIG_ATTRS: Dict[str, List[str]] = {
     "cascading_select": ["parent_field"],
     "multiselect": ["allow_new"],
     "password": [],
+    "ip_address": [],
     "lookup": [],
     "status": [],
     "datamodal": [],
@@ -65,10 +67,13 @@ CONFIG_ATTRS: Dict[str, List[str]] = {
 }
 
 TYPES: List[Dict] = [
-    # ── 8 traditional ──
+    # ── 9 traditional ──
     {"key": "text", "ar": "نص قصير", "en": "Text", "category": "traditional",
      "description": "نصوص قصيرة ومحدودة مثل الأسماء والعناوين والبريد الإلكتروني.",
      "usage": "إدخال اسم الموظف أو البريد الإلكتروني."},
+    {"key": "ip_address", "ar": "عنوان IP", "en": "IP Address", "category": "traditional",
+     "description": "أربع خانات (0-255) بتنقل تلقائي ولصق ودعم IPv4 — يُحفظ نصاً a.b.c.d.",
+     "usage": "عنوان جهاز البصمة أو الطابعة أو الكاميرا."},
     {"key": "textarea", "ar": "نص طويل", "en": "Textarea", "category": "traditional",
      "description": "مساحة أكبر لفقرات متعددة الأسطر والنصوص الطويلة.",
      "usage": "كتابة الوصف الوظيفي أو الملاحظات أو تفاصيل الشكوى."},
