@@ -1072,6 +1072,8 @@
         function escHtml(s){ return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
         function splitList(s){ return String(s || '').split(',').map(x=>x.trim()).filter(Boolean); }
         function parseJsonVal(v, fb){ if(v===undefined||v===null||v==='') return fb; if(typeof v!=='string') return v; try{ const p=JSON.parse(v); return p; }catch(e){ return fb; } }
+        // المنافذ الشائعة لمنتقي المنفذ (datalist + تسمية الخدمة)
+        const FMLK_PORTS = [[21, 'FTP'], [22, 'SSH'], [25, 'SMTP'], [53, 'DNS'], [80, 'HTTP'], [110, 'POP3'], [143, 'IMAP'], [443, 'HTTPS'], [1433, 'SQL Server'], [1521, 'Oracle'], [3306, 'MySQL'], [3389, 'RDP'], [4370, 'ZKTeco'], [5432, 'PostgreSQL'], [6379, 'Redis'], [27017, 'MongoDB']];
         function fieldVal(field){ const v = currentData[field.name]; return (v===undefined||v===null) ? (field.default ?? '') : v; }
         function cfg(field, key){ return ((field.config||{})[key] ?? '').toString().trim(); }
         function fxId(field){ return 'fx_' + field.name.replace(/[^A-Za-z0-9_]/g, '_'); }
@@ -1155,6 +1157,18 @@
                             + [0, 1, 2, 3].map(k=>`${k ? '<span class="text-slate-300 font-bold select-none">.</span>' : ''}<input data-ip-octet="${escAttr(field.name)}" data-idx="${k}" value="${escAttr(_octs[k])}" inputmode="numeric" placeholder="0" maxlength="3" autocomplete="off" spellcheck="false" oninput="FMLK.ipOctet(this)" onkeydown="return FMLK.ipKey(this,event)" onpaste="FMLK.ipPaste('${field.name}',event)" onblur="FMLK.ipBlur(this)" class="fx-inp font-mono text-center !px-1" style="width:3.4rem"/>`).join('')
                             + `</div>` + hiddenField(field, _octs.every(o=>o === '') ? '' : _octs.join('.'));
                         setTimeout(()=>{ try{ FMLK.ipSync(field.name); }catch(e){} }, 0);
+                        break;
+                    }
+                    case 'port_picker': {
+                        const _pv = String(val ?? '').replace(/\D/g, '').slice(0, 5);
+                        const _dl = fxId(field) + '_ports';
+                        input = `<div class="flex items-center gap-1.5" dir="ltr">`
+                            + `<span class="w-8 h-8 shrink-0 rounded-lg bg-teal-50 text-teal-600 flex items-center justify-center" title="منفذ (0-65535)"><i class="fa-solid fa-plug text-xs"></i></span>`
+                            + `<input data-port-input="${escAttr(field.name)}" value="${escAttr(_pv)}" inputmode="numeric" placeholder="5432" maxlength="5" list="${_dl}" autocomplete="off" spellcheck="false" oninput="FMLK.portInput(this)" onblur="FMLK.portBlur(this)" class="fx-inp font-mono !px-2" style="width:6rem"/>`
+                            + `<datalist id="${_dl}">${FMLK_PORTS.map(p=>`<option value="${p[0]}">${p[1]}</option>`).join('')}</datalist>`
+                            + `<span data-port-svc="${escAttr(field.name)}" class="text-[10px] font-bold text-slate-400 whitespace-nowrap"></span>`
+                            + `</div>` + hiddenField(field, _pv);
+                        setTimeout(()=>{ try{ FMLK.portSync(field.name); }catch(e){} }, 0);
                         break;
                     }
                     case 'file':
@@ -1634,6 +1648,40 @@
                 const name = el.getAttribute('data-ip-octet') || '';
                 if((el.value || '') !== '') el.value = String(Math.min(255, parseInt(el.value || '0', 10) || 0));
                 this.ipSync(name);
+            },
+            portSvc(v){
+                const n = parseInt(String(v ?? '').replace(/\D/g, ''), 10);
+                if(isNaN(n)) return '';
+                const hit = (FMLK_PORTS || []).find(p=>p[0] === n);
+                return hit ? hit[1] : '';
+            },
+            portInputEl(name){
+                return document.querySelector(`input[data-port-input="${CSS.escape(name)}"]`);
+            },
+            portSvcEl(name){
+                return document.querySelector(`[data-port-svc="${CSS.escape(name)}"]`);
+            },
+            portSync(name){
+                const inp = this.portInputEl(name);
+                const v = inp ? String(inp.value ?? '') : '';
+                try{ fmlkSetHidden(name, v); }catch(e){}
+                const svc = this.portSvc(v);
+                const badge = this.portSvcEl(name);
+                if(badge){
+                    badge.textContent = svc;
+                    badge.className = 'text-[10px] font-bold whitespace-nowrap ' + (svc ? 'text-teal-600' : 'text-slate-400');
+                }
+                return v;
+            },
+            portInput(el){
+                const name = el.getAttribute('data-port-input') || '';
+                el.value = (el.value || '').replace(/\D/g, '').slice(0, 5);
+                this.portSync(name);
+            },
+            portBlur(el){
+                const name = el.getAttribute('data-port-input') || '';
+                if((el.value || '') !== '') el.value = String(Math.min(65535, parseInt(el.value || '0', 10) || 0));
+                this.portSync(name);
             },
             statusSync(name, value){
                 // الحالات radio: حدّث القيمة المخفية وأعد تلوين الأزرار
@@ -2314,6 +2362,11 @@
                 const bt = String((f && (f.dataType || f.data_type || f.type)) || '').toLowerCase();
                 const it = String((f && f.inputType) || '').toLowerCase();
                 if(it === 'ip_address' || it === 'ipaddress' || it === 'ip'){
+                    const v = String(raw ?? '').trim();
+                    if(v) return `<span class="font-mono whitespace-nowrap" dir="ltr">${escHtml(v)}</span>`;
+                    return '<span class="text-slate-300">—</span>';
+                }
+                if(it === 'port_picker' || it === 'portpicker' || it === 'port'){
                     const v = String(raw ?? '').trim();
                     if(v) return `<span class="font-mono whitespace-nowrap" dir="ltr">${escHtml(v)}</span>`;
                     return '<span class="text-slate-300">—</span>';

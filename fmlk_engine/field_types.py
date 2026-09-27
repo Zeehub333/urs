@@ -1,5 +1,5 @@
 """
-FMLK field-type registry — 9 traditional + 15 relational field types.
+FMLK field-type registry — 10 traditional + 15 relational field types.
 
 Each entry describes one inputType: Arabic label, description, usage example,
 category (traditional = single-table simple data, relational = cross-table),
@@ -18,6 +18,7 @@ ALIASES: Dict[str, List[str]] = {
     "select": ["select", "dropdown", "choice", "list", "combobox"],
     "password": ["password", "passwd", "pwd", "secret", "passcode"],
     "ip_address": ["ip_address", "ipaddress", "ip", "ipv4", "ip_address_field"],
+    "port_picker": ["port_picker", "portpicker", "port", "port_number", "port_picker_field"],
     "list-input": ["list-input", "list_input", "listinput", "iplist", "ip_list", "string_list", "value_list", "multi_text"],
     "cascading_select": ["cascading_select", "cascading", "cascade", "dependent_select", "linked_select", "linkedselect"],
     "multiselect": ["multiselect", "multi_select", "multiselect_tags", "select2", "tags", "tag"],
@@ -47,6 +48,7 @@ CONFIG_ATTRS: Dict[str, List[str]] = {
     "multiselect": ["allow_new"],
     "password": [],
     "ip_address": [],
+    "port_picker": [],
     "lookup": [],
     "status": [],
     "datamodal": [],
@@ -74,6 +76,9 @@ TYPES: List[Dict] = [
     {"key": "ip_address", "ar": "عنوان IP", "en": "IP Address", "category": "traditional",
      "description": "أربع خانات (0-255) بتنقل تلقائي ولصق ودعم IPv4 — يُحفظ نصاً a.b.c.d.",
      "usage": "عنوان جهاز البصمة أو الطابعة أو الكاميرا."},
+    {"key": "port_picker", "ar": "منفذ Port", "en": "Port Picker", "category": "traditional",
+     "description": "إدخال رقمي (0-65535) مع قائمة المنافذ الشائعة وتسمية الخدمة تلقائياً.",
+     "usage": "منفذ قاعدة البيانات (5432) أو جهاز البصمة (4370)."},
     {"key": "textarea", "ar": "نص طويل", "en": "Textarea", "category": "traditional",
      "description": "مساحة أكبر لفقرات متعددة الأسطر والنصوص الطويلة.",
      "usage": "كتابة الوصف الوظيفي أو الملاحظات أو تفاصيل الشكوى."},
