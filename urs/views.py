@@ -3188,8 +3188,37 @@ def api_search_import_excel(request):
 
     يقرأ أول عمود غير فارغ من أول ورقة (xlsx/xlsm حتى 10MB) ويعيد القيم
     النصية مفرّدة بالترتيب (بحد أقصى 5000) لبناء فلتر IN على عمود محدد.
+    تطبيع الأرقام: int/float صحيح ← أرقام صافية، أرقام عربية ← غربية،
+    فواصل الآلاف/المسافات داخل الرقم تُحذف، و'.0' النصية تُسقط —
+    حتى تطابق القيم المخزنة (أرقام الحوالات) حرفياً.
     → {values, count, truncated, filename}
     """
+    import datetime as _sx_dt
+    import re as _sx_re
+    _AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
+
+    def _sx_norm(v):
+        if v is None:
+            return ""
+        if isinstance(v, bool):
+            return str(v)
+        if isinstance(v, int):
+            return str(v)
+        if isinstance(v, float):
+            return str(int(v)) if v.is_integer() else repr(v)
+        if isinstance(v, (_sx_dt.datetime, _sx_dt.date, _sx_dt.time)):
+            return v.isoformat(sep=" ")
+        s = str(v).strip().translate(_AR_DIGITS)
+        if not s:
+            return ""
+        s = s.replace("\u00a0", "").replace("\u066c", "").replace("\u200c", "")
+        nospace = s.replace(" ", "").replace(",", "")
+        if nospace and _sx_re.fullmatch(r"-?\d+", nospace):
+            return nospace
+        m = _sx_re.fullmatch(r"(-?\d+)\.0+", s)
+        if m:
+            return m.group(1)
+        return s
     if request.method != "POST":
         return JsonResponse({"error": "POST required"}, status=405)
     try:
@@ -3232,7 +3261,7 @@ def api_search_import_excel(request):
                 v = row[0] if row else None
                 if v is None:
                     continue
-                s = str(v).strip()
+                s = _sx_norm(v)
                 if not s or s in seen:
                     continue
                 seen.add(s)
