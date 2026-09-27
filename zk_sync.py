@@ -7,9 +7,9 @@ zk_sync.py — مزامنة البصمات من أجهزة ZK مباشرة إل�
 - يسحب سجلات الحضور عبر بروتوكول ZK ويدخل الجديد فقط في public.zk_attendance
   (INSERT .. ON CONFLICT DO NOTHING على terminal_id + emp_code + punch_time).
 - أوقات الأجهزة المحلية تُفسَّر بتوقيت Asia/Aden (جلسة Postgres مضبوطة عليه).
-- الاستخدام:  zk_sync.py [--once] [--limit N] [--clear-device]
+- الاستخدام:  zk_sync.py [--once] [--limit N]
               [--devices 172.16.22.203:4370,172.16.22.204:4370]
-  --clear-device يمسح سجل الجهاز بعد المزامنة الناجحة (اختياري، الافتراضي: إبقاء).
+  (لا يمسح سجل الجهاز أبداً — السجلات تبقى على الجهاز، والمزامنة تدخل الجديد فقط).
 """
 from __future__ import annotations
 import argparse
@@ -164,7 +164,7 @@ def norm_row(r):
         return None
 
 
-def sync_one(pg, terminal_id, host, port, label, limit, clear_device):
+def sync_one(pg, terminal_id, host, port, label, limit):
     rows, zk = pull_device(host, port, limit)
     log("%s: سُحب %d سجلاً من الجهاز" % (label, len(rows)))
     normed = []
@@ -189,12 +189,6 @@ def sync_one(pg, terminal_id, host, port, label, limit, clear_device):
         finally:
             cur.close()
     log("%s: جديد=%d مكرر=%d" % (label, new, len(normed) - new))
-    if clear_device and normed:
-        try:
-            zk.conn.clear_attendance()
-            log("%s: تم مسح سجل الجهاز" % label)
-        except Exception as e:
-            log("%s: تعذر مسح السجل (%s)" % (label, e))
     try:
         zk.disconnect()
     except Exception:
@@ -207,7 +201,6 @@ def main() -> int:
     ap.add_argument("--devices", default="", help="تجاوز: ip:port مفصولة بفواصل")
     ap.add_argument("--limit", type=int, default=1000000, help="حد السحب للاختبار")
     ap.add_argument("--once", action="store_true", help="تشغيلة واحدة (وضع BAT/المجدول)")
-    ap.add_argument("--clear-device", action="store_true", help="مسح سجل الجهاز بعد المزامنة")
     args = ap.parse_args()
 
     has_django = _django_setup()
@@ -239,7 +232,7 @@ def main() -> int:
     ok, fail, total_new = 0, 0, 0
     for terminal_id, host, port, label in devices:
         try:
-            _, new = sync_one(pg, terminal_id, host, port, label, args.limit, args.clear_device)
+            _, new = sync_one(pg, terminal_id, host, port, label, args.limit)
             total_new += new
             ok += 1
         except Exception as e:
