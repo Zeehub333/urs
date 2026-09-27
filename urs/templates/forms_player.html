@@ -4,9 +4,11 @@
 {% block head_css %}
         .fmlk-tab-active { background: #4f46e5; color: white; border-color: #4f46e5; }
         .fmlk-category { border: 1px solid #e2e8f0; border-radius: 12px; background: white; }
-        .fmlk-hero { border: 2px solid #c7d2fe; border-radius: 14px; background: linear-gradient(to left, #eef2ff, #ffffff); padding: 16px; margin-bottom: 12px; }
+        .fmlk-hero { border: 2px solid #c7d2fe; border-radius: 14px; background: linear-gradient(to left, #eef2ff, #ffffff); padding: 16px; }
         .fmlk-hero .fx-label { font-size: 14px; }
         .fmlk-hero .fx-inp { font-size: 15px; padding-top: 10px; padding-bottom: 10px; }
+        .fmlk-hero-logo .fx-label { display: none; }
+        .fmlk-hero-logo .flex { flex-wrap: wrap; }
         .fmlk-field-left { grid-column: span 1; }
         .fmlk-field-full { grid-column: 1 / -1; }
         @media (max-width: 768px) { .fmlk-field-left { grid-column: 1 / -1; } }
@@ -850,14 +852,30 @@
             cats.forEach((catName, ci) => {
                 // مدخلات الوجهات المتفرعة تُعرض في شبكة التفاصيل لا في النموذج الرئيسي
                 const catFields = fields.filter(f => (f.category || 'عام') === catName && (!f.destination || f.destination === 'main'));
-                // العمود الرئيسي (is_main_col): أولاً بعرض الشاشة كاملاً، وتحته البقية جريد 2×2
+                // العمود الرئيسي (is_main_col): أولاً بعرض الشاشة كاملاً، وتحته البقية جريد 2×2.
+                // حقل صورة/شعار في نفس الفئة: بلا تسمية، مربع بورتريه بجانب الرئيسي.
+                const isLogoField = (f)=>{
+                    const t = String(f.dataType || f.data_type || f.type || '').toLowerCase();
+                    if(t === 'image' || t === 'media') return true;
+                    const it = String(f.inputType || '').toLowerCase();
+                    return it === 'image' || it === 'media';
+                };
                 let heroHtml = '';
                 let rest = catFields;
                 const hi = catFields.findIndex(f => f.is_main_col || f.isMainCol);
                 if(hi >= 0){
                     const hero = catFields[hi];
                     rest = catFields.filter((_, k)=>k !== hi);
-                    heroHtml = `<div class="fmlk-hero" data-vis-field="${escAttr(hero.name)}">${renderInput(hero)}</div>`;
+                    let logoHtml = '';
+                    const li = rest.findIndex(f => isLogoField(f) && f.name !== hero.name);
+                    if(li >= 0){
+                        const logo = rest[li];
+                        rest = rest.filter((_, k)=>k !== li);
+                        logoHtml = `<div class="fmlk-hero-logo w-28 sm:w-32 shrink-0 aspect-[3/4] rounded-2xl border-2 border-dashed border-slate-200 bg-white p-2 overflow-y-auto custom-scroll" data-vis-field="${escAttr(logo.name)}">${renderInput(logo)}</div>`;
+                    }
+                    heroHtml = logoHtml
+                        ? `<div class="flex gap-3 items-stretch mb-3"><div class="fmlk-hero flex-1 min-w-0" data-vis-field="${escAttr(hero.name)}">${renderInput(hero)}</div>${logoHtml}</div>`
+                        : `<div class="fmlk-hero mb-3" data-vis-field="${escAttr(hero.name)}">${renderInput(hero)}</div>`;
                 }
                 html += `<div data-tab-content="cat${ci}" style="${ci !== 0 ? 'display:none' : ''}">`;
                 html += heroHtml;
