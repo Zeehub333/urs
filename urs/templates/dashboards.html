@@ -1,3 +1,4 @@
+﻿{% load static %}
 {% extends "base.html" %}
 {% block title %}لوحات المعلومات — Odex ERP{% endblock %}
 {% block sidebar %}
@@ -50,7 +51,7 @@
     {% block modals %}{% include "partials/support_modal.html" %}{% endblock %}
     {% endblock %}
     {% block scripts %}
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="{% static 'vendor/chart.umd.min.js' %}"></script>
     <script>
         const DASH_COLORS = ['#4f46e5','#10b981','#f59e0b','#0ea5e9','#8b5cf6','#ef4444','#14b8a6','#f97316'];
         function dashEsc(s){ return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
@@ -244,3 +245,5 @@
         renderDashboards();
     </script>
     {% endblock %}
+
+

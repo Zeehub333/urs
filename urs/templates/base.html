@@ -5,11 +5,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}النظام ERP{% endblock %}</title>
-    <!-- Tailwind CSS via CDN (development only - use local build for production) -->
-    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Fully offline: vendored under odex/web/vendor (no CDN/internet) -->
+    <script src="{% static 'vendor/tailwindcss.js' %}"></script>
     <script>try{if(localStorage.getItem('theme')==='dark')document.documentElement.classList.add('dark')}catch(e){}</script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'vendor/fontawesome/css/all.min.css' %}">
+    <link rel="stylesheet" href="{% static 'vendor/cairo/cairo.css' %}">
     <style>
         body { font-family: 'Cairo', sans-serif; background-color: #f3f4f6; }
         ::-webkit-scrollbar { width: 6px; height: 6px; }

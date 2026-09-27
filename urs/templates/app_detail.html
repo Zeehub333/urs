@@ -1,3 +1,4 @@
+﻿{% load static %}
 {% extends "base.html" %}
 {% block title %}{{ app.ar }} — {{ app.name }}{% endblock %}
 {% block head_css %}
@@ -275,7 +276,7 @@
     </div>
     {% endblock %}
 {% block scripts %}
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="{% static 'vendor/chart.umd.min.js' %}"></script>
     <script>
         const APP_NAME = "{{ app_name|escapejs }}";
         const FML_FILES = [{% for f in fml_files %}{file: "{{ f.file|escapejs }}", displayName: "{{ f.metadata.displayName|escapejs }}"},{% endfor %}];
@@ -897,3 +898,5 @@
         document.addEventListener('keydown', (e)=>{ if(e.key === 'Escape'){ const m = document.getElementById('rulePolicyModal'); if(m && !m.classList.contains('hidden')) closeRulePolicies(); } });
     </script>
     {% endblock %}
+
+

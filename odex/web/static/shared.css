@@ -1,5 +1,5 @@
-/* ODEX Material — Integrated Package (User Provided + Material 3) — editable via /api/css */
-@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap');
+﻿/* ODEX Material — Integrated Package (User Provided + Material 3) — editable via /api/css */
+/* offline: external Roboto/Material Symbols import removed — system fonts + vendored Cairo used instead */
 
 :root {
   /* User Provided Material Theme */
@@ -95,3 +95,4 @@ body { padding: 24px; }
 /* Sticky editor */
 .toc { margin: 16px 0; padding: 12px; background: var(--md-surface); border-radius: var(--md-radius); position: sticky; top: 0; z-index: 10; border: 1px solid var(--md-background); box-shadow: var(--md-elevation-1); }
 .toc a { margin: 0 8px 8px 0; display: inline-block; padding: 6px 12px; border-radius: 999px; background: var(--md-primary); color: var(--md-on-primary); text-decoration: none; font-size: 13px; font-weight: 500; }
+
