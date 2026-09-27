@@ -535,6 +535,7 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
 
 {% block scripts %}
     <script src="{% static 'components/search_engine.js' %}"></script>
+    <script src="{% static 'components/advanced_filter.js' %}"></script>
     <script>
         // Injected Django context
         const DJANGO_RML = "{{ rml_file|escapejs }}";
@@ -915,6 +916,7 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                 const arr = JSON.parse(q);
                 if(Array.isArray(arr)) arr.forEach(f=>{
                     if(f && Array.isArray(f.any)) activeFilters.push({any: f.any, _smart: f._smart, orGroup: f.orGroup});
+                    else if(f && Array.isArray(f.all)) activeFilters.push({all: f.all, _smart: f._smart, orGroup: f.orGroup});
                     else if(f && f.field && f.op){
                         // فلاتر IN ضخمة (إكسل) لا تُحفظ في الرابط — تُتجاهل عند الاسترجاع
                         if(typeof f.value === 'string' && f.value.indexOf('__skipped_') === 0) return;
@@ -2457,6 +2459,38 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
             }catch(e){}
             return null;
         }
+        // ── AdvancedFilter الموحدة: نافذة القواعد (أي من/كل) بأعمدة ديناميكية ──
+        function advOpsForKind(kind){
+            if(kind === 'text' || kind === 'list' || kind === 'status')
+                return [['contains','يحتوي على'],['equals','يساوي'],['startswith','يبدأ بـ'],['endswith','ينتهي بـ'],['not_contains','لا يحتوي على'],['not_equals','لا يساوي']];
+            if(kind === 'date' || kind === 'datetime')
+                return [['lt','قبل'],['gt','بعد'],['between','بين تاريخين'],['equals','في يوم'],['inmonth','في شهر'],['inyear','في سنة'],['since','منذ']];
+            return [['equals','يساوي'],['not_equals','لا يساوي'],['gt','أكبر من'],['gte','أكبر من أو يساوي'],['lt','أصغر من'],['lte','أصغر من أو يساوي'],['between','بين (رقمين أو تاريخين)']];
+        }
+        function openUnifiedAdvFilter(){
+            if(typeof AdvancedFilter === 'undefined' || !AdvancedFilter.open){ try{ openAdvancedFilterModal(); }catch(e){} return; }
+            let cols = [];
+            try{
+                cols = ((typeof allCols === 'function' ? allCols() : (typeof queryColumns !== 'undefined' ? queryColumns : [])) || [])
+                    .map(c=>({value: c.alias || c.name || '', label: c.alias || c.name || '', kind: setupFieldKind(c.alias || c.name || '')}))
+                    .filter(c=>c.value);
+            }catch(e){ cols = []; }
+            if(!cols.length){ try{ notify('لا أعمدة متاحة للتصفية', 'info'); }catch(e){} return; }
+            AdvancedFilter.open({
+                columns: cols,
+                opsFor: advOpsForKind,
+                onApply: ({mode, rules})=>{
+                    const nodes = rules.map(r=>(r.op === 'between')
+                        ? {field: r.column, op: r.op, valFrom: r.valFrom, valTo: r.valTo}
+                        : {field: r.column, op: r.op, value: r.value});
+                    if(!nodes.length) return;
+                    activeFilters.push(mode === 'all' ? {all: nodes, _smart: '⚙ متقدم'} : {any: nodes, _smart: '⚙ متقدم'});
+                    renderSearchTags();
+                    syncUrlFilters();
+                    refreshApiData();
+                }
+            });
+        }
         // ── SearchEngine الموحد: تركيب + ربط بخط الأنابيب الحالي ──
         function mountReportSearchEngine(){
             if(typeof SearchEngine === 'undefined' || !SearchEngine.mount) return;
@@ -2480,7 +2514,7 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                 refreshApiData();
                 try{ notify(`📥 ${count} قيمة من ${filename}${truncated ? ' (الأولى فقط)' : ''} → ${col}`, 'success'); }catch(e){}
             };
-            const adv = ()=>{ try{ openAdvancedFilterModal(); }catch(e){} };
+            const adv = ()=>{ try{ openUnifiedAdvFilter(); }catch(e){} };
             const key = searchColStoreKey();
             try{
                 const box = document.getElementById('searchEngineBox');

@@ -395,6 +395,7 @@
     {% endblock %}
 {% block scripts %}
     <script src="{% static 'components/search_engine.js' %}"></script>
+    <script src="{% static 'components/advanced_filter.js' %}"></script>
     <script>
         // Injected by Django
         let currentFml = "{{ fml_file|escapejs }}";
@@ -3533,7 +3534,43 @@
                 return [['equals','يساوي'],['not_equals','لا يساوي'],['gt','أكبر من'],['gte','أكبر من أو يساوي'],['lt','أصغر من'],['lte','أصغر من أو يساوي'],['between','بين (من - إلى)']];
             return [['contains','يحتوي على'],['equals','يساوي'],['startswith','يبدأ بـ'],['endswith','ينتهي بـ'],['not_contains','لا يحتوي على'],['not_equals','لا يساوي']];
         }
+        // ── AdvancedFilter الموحدة: نافذة القواعد (أي من/كل) بأعمدة ديناميكية ──
+        // تحل محل النافذة الأحادية القديمة (تبقى في DOM دون استخدام)
         function openAdvFilterModal(){
+            if(typeof AdvancedFilter !== 'undefined' && AdvancedFilter.open){
+                let cols = [];
+                try{
+                    cols = ((typeof visibleFields === 'function' ? visibleFields() : []) || [])
+                        .filter(f=>f && f.name)
+                        .map(f=>({value: f.name, label: f.alias || f.name, kind: formFieldKind(f)}));
+                }catch(e){ cols = []; }
+                if(!cols.length){ try{ notify('لا حقول مرئية للتصفية', 'info'); }catch(e){} return; }
+                AdvancedFilter.open({
+                    columns: cols,
+                    opsFor: (kind)=>{
+                        try{
+                            if(typeof advOpList === 'function'){
+                                const k = (kind === 'list' || kind === 'status') ? 'text' : (kind || 'text');
+                                return advOpList(k);
+                            }
+                        }catch(e){}
+                        return null;
+                    },
+                    onApply: ({mode, rules})=>{
+                        const nodes = rules.map(r=>(r.op === 'between')
+                            ? {field: r.column, op: r.op, valFrom: r.valFrom, valTo: r.valTo}
+                            : {field: r.column, op: r.op, value: r.value});
+                        if(!nodes.length) return;
+                        advFilters = nodes;
+                        advMode = (mode === 'all') ? 'and' : 'or';
+                        currentPage = 1;
+                        renderAdvTags();
+                        renderGrid();
+                        try{ notify(`⚙ ${nodes.length} ${nodes.length === 1 ? 'قاعدة' : 'قواعد'} (${mode === 'all' ? 'الكل' : 'أي من'})`, 'success'); }catch(e){}
+                    }
+                });
+                return;
+            }
             const fields = visibleFields();
             if(!fields.length){ try{ notify('لا حقول مرئية للتصفية', 'info'); }catch(e){} return; }
             document.getElementById('advFilterField').innerHTML = fields.map(f=>`<option value="${escAttr(f.name)}">${escHtml(f.alias || f.name)}</option>`).join('');
