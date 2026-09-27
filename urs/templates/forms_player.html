@@ -10,6 +10,7 @@
         .fmlk-hero-logo .fx-label { display: none; }
         .fmlk-hero-logo .flex { flex-wrap: wrap; }
         .fmlk-hero-logo [id$="_chip"] { display: none; }
+        .fmlk-logo-box img, .fmlk-logo-box video { width: 100%; height: 100%; object-fit: cover; display: block; }
         .fmlk-field-left { grid-column: span 1; }
         .fmlk-field-full { grid-column: 1 / -1; }
         @media (max-width: 768px) { .fmlk-field-left { grid-column: 1 / -1; } }
@@ -737,7 +738,7 @@
             main.className = 'flex-1 min-w-0';
             const logoCol = document.createElement('div');
             logoCol.id = 'stLogoCol';
-            logoCol.className = 'w-full lg:w-60 shrink-0 self-start lg:sticky lg:top-4 rounded-2xl border-2 border-dashed border-slate-200 bg-white p-3';
+            logoCol.className = 'w-full lg:w-60 shrink-0 self-start lg:sticky lg:top-4 rounded-2xl border border-slate-200 bg-white overflow-hidden';
             root.appendChild(wrapRow);
             wrapRow.appendChild(main);
             wrapRow.appendChild(logoCol);
@@ -896,7 +897,10 @@
                     if(li >= 0){
                         const logo = rest[li];
                         rest = rest.filter((_, k)=>k !== li);
-                        try{ window._heroLogo = {name: logo.name, tab: 'cat' + ci, html: renderInput(logo)}; }catch(e){ window._heroLogo = null; }
+                        try{
+                            const lv = (typeof fieldVal === 'function') ? fieldVal(logo) : '';
+                            window._heroLogo = {name: logo.name, tab: 'cat' + ci, html: renderLogoBox(logo, lv)};
+                        }catch(e){ window._heroLogo = null; }
                     }
                     heroHtml = `<div class="fmlk-hero mb-3" data-vis-field="${escAttr(hero.name)}">${renderInput(hero)}</div>`;
                 }
@@ -1136,6 +1140,19 @@
             return `<input type="hidden" data-field="${field.name}" value="${escAttr(v)}"/>`;
         }
 
+        function renderLogoBox(field, val){
+            // نسخة الشعار المدمجة: صورة عائمة بكامل المربع + رفع في الوسط عند الهوفر + مسح أعلى اليمين.
+            // نفس معرّفات ودوال الوسم القياسي (fmlkMediaFile/Clear/Paint) — بلا صف URL/شارة.
+            const mk = (fieldMediaKind(field) || 'image');
+            const accept = mk === 'image' ? 'image/*' : 'image/*,video/*,audio/*';
+            const hasV = String(val ?? '').trim() !== '';
+            const prev = hasV ? mediaHtml(val, mk) : '<span class="flex flex-col items-center gap-1 text-slate-300"><i class="fa-solid fa-image text-2xl"></i><span class="text-[10px] font-bold">شعار</span></span>';
+            return `<div class="fmlk-logo-box group relative w-full min-h-[220px] rounded-xl overflow-hidden bg-slate-100 flex items-center justify-center">`
+                + `<div id="${fxId(field)}_prev" class="absolute inset-0 flex items-center justify-center">${prev}</div>`
+                + `<label title="رفع صورة" class="absolute inset-0 z-10 flex items-center justify-center cursor-pointer transition ${hasV ? 'opacity-0 group-hover:opacity-100 focus-within:opacity-100 bg-slate-900/45' : 'bg-slate-100/70'}"><span class="w-12 h-12 rounded-full ${hasV ? 'bg-white text-indigo-600' : 'bg-indigo-600 text-white'} flex items-center justify-center text-lg shadow-xl"><i class="fa-solid fa-upload"></i></span><input type="file" accept="${accept}" class="hidden" onchange="fmlkMediaFile('${field.name}', this)"/></label>`
+                + `<button type="button" onclick="fmlkMediaClear('${field.name}')" title="مسح" class="absolute top-1.5 right-1.5 z-20 w-7 h-7 rounded-full bg-white/95 hover:bg-white text-rose-500 shadow flex items-center justify-center text-xs transition ${hasV ? 'opacity-0 group-hover:opacity-100 focus-within:opacity-100' : 'hidden'}"><i class="fa-solid fa-xmark"></i></button>`
+                + `</div>` + hiddenField(field, val);
+        }
         function renderInput(field) {
             const isDisp = !!(field.display_only || field.displayOnly);
             const req = (field.required && !isDisp) ? '<span class="req">*</span>' : '';
@@ -2613,6 +2630,19 @@
                 kind = fieldMediaKind(f) || 'image';
             }catch(e){}
             prev.innerHTML = String(v || '').trim() !== '' ? mediaHtml(v, kind) : '<span class="text-slate-400 text-xs"><i class="fa-solid fa-image"></i> بلا صورة</span>';
+            // نسخة الشعار المدمجة: بدّل ظهور الرفع/المسح حسب وجود قيمة
+            try{
+                const box = prev.closest ? prev.closest('.fmlk-logo-box') : null;
+                if(box){
+                    const has = String(v || '').trim() !== '';
+                    const ov = box.querySelector('label');
+                    if(ov) ov.className = 'absolute inset-0 z-10 flex items-center justify-center cursor-pointer transition ' + (has ? 'opacity-0 group-hover:opacity-100 focus-within:opacity-100 bg-slate-900/45' : 'bg-slate-100/70');
+                    const dot = ov ? ov.querySelector('span') : null;
+                    if(dot) dot.className = 'w-12 h-12 rounded-full flex items-center justify-center text-lg shadow-xl ' + (has ? 'bg-white text-indigo-600' : 'bg-indigo-600 text-white');
+                    const x = box.querySelector('button');
+                    if(x) x.className = 'absolute top-1.5 right-1.5 z-20 w-7 h-7 rounded-full bg-white/95 hover:bg-white text-rose-500 shadow flex items-center justify-center text-xs transition ' + (has ? 'opacity-0 group-hover:opacity-100 focus-within:opacity-100' : 'hidden');
+                }
+            }catch(e){}
         }
         function fmlkMediaUrl(name){
             const {hid, url} = fmlkMediaEls(name);
