@@ -1532,6 +1532,9 @@ class RMLReportEngine:
         self._last_merges: List[Dict[str, Any]] = []
         self._last_extra: List[Tuple[str, str]] = []
         self._dj_conns: Dict[str, Any] = {}
+        # Per-execute diagnostics: merge stats {table: {keys, matched}} + timings
+        self._merge_stats: Dict[str, Any] = {}
+        self._timings: Dict[str, Any] = {}
         # Connection routing: map connection_id -> db_engine (for multi-DB reports)
         self._db_map: Dict[str, Any] = {}
         if self.connections:
@@ -5473,6 +5476,84 @@ class RMLReportEngine:
         except Exception:
             return None
 
+    def _fuzzy_key_index(self, mode, rx, pairs):
+        """Index over [(match_raw, out_raw)] stored spellings for fuzzy keys.
+
+        regex: {extract(match): [out...]}; contains: alternation over
+        distinct match texts + text -> [out...]. Lookup returns out raws.
+        Built for DISTINCT key combos (round 1) so round 2 hauls only rows
+        whose keys actually match some base row.
+        """
+        mode = str(mode or "exact").strip().lower()
+        if mode == "regex":
+            groups = {}
+            for mraw, oraw in (pairs or []):
+                if mraw is None or oraw is None:
+                    continue
+                try:
+                    e = self._rx_extract(rx, mraw)
+                except Exception:
+                    e = None
+                if e is None:
+                    continue
+                lst = groups.setdefault(e, [])
+                if oraw not in lst:
+                    lst.append(oraw)
+            return {"kind": "regex", "groups": groups, "rx": rx}
+        vals, byval = [], {}
+        for mraw, oraw in (pairs or []):
+            if mraw is None or oraw is None:
+                continue
+            ss = str(mraw)
+            if not ss:
+                continue
+            if ss not in byval:
+                byval[ss] = []
+                vals.append(ss)
+            if oraw not in byval[ss]:
+                byval[ss].append(oraw)
+        return {"kind": "contains", "alts": self._contains_alternations(vals),
+                "byval": byval}
+
+    def _fuzzy_lookup(self, index, base_norm):
+        """[out_raw...] matching one normalized base value (dedup, ordered)."""
+        out = []
+        if not index or base_norm is None:
+            return out
+        try:
+            if index.get("kind") == "regex":
+                try:
+                    e = self._rx_extract(index.get("rx"), base_norm)
+                except Exception:
+                    e = None
+                if e is None:
+                    return out
+                return list((index.get("groups") or {}).get(e) or [])
+            bs = str(base_norm)
+            if not bs:
+                return out
+            byval = index.get("byval") or {}
+            for rxc in (index.get("alts") or []):
+                try:
+                    m = rxc.search(bs)
+                except Exception:
+                    m = None
+                if m:
+                    for o in (byval.get(m.group(0)) or []):
+                        if o not in out:
+                            out.append(o)
+                    return out
+            # reverse direction only when tier 1 missed (parity, rare)
+            for ss, lst in byval.items():
+                if ss and bs in ss:
+                    for o in lst:
+                        if o not in out:
+                            out.append(o)
+                    return out
+        except Exception:
+            pass
+        return out
+
     @staticmethod
     def _contains_alternations(sec_vals, chunk=2000):
         """Compiled literal-alternation regexes (multi-substring in C).
@@ -5673,15 +5754,81 @@ class RMLReportEngine:
                         _need.add(s["anchor_sec"])
                         _need.add(self._fuzzy_inner_field(s, sec))
                 _need = sorted(_need)
-                _fcols = ", ".join([_Q(c) for c in _need])
-                _fcur = self._exec_on(rdb, f"SELECT {_fcols} FROM {self._remote_from(info)}", {})
+                _rfrom = self._remote_from(info)
+                # Round 1 (narrow): DISTINCT key combos only — never haul
+                # the whole wide table when a subset matches.
+                _anchor_cols = sorted({s["anchor_sec"] for s in specs if s.get("kind") != "direct"})
+                _key_cols = [scol] + [a for a in _anchor_cols if a != scol]
+                _kcols = ", ".join([_Q(c) for c in _key_cols])
+                _kcur = self._exec_on(rdb, f"SELECT DISTINCT {_kcols} FROM {_rfrom}", {})
                 try:
-                    _frows = [dict(zip(_need, rec)) for rec in _fcur.fetchall()]
+                    _krows = [dict(zip(_key_cols, rec)) for rec in _kcur.fetchall()]
                 finally:
                     try:
-                        _fcur.close()
+                        _kcur.close()
                     except Exception:
                         pass
+                try:
+                    _kid_scol = self._fuzzy_key_index(
+                        _fmode, _rx, [(kr.get(scol), kr.get(scol)) for kr in _krows])
+                    _kid_anchor = {}
+                    for _ac0 in _anchor_cols:
+                        _kid_anchor[_ac0] = self._fuzzy_key_index(
+                            _fmode, _rx, [(kr.get(_ac0), kr.get(scol)) for kr in _krows])
+                    _matched_raws = []
+                    for r in rows:
+                        for s in specs:
+                            try:
+                                if s.get("kind") == "direct":
+                                    _rr0 = self._fuzzy_lookup(
+                                        _kid_scol, self._norm_key_value(r.get(s.get("key_alias"))))
+                                else:
+                                    _rr0 = self._fuzzy_lookup(
+                                        _kid_anchor.get(s["anchor_sec"]),
+                                        self._norm_key_value(r.get(s.get("anchor_alias"))))
+                            except Exception:
+                                _rr0 = []
+                            for _o in (_rr0 or []):
+                                if _o not in _matched_raws:
+                                    _matched_raws.append(_o)
+                except Exception:
+                    _matched_raws = []
+                try:
+                    _all_raws = {kr.get(scol) for kr in _krows}
+                except Exception:
+                    _all_raws = set()
+                try:
+                    self._merge_stats[str(sec)] = {"keys": len(_all_raws),
+                                                   "matched": len(_matched_raws)}
+                except Exception:
+                    pass
+                # Round 2: full rows for matched keys only (chunked IN);
+                # empty match set skips the haul entirely.
+                _frows = []
+                if _matched_raws:
+                    _fcols = ", ".join([_Q(c) for c in _need])
+                    if len(_matched_raws) < len(_all_raws):
+                        for _ch in self._chunk(list(_matched_raws), 500):
+                            _phs = ", ".join([f":mk{i}" for i in range(len(_ch))])
+                            _prm = {f"mk{i}": _v for i, _v in enumerate(_ch)}
+                            _fcur = self._exec_on(
+                                rdb, f"SELECT {_fcols} FROM {_rfrom} WHERE {_Q(scol)} IN ({_phs})", _prm)
+                            try:
+                                _frows.extend(dict(zip(_need, rec)) for rec in _fcur.fetchall())
+                            finally:
+                                try:
+                                    _fcur.close()
+                                except Exception:
+                                    pass
+                    else:
+                        _fcur = self._exec_on(rdb, f"SELECT {_fcols} FROM {_rfrom}", {})
+                        try:
+                            _frows = [dict(zip(_need, rec)) for rec in _fcur.fetchall()]
+                        finally:
+                            try:
+                                _fcur.close()
+                            except Exception:
+                                pass
                 # secondary index: norms (+ regex extracts) computed ONCE
                 _sec_norms = []  # [(norm, row)]
                 _sec_groups = {}  # col -> {extract: [rows]} (regex only)
@@ -6459,6 +6606,10 @@ class RMLReportEngine:
         Returns: {rows, total, page, pageSize, sql, columns}
         """
         self._validate_no_exact_dupes()
+        import time as _tmod
+        self._timings = {}
+        self._merge_stats = {}
+        _t_all = _tmod.time()
         # Distributed query path: when the report spans multiple connections
         # we avoid the (very slow) staging copy and instead fetch each
         # connection independently, then join in Python. The user opts in
@@ -6499,7 +6650,9 @@ class RMLReportEngine:
         active_table = payload.get("activeTable") or payload.get("table")
 
         # Compile SQL (computed-column filters wrapped in an outer query)
+        _t_plan = _tmod.time()
         exec_plan = self._plan_structure(active_table, filters, sort, group_by)
+        self._timings["plan_ms"] = int((_tmod.time() - _t_plan) * 1000)
         base_db = exec_plan["base_db"]
         filters2 = self._apply_remote_filters(filters, exec_plan)
         _pc, _ptm, base_f, outer_f, extra, outer_cols = self._outer_plan2(exec_plan, filters2)
@@ -6583,6 +6736,7 @@ class RMLReportEngine:
                 except Exception:
                     pass
                 self._report_progress({"stage": "count", "text": "حساب عدد السجلات..."})
+                _t_count = _tmod.time()
                 cur = self._exec_on(base_db, count_sql_simple, count_params_simple)
                 try:
                     row = cur.fetchone()
@@ -6599,6 +6753,7 @@ class RMLReportEngine:
                 finally:
                     try: cur.close()
                     except: pass
+                self._timings["count_ms"] = int((_tmod.time() - _t_count) * 1000)
 
             # Get paged rows (raw -> cross-DB merges -> strip helpers -> format)
             try:
@@ -6608,6 +6763,7 @@ class RMLReportEngine:
                 pass
             self._report_progress({"stage": "rows", "table": str(exec_plan.get("from_table") or "").lower(),
                                    "text": "جلب الصفوف..."})
+            _t_rows = _tmod.time()
             cur = self._exec_on(base_db, sql, params)
             try:
                 cols = [d[0].lower() for d in cur.description] if cur.description else []
@@ -6626,7 +6782,11 @@ class RMLReportEngine:
                     for _r in _fetched:
                         _d = dict(zip(cols, _r))
                         _append(_d)
+                    self._timings["rows_ms"] = int((_tmod.time() - _t_rows) * 1000)
+                    self._timings["rows_n"] = len(_rr)
+                    _t_merge = _tmod.time()
                     raw_rows = self._apply_merges(_rr, exec_plan)
+                    self._timings["merge_ms"] = int((_tmod.time() - _t_merge) * 1000)
                     if _strip:
                         for _d in raw_rows:
                             for _k in _strip:
@@ -6663,9 +6823,23 @@ class RMLReportEngine:
             _meta_out = {}
         # duplicate groups inside metadata for player header (reads metadata.groups)
         _meta_out["groups"] = _groups_list
+        try:
+            self._timings["total_ms"] = int((_tmod.time() - _t_all) * 1000)
+            self._timings["merge_stats"] = dict(getattr(self, "_merge_stats", {}) or {})
+            _rn = ""
+            try:
+                _rn = str((self.metadata or {}).get("name") or "")
+            except Exception:
+                _rn = ""
+            print(f"RML timings [{_rn}]: " + " ".join(
+                f"{k}={v}" for k, v in self._timings.items() if k != "merge_stats")
+                + (f" merge_stats={self._timings['merge_stats']}" if self._timings.get("merge_stats") else ""))
+        except Exception:
+            pass
         return {
             "rows": result_rows,
             "total": total,
+            "timings": dict(getattr(self, "_timings", {}) or {}),
             "page": int(page),
             "pageSize": page_size_val,
             "totalPages": total_pages,
