@@ -200,24 +200,27 @@
             onSearch({ column: (forceCol !== undefined ? forceCol : state.column), text: text });
         }
 
-        function doImport(file) {
-            // فتح مودال استيراد الإكسل المطابق للمواصفات
+        // زر «إكسل» يفتح نافذة الاستيراد الجماعي مباشرة (لا حوار ملف قبله —
+        // الرفع/السحب يتم داخل النافذة نفسها).
+        function openExcelModal() {
+            var cols = [];
+            try { cols = columnsFn() || []; } catch (e) {}
+            ExcelImportModal.open({
+                columns: cols,
+                initialColumn: state.column,
+                importEndpoint: importEndpoint,
+                onApply: function (res) {
+                    onImportValues(res);
+                }
+            });
+        }
+
+        // مسار احتياطي قديم (يُستخدم فقط إذا تعذّر تحميل مكتبة النافذة)
+        function doImportLegacy(file) {
+            if (!file || state.busy) return;
+            state.busy = true;
+            var done = function () { state.busy = false; try { fileInp.value = ''; } catch (e) {} };
             try {
-                var cols = [];
-                try { cols = columnsFn() || []; } catch (e) {}
-                ExcelImportModal.open({
-                    columns: cols,
-                    initialColumn: state.column,
-                    onApply: function (res) {
-                        onImportValues(res);
-                    }
-                });
-                try { fileInp.value = ''; } catch (e) {}
-            } catch (e) {
-                // Fallback مباشر
-                if (!file || state.busy) return;
-                state.busy = true;
-                var done = function () { state.busy = false; try { fileInp.value = ''; } catch (e) {} };
                 var fd = new FormData();
                 fd.append('file', file);
                 if (state.column) fd.append('column', state.column);
@@ -235,9 +238,12 @@
                     });
                 }).catch(function (e) {
                     done();
-                    try { notify('فشل استيراد الإكسل: ' + (e.message || e), 'error'); } catch (_e) {}
+                    try {
+                        if (typeof notify === 'function') notify('فشل استيراد الإكسل: ' + (e.message || e), 'error');
+                        else alert('فشل استيراد الإكسل: ' + (e.message || e));
+                    } catch (_e) {}
                 });
-            }
+            } catch (e) { done(); }
         }
 
         // — events: لا بحث فوري أبداً — الكتابة تُرشّح قائمة الأعمدة فقط —
@@ -273,10 +279,25 @@
         });
         goBtn.addEventListener('click', submit);
         if (advBtn) advBtn.addEventListener('click', function () { closePop(); onAdvanced(); });
-        if (xlBtn && fileInp) {
-            xlBtn.addEventListener('click', function () { fileInp.click(); });
+        if (xlBtn) {
+            xlBtn.addEventListener('click', function () {
+                closePop();
+                try {
+                    openExcelModal();
+                } catch (e) {
+                    // مكتبة النافذة غير محمّلة → الحوار القديم المباشر
+                    if (fileInp) fileInp.click();
+                    else {
+                        try {
+                            if (typeof notify === 'function') notify('تعذّر فتح نافذة الإكسل', 'error');
+                        } catch (_e) {}
+                    }
+                }
+            });
+        }
+        if (fileInp) {
             fileInp.addEventListener('change', function () {
-                if (fileInp.files && fileInp.files[0]) doImport(fileInp.files[0]);
+                if (fileInp.files && fileInp.files[0]) doImportLegacy(fileInp.files[0]);
             });
         }
         function onDocDown(e) {

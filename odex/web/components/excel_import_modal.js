@@ -14,6 +14,7 @@
         var columns = opts.columns || [];
         var initialColumn = opts.initialColumn || '';
         var onApply = opts.onApply || function () {};
+        var endpoint = opts.importEndpoint || '/api/search/import-excel/';
 
         var existing = document.getElementById('fmlkXlModal');
         if (existing) existing.remove();
@@ -143,7 +144,8 @@
         var closeBtn = md.querySelector('#xlClose');
         var cancelBtn = md.querySelector('#xlCancelBtn');
 
-        var parsedData = { columns: [], rows: [], rawValuesByCol: {} };
+        var parsedData = { columns: [], valuesByIdx: {}, fileMeta: {} };
+        var currentFile = null;
 
         function closeModal() {
             md.remove();
@@ -169,32 +171,46 @@
             }
         };
 
-        function handleFile(file) {
+        function handleFile(file, colIdx) {
+            if (file) currentFile = file;
+            else file = currentFile;
+            if (!file) return;
             fileNameLbl.textContent = file.name;
             var fd = new FormData();
             fd.append('file', file);
-            
-            // استخدام نقطة النهاية الموجودة لتحليل الملف أو قراءته
-            fetch('/api/search/import-excel/', { method: 'POST', body: fd })
+            if (colIdx) fd.append('column_index', String(colIdx));
+
+            fetch(endpoint, { method: 'POST', body: fd })
                 .then(r => r.json().then(j => ({ ok: r.ok, j })))
                 .then(res => {
                     if (!res.ok || res.j.error) throw new Error(res.j.error || 'فشل قراءة الملف');
-                    var vals = res.j.values || [];
-                    parsedData.rawValuesByCol = { 'العمود الأول': vals };
-                    
-                    excelColSel.innerHTML = `<option value="العمود الأول">📊 العمود #1: ${file.name} (${vals.length} قيمة)</option>`;
+                    var idx = res.j.column_index;
+                    parsedData.valuesByIdx[idx] = res.j.values || [];
+                    parsedData.fileMeta[idx] = { truncated: !!res.j.truncated, filename: res.j.filename || file.name };
+                    var cols = res.j.columns || [];
+                    parsedData.columns = cols;
+
+                    // الخطوة 3: أعمدة الملف الفعلية (العنوان + عينة + العدد)
+                    excelColSel.innerHTML = cols.map(function (c) {
+                        return `<option value="${c.index}" ${c.index === idx ? 'selected' : ''}>📊 العمود #${c.index}: ${esc(c.header)} — (${esc(c.sample)}…) [${c.count}]</option>`;
+                    }).join('');
                     excelColSel.disabled = false;
                     excelColSel.className = 'w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-slate-700 focus:outline-none focus:border-indigo-500 font-bold';
-                    
-                    updatePreview('العمود الأول');
+
+                    updatePreview(idx);
                 })
                 .catch(err => {
                     try { if (typeof notify === 'function') notify('خطأ في استيراد الملف: ' + err.message, 'error'); else alert(err.message); } catch (e) {}
                 });
         }
 
-        function updatePreview(colKey) {
-            var vals = parsedData.rawValuesByCol[colKey] || [];
+        function currentIdx() {
+            var v = parseInt(excelColSel.value, 10);
+            return isNaN(v) ? null : v;
+        }
+
+        function updatePreview(idx) {
+            var vals = (idx != null && parsedData.valuesByIdx[idx]) || [];
             if (!vals.length) {
                 previewBox.classList.add('hidden');
                 submitBtn.disabled = true;
@@ -202,23 +218,33 @@
                 return;
             }
             previewBox.classList.remove('hidden');
-            countLbl.textContent = `القيم المستخرجة الفريدة (${vals.length} قيمة):`;
-            
+            var meta = parsedData.fileMeta[idx] || {};
+            countLbl.textContent = `القيم المستخرجة الفريدة (${vals.length} قيمة${meta.truncated ? ' — الأولى فقط' : ''}):`;
+
             var sep = separatorSel.value;
             if (sep === '\\n') sep = '\n';
-            
+
             textArea.value = vals.join(sep);
             copyBtn.disabled = false;
             submitBtn.disabled = !targetColSel.value;
         }
 
+        excelColSel.onchange = function () {
+            var idx = currentIdx();
+            if (idx == null) return;
+            // القيم مخزنة من الاستجابة؛ غير المخزن يُجلب بإعادة الرفع مع column_index
+            if (parsedData.valuesByIdx[idx]) updatePreview(idx);
+            else handleFile(null, idx);
+        };
+
         separatorSel.onchange = function () {
-            var colKey = excelColSel.value;
-            if (colKey) updatePreview(colKey);
+            var idx = currentIdx();
+            if (idx != null) updatePreview(idx);
         };
 
         targetColSel.onchange = function () {
-            submitBtn.disabled = !targetColSel.value || !excelColSel.value || !parsedData.rawValuesByCol[excelColSel.value];
+            var idx = currentIdx();
+            submitBtn.disabled = !targetColSel.value || idx == null || !(parsedData.valuesByIdx[idx] || []).length;
         };
 
         copyBtn.onclick = function () {
@@ -231,15 +257,17 @@
 
         submitBtn.onclick = function () {
             var colKey = targetColSel.value;
-            var excelKey = excelColSel.value;
-            var vals = parsedData.rawValuesByCol[excelKey] || [];
+            var idx = currentIdx();
+            var vals = (idx != null && parsedData.valuesByIdx[idx]) || [];
             if (!colKey || !vals.length) return;
+            var meta = parsedData.fileMeta[idx] || {};
 
             onApply({
                 column: colKey,
                 values: vals,
                 count: vals.length,
-                filename: fileNameLbl.textContent
+                truncated: !!meta.truncated,
+                filename: meta.filename || fileNameLbl.textContent
             });
             closeModal();
         };

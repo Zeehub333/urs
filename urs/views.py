@@ -3188,14 +3188,17 @@ def api_rml_distinct(request):
 
 @csrf_exempt
 def api_search_import_excel(request):
-    """POST /api/search/import-excel/ (multipart file=) — قيم بحث من ملف إكسل.
+    """POST /api/search/import-excel/ (multipart file=, ‏column_index?=) — قيم بحث من ملف.
 
-    يقرأ أول عمود غير فارغ من أول ورقة (xlsx/xlsm حتى 10MB) ويعيد القيم
-    النصية مفرّدة بالترتيب (بحد أقصى 5000) لبناء فلتر IN على عمود محدد.
+    يقبل xlsx/xlsm/csv/txt (حتى 10MB)، يقرأ أول 20 عموداً من أول ورقة/ملف،
+    ويعيد القيم المفرّدة بالترتيب (بحد أقصى 5000) لبناء فلتر IN على عمود محدد.
+    ‏column_index (اختياري، يبدأ من 1): عمود الملف المطلوب استخراج قيمه —
+    بدونه يُختار أول عمود غير فارغ تلقائياً.
     تطبيع الأرقام: int/float صحيح ← أرقام صافية، أرقام عربية ← غربية،
     فواصل الآلاف/المسافات داخل الرقم تُحذف، و'.0' النصية تُسقط —
     حتى تطابق القيم المخزنة (أرقام الحوالات) حرفياً.
-    → {values, count, truncated, filename}
+    → {values, count, truncated, filename, columns, column_index}
+    (columns: [{index, header, sample, count}] لأول 20 عموداً غير فارغ)
     """
     import datetime as _sx_dt
     import re as _sx_re
@@ -3230,56 +3233,132 @@ def api_search_import_excel(request):
         if not f:
             return JsonResponse({"error": "file required"}, status=400)
         ext = (f.name.rsplit(".", 1)[-1] if "." in (f.name or "") else "").lower()
-        if ext not in ("xlsx", "xlsm"):
-            return JsonResponse({"error": "xlsx/xlsm only"}, status=400)
+        if ext not in ("xlsx", "xlsm", "csv", "txt", "xls"):
+            return JsonResponse({"error": "المدعوم: xlsx / xlsm / csv / txt"}, status=400)
         if (f.size or 0) > 10 * 1024 * 1024 or (f.size or 0) <= 0:
             return JsonResponse({"error": "empty or >10MB"}, status=400)
         raw = f.read()
         if len(raw) > 10 * 1024 * 1024:
             return JsonResponse({"error": ">10MB"}, status=400)
-        if raw[:2] != b"PK":
-            return JsonResponse({"error": "not a valid xlsx file"}, status=400)
         import io as _io
-        from openpyxl import load_workbook as _load_wb
-        wb = _load_wb(filename=_io.BytesIO(raw), read_only=True, data_only=True)
-        try:
-            ws = wb.active
-            if ws is None:
-                return JsonResponse({"error": "empty workbook"}, status=400)
-            # أول عمود فيه قيم (نمسح A..J) — نتجاوز الرؤوس النصية الصرفة تلقائياً؟
-            # لا: نعيد كل القيم غير الفارغة، والمضيف يبني IN (القيم الزائدة لا تضر).
-            col_idx = None
-            for ci in range(1, 11):
-                for row in ws.iter_rows(min_col=ci, max_col=ci, max_row=50, values_only=True):
-                    v = row[0] if row else None
-                    if v is not None and str(v).strip() != "":
-                        col_idx = ci
-                        break
-                if col_idx is not None:
-                    break
-            if col_idx is None:
-                return JsonResponse({"error": "no values in first columns"}, status=400)
-            values, seen = [], set()
-            truncated = False
-            for row in ws.iter_rows(min_col=col_idx, max_col=col_idx, values_only=True):
-                v = row[0] if row else None
-                if v is None:
-                    continue
-                s = _sx_norm(v)
-                if not s or s in seen:
-                    continue
-                seen.add(s)
-                values.append(s)
-                if len(values) >= 5000:
-                    truncated = True
-                    break
-        finally:
+        # — قراءة الملف إلى أعمدة خام (بحد أقصى 20 عموداً × 20000 صف) —
+        _MAX_COLS, _MAX_ROWS = 20, 20000
+        raw_cols = []  # list[list[raw value]]
+        if ext in ("xlsx", "xlsm"):
+            if raw[:2] != b"PK":
+                return JsonResponse({"error": "not a valid xlsx file"}, status=400)
+            from openpyxl import load_workbook as _load_wb
+            wb = _load_wb(filename=_io.BytesIO(raw), read_only=True, data_only=True)
             try:
-                wb.close()
+                ws = wb.active
+                if ws is None:
+                    return JsonResponse({"error": "empty workbook"}, status=400)
+                raw_cols = [[] for _ in range(_MAX_COLS)]
+                for ri, row in enumerate(ws.iter_rows(min_col=1, max_col=_MAX_COLS, values_only=True)):
+                    if ri >= _MAX_ROWS:
+                        break
+                    for ci in range(_MAX_COLS):
+                        v = row[ci] if row and ci < len(row) else None
+                        if v is not None and str(v).strip() != "":
+                            raw_cols[ci].append(v)
+            finally:
+                try:
+                    wb.close()
+                except Exception:
+                    pass
+        elif ext == "xls":
+            try:
+                import xlrd as _xlrd
+            except ImportError:
+                return JsonResponse({"error": "ملفات xls القديمة غير مدعومة — احفظ الملف بصيغة xlsx ثم أعد الرفع"}, status=400)
+            book = _xlrd.open_workbook(file_contents=raw)
+            if not book.nsheets:
+                return JsonResponse({"error": "empty workbook"}, status=400)
+            sh = book.sheet_by_index(0)
+            ncols = min(sh.ncols, _MAX_COLS)
+            nrows = min(sh.nrows, _MAX_ROWS)
+            raw_cols = [[] for _ in range(ncols)]
+            for ri in range(nrows):
+                for ci in range(ncols):
+                    try:
+                        v = sh.cell_value(ri, ci)
+                    except Exception:
+                        continue
+                    if v is not None and str(v).strip() != "":
+                        raw_cols[ci].append(v)
+        else:  # csv / txt
+            import csv as _csv
+            text = None
+            for enc in ("utf-8-sig", "utf-8", "cp1256", "windows-1256"):
+                try:
+                    text = raw.decode(enc)
+                    break
+                except Exception:
+                    continue
+            if text is None:
+                return JsonResponse({"error": "تعذّر قراءة ترميز الملف النصي"}, status=400)
+            sample = text[:4096]
+            try:
+                dialect = _csv.Sniffer().sniff(sample, delimiters=[",", ";", "\t", "|"])
             except Exception:
-                pass
+                dialect = _csv.excel
+            reader = _csv.reader(_io.StringIO(text), dialect)
+            raw_cols = [[] for _ in range(_MAX_COLS)]
+            for ri, row in enumerate(reader):
+                if ri >= _MAX_ROWS:
+                    break
+                if not row:
+                    continue
+                for ci in range(min(len(row), _MAX_COLS)):
+                    v = row[ci]
+                    if v is not None and str(v).strip() != "":
+                        raw_cols[ci].append(v)
+        # — تطبيع كل عمود وبناء بياناته —
+        def _is_num_text(s):
+            return bool(_sx_re.fullmatch(r"-?\d+(\.\d+)?", s or ""))
+
+        col_infos = []
+        for ci, col in enumerate(raw_cols):
+            normed, seen_c = [], set()
+            for v in col:
+                s = _sx_norm(v)
+                if not s or s in seen_c:
+                    continue
+                seen_c.add(s)
+                normed.append(s)
+            if not normed:
+                continue
+            first_raw = str(col[0]).strip() if col else ""
+            header = first_raw if (first_raw and not _is_num_text(_sx_norm(col[0]))) else ("العمود #%d" % (ci + 1))
+            col_infos.append({"idx": ci + 1, "header": header[:60],
+                              "sample": normed[0][:40], "count": len(normed),
+                              "values": normed})
+        if not col_infos:
+            return JsonResponse({"error": "no values in first columns"}, status=400)
+        # — العمود المطلوب (1-based) أو أول عمود غير فارغ —
+        want = None
+        try:
+            want = int(request.POST.get("column") or request.POST.get("column_index") or 0) or None
+        except Exception:
+            want = None
+        pick = next((c for c in col_infos if c["idx"] == want), None) if want else None
+        if pick is None:
+            pick = col_infos[0]
+        values, seen = [], set()
+        truncated = False
+        for s in pick["values"]:
+            if s in seen:
+                continue
+            seen.add(s)
+            values.append(s)
+            if len(values) >= 5000:
+                truncated = True
+                break
+        columns = [{"index": c["idx"], "header": c["header"],
+                    "sample": c["sample"], "count": c["count"]} for c in col_infos]
         return JsonResponse({"values": values, "count": len(values),
-                             "truncated": truncated, "filename": f.name or ""},
+                             "truncated": truncated, "filename": f.name or "",
+                             "columns": columns, "column_index": pick["idx"]},
                             json_dumps_params={"ensure_ascii": False})
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
