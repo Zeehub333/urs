@@ -2673,7 +2673,8 @@
         }
         function collectData() {
             const data = {};
-            document.querySelectorAll('[data-field]').forEach(el => {
+            // نطاق النموذج فقط — مدخلات مودال الاستيراد (xl_*) خارج formRoot فلا تلوث الحفظ
+            document.querySelectorAll('#formRoot [data-field]').forEach(el => {
                 data[el.dataset.field] = el.value;
             });
             return data;
@@ -2688,7 +2689,7 @@
             currentData = {};
             try{ window._panelId = null; }catch(e){}
             renderForm(fmlMeta);
-            document.querySelectorAll('[data-field]').forEach(el => { el.value = ''; });
+            document.querySelectorAll('#formRoot [data-field]').forEach(el => { el.value = ''; });
             document.getElementById('formPanelTitle').textContent = 'سجل جديد';
             try{             document.getElementById('formPanelSub').textContent = 'إدخال بيانات جديدة — التبويب الأول فوق وبقيتها تحته'; }catch(e){}
             enterFormView();
@@ -2720,7 +2721,7 @@
             Object.entries(currentData).forEach(([k, v]) => {
                 if(v === undefined || v === null) return;
                 const f = fmlkField(k);
-                document.querySelectorAll(`[data-field="${CSS.escape(k)}"]`).forEach(el => {
+                document.querySelectorAll(`#formRoot [data-field="${CSS.escape(k)}"]`).forEach(el => {
                     if(el.type === 'checkbox' && (f.inputType === 'boolean' || el.hasAttribute('onchange') && el.getAttribute('onchange').includes('boolSync'))) {
                         el.checked = (String(v).toLowerCase() === 'true' || v === '1' || v === 1 || v === true);
                         if(window.FMLK) FMLK.boolSync(k, el.checked);
@@ -2852,7 +2853,7 @@
             currentRecordId = null;
             currentData = {};
             renderForm(fmlMeta);
-            document.querySelectorAll('[data-field]').forEach(el => { el.value = ''; });
+            document.querySelectorAll('#formRoot [data-field]').forEach(el => { el.value = ''; });
             document.getElementById('formPanelTitle').textContent = 'سجل جديد';
         }
         function toggleBlankPanel(){ const p = document.getElementById('blankPanel'); if(!p) return; const show = p.classList.contains('hidden'); p.classList.toggle('hidden', !show); p.classList.toggle('flex', show); }
@@ -4693,7 +4694,7 @@
                 m.id = 'xlsxImportModal';
                 m.className = 'hidden fixed inset-0 z-[70] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4';
                 m.setAttribute('onclick', 'if(event.target===this)closeXlsxImport()');
-                m.innerHTML = '<div class="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[88vh] overflow-hidden flex flex-col">'
+                m.innerHTML = '<div class="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[88vh] overflow-hidden flex flex-col">'
                     + '<div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-emerald-50 shrink-0"><h3 class="text-sm font-bold text-slate-800"><i class="fa-solid fa-file-excel text-emerald-600"></i> استيراد من Excel</h3><button onclick="closeXlsxImport()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button></div>'
                     + '<div class="p-4 space-y-3 overflow-y-auto custom-scroll text-xs">'
                     + '<div><label class="block text-[11px] font-bold text-slate-500 mb-1">ملف XLSX (يُحلَّل تلقائياً فور اختياره)</label><input id="xlsxFileInput" type="file" accept=".xlsx,.xlsm,.xltx,.xltm" onchange="autoXlsxParse()" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"/></div>'
@@ -4786,6 +4787,23 @@
                         return `<select ${nm} title="قيمة ثابتة تُدخل مع كل الصفوف" class="${cls}"><option value="">—</option>` + _opts.map(o=>`<option value="${escAttr(o.value)}">${escHtml(o.label)}</option>`).join('') + `</select>`;
                     return `<input type="text" ${nm} ${ph} class="${cls}"/>`;
                 };
+                // نفس مدخل النموذج تماماً: نسخة بأسماء xl_ معزولة (بلا تسمية — الصف يعرضها)
+                const XLSX_SRV_T = ['lookup','datamodal','cascading_select','livesync','autopopulate','calculated','subform','grid','matrix','tree','badges','polymorphic','reorder','multiselect','list-input','restricted_tags','cascade_grid'];
+                const xlsxFormInput = (f)=>{
+                    try{
+                        const _t = String(f.inputType || f.input_type || '').toLowerCase();
+                        const _hasTabSrc = ((f.options_source || f.optionsSource || []).length > 0);
+                        // select بمرجع جدولي + مصدر خيارات جدولي: نفس القائمة من نفس الجدول
+                        // (التعبئة بـ hydOptionsSource الجدولية — لا تحتاج اسم الحقل)
+                        const _isRefSelect = (_t === 'select' && (f.refTable || f.ref_table) && _hasTabSrc);
+                        if(!_isRefSelect && (f.refTable || f.ref_table || f.displayTable || f.display_table)) return xlsxFixedInput(f);
+                        if(XLSX_SRV_T.includes(_t)) return xlsxFixedInput(f);
+                        const clone = Object.assign({}, f, {name: 'xl_' + f.name, default: ''});
+                        if(_isRefSelect){ delete clone.refTable; delete clone.ref_table; delete clone.displayTable; delete clone.display_table; }
+                        const html = renderInput(clone);
+                        return String(html || '').replace(/<label class="fx-label">[\s\S]*?<\/label>/, '');
+                    }catch(e){ return xlsxFixedInput(f); }
+                };
                 let html = `<div class="text-[11px] font-bold text-slate-600 mb-1">${data.total_rows} صف (الترويسات: صف ${data.header_row || hr}):</div>`;
                 // 1) عينات الملف فوق الربط
                 if((data.sample_rows || []).length) html += `<div class="text-[11px] font-bold text-slate-600 mb-1">عينات من الملف (أول 5 صفوف بيانات):</div><div class="overflow-x-auto border border-slate-200 rounded-lg mb-2"><table class="w-full text-[10px]"><tr>${_xlsxHeaders.map(h=>`<th class="px-1.5 py-1 bg-slate-50 border-b font-mono" dir="ltr">${escHtml(h)}</th>`).join('')}</tr>` + data.sample_rows.map(r=>`<tr>${_xlsxHeaders.map((h,i)=>`<td class="px-1.5 py-1 border-b truncate max-w-[140px]">${escHtml(String(r[i] ?? ''))}</td>`).join('')}</tr>`).join('') + `</table></div>`;
@@ -4795,14 +4813,23 @@
                     + `<div class="space-y-1">` + fields.map(f=>{
                         const hi = autoCol(f);
                         return `<div data-xrow class="grid grid-cols-[1fr_1fr_1fr] gap-1 items-center bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5"><span class="font-bold text-slate-700 truncate" title="${escAttr(f.name)}">${escHtml(f.alias || f.name)}</span>`
-                            + xlsxFixedInput(f)
-                            + `<select data-xfield="${escAttr(f.name)}" onchange="var fx=this.closest('[data-xrow]').querySelector('[data-xfixed]'); if(fx){ fx.disabled = this.value !== '-1'; if(this.value !== '-1') fx.value=''; }" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs min-w-0">${xlOpts(hi)}</select></div>`;
+                            + `<div data-xfixedwrap="${escAttr(f.name)}" class="min-w-0 overflow-x-auto custom-scroll">${xlsxFormInput(f)}</div>`
+                            + `<select data-xfield="${escAttr(f.name)}" onchange="var w=this.closest('[data-xrow]').querySelector('[data-xfixedwrap]'); if(w){ w.querySelectorAll('input,select,textarea,button').forEach(function(e){ e.disabled = this.value !== '-1'; }, this); w.classList.toggle('opacity-40', this.value !== '-1'); }" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs min-w-0 self-start">${xlOpts(hi)}</select></div>`;
                     }).join('') + `</div>`;
                 box.innerHTML = html;
+                const xlsxWrapVal = (wrap)=>{
+                    if(!wrap) return '';
+                    const vinp = wrap.querySelector('[data-field]');
+                    if(!vinp || vinp.disabled) return '';
+                    let v = String(vinp.value ?? '').trim();
+                    if(v && vinp.type === 'datetime-local') v = v.replace('T', ' ');
+                    return v;
+                };
+                window._xlsxWrapVal = xlsxWrapVal;
                 // عطّل الثابتة حيث اختير عمود تلقائياً
-                box.querySelectorAll('#xlsxMapOut [data-xfield]').forEach(s=>{ if(s.value !== '-1'){ const fx = s.closest('[data-xrow]').querySelector('[data-xfixed]'); if(fx) fx.disabled = true; } });
+                box.querySelectorAll('#xlsxMapOut [data-xfield]').forEach(s=>{ if(s.value !== '-1'){ const w = s.closest('[data-xrow]').querySelector('[data-xfixedwrap]'); if(w){ w.querySelectorAll('input,select,textarea,button').forEach(e=>{ e.disabled = true; }); w.classList.add('opacity-40'); } } });
                 const mapped = [...document.querySelectorAll('#xlsxMapOut [data-xfield]')].filter(s=>s.value !== '-1').length
-                    + [...document.querySelectorAll('#xlsxMapOut [data-xfixed]')].filter(i=>!i.disabled && i.value.trim()).length;
+                    + [...document.querySelectorAll('#xlsxMapOut [data-xfixedwrap]')].filter(w=>xlsxWrapVal(w) !== '').length;
                 document.getElementById('xlsxImportBtn').disabled = !mapped;
                 if(!mapped) box.innerHTML += '<div class="text-amber-700 text-[11px] mt-1">اختر عمود إكسل أو أدخل قيمة ثابتة لحقل واحد على الأقل</div>';
             }catch(e){ box.innerHTML = '<span class="text-rose-500">تعذر التحليل: ' + escHtml(String((e && e.message) || e)).slice(0, 300) + '</span>'; }
@@ -4822,15 +4849,15 @@
             const btn = document.getElementById('xlsxImportBtn');
             if(!_xlsxFile || _xlsxRunning) return;
             const mapping = {}, fixed = {};
+            const _wval = window._xlsxWrapVal || ((w)=>{ const v = w ? w.querySelector('[data-field]') : null; return (v && !v.disabled) ? String(v.value || '').trim() : ''; });
             document.querySelectorAll('#xlsxMapOut [data-xfield]').forEach(s=>{
                 const fn = s.dataset.xfield;
                 const hi = parseInt(s.value, 10);
-                const fx = s.closest('[data-xrow]') ? s.closest('[data-xrow]').querySelector('[data-xfixed]') : null;
+                const wrap = s.closest('[data-xrow]') ? s.closest('[data-xrow]').querySelector('[data-xfixedwrap]') : null;
                 if(hi >= 0 && _xlsxHeaders[hi] !== undefined) mapping[_xlsxHeaders[hi]] = fn;
-                else if(fx && String(fx.value || '').trim()){
-                    let fv = String(fx.value).trim();
-                    if(fx.dataset && fx.dataset.xdt) fv = fv.replace('T', ' ');
-                    fixed[fn] = fv;
+                else if(wrap){
+                    const fv = _wval(wrap);
+                    if(fv !== '') fixed[fn] = fv;
                 }
             });
             if(!Object.keys(mapping).length && !Object.keys(fixed).length) return notify('اختر عمود إكسل أو قيمة ثابتة لحقل واحد على الأقل', 'error');
