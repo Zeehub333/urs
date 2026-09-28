@@ -7,7 +7,7 @@
         let wizardColumns = [];
         let wizardDetail = {table:'', master:'', detail:'', rel_type:'one_to_many', columns:[]};
         let diagTables = []; // {name, cols:[{name,type}], selected:true}
-        let wizardLinks = []; // {from_table, from_col, to_table, to_col, rel_type}
+        let wizardLinks = []; // {from_table, from_col, to_table, to_col, rel_type, match, pattern}
         let colSubTab = 'main'; // main | sub (step4 sub-sidebar)
         let exprBTgt = null; // {idx, isDetail}
         let diagLinkDraft = null; // {from, to}
@@ -157,7 +157,7 @@
                 wizardGeneralWhere = data.general_where || data.generalWhere || (md.general_where || md.generalWhere) || '';
                 const _dtEl2 = document.getElementById('wizardDocTemplate');
                 if(_dtEl2) _dtEl2.value = wizardDocTemplate;
-                wizardLinks = (data.links || []).map(l=>({from_table:l.from_table||l.fromTable||'', from_col:l.from_col||l.fromCol||'', to_table:l.to_table||l.toTable||'', to_col:l.to_col||l.toCol||'', rel_type:(l.rel_type||l.relType||l.rel||'')})).filter(l=>l.from_table && l.to_table);
+                wizardLinks = (data.links || []).map(l=>({from_table:l.from_table||l.fromTable||'', from_col:l.from_col||l.fromCol||'', to_table:l.to_table||l.toTable||'', to_col:l.to_col||l.toCol||'', rel_type:(l.rel_type||l.relType||l.rel||''), match:(l.match||'exact'), pattern:(l.pattern||'')})).filter(l=>l.from_table && l.to_table);
                 wizardTableOpts = {};
                 (data.table_opts || data.tableOpts || []).forEach(t=>{
                     const nm = String(t.name || t.table || '').trim();
@@ -2607,7 +2607,7 @@ list.innerHTML = wizardDetail.columns.map((col, idx)=>`
                 });
                 const _tkeys = Object.keys(_groups);
                 const _fopts = wizardFields.map((f,i)=>'<option value="'+i+'">'+wbEsc(String(f.table_source||f.tableSource||'')+'.'+f.name)+'</option>').join('');
-                const _links = (wizardLinks||[]).map((l,i)=>'<div class="wb-linkchip" onclick="wbOpenLinkModal('+i+')" title="تعديل الرابط"><span class="font-mono" dir="ltr">'+wbEsc((l.from_table||'?')+'.'+(l.from_col||'?'))+' ← '+wbEsc((l.to_table||'?')+'.'+(l.to_col||'?'))+'</span><span class="text-slate-400">'+wbEsc(l.rel_type||l.relType||'')+'</span><button onclick="event.stopPropagation();wbDelLink('+i+')" class="wb-del" title="حذف الرابط"><i class="fa-solid fa-xmark text-[10px]"></i></button></div>').join('')
+                const _links = (wizardLinks||[]).map((l,i)=>'<div class="wb-linkchip" onclick="wbOpenLinkModal('+i+')" title="تعديل الرابط"><span class="font-mono" dir="ltr">'+wbEsc((l.from_table||'?')+'.'+(l.from_col||'?'))+' ← '+wbEsc((l.to_table||'?')+'.'+(l.to_col||'?'))+'</span><span class="text-slate-400">'+wbEsc(l.rel_type||l.relType||'')+'</span>'+((l.match && l.match!=='exact')?'<span class="text-[9px] bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded-full font-bold" title="'+wbEsc(l.pattern||'')+'">'+(l.match==='contains'?'احتواء':'regex')+'</span>':'')+'<button onclick="event.stopPropagation();wbDelLink('+i+')" class="wb-del" title="حذف الرابط"><i class="fa-solid fa-xmark text-[10px]"></i></button></div>').join('')
                     || '<p class="text-slate-400 text-center py-2">لا روابط بعد — أضف رابطاً من السايدبار</p>';
                 html = '<div class="flex gap-2 items-start">'
                     + '<aside class="wb-dside">'
@@ -3026,7 +3026,8 @@ list.innerHTML = wizardDetail.columns.map((col, idx)=>`
                 wizardLinks.push({
                     from_table: dTbl, from_col: pick, from_conn: dConn,
                     to_table: oTbl, to_col: pick, to_conn: oConn,
-                    rel_type: isSub ? 'one_to_many' : 'one_to_one'
+                    rel_type: isSub ? 'one_to_many' : 'one_to_one',
+                    match: 'exact', pattern: ''
                 });
                 added++;
             }
@@ -3176,7 +3177,8 @@ list.innerHTML = wizardDetail.columns.map((col, idx)=>`
                 const key = [l.from_table, l.from_col, l.to_table, l.to_col].join('||').toLowerCase();
                 if(existL.has(key)) return;
                 wizardLinks.push({from_table: l.from_table, from_col: l.from_col, to_table: l.to_table, to_col: l.to_col,
-                                  from_conn: l.from_conn || '', to_conn: l.to_conn || '', rel_type: l.rel_type || 'one_to_one'});
+                                  from_conn: l.from_conn || '', to_conn: l.to_conn || '', rel_type: l.rel_type || 'one_to_one',
+                                  match: l.match || 'exact', pattern: l.pattern || ''});
                 existL.add(key);
                 nl++;
             });
@@ -3202,7 +3204,7 @@ list.innerHTML = wizardDetail.columns.map((col, idx)=>`
         }
         function wbOpenLinkModal(idx){
             wbLinkEdit = (typeof idx === 'number') ? idx : -1;
-            const l = (idx >= 0 && wizardLinks[idx]) ? wizardLinks[idx] : {from_table:'',from_col:'',to_table:'',to_col:'',rel_type:'one_to_many'};
+            const l = (idx >= 0 && wizardLinks[idx]) ? wizardLinks[idx] : {from_table:'',from_col:'',to_table:'',to_col:'',rel_type:'one_to_many',match:'exact',pattern:''};
             const def = wbEnsureDefault();
             const fk = wbTblKeys().find(k=>k.split('||').slice(1).join('||').toLowerCase()===String(l.from_table||'').toLowerCase()) || def || wbTblKeys()[0] || '';
             const tk = wbTblKeys().find(k=>k.split('||').slice(1).join('||').toLowerCase()===String(l.to_table||'').toLowerCase()) || wbTblKeys().filter(k=>k!==fk)[0] || '';
@@ -3214,6 +3216,9 @@ list.innerHTML = wizardDetail.columns.map((col, idx)=>`
             document.getElementById('wbLinkFromFld').innerHTML = wbFldOptions(fs.value, l.from_col);
             document.getElementById('wbLinkToFld').innerHTML = wbFldOptions(ts.value, l.to_col);
             document.getElementById('wbLinkRel').value = l.rel_type || 'one_to_many';
+            document.getElementById('wbLinkMatch').value = l.match || 'exact';
+            document.getElementById('wbLinkPattern').value = l.pattern || '';
+            document.getElementById('wbLinkPatternWrap').style.display = (document.getElementById('wbLinkMatch').value === 'regex' ? '' : 'none');
             document.getElementById('wbLinkModal').classList.remove('hidden');
         }
         function wbLinkTblChanged(which){
@@ -3228,10 +3233,14 @@ list.innerHTML = wizardDetail.columns.map((col, idx)=>`
             const tt = document.getElementById('wbLinkToTbl').value;
             const tf = document.getElementById('wbLinkToFld').value;
             const rel = document.getElementById('wbLinkRel').value || 'one_to_many';
+            const mt = document.getElementById('wbLinkMatch').value || 'exact';
+            const pat = (document.getElementById('wbLinkPattern').value || '').trim();
             if(!ft || !ff || !tt || !tf) return notify('أكمل الجدول والحقل للطرفين', 'info');
+            if(mt === 'regex' && !pat) return notify('وضع regex يتطلب نمطاً — مثال: (\\d+)', 'info');
             const fp = ft.split('||'), tp = tt.split('||');
             const rec = {from_table: fp.slice(1).join('||'), from_col: ff, from_conn: fp[0],
-                         to_table: tp.slice(1).join('||'), to_col: tf, to_conn: tp[0], rel_type: rel};
+                         to_table: tp.slice(1).join('||'), to_col: tf, to_conn: tp[0], rel_type: rel,
+                         match: mt, pattern: pat};
             if(wbLinkEdit >= 0 && wizardLinks[wbLinkEdit]) wizardLinks[wbLinkEdit] = Object.assign({}, wizardLinks[wbLinkEdit], rec);
             else wizardLinks.push(rec);
             try{ autoMatchDetailLink(); }catch(e){}
