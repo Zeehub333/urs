@@ -4684,7 +4684,8 @@
             notify(`تم استيراد ${ok} سجل${fail ? ` — فشل ${fail}` : ''}`, fail ? (ok ? 'info' : 'error') : 'success');
             await loadAllRecords();
         }
-        let _xlsxFile = null, _xlsxHeaders = [], _xlsxHeaderRow = 1, _xlsxDataStart = 2;
+        let _xlsxFile = null, _xlsxHeaders = [], _xlsxHeaderRow = 1, _xlsxDataStart = 2, _xlsxTotal = 0;
+        let _xlsxRunning = false, _xlsxCancel = false;
         function openXlsxImport(){
             let m = document.getElementById('xlsxImportModal');
             if(!m){
@@ -4698,8 +4699,9 @@
                     + '<div><label class="block text-[11px] font-bold text-slate-500 mb-1">ملف XLSX (يُحلَّل تلقائياً فور اختياره)</label><input id="xlsxFileInput" type="file" accept=".xlsx,.xlsm,.xltx,.xltm" onchange="autoXlsxParse()" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"/></div>'
                     + '<div class="flex gap-2"><div class="flex-1"><label class="block text-[11px] font-bold text-slate-500 mb-1">صف الترويسات (أسماء الأعمدة)</label><input id="xlsxHeaderRow" type="number" min="1" value="1" onchange="var h=Math.max(1,parseInt(this.value||\'1\',10)||1); this.value=h; var d=document.getElementById(\'xlsxDataStart\'); if(d) d.value=String(h+1); autoXlsxParse();" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"/></div>'
                     + '<div class="flex-1"><label class="block text-[11px] font-bold text-slate-500 mb-1">صف بدء البيانات (= الترويسات +1)</label><input id="xlsxDataStart" type="number" min="2" value="2" onchange="autoXlsxParse()" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"/></div></div>'
-                    + '<div><label class="block text-[11px] font-bold text-slate-500 mb-1">عمود المطابقة (لتحديث الموجود بدل التكرار — اتركه فارغاً للإنشاء فقط)</label><select id="xlsxMatchCol" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"></select></div>'
+                    + '<div><label class="block text-[11px] font-bold text-slate-500 mb-1">عمود المطابقة — مفتاح الـ upsert (الموجود يُحدَّث والجديد يُنشأ — فارغ = إنشاء فقط)</label><select id="xlsxMatchCol" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"></select></div>'
                     + '<div id="xlsxMapOut" class="text-slate-500">اختر الملف ثم اضغط تحليل.</div>'
+                    + '<div id="xlsxProgWrap" class="hidden mt-1"><div class="flex items-center justify-between text-[11px] font-bold text-slate-600 mb-1"><span id="xlsxProgLbl"></span><span id="xlsxProgEta" class="text-slate-400"></span></div><div class="h-2.5 bg-slate-200 rounded-full overflow-hidden"><div id="xlsxProgBar" class="h-full bg-emerald-500 rounded-full transition-all" style="width:0%"></div></div></div>'
                     + '</div>'
                     + '<div class="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2 shrink-0"><button onclick="closeXlsxImport()" class="px-4 py-1.5 bg-slate-100 rounded-xl text-xs">إلغاء</button><button onclick="runXlsxParse()" class="px-4 py-1.5 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs font-bold"><i class="fa-solid fa-magnifying-glass"></i> تحليل</button><button id="xlsxImportBtn" onclick="applyXlsxImport()" disabled class="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold disabled:opacity-40">استيراد</button></div>'
                     + '</div>';
@@ -4709,13 +4711,15 @@
             document.getElementById('xlsxMatchCol').innerHTML = '<option value="">— بلا (إنشاء فقط) —</option>' + fields.map(f=>`<option value="${escAttr(f.name)}">${escHtml(f.alias || f.name)} <span class="text-slate-400">(${escHtml(f.name)})</span></option>`).join('');
             document.getElementById('xlsxMapOut').innerHTML = '<span class="text-slate-400">اختر الملف ثم اضغط تحليل.</span>';
             document.getElementById('xlsxImportBtn').disabled = true;
-            _xlsxFile = null; _xlsxHeaders = []; _xlsxHeaderRow = 1; _xlsxDataStart = 2;
+            _xlsxFile = null; _xlsxHeaders = []; _xlsxHeaderRow = 1; _xlsxDataStart = 2; _xlsxTotal = 0; _xlsxCancel = false;
+            const _pw = document.getElementById('xlsxProgWrap'); if(_pw) _pw.classList.add('hidden');
             const _hr = document.getElementById('xlsxHeaderRow'); if(_hr) _hr.value = '1';
             const _ds = document.getElementById('xlsxDataStart'); if(_ds) _ds.value = '2';
             m.classList.remove('hidden');
             if(typeof lockScroll === 'function') lockScroll();
         }
         function closeXlsxImport(){
+            _xlsxCancel = true;
             document.getElementById('xlsxImportModal').classList.add('hidden');
             if(typeof unlockScroll === 'function') unlockScroll();
         }
@@ -4741,7 +4745,7 @@
                 const data = await res.json();
                 if(!res.ok) throw new Error(data.error || 'فشل التحليل');
                 _xlsxHeaders = data.headers || [];
-                _xlsxHeaderRow = hr; _xlsxDataStart = ds;
+                _xlsxHeaderRow = hr; _xlsxDataStart = ds; _xlsxTotal = data.total_rows || 0;
                 const fields = (fmlMeta.fields || []).filter(f => !f.destination || f.destination === 'main');
                 // مطابقة تلقائية: ترويسة الإكسل == اسم الحقل أو مسماه
                 const autoCol = (f)=>{
@@ -4775,9 +4779,16 @@
             const inp = document.getElementById('xlsxFileInput');
             if(inp && inp.files && inp.files[0]) runXlsxParse();
         }
+        function fmtEta(sec){
+            sec = Math.max(0, Math.round(sec || 0));
+            if(sec < 60) return `~${sec} ث`;
+            const m = Math.floor(sec / 60), s = sec % 60;
+            if(m < 60) return `~${m}:${String(s).padStart(2, '0')} د`;
+            return `~${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')} س`;
+        }
         async function applyXlsxImport(){
             const btn = document.getElementById('xlsxImportBtn');
-            if(!_xlsxFile) return;
+            if(!_xlsxFile || _xlsxRunning) return;
             const mapping = {}, fixed = {};
             document.querySelectorAll('#xlsxMapOut [data-xfield]').forEach(s=>{
                 const fn = s.dataset.xfield;
@@ -4787,28 +4798,59 @@
                 else if(fx && fx.value.trim()) fixed[fn] = fx.value.trim();
             });
             if(!Object.keys(mapping).length && !Object.keys(fixed).length) return notify('اختر عمود إكسل أو قيمة ثابتة لحقل واحد على الأقل', 'error');
+            const total = Math.min(_xlsxTotal || 0, 2000);
+            if(!total) return notify('لا صفوف للاستيراد', 'error');
+            _xlsxRunning = true; _xlsxCancel = false;
             btn.disabled = true;
-            notify('جارٍ الاستيراد...', 'info');
+            const wrap = document.getElementById('xlsxProgWrap'), bar = document.getElementById('xlsxProgBar'),
+                lbl = document.getElementById('xlsxProgLbl'), eta = document.getElementById('xlsxProgEta');
+            if(wrap) wrap.classList.remove('hidden');
+            const BATCH = 200;
+            let off = 0;
+            const agg = {created: 0, updated: 0, skipped: 0, errors: []};
+            const t0 = Date.now();
+            const paint = ()=>{
+                const pct = total ? Math.round(off / total * 100) : 0;
+                if(bar) bar.style.width = pct + '%';
+                if(lbl) lbl.textContent = `تم ${off} من ${total} (${pct}%) — جديد ${agg.created} + محدّث ${agg.updated}`;
+                const el = (Date.now() - t0) / 1000, rate = off / Math.max(el, 0.1);
+                if(eta) eta.textContent = (off < total && rate > 0) ? ('متبقي ' + fmtEta((total - off) / rate)) : '';
+            };
+            paint();
             try{
-                const fd = new FormData();
-                fd.append('file', _xlsxFile);
-                fd.append('fml', currentFml);
-                fd.append('mapping', JSON.stringify(mapping));
-                fd.append('fixed', JSON.stringify(fixed));
-                fd.append('match_column', (document.getElementById('xlsxMatchCol') || {}).value || '');
-                fd.append('header_row', String(_xlsxHeaderRow || 1));
-                fd.append('data_start', String(_xlsxDataStart || 2));
-                const res = await fetch(`/api/apps/${encodeURIComponent(currentApp)}/models/import-xlsx/`, {method:'POST', body: fd});
-                const data = await res.json();
-                if(!res.ok) throw new Error(data.error || 'فشل الاستيراد');
-                let msg = `تم: ${data.created} جديد + ${data.updated} محدّث${data.skipped ? ` (تُجوهل ${data.skipped})` : ''}`;
-                if(data.truncated) msg += ' — اقتصر على أول 2000 صف';
-                if((data.errors || []).length) msg += ' — أخطاء: ' + data.errors.slice(0, 3).join('، ');
-                notify(msg, (data.errors || []).length ? 'info' : 'success');
+                while(off < total && !_xlsxCancel){
+                    const fd = new FormData();
+                    fd.append('file', _xlsxFile);
+                    fd.append('fml', currentFml);
+                    fd.append('mapping', JSON.stringify(mapping));
+                    fd.append('fixed', JSON.stringify(fixed));
+                    fd.append('match_column', (document.getElementById('xlsxMatchCol') || {}).value || '');
+                    fd.append('header_row', String(_xlsxHeaderRow || 1));
+                    fd.append('data_start', String(_xlsxDataStart || 2));
+                    fd.append('row_offset', String(off));
+                    fd.append('row_limit', String(BATCH));
+                    const res = await fetch(`/api/apps/${encodeURIComponent(currentApp)}/models/import-xlsx/`, {method:'POST', body: fd});
+                    const data = await res.json();
+                    if(!res.ok) throw new Error(data.error || 'فشل الاستيراد');
+                    agg.created += data.created || 0; agg.updated += data.updated || 0; agg.skipped += data.skipped || 0;
+                    (data.errors || []).slice(0, 10 - agg.errors.length).forEach(e=>agg.errors.push(e));
+                    off = (typeof data.next_offset === 'number') ? data.next_offset : (off + (data.processed || 0));
+                    paint();
+                    if(data.done) break;
+                }
+            }catch(e){ notify('تعذر الاستيراد: ' + String((e && e.message) || e).slice(0, 250), 'error'); }
+            _xlsxRunning = false;
+            btn.disabled = false;
+            if(wrap) wrap.classList.add('hidden');
+            if(_xlsxCancel){ notify(`أُوقف الاستيراد عند ${off} صف (جديد ${agg.created} + محدّث ${agg.updated})`, 'info'); }
+            else{
+                let msg = `تم (upsert): ${agg.created} جديد + ${agg.updated} محدّث${agg.skipped ? ` (تُجوهل ${agg.skipped})` : ''}`;
+                if(_xlsxTotal > 2000) msg += ' — اقتصر على أول 2000 صف';
+                if(agg.errors.length) msg += ' — أخطاء: ' + agg.errors.slice(0, 3).join('، ');
+                notify(msg, agg.errors.length ? 'info' : 'success');
                 closeXlsxImport();
                 await loadAllRecords();
-            }catch(e){ notify('تعذر الاستيراد: ' + String((e && e.message) || e).slice(0, 250), 'error'); }
-            btn.disabled = false;
+            }
         }
 
         try{ mountGridSearchEngine(); }catch(e){}

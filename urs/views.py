@@ -2132,46 +2132,85 @@ def api_fmlk_import_xlsx(request, app_name):
         if not isinstance(fixed, dict):
             fixed = {}
         match_column = (request.POST.get("match_column") or "").strip()
+        try:
+            row_offset = max(0, int(request.POST.get("row_offset") or 0))
+        except (TypeError, ValueError):
+            row_offset = 0
+        try:
+            row_limit = int(request.POST.get("row_limit") or 0) or 0
+        except (TypeError, ValueError):
+            row_limit = 0
         eng = _fmlk_get_engine(fml, app_name)
         fields = {getattr(f, "name", ""): f for f in (eng.compiler.fields() or []) if getattr(f, "name", "")}
         MAX_ROWS = 2000
+        effective_total = min(len(data_rows), MAX_ROWS)
         truncated = len(data_rows) > MAX_ROWS
+        chunk = data_rows[row_offset:]
+        if row_limit:
+            chunk = chunk[:min(row_limit, 500)]
+        chunk = chunk[:MAX_ROWS]
         created = updated = skipped = 0
         errors = []
-        for _ri, _r in enumerate(data_rows[:MAX_ROWS], start=data_start):
+
+        def _row_data(_r):
+            vals = list(_r or []) + [""] * max(0, len(headers) - len(_r or []))
+            data = {}
+            for _hi, _h in enumerate(headers):
+                if not _h:
+                    continue
+                _fn = mapping.get(_h)
+                if not _fn or _fn not in fields:
+                    continue
+                _v = _norm(vals[_hi] if _hi < len(vals) else "")
+                if _v == "" or _v is None:
+                    continue
+                data[_fn] = _v
+            for _fn, _fv in (fixed or {}).items():
+                if _fn in fields and _fn not in data:
+                    _fv = str(_fv).strip() if _fv is not None else ""
+                    if _fv != "":
+                        data[_fn] = _fv
+            return data
+
+        datas = [_row_data(_r) for _r in chunk]
+        # upsert جماعي: استعلام IN واحد لقيم المطابقة بدل N استعلامات
+        match_map = {}
+        if match_column and match_column in fields:
+            _mvals = []
+            for _d in datas:
+                if match_column in _d and str(_d[match_column]).strip() != "":
+                    _sv = str(_d[match_column]).strip()
+                    if _sv not in _mvals:
+                        _mvals.append(_sv)
             try:
-                vals = list(_r or []) + [""] * max(0, len(headers) - len(_r or []))
-                data = {}
-                for _hi, _h in enumerate(headers):
-                    if not _h:
-                        continue
-                    _fn = mapping.get(_h)
-                    if not _fn or _fn not in fields:
-                        continue
-                    _v = _norm(vals[_hi] if _hi < len(vals) else "")
-                    if _v == "" or _v is None:
-                        continue
-                    data[_fn] = _v
-                # قيم ثابتة: تُملأ عند غياب قيمة العمود (عمود فارغ أو غير مربوط)
-                for _fn, _fv in (fixed or {}).items():
-                    if _fn in fields and _fn not in data:
-                        _fv = str(_fv).strip() if _fv is not None else ""
-                        if _fv != "":
-                            data[_fn] = _fv
+                _malias = str(getattr(fields[match_column], "alias", "") or match_column).lower()
+            except Exception:
+                _malias = str(match_column).lower()
+            for _ci in range(0, len(_mvals), 500):
+                try:
+                    _lr = eng.list_records(
+                        filters=[{"field": match_column, "op": "in", "value": _mvals[_ci:_ci + 500]}],
+                        page=1, page_size=500)
+                    for _row in (_lr.get("rows") or []):
+                        try:
+                            _rv = _row.get(_malias, _row.get(match_column, _row.get(match_column.lower(), "")))
+                            _pk = _row.get("__pk_id", _row.get("id"))
+                            if _rv is not None and _pk is not None and str(_pk).strip() != "":
+                                match_map.setdefault(str(_rv).strip(), _pk)
+                        except Exception:
+                            continue
+                except Exception:
+                    continue
+        for _k, _r in enumerate(chunk):
+            _ri = data_start + row_offset + _k
+            try:
+                data = datas[_k]
                 if not data:
                     skipped += 1
                     continue
                 _rid = None
                 if match_column and match_column in data and str(data[match_column]).strip() != "":
-                    try:
-                        _lr = eng.list_records(
-                            filters=[{"field": match_column, "op": "=", "value": data[match_column]}],
-                            page=1, page_size=1)
-                        _rows = _lr.get("rows") or []
-                        if _rows:
-                            _rid = _rows[0].get("__pk_id", _rows[0].get("id"))
-                    except Exception:
-                        _rid = None
+                    _rid = match_map.get(str(data[match_column]).strip())
                 if _rid is not None and str(_rid).strip() != "":
                     eng.update_record({"id": _rid}, data)
                     updated += 1
@@ -2183,8 +2222,11 @@ def api_fmlk_import_xlsx(request, app_name):
                     errors.append(f"صف {_ri}: {str(e)[:120]}")
                 else:
                     skipped += 1
+        _processed = len(chunk)
+        _done = (row_offset + _processed) >= effective_total
         return JsonResponse({"ok": True, "created": created, "updated": updated, "skipped": skipped,
-                             "total": min(len(data_rows), MAX_ROWS), "truncated": truncated, "errors": errors},
+                             "processed": _processed, "next_offset": row_offset + _processed,
+                             "done": _done, "total": effective_total, "truncated": truncated, "errors": errors},
                             json_dumps_params={"ensure_ascii": False})
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
