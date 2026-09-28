@@ -1136,7 +1136,8 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                     }
                     if(bar) bar.style.width = (_pct || 0) + '%';
                     if(pct) pct.textContent = _pct > 0 ? (_pct + '%' + (_total ? ` (${_rows.toLocaleString('ar-EG')} / ${_total.toLocaleString('ar-EG')})` : '')) : '...';
-                    if(sub) sub.textContent = _stage ? ('مرحلة: ' + _stage) : '';
+                    const _stgMap = {rows:'الصفوف', count:'العدّ', gw_ekeys:'مفاتيح البعيد', prepare:'التجهيز', execute:'التنفيذ', done:'اكتمل', queued:'بالانتظار'};
+                    if(sub) sub.textContent = _stage ? ('مرحلة: ' + (_stgMap[_stage] || _stage)) : '';
                 } else if(ov){ ov.style.display = 'none'; }
             }catch(e){}
         }

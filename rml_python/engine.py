@@ -6354,6 +6354,15 @@ class RMLReportEngine:
         """
         import time as _tmod
         _t0 = _tmod.time()
+        _skip_reason = [""]
+        def _skip(reason):
+            # first skip reason wins (tells WHY the narrow-down did not fire)
+            try:
+                if not _skip_reason[0]:
+                    _skip_reason[0] = reason
+                    self._timings["gw_prefilter_skip"] = reason
+            except Exception:
+                pass
         try:
             self._timings["gw_prefilter"] = False
             self._timings["gw_ekeys_n"] = -1
@@ -6395,8 +6404,18 @@ class RMLReportEngine:
                 _pred = _en.get("pred")
                 _nullkeeps = self._gw_pred_eval(_pred, lambda rk, raw: None) is True
                 _keys, _had_null = self._gw_entry_keys(_en, exec_plan)
-                if _keys is None or _had_null:
+                if _keys is None:
+                    _skip("ekeys")
                     continue
+                if _had_null:
+                    _skip("null-key")
+                    continue
+                try:
+                    _n0 = len(_keys)
+                    if int(self._timings.get("gw_ekeys_n") or -1) < _n0:
+                        self._timings["gw_ekeys_n"] = _n0
+                except Exception:
+                    pass
                 if not _keys:
                     if not _nullkeeps:
                         try:
@@ -6406,17 +6425,22 @@ class RMLReportEngine:
                         except Exception:
                             pass
                         return sql, params, False, True
+                    _skip("null-keeps")
                     continue
                 if _nullkeeps:
+                    _skip("null-keeps")
                     continue
                 if any(not isinstance(_v, str) for _v in _keys):
+                    _skip("non-string-keys")
                     continue
                 try:
                     _mspec = self._link_match_spec(base_norm, _sec)
                 except Exception:
+                    _skip("link-spec")
                     continue
                 _match = str(_mspec.get("match") or "exact").strip().lower()
                 if _match not in ("exact", "contains", "regex"):
+                    _skip("bad-match")
                     continue
                 _helpers = []
                 for _sp in (exec_plan.get("merges") or []):
@@ -6427,8 +6451,10 @@ class RMLReportEngine:
                     if _hh and _bk and all(_hh != h for h, _ in _helpers):
                         _helpers.append((_hh, _bk))
                 if not _helpers:
+                    _skip("no-helpers")
                     continue
                 if any(not self._gw_stringy(self._gw_base_field_type(base_norm, _bk)) for _hh, _bk in _helpers):
+                    _skip("non-string-base")
                     continue
                 _parts = []
                 for _hh, _bk in _helpers:
@@ -6461,15 +6487,18 @@ class RMLReportEngine:
                                 _ors.append(f"INSTR(CAST({_h} AS {_ct}), CAST(:{_k} AS {_ct})) > 0")
                         _parts.append("(" + " OR ".join(_ors) + ")")
                 if not _parts:
+                    _skip("no-parts")
                     continue
                 _conds.append("(" + " OR ".join(_parts) + ")")
         except Exception:
+            _skip("exception")
             return sql, params, False, False
         try:
             self._timings["gw_ekeys_ms"] = int((_tmod.time() - _t0) * 1000)
         except Exception:
             pass
         if not _conds:
+            _skip("no-cond")
             return sql, params, False, False
         _gsql = f"SELECT * FROM ({sql}) t WHERE " + " AND ".join(_conds)
         _gparams = dict(params or {})
@@ -6485,6 +6514,7 @@ class RMLReportEngine:
                 except Exception:
                     pass
         except Exception:
+            _skip("probe-fail")
             return sql, params, False, False
         try:
             self._timings["gw_prefilter"] = True
