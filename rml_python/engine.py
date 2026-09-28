@@ -4046,12 +4046,12 @@ class RMLReportEngine:
         # general_where across DBs: remote conjuncts become two-phase
         # filter dicts (base IN lists); the rest stays in base SQL.
         try:
-            _gw_base, _gw_remote = self._split_general_where(
+            _gw_base, _gw_remote, _gw_deferred = self._split_general_where(
                 _gw_text or "", base_norm, local_sec, remote_sec, field_table)
         except ValueError:
             raise
         except Exception:
-            _gw_base, _gw_remote = (_gw_text or ""), []
+            _gw_base, _gw_remote, _gw_deferred = (_gw_text or ""), [], []
         # Sort / group-by must be base-local (cross-DB ordering impossible in SQL)
         def _field_tables_of(text):
             ts = set()
@@ -4107,7 +4107,7 @@ class RMLReportEngine:
                     "from_q": base_q,
                     "columns": inlined, "table_map": None, "merges": [], "extra": [],
                     "strip": set(), "local_sec": [], "remote": {}, "base_alias": None,
-                    "gw_base": _gw_text or "", "gw_remote": []}
+                    "gw_base": _gw_text or "", "gw_remote": [], "gw_deferred": []}
         # Aliases (base always aliased when other tables involved)
         base_alias = "T0"
         aliases = {s: f"T{i + 1}" for i, s in enumerate(sorted(set(local_sec)))}
@@ -4273,13 +4273,23 @@ class RMLReportEngine:
                 extra.append((f"{_q(base_alias)}.{_q(_ab)}", al))
                 strip.add(al)
         from_q = f"{base_q} {_q(base_alias)}" + ("" if not joins else " " + " ".join(joins))
+        if _gw_deferred:
+            # Deferred GW evaluates on merged rows, so the table must actually
+            # merge (i.e. at least one displayed column binds it for matching).
+            _merged_tables = {m.get("table") for m in (merges or [])}
+            for _dd in _gw_deferred:
+                if isinstance(_dd, dict) and _dd.get("sec") not in _merged_tables:
+                    raise ValueError(
+                        f'الشرط العام المؤجل على "{_dd.get("sec")}" يتطلب عموداً معروضاً من نفس الجدول '
+                        f'لإتمام المطابقة — اعرض عموداً منه أولاً.')
         return {"from_table": from_table, "base_norm": base_norm, "base_conn": base_conn,
                 "base_db": base_db, "base_schema": base_schema, "base_disp": disp.get(base_norm, base_norm),
                 "from_q": from_q,
                 "columns": new_cols, "table_map": table_map, "merges": merges, "extra": extra,
                 "strip": strip, "local_sec": sorted(set(local_sec)), "remote": remote_sec,
                 "base_alias": base_alias,
-                "gw_base": _gw_base, "gw_remote": _gw_remote}
+                "gw_base": _gw_base, "gw_remote": _gw_remote,
+                "gw_deferred": _gw_deferred}
 
     def _plan_remote_column(self, col, raw: str, refs_tables: set, remote_sec: Dict[str, Any],
                             base_norm: str, base_alias: str, disp: Dict[str, str],
@@ -4380,6 +4390,7 @@ class RMLReportEngine:
     def _prepare_from_and_columns(self, active_table, filters, sort, group_by):
         """Compat wrapper: (from_q, columns, table_map) from the routing plan."""
         plan = self._plan_structure(active_table, filters, sort, group_by)
+        self._reject_deferred(plan, "في هذا المسار")
         return plan["from_q"], plan["columns"], plan["table_map"]
 
     @staticmethod
@@ -4531,19 +4542,22 @@ class RMLReportEngine:
         return s
 
     def _split_general_where(self, gw_text, base_norm, local_sec, remote_sec, field_table):
-        """Split general_where into (base_sql_text, remote_filter_dicts).
+        """Split general_where into (base_sql_text, remote_filter_dicts, deferred).
 
         Top-level AND conjuncts touching exactly ONE cross-DB table convert
-        to {field, op, value} dicts (consumed by the two-phase IN rewrite).
-        Everything else stays in base SQL. Raises loudly when a remote ref
-        cannot convert (OR/NOT mixes, cross-DB comparisons, fuzzy links,
-        unparsable shapes) — silent mis-filtering is worse.
+        to {field, op, value} dicts (consumed by the two-phase IN rewrite);
+        single-table OR/NOT-free shapes also convert (IS NULL, IN, any-groups).
+        Conjuncts on fuzzy-linked (contains/regex) tables cannot become key
+        lists, so they are DEFERRED: [{sec, pred, text}] evaluated in Python
+        after the merge. Raises loudly when a remote ref cannot convert
+        (multi-table mixes, cross-DB comparisons, unparsable shapes) —
+        silent mis-filtering is worse.
         """
         remote_tables = set((remote_sec or {}).keys())
         if not gw_text or not remote_tables:
-            return gw_text or "", []
+            return gw_text or "", [], []
         local_set = set(local_sec or []) | {base_norm}
-        base_parts, remote_dicts = [], []
+        base_parts, remote_dicts, deferred = [], [], []
         for part in self._split_top_and(gw_text):
             core = self._strip_outer_parens(part)
             try:
@@ -4555,14 +4569,13 @@ class RMLReportEngine:
             if not remotes:
                 base_parts.append(part)
                 continue
-            # any OR/NOT inside a remote conjunct -> unsupported mix
             try:
                 _skel = re.sub(r"('(?:[^']|'')*')", "''", core)
                 _has_or = re.search(r"(?<![\w\u0600-\u06FF])(OR|NOT)(?![\w\u0600-\u06FF])", _skel, re.IGNORECASE)
             except Exception:
                 _has_or = True
             _others = sorted(t for t in tables if t != remotes[0] or len(remotes) > 1)
-            if _has_or or _others or len(remotes) > 1:
+            if _others or len(remotes) > 1:
                 raise ValueError(
                     f'الشرط العام يدمج جدولاً من اتصال آخر ({", ".join(remotes)}) مع شرط مركب — '
                     f'غير مدعوم: انقل الشرط إلى فلاتر المشغل أو إلى عمود من الاتصال الأساسي.')
@@ -4571,17 +4584,40 @@ class RMLReportEngine:
                 _mspec = self._link_match_spec(base_norm, sec)
             except Exception:
                 _mspec = {"match": "exact", "pattern": ""}
-            if str(_mspec.get("match") or "exact").strip().lower() != "exact":
-                raise ValueError(
-                    f'الشرط العام على الجدول "{sec}" المربوط {_mspec.get("match")} غير مدعوم — '
-                    f'اعرض العمود ثم رشّح، أو استخدم ربطاً تاماً.')
+            _match = str(_mspec.get("match") or "exact").strip().lower()
+            if _match != "exact":
+                # Fuzzy link: key lists are meaningless across the match
+                # function — defer to post-merge Python evaluation.
+                _pred = self._gw_parse_pred(core, sec)
+                if _pred is None:
+                    raise ValueError(
+                        f'الشرط العام على الجدول "{sec}" المربوط {_match} بصيغة غير مدعومة ({core[:80]}) — '
+                        f'المسموح: مقارنات (= > < >= <= !=) و IS NULL و IN و AND/OR/NOT على أعمدة {sec} فقط.')
+                deferred.append({"sec": sec, "pred": _pred, "text": core, "_gw_deferred": True})
+                continue
+            if _has_or:
+                # Single-table OR/NOT shape: one remote WHERE with a group.
+                _pred = self._gw_parse_pred(core, sec)
+                _flts = self._gw_pred_to_filters(_pred) if _pred is not None else None
+                if _pred is None or _flts is None:
+                    raise ValueError(
+                        f'الشرط العام يدمج جدولاً من اتصال آخر ({", ".join(remotes)}) مع شرط مركب — '
+                        f'غير مدعوم: انقل الشرط إلى فلاتر المشغل أو إلى عمود من الاتصال الأساسي.')
+                remote_dicts.extend(_flts)
+                continue
             _fd = self._gw_remote_dict(core, sec)
             if _fd is None:
-                raise ValueError(
-                    f'الشرط العام على الجدول "{sec}" بصيغة غير مدعومة عبر الاتصالات ({core[:80]}) — '
-                    f'المسموح: عمود = قيمة (أو > < >= <= !=) — أو انقله لفلاتر المشغل.')
+                # last chance: IS NULL / nested shapes via the pred parser
+                _pred = self._gw_parse_pred(core, sec)
+                _flts = self._gw_pred_to_filters(_pred) if _pred is not None else None
+                if _pred is None or _flts is None:
+                    raise ValueError(
+                        f'الشرط العام على الجدول "{sec}" بصيغة غير مدعومة عبر الاتصالات ({core[:80]}) — '
+                        f'المسموح: عمود = قيمة (أو > < >= <= !=)، IS NULL، IN — أو انقله لفلاتر المشغل.')
+                remote_dicts.extend(_flts)
+                continue
             remote_dicts.append(_fd)
-        return (" AND ".join(base_parts), remote_dicts)
+        return (" AND ".join(base_parts), remote_dicts, deferred)
 
     @staticmethod
     def _gw_lit(raw):
@@ -4640,41 +4676,54 @@ class RMLReportEngine:
         parts.append("".join(cur))
         return parts
 
+    @staticmethod
+    def _gw_norm_side(s):
+        """Normalize a GW operand: strip formula markers (=) + redundant parens.
+
+        Column-expr expansion yields (=get(...)) / ((=get(...))) — unwrap to
+        get(...) so ref extraction sees through. Function wraps (SUM(x))
+        survive intact and stay rejected downstream.
+        """
+        t = str(s or "").strip()
+        for _ in range(10):
+            t0 = t
+            while t.startswith("="):
+                t = t[1:].strip()
+            t = RMLReportEngine._strip_outer_parens(t)
+            if t == t0:
+                break
+        return t
+
     def _gw_ref_key(self, ref_text, sec):
         """Single remote field key for a ref string, or None.
 
-        Accepts [..] / @.. / get(..) single refs; exactly one field whose
-        table is `sec`, else None.
+        Accepts [..] / @.. / get(..) / =get(..) single refs; exactly one
+        field whose table is `sec`, else None.
         """
         try:
+            ref_text = self._gw_norm_side(ref_text)
             ft = self._field_table_map()
             keys = {r for r in self._refs_in_text(str(ref_text or ""), ft) if ft.get(r)}
             if len(keys) != 1:
                 return None
             key = next(iter(keys))
-            if ft.get(key) != sec:
+            try:
+                _same = self._norm_table(ft.get(key) or "") == self._norm_table(sec or "")
+            except Exception:
+                _same = (ft.get(key) or "") == (sec or "")
+            if not _same:
                 return None
             return key
         except Exception:
             return None
 
-    def _gw_remote_dict(self, core, sec):
-        """One remote conjunct -> {field, op, value} dict, or None."""
-        # IN-list shape first: ref IN (v1, v2, ...)
-        _inm = re.fullmatch(r"(?s)\s*(.+?)\s+IN\s*\((.+)\)\s*", str(core or "").strip())
-        if _inm:
-            _r1 = _inm.group(1).strip()
-            if re.search(r"[\(\)]", _r1) and not re.fullmatch(r"(?i)get\s*\(.+\)", _r1):
-                return None
-            _key = self._gw_ref_key(_r1, sec)
-            _items = self._gw_split_list(_inm.group(2))
-            if _key is None or not _items:
-                return None
-            _vals = [self._gw_lit(x) for x in _items]
-            if any(v is None for v in _vals):
-                return None
-            return {"field": _key, "op": "in", "value": _vals}
-        # scan first top-level comparison outside quotes/parens
+    @staticmethod
+    def _gw_find_compare(core):
+        """First top-level comparison outside quotes/parens.
+
+        Returns (op, left, right) with op in equals/not_equals/gt/lt/gte/lte,
+        or None. Shared by _gw_remote_dict and the GW predicate parser.
+        """
         depth, in_q = 0, False
         i, n, at = 0, len(core or ""), -1
         _op, _oplen = None, 0
@@ -4719,6 +4768,39 @@ class RMLReportEngine:
         _left, _right = core[:at].strip(), core[at + _oplen:].strip()
         if not _left or not _right:
             return None
+        return _op, _left, _right
+
+    def _gw_remote_dict(self, core, sec):
+        """One remote conjunct -> {field, op, value} dict, or None."""
+        # IS [NOT] NULL shape: ref IS NULL | ref IS NOT NULL
+        _nullm = re.fullmatch(r"(?s)\s*(.+?)\s+IS\s+(NOT\s+)?NULL\s*", str(core or "").strip(), re.IGNORECASE)
+        if _nullm:
+            _r1 = self._gw_norm_side(_nullm.group(1))
+            if re.search(r"[\(\)]", _r1) and not re.fullmatch(r"(?i)get\s*\(.+\)", _r1):
+                return None
+            _key = self._gw_ref_key(_r1, sec)
+            if _key is None:
+                return None
+            return {"field": _key, "op": "is_not_null" if _nullm.group(2) else "is_null"}
+        # IN-list shape first: ref IN (v1, v2, ...)
+        _inm = re.fullmatch(r"(?s)\s*(.+?)\s+IN\s*\((.+)\)\s*", str(core or "").strip())
+        if _inm:
+            _r1 = self._gw_norm_side(_inm.group(1))
+            if re.search(r"[\(\)]", _r1) and not re.fullmatch(r"(?i)get\s*\(.+\)", _r1):
+                return None
+            _key = self._gw_ref_key(_r1, sec)
+            _items = self._gw_split_list(_inm.group(2))
+            if _key is None or not _items:
+                return None
+            _vals = [self._gw_lit(self._gw_norm_side(x)) for x in _items]
+            if any(v is None for v in _vals):
+                return None
+            return {"field": _key, "op": "in", "value": _vals}
+        _fc = self._gw_find_compare(core)
+        if _fc is None:
+            return None
+        _op, _left, _right = _fc
+        _left, _right = self._gw_norm_side(_left), self._gw_norm_side(_right)
         if re.search(r"[\(\)]", _left) and not re.fullmatch(r"(?i)get\s*\(.+\)", _left):
             return None  # function-wrapped refs keep SQL semantics: unsupported
         _key = self._gw_ref_key(_left, sec)
@@ -4728,6 +4810,378 @@ class RMLReportEngine:
         if _val is None:
             return None
         return {"field": _key, "op": _op, "value": _val}
+
+    @staticmethod
+    def _split_top_or(text):
+        """Split on top-level OR (quote/paren aware; mirrors _split_top_and)."""
+        parts, depth, cur = [], 0, []
+        in_q = False
+        i, n = 0, len(text or "")
+        while i < n:
+            ch = text[i]
+            if in_q:
+                cur.append(ch)
+                if ch == "'":
+                    if i + 1 < n and text[i + 1] == "'":
+                        cur.append(text[i + 1])
+                        i += 1
+                    else:
+                        in_q = False
+                i += 1
+                continue
+            if ch == "'":
+                in_q = True
+                cur.append(ch)
+                i += 1
+                continue
+            if ch == "(":
+                depth += 1
+                cur.append(ch)
+                i += 1
+                continue
+            if ch == ")":
+                depth = max(0, depth - 1)
+                cur.append(ch)
+                i += 1
+                continue
+            if depth == 0 and (ch == "O" or ch == "o"):
+                _m = re.match(r"OR(?![\w\u0600-\u06FF])", text[i:], re.IGNORECASE)
+                _pre_ok = (i == 0 or not (text[i - 1].isalnum() or text[i - 1] == "_"))
+                if _m and _pre_ok:
+                    parts.append("".join(cur))
+                    cur = []
+                    i += 2
+                    continue
+            cur.append(ch)
+            i += 1
+        parts.append("".join(cur))
+        return [p.strip() for p in parts if str(p or "").strip() != ""]
+
+    def _gw_parse_pred(self, text, sec):
+        """Parse a single-remote-table GW fragment into a predicate AST, or None.
+
+        AST: ("and", [...]) | ("or", [...]) | ("not", sub)
+           | ("cmp", refkey, op, literal, raw_left)
+           | ("null", refkey, negated, raw_left)
+           | ("in", refkey, [literals], negated, raw_left)
+        Every ref must resolve to `sec` and every right-hand side must be a
+        literal (a second column ref = cross-DB comparison => None => loud).
+        LIKE / function-wrapped refs stay SQL-side (None => loud downstream).
+        """
+        frag = self._strip_outer_parens(str(text or "").strip())
+        if not frag:
+            return None
+        ors = self._split_top_or(frag)
+        if len(ors) > 1:
+            subs = [self._gw_parse_pred(o, sec) for o in ors]
+            if any(s is None for s in subs):
+                return None
+            return ("or", subs)
+        ands = self._split_top_and(frag)
+        if len(ands) > 1:
+            subs = [self._gw_parse_pred(a, sec) for a in ands]
+            if any(s is None for s in subs):
+                return None
+            return ("and", subs)
+        _notm = re.match(r"(?is)^NOT\s+(.+)$", frag)
+        if _notm:
+            sub = self._gw_parse_pred(_notm.group(1), sec)
+            return ("not", sub) if sub is not None else None
+        return self._gw_parse_leaf(frag, sec)
+
+    def _gw_parse_leaf(self, frag, sec):
+        """One predicate leaf (no top-level AND/OR/NOT) -> AST or None."""
+        s = str(frag or "").strip()
+        _nm = re.fullmatch(r"(?s)\s*(.+?)\s+IS\s+(NOT\s+)?NULL\s*", s, re.IGNORECASE)
+        if _nm:
+            _left = self._gw_norm_side(_nm.group(1))
+            if re.search(r"[\(\)]", _left) and not re.fullmatch(r"(?i)get\s*\(.+\)", _left):
+                return None
+            _key = self._gw_ref_key(_left, sec)
+            if _key is None:
+                return None
+            return ("null", _key, bool(_nm.group(2)), _left)
+        _im = re.fullmatch(r"(?s)\s*(.+?)\s+(NOT\s+)?IN\s*\((.+)\)\s*", s, re.IGNORECASE)
+        if _im:
+            _left = self._gw_norm_side(_im.group(1))
+            if re.search(r"[\(\)]", _left) and not re.fullmatch(r"(?i)get\s*\(.+\)", _left):
+                return None
+            _key = self._gw_ref_key(_left, sec)
+            _items = self._gw_split_list(_im.group(3))
+            if _key is None or not _items:
+                return None
+            _vals = [self._gw_lit(self._gw_norm_side(x)) for x in _items]
+            if any(v is None for v in _vals):
+                return None
+            return ("in", _key, _vals, bool(_im.group(2)), _left)
+        try:
+            _nos = re.sub(r"('(?:[^']|'')*')", "''", s)
+            if re.search(r"(?<![\w\u0600-\u06FF])LIKE(?![\w\u0600-\u06FF])", _nos, re.IGNORECASE):
+                return None
+        except Exception:
+            return None
+        _fc = self._gw_find_compare(s)
+        if _fc is None:
+            return None
+        _op, _left, _right = _fc
+        _left, _right = self._gw_norm_side(_left), self._gw_norm_side(_right)
+        if re.search(r"[\(\)]", _left) and not re.fullmatch(r"(?i)get\s*\(.+\)", _left):
+            return None
+        _key = self._gw_ref_key(_left, sec)
+        _val = self._gw_lit(_right)
+        if _key is None or _val is None:
+            return None
+        return ("cmp", _key, _op, _val, _left)
+
+    def _gw_pred_to_filters(self, pred):
+        """AST -> player-style filter dicts for server pushdown, or None.
+
+        ("not", ...) has no pushdown form (De Morgan omitted on purpose):
+        None here still evaluates fine post-merge for deferred predicates.
+        """
+        try:
+            kind = pred[0]
+        except Exception:
+            return None
+        if kind == "cmp":
+            _, key, op, lit, _raw = pred
+            return [{"field": key, "op": op, "value": lit}]
+        if kind == "null":
+            _, key, neg, _raw = pred
+            return [{"field": key, "op": "is_not_null" if neg else "is_null"}]
+        if kind == "in":
+            _, key, vals, neg, _raw = pred
+            return [{"field": key, "op": "not_in" if neg else "in", "value": list(vals)}]
+        if kind == "and":
+            out = []
+            for s in pred[1]:
+                c = self._gw_pred_to_filters(s)
+                if c is None:
+                    return None
+                out.extend(c)
+            return out
+        if kind == "or":
+            grp = []
+            for s in pred[1]:
+                if s[0] == "and":
+                    c = self._gw_pred_to_filters(s)
+                    if c is None:
+                        return None
+                    grp.append({"all": c} if len(c) > 1 else c[0])
+                else:
+                    c = self._gw_pred_to_filters(s)
+                    if c is None or len(c) != 1:
+                        return None
+                    grp.append(c[0])
+            return [{"any": grp}]
+        return None
+
+    @staticmethod
+    def _gw_num(x):
+        """Numeric value when x is int/float/numeric-string, else None."""
+        try:
+            if isinstance(x, bool):
+                return float(x)
+            if isinstance(x, (int, float)):
+                return float(x)
+            s = str(x).strip()
+            if re.fullmatch(r"-?(\d+(\.\d*)?|\.\d+)", s or ""):
+                return float(s)
+        except Exception:
+            pass
+        return None
+
+    @classmethod
+    def _gw_vals_equal(cls, a, b):
+        na, nb = cls._gw_num(a), cls._gw_num(b)
+        if na is not None and nb is not None:
+            return na == nb
+        return str(a) == str(b)
+
+    @classmethod
+    def _gw_vals_cmp(cls, a, b):
+        """Three-way compare (-1/0/1) or None when incomparable.
+
+        Numbers compare numerically; dates compare by ISO date part;
+        everything else lexicographically on str().
+        """
+        try:
+            import datetime as _dt
+            _ad = isinstance(a, (_dt.date, _dt.datetime))
+            _bd = isinstance(b, (_dt.date, _dt.datetime))
+            if _ad or _bd:
+                sa = a.isoformat()[:19] if _ad else str(b if _ad else a)[:19]
+                sb = b.isoformat()[:19] if _bd else str(a if _bd else b)[:19]
+                return (sa > sb) - (sa < sb)
+        except Exception:
+            pass
+        na, nb = cls._gw_num(a), cls._gw_num(b)
+        if na is not None and nb is not None:
+            return (na > nb) - (na < nb)
+        try:
+            sa, sb = str(a), str(b)
+            return (sa > sb) - (sa < sb)
+        except Exception:
+            return None
+
+    def _gw_pred_eval(self, pred, lookup):
+        """Three-valued eval (True/False/None=unknown); keep rows evaluating True.
+
+        lookup(refkey, raw_left) -> merged-row value (None when unmatched).
+        SQL WHERE semantics: unknown filters the row out.
+        """
+        kind = pred[0]
+        if kind == "and":
+            unk = False
+            for s in pred[1]:
+                v = self._gw_pred_eval(s, lookup)
+                if v is False:
+                    return False
+                if v is None:
+                    unk = True
+            return None if unk else True
+        if kind == "or":
+            unk = False
+            for s in pred[1]:
+                v = self._gw_pred_eval(s, lookup)
+                if v is True:
+                    return True
+                if v is None:
+                    unk = True
+            return None if unk else False
+        if kind == "not":
+            v = self._gw_pred_eval(pred[1], lookup)
+            return None if v is None else (not v)
+        if kind == "null":
+            _, key, neg, raw = pred
+            v = lookup(key, raw)
+            return (v is not None) if neg else (v is None)
+        if kind == "in":
+            _, key, vals, neg, raw = pred
+            v = lookup(key, raw)
+            if v is None:
+                return None
+            hit = any(self._gw_vals_equal(v, x) for x in vals)
+            return (not hit) if neg else hit
+        if kind == "cmp":
+            _, key, op, lit, raw = pred
+            v = lookup(key, raw)
+            if v is None:
+                return None
+            if op == "equals":
+                return self._gw_vals_equal(v, lit)
+            if op == "not_equals":
+                return not self._gw_vals_equal(v, lit)
+            c = self._gw_vals_cmp(v, lit)
+            if c is None:
+                return None
+            return {"gt": c > 0, "lt": c < 0, "gte": c >= 0, "lte": c <= 0}.get(op)
+        return None
+
+    @staticmethod
+    def _gw_walk_leaves(pred):
+        """Yield (refkey, raw_left) of every leaf in a predicate AST."""
+        try:
+            kind = pred[0]
+        except Exception:
+            return
+        if kind in ("cmp", "null", "in"):
+            yield (pred[1], pred[-1])
+        elif kind in ("and", "or"):
+            for s in pred[1]:
+                for leaf in RMLReportEngine._gw_walk_leaves(s):
+                    yield leaf
+        elif kind == "not":
+            for leaf in RMLReportEngine._gw_walk_leaves(pred[1]):
+                yield leaf
+
+    def _gw_make_row_getter(self, columns, keyset):
+        """Build a merged-row value getter with memoized ref->alias binding.
+
+        Returns (getter, alias_of). getter(row_low, refkey, raw) reads the
+        case-folded row dict; alias_of(refkey, raw) resolves the expected
+        row key (None when unresolvable -> loud error upstream, never silent).
+        """
+        cache: Dict[tuple, Optional[str]] = {}
+
+        def _alias(refkey, raw):
+            ck = (str(refkey or ""), str(raw or ""))
+            if ck in cache:
+                return cache[ck]
+            found = None
+            cands = []
+            if raw:
+                cands.append(str(raw).strip())
+                _g = str(raw).strip()
+                if _g.lower().startswith("get(") and _g.endswith(")"):
+                    cands.append(_g[4:-1].strip())
+            if refkey:
+                cands.append(str(refkey))
+                if str(refkey).startswith("@"):
+                    cands.append(str(refkey)[1:])
+            for _c in cands:
+                _cl = str(_c).strip().lower()
+                if not _cl:
+                    continue
+                if _cl in keyset:
+                    found = _cl
+                    break
+                if "." in _cl:
+                    _last = _cl.rsplit(".", 1)[-1].strip().strip("[]")
+                    if _last and _last in keyset:
+                        found = _last
+                        break
+                col = None
+                for _v in (_c, "=" + str(_c).strip()):
+                    # expr stored with formula marker (=get(...)) while GW
+                    # carries the bare get(...) — try both spellings.
+                    try:
+                        col = _find_column_for_field(_v, columns)
+                    except Exception:
+                        col = None
+                    if col is not None:
+                        break
+                if col is not None:
+                    _al = str(getattr(col, "alias", "") or getattr(col, "name", "") or "").strip().lower()
+                    if _al and _al in keyset:
+                        found = _al
+                        break
+            cache[ck] = found
+            return found
+
+        def _get(row_low, refkey, raw):
+            a = _alias(refkey, raw)
+            if not a:
+                return None
+            try:
+                return row_low.get(a)
+            except Exception:
+                return None
+
+        return _get, _alias
+
+    def _gw_pred_unbound(self, pred, keyset, columns):
+        """First leaf ref that cannot bind to a report row key, or ''."""
+        try:
+            _get, _alias = self._gw_make_row_getter(columns, keyset)
+        except Exception:
+            return "?"
+        for _rk, _raw in self._gw_walk_leaves(pred):
+            try:
+                if _alias(_rk, _raw) is None:
+                    return str(_raw or _rk or "?")[:80]
+            except Exception:
+                return str(_raw or _rk or "?")[:80]
+        return ""
+
+    def _reject_deferred(self, plan, where):
+        """Loud guard for flows that cannot apply deferred (post-merge) GW."""
+        _d = (plan or {}).get("gw_deferred") or []
+        if _d:
+            secs = sorted({str(d.get("sec") or "") for d in _d if isinstance(d, dict)})
+            raise ValueError(
+                f'الشرط العام على ({", ".join(secs)}) من اتصال آخر {where} غير مدعوم — '
+                f'نفّذ التقرير بالمسار العادي.')
 
     def _apply_remote_filters(self, filters, plan):
         """Rewrite filters touching remote tables into base-key IN lists.
@@ -4747,6 +5201,8 @@ class RMLReportEngine:
         field_table = self._field_table_map()
         out = []
         for f in (filters or []):
+            if isinstance(f, dict) and f.get("_gw_deferred"):
+                continue  # deferred GW never renders to SQL (post-merge only)
             members = [sf for sf in f.get("any", []) if isinstance(sf, dict)] \
                 if isinstance(f, dict) and isinstance(f.get("any"), (list, tuple)) else [f]
             if not members:
@@ -4800,7 +5256,13 @@ class RMLReportEngine:
                 nm["field"] = self._orig_col(sec, sfield, info["db"], info["schema"]) if sfield else nm.get("field")
                 mapped.append(nm)
             rcols = self._table_columns(sec, info["schema"], info["db"])
-            wc, wp = self._where_for_table(mapped, sec, rcols, info["db"], info["schema"])
+            if isinstance(f, dict) and isinstance(f.get("any"), (list, tuple)):
+                _w_in = [{"any": mapped}]
+            elif isinstance(f, dict) and isinstance(f.get("all"), (list, tuple)):
+                _w_in = [{"all": mapped}]
+            else:
+                _w_in = mapped
+            wc, wp = self._where_for_table(_w_in, sec, rcols, info["db"], info["schema"])
             if wc is None:
                 raise ValueError(
                     f'تعذر ترجمة الفلتر على الجدول البعيد "{sec}" — تحقق من أسماء الأعمدة.')
@@ -5751,6 +6213,7 @@ class RMLReportEngine:
     def _outer_plan(self, filters, sort, group_by, active_table):
         """Prepare outer-filter execution: (prep_cols, table_map, base, outer, extra, outer_cols)."""
         plan = self._plan_structure(active_table, filters, sort, group_by)
+        self._reject_deferred(plan, "في هذا المسار")
         filters2 = self._apply_remote_filters(filters, plan)
         return self._outer_plan2(plan, filters2)
 
@@ -6049,6 +6512,7 @@ class RMLReportEngine:
         Returns (sql, params)
         """
         plan = self._plan_structure(active_table, filters, sort, group_by)
+        self._reject_deferred(plan, "في معاينة SQL")
         filters2 = self._apply_remote_filters(filters, plan)
         return self._compile_sql2(plan, filters2, sort, page, page_size, group_by, extra_selects)
 
@@ -6217,9 +6681,15 @@ class RMLReportEngine:
         base_db = exec_plan["base_db"]
         filters2 = self._apply_remote_filters(filters, exec_plan)
         _pc, _ptm, base_f, outer_f, extra, outer_cols = self._outer_plan2(exec_plan, filters2)
+        _deferred = [d for d in (exec_plan.get("gw_deferred") or []) if isinstance(d, dict)]
+        if _deferred and outer_f:
+            raise ValueError(
+                'الشرط العام المؤجل على جدول باتصال آخر لا يجتمع مع فلاتر محسوبة — '
+                'رشّح العمود المحسوب من المشغل بعد العرض.')
+        _need_all = bool(outer_f or _deferred)
         sql, params = self._compile_sql2(
-            exec_plan, base_f, sort, 1 if outer_f else page,
-            "all" if outer_f else page_size, group_by, extra)
+            exec_plan, base_f, sort, 1 if _need_all else page,
+            "all" if _need_all else page_size, group_by, extra)
         strip_extra = [a for _, a in extra]
         if outer_f:
             _ow0, _op0 = _build_outer_where(outer_f, outer_cols, rules=getattr(self, "rules", []))
@@ -6237,7 +6707,8 @@ class RMLReportEngine:
                                                  table_map=exec_plan["table_map"],
                                                  conn_map=self._conn_map(), rules=getattr(self, "rules", []),
                                                  default_tables=self._rx_defaults())
-        where_clause = self._apply_general_where(where_clause, exec_plan["table_map"], self._conn_map())
+        where_clause = self._apply_general_where(where_clause, exec_plan["table_map"], self._conn_map(),
+                                                   exec_plan.get("gw_base"))
         from_q = exec_plan["from_q"]
         group_clause = f" GROUP BY {_resolve_filter_field(group_by, exec_plan['columns'], getattr(self, 'fields', []), exec_plan['table_map'], self._conn_map(), getattr(self, 'rules', []), default_tables=self._rx_defaults())}" if group_by else ""
         if outer_f:
@@ -6316,6 +6787,19 @@ class RMLReportEngine:
                     except: pass
                 self._timings["count_ms"] = int((_tmod.time() - _t_count) * 1000)
 
+            if _deferred:
+                # Deferred GW filters post-merge, so the whole base set is
+                # fetched: guard memory with a row cap (metadata
+                # stage_max_rows or 200000). `total` is the pre-filter count.
+                try:
+                    _cap = int((self.metadata or {}).get("stage_max_rows") or 200000)
+                except Exception:
+                    _cap = 200000
+                if total > _cap:
+                    raise ValueError(
+                        f'الشرط العام المؤجل يحتاج جلب {total} صفاً قبل الترشيح (الحد {_cap}) — '
+                        f'ضيّق التقرير بفلاتر المشغل أولاً.')
+
             # Get paged rows (raw -> cross-DB merges -> strip helpers -> format)
             try:
                 if getattr(base_db, "conn", None):
@@ -6348,6 +6832,60 @@ class RMLReportEngine:
                     _t_merge = _tmod.time()
                     raw_rows = self._apply_merges(_rr, exec_plan)
                     self._timings["merge_ms"] = int((_tmod.time() - _t_merge) * 1000)
+                    if _deferred:
+                        # Post-merge GW: SQL WHERE semantics over merged rows
+                        # (keep iff True; NULL/unknown drops the row).
+                        _t_gw = _tmod.time()
+                        try:
+                            _pcols = exec_plan.get("columns") or []
+                            _exp_keys = {str(getattr(c, "alias", "") or getattr(c, "name", "") or "").lower()
+                                         for c in _pcols}
+                            _exp_keys |= {str(m.get("alias") or "").lower()
+                                          for m in (exec_plan.get("merges") or []) if m.get("alias")}
+                            _rls, _allkeys = [], set(_exp_keys)
+                            for _r in raw_rows:
+                                try:
+                                    _rl = {str(_k).lower(): _v for _k, _v in dict(_r or {}).items()}
+                                except Exception:
+                                    continue
+                                _rls.append((_r, _rl))
+                                _allkeys |= set(_rl.keys())
+                            _get, _al = self._gw_make_row_getter(_pcols, _allkeys)
+                            for _dd in _deferred:
+                                _miss = self._gw_pred_unbound(_dd.get("pred"), _allkeys, _pcols)
+                                if _miss:
+                                    raise ValueError(
+                                        f'تعذر ربط الشرط العام المؤجل ({_miss}) بأعمدة التقرير — '
+                                        f'اعرض العمود أولاً.')
+                            _kept = []
+                            for _r, _rl in _rls:
+                                _lk = lambda _rk, _raw, _g=_get, _w=_rl: _g(_w, _rk, _raw)
+                                _okr = True
+                                for _dd in _deferred:
+                                    try:
+                                        _pv = self._gw_pred_eval(_dd.get("pred"), _lk)
+                                    except Exception:
+                                        _pv = None
+                                    if _pv is not True:
+                                        _okr = False
+                                        break
+                                if _okr:
+                                    _kept.append(_r)
+                            raw_rows = _kept
+                        finally:
+                            try:
+                                self._timings["gw_post_ms"] = int((_tmod.time() - _t_gw) * 1000)
+                            except Exception:
+                                pass
+                        total = len(raw_rows)
+                        if str(page_size).lower() != "all":
+                            try:
+                                _ps_n = max(1, int(page_size))
+                                _p0 = max(1, int(page or 1))
+                            except Exception:
+                                _ps_n, _p0 = len(raw_rows), 1
+                            _s0 = (_p0 - 1) * _ps_n
+                            raw_rows = raw_rows[_s0:_s0 + _ps_n]
                     if _strip:
                         for _d in raw_rows:
                             for _k in _strip:
@@ -6406,6 +6944,7 @@ class RMLReportEngine:
             "totalPages": total_pages,
             "sql": sql,
             "params": params,
+            "gw_post_filtered": bool(_deferred),
             "warnings": self._render_api_warnings(),
             "columns": [c.to_dict() for c in self.columns],
             "fields": [f.to_dict() for f in getattr(self, "fields", [])],
@@ -6443,6 +6982,7 @@ class RMLReportEngine:
                 target = c
                 break
         plan = self._plan_structure(None, [], None, None)
+        self._reject_deferred(plan, "في القيم المميزة")
         from_q = plan["from_q"]
         table_map = plan.get("table_map")
         try:
@@ -7067,6 +7607,7 @@ class RMLReportEngine:
         except (TypeError, ValueError):
             n = 500
         _gp = self._plan_structure(active_table, filters, None, key)
+        self._reject_deferred(_gp, "في قيم التجميع")
         _gf = self._apply_remote_filters(filters, _gp)
         gfields = getattr(self, "fields", [])
         where_clause, params = _build_where(_gf or [], columns=_gp["columns"], fields=gfields,
@@ -7178,6 +7719,7 @@ class RMLReportEngine:
         self._validate_no_exact_dupes()
         self._ensure_api_staged()
         _gp = self._plan_structure(active_table, filters, None, group_by)
+        self._reject_deferred(_gp, "في التجميع")
         _gf = self._apply_remote_filters(filters, _gp)
         gfields = getattr(self, "fields", [])
         where_clause, params = _build_where(_gf, columns=_gp["columns"], fields=gfields, table_map=_gp["table_map"], conn_map=self._conn_map(), rules=getattr(self, "rules", []), default_tables=self._rx_defaults())
@@ -7287,7 +7829,7 @@ class RMLReportEngine:
         base_norm = exec_plan.get("base_norm")
         if not base_norm:
             raise ValueError("لم يتم تحديد الجدول الأساسي.")
-        if exec_plan.get("gw_remote"):
+        if exec_plan.get("gw_remote") or exec_plan.get("gw_deferred"):
             raise ValueError(
                 "الشرط العام على جدول باتصال آخر غير مدعوم في التنفيذ الموزع — "
                 "نفّذ التقرير بالمسار العادي.")
@@ -7706,6 +8248,7 @@ class RMLReportEngine:
             return out
         try:
             plan = self._plan_structure(active_table, filters, None, None)
+            self._reject_deferred(plan, "في الملخصات")
             filters2 = self._apply_remote_filters(filters, plan)
             fields = getattr(self, "fields", []) or []
             field_table = self._field_table_map()
@@ -7826,14 +8369,30 @@ class RMLReportEngine:
             pass
         return out
 
-    def _where_for_table(self, filters, table_norm: str, table_cols: Dict[str, str], db=None, schema: Optional[str] = None):
+    def _where_for_table(self, filters, table_norm: str, table_cols: Dict[str, str], db=None, schema: Optional[str] = None, _pfx: str = "", _joiner: str = " AND "):
         """WHERE over a secondary table: keep filters mappable by same-name columns.
 
         Returns (where, params) or (None, None) when a filter cannot map.
+        {"any": [...]} / {"all": [...]} groups render parenthesized OR/AND
+        (recursively). _pfx namespaces binds, _joiner joins siblings.
         """
         clauses = []
         params = {}
-        for i, f in enumerate(filters or [], start=1):
+        for _gf in (filters or []):
+            if isinstance(_gf, dict) and (isinstance(_gf.get("any"), (list, tuple)) or isinstance(_gf.get("all"), (list, tuple))):
+                _is_or = isinstance(_gf.get("any"), (list, tuple))
+                _members = list(_gf.get("any") if _is_or else _gf.get("all"))
+                if not _members or any(not isinstance(_m, dict) for _m in _members):
+                    return None, None
+                _gp = f"{_pfx}g{len(clauses) + 1}_"
+                _sw, _sp = self._where_for_table(_members, table_norm, table_cols, db, schema,
+                                                 _pfx=_gp, _joiner=(" OR " if _is_or else " AND "))
+                if not _sw:
+                    return None, None
+                clauses.append("(" + _sw[len(" WHERE "):] + ")")
+                params.update(_sp or {})
+        _singles = [f for f in (filters or []) if not (isinstance(f, dict) and (isinstance(f.get("any"), (list, tuple)) or isinstance(f.get("all"), (list, tuple))))]
+        for i, f in enumerate(_singles, start=1):
             fld = str(f.get("field") or f.get("column") or f.get("name") or "")
             op = (f.get("op") or "equals").lower()
             # resolve filter field -> base field names
@@ -7863,7 +8422,7 @@ class RMLReportEngine:
             _dtype2 = table_cols.get(mapped[0], "")
             is_date = bool(_date_kind_of(_dtype2))
             date_kind2 = _date_kind_of(_dtype2)
-            p = f"q{i}"
+            p = f"{_pfx}q{i}"
 
             def _db(ph, val):
                 if is_date and isinstance(val, str):
@@ -7923,8 +8482,34 @@ class RMLReportEngine:
                     phs.append(f":{pj}")
                     params[pj] = v
                 clauses.append(f"{qcol} IN ({', '.join(phs)})" if phs else "1=0")
+            elif op in ("not_equals", "notequals", "not_equal", "!=", "<>", "ne", "neq"):
+                clauses.append(f"{qcol} <> {_db(':'+p, f.get('value'))}")
+                params[p] = f.get("value")
+            elif op in ("not_contains", "notcontains", "notlike", "not_like"):
+                clauses.append(f"{qcol} NOT LIKE :{p}")
+                params[p] = f"%{f.get('value', '')}%"
+            elif op in ("startswith", "starts_with", "start", "begins", "begins_with"):
+                clauses.append(f"{qcol} LIKE :{p}")
+                params[p] = f"{f.get('value', '')}%"
+            elif op in ("endswith", "ends_with", "end", "ends"):
+                clauses.append(f"{qcol} LIKE :{p}")
+                params[p] = f"%{f.get('value', '')}"
+            elif op in ("not_in", "not_in_list"):
+                vals = f.get("value") or []
+                if not isinstance(vals, (list, tuple)):
+                    vals = [vals]
+                phs = []
+                for j, v in enumerate(vals):
+                    pj = f"{p}_{j}"
+                    phs.append(f":{pj}")
+                    params[pj] = v
+                clauses.append(f"{qcol} NOT IN ({', '.join(phs)})" if phs else "1=1")
+            elif op in ("is_null", "isnull", "null"):
+                clauses.append(f"{qcol} IS NULL")
+            elif op in ("is_not_null", "notnull", "not_null"):
+                clauses.append(f"{qcol} IS NOT NULL")
             else:
                 clauses.append(f"{qcol}={_db(':'+p, f.get('value'))}")
                 params[p] = f.get("value")
-        where = " WHERE " + " AND ".join(clauses) if clauses else ""
+        where = " WHERE " + _joiner.join(clauses) if clauses else ""
         return where, params
