@@ -4855,14 +4855,15 @@
                 const fn = s.dataset.xfield;
                 const hi = parseInt(s.value, 10);
                 const wrap = s.closest('[data-xrow]') ? s.closest('[data-xrow]').querySelector('[data-xfixedwrap]') : null;
-                if(hi >= 0 && _xlsxHeaders[hi] !== undefined) mapping[_xlsxHeaders[hi]] = fn;
+                // المفتاح برقم العمود — يعمل حتى مع الترويسات الفارغة/المكررة
+                if(hi >= 0) mapping['col_' + hi] = fn;
                 else if(wrap){
                     const fv = _wval(wrap);
                     if(fv !== '') fixed[fn] = fv;
                 }
             });
             if(!Object.keys(mapping).length && !Object.keys(fixed).length) return notify('اختر عمود إكسل أو قيمة ثابتة لحقل واحد على الأقل', 'error');
-            const total = Math.min(_xlsxTotal || 0, 2000);
+            const total = _xlsxTotal || 0;
             if(!total) return notify('لا صفوف للاستيراد', 'error');
             _xlsxRunning = true; _xlsxCancel = false;
             btn.disabled = true;
@@ -4870,17 +4871,21 @@
                 lbl = document.getElementById('xlsxProgLbl'), eta = document.getElementById('xlsxProgEta');
             if(wrap) wrap.classList.remove('hidden');
             const BATCH = 200;
-            let off = 0;
+            let off = 0, lastTruncated = false, lastPaint = 0;
             const agg = {created: 0, updated: 0, skipped: 0, errors: []};
             const t0 = Date.now();
-            const paint = ()=>{
+            const paint = (force)=>{
+                // تخفيف الوميض: تحديث الواجهة كل 300ms على الأكثر (الدفعات السريعة تأتي كل ~50ms)
+                const now = Date.now();
+                if(!force && now - lastPaint < 300) return;
+                lastPaint = now;
                 const pct = total ? Math.round(off / total * 100) : 0;
                 if(bar) bar.style.width = pct + '%';
                 if(lbl) lbl.textContent = `تم ${off} من ${total} (${pct}%) — جديد ${agg.created} + محدّث ${agg.updated}`;
-                const el = (Date.now() - t0) / 1000, rate = off / Math.max(el, 0.1);
+                const el = (now - t0) / 1000, rate = off / Math.max(el, 0.1);
                 if(eta) eta.textContent = (off < total && rate > 0) ? ('متبقي ' + fmtEta((total - off) / rate)) : '';
             };
-            paint();
+            paint(true);
             try{
                 while(off < total && !_xlsxCancel){
                     const fd = new FormData();
@@ -4897,9 +4902,10 @@
                     const data = await res.json();
                     if(!res.ok) throw new Error(data.error || 'فشل الاستيراد');
                     agg.created += data.created || 0; agg.updated += data.updated || 0; agg.skipped += data.skipped || 0;
+                    lastTruncated = !!data.truncated;
                     (data.errors || []).slice(0, 10 - agg.errors.length).forEach(e=>agg.errors.push(e));
                     off = (typeof data.next_offset === 'number') ? data.next_offset : (off + (data.processed || 0));
-                    paint();
+                    paint(data.done);
                     if(data.done) break;
                 }
             }catch(e){ notify('تعذر الاستيراد: ' + String((e && e.message) || e).slice(0, 250), 'error'); }
@@ -4909,7 +4915,8 @@
             if(_xlsxCancel){ notify(`أُوقف الاستيراد عند ${off} صف (جديد ${agg.created} + محدّث ${agg.updated})`, 'info'); }
             else{
                 let msg = `تم (upsert): ${agg.created} جديد + ${agg.updated} محدّث${agg.skipped ? ` (تُجوهل ${agg.skipped})` : ''}`;
-                if(_xlsxTotal > 2000) msg += ' — اقتصر على أول 2000 صف';
+                if(lastTruncated) msg += ' — اقتصر على أول 100000 صف';
+                if(!agg.created && !agg.updated) msg += ' — لا قيم مستخرجة: تحقق من ربط الأعمدة وصفوف البيانات';
                 if(agg.errors.length) msg += ' — أخطاء: ' + agg.errors.slice(0, 3).join('، ');
                 notify(msg, agg.errors.length ? 'info' : 'success');
                 closeXlsxImport();

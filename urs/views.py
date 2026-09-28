@@ -2155,10 +2155,10 @@ def api_fmlk_import_xlsx(request, app_name):
         match_column = (request.POST.get("match_column") or "").strip()
         eng = _fmlk_get_engine(fml, app_name)
         fields = {getattr(f, "name", ""): f for f in (eng.compiler.fields() or []) if getattr(f, "name", "")}
-        MAX_ROWS = 2000
-        effective_total = min(total_rows, MAX_ROWS)
-        truncated = total_rows > MAX_ROWS
-        chunk = data_rows[:MAX_ROWS]
+        # بلا سقف لعدد الصفوف: الدفعات (200) + زر الإلغاء + شريط التقدم هي الحماية
+        effective_total = total_rows
+        truncated = False
+        chunk = data_rows
         created = updated = skipped = 0
         errors = []
 
@@ -2169,9 +2169,10 @@ def api_fmlk_import_xlsx(request, app_name):
             vals = list(_r or []) + [""] * max(0, len(headers) - len(_r or []))
             data = {}
             for _hi, _h in enumerate(headers):
-                if not _h:
-                    continue
-                _fn = mapping.get(_h)
+                # المفتاح برقم العمود (يعمل مع الترويسات الفارغة/المكررة) ثم بالنص (توافق)
+                _fn = mapping.get(f"col_{_hi}")
+                if (not _fn) and _h:
+                    _fn = mapping.get(_h)
                 if not _fn or _fn not in fields:
                     continue
                 try:
