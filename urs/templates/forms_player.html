@@ -4669,7 +4669,7 @@
             notify(`تم استيراد ${ok} سجل${fail ? ` — فشل ${fail}` : ''}`, fail ? (ok ? 'info' : 'error') : 'success');
             await loadAllRecords();
         }
-        let _xlsxFile = null, _xlsxHeaders = [];
+        let _xlsxFile = null, _xlsxHeaders = [], _xlsxHeaderRow = 1, _xlsxDataStart = 2;
         function openXlsxImport(){
             let m = document.getElementById('xlsxImportModal');
             if(!m){
@@ -4680,7 +4680,9 @@
                 m.innerHTML = '<div class="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[88vh] overflow-hidden flex flex-col">'
                     + '<div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-emerald-50 shrink-0"><h3 class="text-sm font-bold text-slate-800"><i class="fa-solid fa-file-excel text-emerald-600"></i> استيراد من Excel</h3><button onclick="closeXlsxImport()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button></div>'
                     + '<div class="p-4 space-y-3 overflow-y-auto custom-scroll text-xs">'
-                    + '<div><label class="block text-[11px] font-bold text-slate-500 mb-1">ملف XLSX (الصف الأول = الترويسات)</label><input id="xlsxFileInput" type="file" accept=".xlsx,.xlsm,.xltx,.xltm" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"/></div>'
+                    + '<div><label class="block text-[11px] font-bold text-slate-500 mb-1">ملف XLSX</label><input id="xlsxFileInput" type="file" accept=".xlsx,.xlsm,.xltx,.xltm" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"/></div>'
+                    + '<div class="flex gap-2"><div class="flex-1"><label class="block text-[11px] font-bold text-slate-500 mb-1">صف الترويسات (أسماء الأعمدة)</label><input id="xlsxHeaderRow" type="number" min="1" value="1" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"/></div>'
+                    + '<div class="flex-1"><label class="block text-[11px] font-bold text-slate-500 mb-1">صف بدء البيانات</label><input id="xlsxDataStart" type="number" min="2" value="2" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"/></div></div>'
                     + '<div><label class="block text-[11px] font-bold text-slate-500 mb-1">عمود المطابقة (لتحديث الموجود بدل التكرار — اتركه فارغاً للإنشاء فقط)</label><select id="xlsxMatchCol" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"></select></div>'
                     + '<div id="xlsxMapOut" class="text-slate-500">اختر الملف ثم اضغط تحليل.</div>'
                     + '</div>'
@@ -4692,7 +4694,9 @@
             document.getElementById('xlsxMatchCol').innerHTML = '<option value="">— بلا (إنشاء فقط) —</option>' + fields.map(f=>`<option value="${escAttr(f.name)}">${escHtml(f.alias || f.name)} <span class="text-slate-400">(${escHtml(f.name)})</span></option>`).join('');
             document.getElementById('xlsxMapOut').innerHTML = '<span class="text-slate-400">اختر الملف ثم اضغط تحليل.</span>';
             document.getElementById('xlsxImportBtn').disabled = true;
-            _xlsxFile = null; _xlsxHeaders = [];
+            _xlsxFile = null; _xlsxHeaders = []; _xlsxHeaderRow = 1; _xlsxDataStart = 2;
+            const _hr = document.getElementById('xlsxHeaderRow'); if(_hr) _hr.value = '1';
+            const _ds = document.getElementById('xlsxDataStart'); if(_ds) _ds.value = '2';
             m.classList.remove('hidden');
             if(typeof lockScroll === 'function') lockScroll();
         }
@@ -4712,10 +4716,17 @@
                 fd.append('file', _xlsxFile);
                 fd.append('fml', currentFml);
                 fd.append('preview', '1');
+                const hr = Math.max(1, parseInt((document.getElementById('xlsxHeaderRow') || {}).value || '1', 10) || 1);
+                const dsEl = document.getElementById('xlsxDataStart');
+                let ds = parseInt((dsEl || {}).value || '0', 10) || 0;
+                if(!(ds > hr)){ ds = hr + 1; if(dsEl) dsEl.value = String(ds); }
+                fd.append('header_row', String(hr));
+                fd.append('data_start', String(ds));
                 const res = await fetch(`/api/apps/${encodeURIComponent(currentApp)}/models/import-xlsx/`, {method:'POST', body: fd});
                 const data = await res.json();
                 if(!res.ok) throw new Error(data.error || 'فشل التحليل');
                 _xlsxHeaders = data.headers || [];
+                _xlsxHeaderRow = hr; _xlsxDataStart = ds;
                 const fields = (fmlMeta.fields || []).filter(f => !f.destination || f.destination === 'main');
                 const autoMap = (h)=>{
                     const t = String(h || '').trim();
@@ -4724,7 +4735,7 @@
                     return f ? f.name : '';
                 };
                 const opts = '<option value="">— تجاهل —</option>' + fields.map(f=>`<option value="${escAttr(f.name)}">${escHtml(f.alias || f.name)} (${escHtml(f.name)})</option>`).join('');
-                box.innerHTML = `<div class="text-[11px] font-bold text-slate-600 mb-1">${data.total_rows} صف — ماب الأعمدة:</div>`
+                box.innerHTML = `<div class="text-[11px] font-bold text-slate-600 mb-1">${data.total_rows} صف — ماب الأعمدة (الترويسات: صف ${data.header_row || hr}):</div>`
                     + `<div class="space-y-1">` + _xlsxHeaders.map((h, i)=>`<div class="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5"><span class="font-mono font-bold text-slate-700 flex-1 truncate" dir="ltr">${escHtml(h) || ('عمود ' + (i+1))}</span><span class="text-slate-400">←</span><select data-xmap="${i}" class="flex-1 bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs">${opts.replace(`value="${autoMap(h)}"`, `value="${autoMap(h)}" selected`)}</select></div>`).join('') + `</div>`
                     + ((data.sample_rows || []).length ? `<div class="text-[11px] font-bold text-slate-600 mt-2 mb-1">معاينة أول 5 صفوف:</div><div class="overflow-x-auto border border-slate-200 rounded-lg"><table class="w-full text-[10px]"><tr>${_xlsxHeaders.map(h=>`<th class="px-1.5 py-1 bg-slate-50 border-b font-mono" dir="ltr">${escHtml(h)}</th>`).join('')}</tr>` + data.sample_rows.map(r=>`<tr>${_xlsxHeaders.map((h,i)=>`<td class="px-1.5 py-1 border-b truncate max-w-[140px]">${escHtml(String(r[i] ?? ''))}</td>`).join('')}</tr>`).join('') + `</table></div>` : '');
                 const mapped = [...document.querySelectorAll('#xlsxMapOut [data-xmap]')].filter(s=>s.value).length;
@@ -4746,6 +4757,8 @@
                 fd.append('fml', currentFml);
                 fd.append('mapping', JSON.stringify(mapping));
                 fd.append('match_column', (document.getElementById('xlsxMatchCol') || {}).value || '');
+                fd.append('header_row', String(_xlsxHeaderRow || 1));
+                fd.append('data_start', String(_xlsxDataStart || 2));
                 const res = await fetch(`/api/apps/${encodeURIComponent(currentApp)}/models/import-xlsx/`, {method:'POST', body: fd});
                 const data = await res.json();
                 if(!res.ok) throw new Error(data.error || 'فشل الاستيراد');

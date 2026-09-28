@@ -2046,9 +2046,11 @@ def api_fmlk_preview_insert(request):
 
 @csrf_exempt
 def api_fmlk_import_xlsx(request, app_name):
-    """POST /api/apps/<app>/models/import-xlsx/ (multipart: file, fml, preview?, mapping?, match_column?).
+    """POST /api/apps/<app>/models/import-xlsx/ (multipart: file, fml, preview?, mapping?, match_column?, header_row?, data_start?).
 
-    preview=1 → {headers, sample_rows(5), total_rows} بلا كتابة.
+    header_row (1-based, افتراضي 1): صف الترويسات — تُؤخذ منه أسماء الأعمدة.
+    data_start (1-based, افتراضي header_row+1): أول صف بيانات.
+    preview=1 → {headers, sample_rows(5), total_rows, header_row, data_start} بلا كتابة.
     Иначе → يستورد الصفوف: مطابقة عمود المطابقة تحدّث الموجود (upsert) وإلا ينشئ.
     mapping: {excel_header: field_name}. حد أقصى 2000 صف.
     """
@@ -2095,14 +2097,27 @@ def api_fmlk_import_xlsx(request, app_name):
         rows = [r for r in (rows or []) if any(c is not None and str(c).strip() != "" for c in (r or []))]
         if not rows:
             return JsonResponse({"error": "الملف فارغ"}, status=400)
-        headers = [str(c or "").strip() for c in (rows[0] or [])]
+        try:
+            header_row = int(request.POST.get("header_row") or 1)
+        except (TypeError, ValueError):
+            header_row = 1
+        try:
+            data_start = int(request.POST.get("data_start") or 0) or (header_row + 1)
+        except (TypeError, ValueError):
+            data_start = header_row + 1
+        if header_row < 1 or header_row > len(rows):
+            return JsonResponse({"error": f"صف الترويسات ({header_row}) خارج الملف (1..{len(rows)})"}, status=400)
+        if data_start <= header_row:
+            return JsonResponse({"error": "صف بدء البيانات يجب أن يكون بعد صف الترويسات"}, status=400)
+        headers = [str(c or "").strip() for c in (rows[header_row - 1] or [])]
         if not any(headers):
-            return JsonResponse({"error": "الصف الأول يجب أن يحتوي الترويسات"}, status=400)
-        data_rows = rows[1:]
+            return JsonResponse({"error": f"الصف {header_row} فارغ — اختر صف الترويسات الصحيح"}, status=400)
+        data_rows = rows[data_start - 1:]
         if request.POST.get("preview"):
             return JsonResponse({"ok": True, "headers": headers,
                                  "sample_rows": [[_norm(c) for c in (r or [])] for r in data_rows[:5]],
-                                 "total_rows": len(data_rows)},
+                                 "total_rows": len(data_rows),
+                                 "header_row": header_row, "data_start": data_start},
                                 json_dumps_params={"ensure_ascii": False})
         try:
             mapping = json.loads(request.POST.get("mapping") or "{}")
@@ -2117,7 +2132,7 @@ def api_fmlk_import_xlsx(request, app_name):
         truncated = len(data_rows) > MAX_ROWS
         created = updated = skipped = 0
         errors = []
-        for _ri, _r in enumerate(data_rows[:MAX_ROWS], start=2):
+        for _ri, _r in enumerate(data_rows[:MAX_ROWS], start=data_start):
             try:
                 vals = list(_r or []) + [""] * max(0, len(headers) - len(_r or []))
                 data = {}
