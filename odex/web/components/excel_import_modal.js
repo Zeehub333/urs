@@ -30,7 +30,7 @@
                 <div class="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50/50">
                     <div class="flex items-center gap-3">
                         <div class="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-600 flex items-center justify-center text-lg shadow-sm">
-                            <i class="fa-solid fa-file-excel"></i>
+                            <span class="relative inline-flex items-center"><i class="fa-solid fa-file-excel"></i><i class="fa-solid fa-magnifying-glass absolute -bottom-1 -left-1 text-[8px] bg-white rounded-full ring-1 ring-emerald-300 p-[1.5px]"></i></span>
                         </div>
                         <div>
                             <h3 class="font-bold text-slate-800 text-base">البحث الجماعي واستخراج البيانات من ملف إكسل</h3>
