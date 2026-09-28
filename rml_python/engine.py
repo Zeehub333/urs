@@ -2112,6 +2112,27 @@ class RMLReportEngine:
                 return l
         return None
 
+    def _transitive_link_error(self, base_norm: str, s: str, sec_all) -> Optional[str]:
+        """Loud guidance when a secondary links only via another secondary.
+
+        The planner joins every secondary DIRECTLY to the base table — a
+        chain (base ↔ mid ↔ leaf) is not followed. Without this guard the
+        leaf either hits the generic inference error or, worse, silently
+        joins on a coincidental shared-name key (e.g. ID ↔ id) matching
+        nothing → empty columns with no error.
+        """
+        try:
+            if self._find_link(base_norm, s) is not None:
+                return None
+            _trans = [t for t in (sec_all or []) if t != s and self._find_link(s, t) is not None]
+            if _trans:
+                return (f'الجدول "{s}" مربوط بالجدول "{_trans[0]}" وليس بالجدول الأساسي "{base_norm}" — '
+                        f'الربط عبر جدول وسيط غير مدعوم: أضف رابطاً مباشراً بين "{s}" و"{base_norm}" '
+                        f'أو اجعل "{_trans[0]}" هو الجدول الافتراضي.')
+        except Exception:
+            pass
+        return None
+
     def _link_match_spec(self, base_norm: str, sec_norm: str) -> Dict[str, str]:
         """{match, pattern} of the link between two tables.
 
@@ -4912,6 +4933,9 @@ class RMLReportEngine:
         local_sec: List[str] = []
         remote_sec: Dict[str, Any] = {}
         for s in sec_all:
+            _terr = self._transitive_link_error(base_norm, s, sec_all)
+            if _terr:
+                raise ValueError(_terr)
             sconn = self._conn_key_of_table(s)
             sdb = self._db_for_conn(sconn)
             _mspec = self._link_match_spec(base_norm, s)
