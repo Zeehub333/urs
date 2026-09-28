@@ -1209,13 +1209,18 @@ def _emit_staging_diag(header, body):
     try:
         import sys as _sys
         import traceback as _tb
+        import datetime as _dtdiag
+        try:
+            _tsdiag = _dtdiag.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            _tsdiag = "?"
         try:
             from pathlib import Path as _P
             from config.settings import BASE_DIR as _BD
             _logdir = _P(_BD) / "logs"
             _logdir.mkdir(parents=True, exist_ok=True)
             with open(_logdir / "rml_stage_diag.log", "a", encoding="utf-8") as _fh:
-                _fh.write("\n=== " + header + " ===\n")
+                _fh.write("\n=== " + header + " === [" + _tsdiag + "]\n")
                 _fh.write(str(body))
                 if not str(body).endswith("\n"):
                     _fh.write("\n")
@@ -5095,14 +5100,26 @@ class RMLReportEngine:
             for leaf in RMLReportEngine._gw_walk_leaves(pred[1]):
                 yield leaf
 
-    def _gw_make_row_getter(self, columns, keyset):
+    def _gw_make_row_getter(self, columns, keyset, merges=None):
         """Build a merged-row value getter with memoized ref->alias binding.
 
         Returns (getter, alias_of). getter(row_low, refkey, raw) reads the
         case-folded row dict; alias_of(refkey, raw) resolves the expected
         row key (None when unresolvable -> loud error upstream, never silent).
+        `merges` (plan specs) is REQUIRED for remote-merged columns: the
+        plan NULLs their expr (expr="NULL"), so expr matching cannot see
+        them — their spec field->alias map can.
         """
         cache: Dict[tuple, Optional[str]] = {}
+        _mmap: Dict[str, str] = {}
+        try:
+            for _m in (merges or []):
+                _mf = str(_m.get("field") or "").strip().lower()
+                _ma = str(_m.get("alias") or "").strip().lower()
+                if _mf and _ma:
+                    _mmap.setdefault(_mf, _ma)
+        except Exception:
+            pass
 
         def _alias(refkey, raw):
             ck = (str(refkey or ""), str(raw or ""))
@@ -5146,6 +5163,25 @@ class RMLReportEngine:
                     if _al and _al in keyset:
                         found = _al
                         break
+            if found is None and _mmap:
+                # remote-merged columns: bind via spec field->alias
+                _probes = []
+                if refkey:
+                    _probes.append(str(refkey).strip().lower())
+                    if str(refkey).startswith("@"):
+                        _probes.append(str(refkey)[1:].strip().lower())
+                if raw:
+                    _g0 = str(raw).strip()
+                    if _g0.lower().startswith("get(") and _g0.endswith(")"):
+                        _g0 = _g0[4:-1].strip()
+                    for _pp in _g0.split("."):
+                        _pp = _pp.strip().lower()
+                        if _pp:
+                            _probes.append(_pp)
+                for _pr in _probes:
+                    if _pr in _mmap and _mmap[_pr] in keyset:
+                        found = _mmap[_pr]
+                        break
             cache[ck] = found
             return found
 
@@ -5160,10 +5196,10 @@ class RMLReportEngine:
 
         return _get, _alias
 
-    def _gw_pred_unbound(self, pred, keyset, columns):
+    def _gw_pred_unbound(self, pred, keyset, columns, merges=None):
         """First leaf ref that cannot bind to a report row key, or ''."""
         try:
-            _get, _alias = self._gw_make_row_getter(columns, keyset)
+            _get, _alias = self._gw_make_row_getter(columns, keyset, merges)
         except Exception:
             return "?"
         for _rk, _raw in self._gw_walk_leaves(pred):
@@ -6148,9 +6184,11 @@ class RMLReportEngine:
                         _allkeys |= set(str(_k).lower() for _k in dict(_r0 or {}).keys())
                     except Exception:
                         pass
-                _get, _al = self._gw_make_row_getter(_pcols, _allkeys)
+                _get, _al = self._gw_make_row_getter(
+                    _pcols, _allkeys, exec_plan.get("merges"))
                 for _dd in _deferred:
-                    _miss = self._gw_pred_unbound(_dd.get("pred"), _allkeys, _pcols)
+                    _miss = self._gw_pred_unbound(
+                        _dd.get("pred"), _allkeys, _pcols, exec_plan.get("merges"))
                     if _miss:
                         raise ValueError(
                             f'تعذر ربط الشرط العام المؤجل ({_miss}) بأعمدة التقرير — '
