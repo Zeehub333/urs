@@ -4695,9 +4695,9 @@
                 m.innerHTML = '<div class="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[88vh] overflow-hidden flex flex-col">'
                     + '<div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-emerald-50 shrink-0"><h3 class="text-sm font-bold text-slate-800"><i class="fa-solid fa-file-excel text-emerald-600"></i> استيراد من Excel</h3><button onclick="closeXlsxImport()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button></div>'
                     + '<div class="p-4 space-y-3 overflow-y-auto custom-scroll text-xs">'
-                    + '<div><label class="block text-[11px] font-bold text-slate-500 mb-1">ملف XLSX</label><input id="xlsxFileInput" type="file" accept=".xlsx,.xlsm,.xltx,.xltm" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"/></div>'
-                    + '<div class="flex gap-2"><div class="flex-1"><label class="block text-[11px] font-bold text-slate-500 mb-1">صف الترويسات (أسماء الأعمدة)</label><input id="xlsxHeaderRow" type="number" min="1" value="1" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"/></div>'
-                    + '<div class="flex-1"><label class="block text-[11px] font-bold text-slate-500 mb-1">صف بدء البيانات</label><input id="xlsxDataStart" type="number" min="2" value="2" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"/></div></div>'
+                    + '<div><label class="block text-[11px] font-bold text-slate-500 mb-1">ملف XLSX (يُحلَّل تلقائياً فور اختياره)</label><input id="xlsxFileInput" type="file" accept=".xlsx,.xlsm,.xltx,.xltm" onchange="autoXlsxParse()" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"/></div>'
+                    + '<div class="flex gap-2"><div class="flex-1"><label class="block text-[11px] font-bold text-slate-500 mb-1">صف الترويسات (أسماء الأعمدة)</label><input id="xlsxHeaderRow" type="number" min="1" value="1" onchange="var h=Math.max(1,parseInt(this.value||\'1\',10)||1); this.value=h; var d=document.getElementById(\'xlsxDataStart\'); if(d) d.value=String(h+1); autoXlsxParse();" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"/></div>'
+                    + '<div class="flex-1"><label class="block text-[11px] font-bold text-slate-500 mb-1">صف بدء البيانات (= الترويسات +1)</label><input id="xlsxDataStart" type="number" min="2" value="2" onchange="autoXlsxParse()" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"/></div></div>'
                     + '<div><label class="block text-[11px] font-bold text-slate-500 mb-1">عمود المطابقة (لتحديث الموجود بدل التكرار — اتركه فارغاً للإنشاء فقط)</label><select id="xlsxMatchCol" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"></select></div>'
                     + '<div id="xlsxMapOut" class="text-slate-500">اختر الملف ثم اضغط تحليل.</div>'
                     + '</div>'
@@ -4743,27 +4743,50 @@
                 _xlsxHeaders = data.headers || [];
                 _xlsxHeaderRow = hr; _xlsxDataStart = ds;
                 const fields = (fmlMeta.fields || []).filter(f => !f.destination || f.destination === 'main');
-                const autoMap = (h)=>{
-                    const t = String(h || '').trim();
-                    if(!t) return '';
-                    const f = fields.find(f=>String(f.name||'').toLowerCase() === t.toLowerCase()) || fields.find(f=>String(f.alias||'').trim() === t);
-                    return f ? f.name : '';
+                // مطابقة تلقائية: ترويسة الإكسل == اسم الحقل أو مسماه
+                const autoCol = (f)=>{
+                    let hi = _xlsxHeaders.findIndex(h=>String(h || '').trim().toLowerCase() === String(f.name || '').toLowerCase());
+                    if(hi < 0) hi = _xlsxHeaders.findIndex(h=>String(h || '').trim() === String(f.alias || '').trim() && String(f.alias || '').trim() !== '');
+                    return hi;
                 };
-                const opts = '<option value="">— تجاهل —</option>' + fields.map(f=>`<option value="${escAttr(f.name)}">${escHtml(f.alias || f.name)} (${escHtml(f.name)})</option>`).join('');
-                box.innerHTML = `<div class="text-[11px] font-bold text-slate-600 mb-1">${data.total_rows} صف — ماب الأعمدة (الترويسات: صف ${data.header_row || hr}):</div>`
-                    + `<div class="space-y-1">` + _xlsxHeaders.map((h, i)=>`<div class="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5"><span class="font-mono font-bold text-slate-700 flex-1 truncate" dir="ltr">${escHtml(h) || ('عمود ' + (i+1))}</span><span class="text-slate-400">←</span><select data-xmap="${i}" class="flex-1 bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs">${opts.replace(`value="${autoMap(h)}"`, `value="${autoMap(h)}" selected`)}</select></div>`).join('') + `</div>`
-                    + ((data.sample_rows || []).length ? `<div class="text-[11px] font-bold text-slate-600 mt-2 mb-1">معاينة أول 5 صفوف:</div><div class="overflow-x-auto border border-slate-200 rounded-lg"><table class="w-full text-[10px]"><tr>${_xlsxHeaders.map(h=>`<th class="px-1.5 py-1 bg-slate-50 border-b font-mono" dir="ltr">${escHtml(h)}</th>`).join('')}</tr>` + data.sample_rows.map(r=>`<tr>${_xlsxHeaders.map((h,i)=>`<td class="px-1.5 py-1 border-b truncate max-w-[140px]">${escHtml(String(r[i] ?? ''))}</td>`).join('')}</tr>`).join('') + `</table></div>` : '');
-                const mapped = [...document.querySelectorAll('#xlsxMapOut [data-xmap]')].filter(s=>s.value).length;
+                const xlOpts = (sel)=>'<option value="-1">— لاشيء —</option>' + _xlsxHeaders.map((h, i)=>`<option value="${i}" ${i === sel ? 'selected' : ''}>${escHtml(h) || ('عمود ' + (i+1))}</option>`).join('');
+                let html = `<div class="text-[11px] font-bold text-slate-600 mb-1">${data.total_rows} صف (الترويسات: صف ${data.header_row || hr}):</div>`;
+                // 1) عينات الملف فوق الربط
+                if((data.sample_rows || []).length) html += `<div class="text-[11px] font-bold text-slate-600 mb-1">عينات من الملف (أول 5 صفوف بيانات):</div><div class="overflow-x-auto border border-slate-200 rounded-lg mb-2"><table class="w-full text-[10px]"><tr>${_xlsxHeaders.map(h=>`<th class="px-1.5 py-1 bg-slate-50 border-b font-mono" dir="ltr">${escHtml(h)}</th>`).join('')}</tr>` + data.sample_rows.map(r=>`<tr>${_xlsxHeaders.map((h,i)=>`<td class="px-1.5 py-1 border-b truncate max-w-[140px]">${escHtml(String(r[i] ?? ''))}</td>`).join('')}</tr>`).join('') + `</table></div>`;
+                // 2) الربط: لكل حقل (تسمية النظام | قيمة ثابتة | عمود الإكسل)
+                html += `<div class="text-[11px] font-bold text-slate-600 mb-1">ربط الأعمدة — لكل حقل: عمود إكسل أو قيمة ثابتة للكل:</div>`
+                    + `<div class="grid grid-cols-[1fr_1fr_1fr] gap-1 px-2 pb-1 text-[10px] font-bold text-slate-400"><span>تسمية العمود (النظام)</span><span>قيمة ثابتة مع الكل</span><span>عمود الإكسل</span></div>`
+                    + `<div class="space-y-1">` + fields.map(f=>{
+                        const hi = autoCol(f);
+                        return `<div data-xrow class="grid grid-cols-[1fr_1fr_1fr] gap-1 items-center bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5"><span class="font-bold text-slate-700 truncate" title="${escAttr(f.name)}">${escHtml(f.alias || f.name)}</span>`
+                            + `<input data-xfixed="${escAttr(f.name)}" placeholder="ثابتة..." title="قيمة ثابتة تُدخل مع كل الصفوف" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs min-w-0"/>`
+                            + `<select data-xfield="${escAttr(f.name)}" onchange="var fx=this.closest('[data-xrow]').querySelector('[data-xfixed]'); if(fx){ fx.disabled = this.value !== '-1'; if(this.value !== '-1') fx.value=''; }" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs min-w-0">${xlOpts(hi)}</select></div>`;
+                    }).join('') + `</div>`;
+                box.innerHTML = html;
+                // عطّل الثابتة حيث اختير عمود تلقائياً
+                box.querySelectorAll('#xlsxMapOut [data-xfield]').forEach(s=>{ if(s.value !== '-1'){ const fx = s.closest('[data-xrow]').querySelector('[data-xfixed]'); if(fx) fx.disabled = true; } });
+                const mapped = [...document.querySelectorAll('#xlsxMapOut [data-xfield]')].filter(s=>s.value !== '-1').length
+                    + [...document.querySelectorAll('#xlsxMapOut [data-xfixed]')].filter(i=>!i.disabled && i.value.trim()).length;
                 document.getElementById('xlsxImportBtn').disabled = !mapped;
-                if(!mapped) box.innerHTML += '<div class="text-amber-700 text-[11px] mt-1">لم تُطابق أي ترويسة — اختر يدوياً من القوائم</div>';
+                if(!mapped) box.innerHTML += '<div class="text-amber-700 text-[11px] mt-1">اختر عمود إكسل أو أدخل قيمة ثابتة لحقل واحد على الأقل</div>';
             }catch(e){ box.innerHTML = '<span class="text-rose-500">تعذر التحليل: ' + escHtml(String((e && e.message) || e)).slice(0, 300) + '</span>'; }
+        }
+        function autoXlsxParse(){
+            const inp = document.getElementById('xlsxFileInput');
+            if(inp && inp.files && inp.files[0]) runXlsxParse();
         }
         async function applyXlsxImport(){
             const btn = document.getElementById('xlsxImportBtn');
             if(!_xlsxFile) return;
-            const mapping = {};
-            document.querySelectorAll('#xlsxMapOut [data-xmap]').forEach(s=>{ if(s.value) mapping[_xlsxHeaders[+s.dataset.xmap]] = s.value; });
-            if(!Object.keys(mapping).length) return notify('طابق عموداً واحداً على الأقل', 'error');
+            const mapping = {}, fixed = {};
+            document.querySelectorAll('#xlsxMapOut [data-xfield]').forEach(s=>{
+                const fn = s.dataset.xfield;
+                const hi = parseInt(s.value, 10);
+                const fx = s.closest('[data-xrow]') ? s.closest('[data-xrow]').querySelector('[data-xfixed]') : null;
+                if(hi >= 0 && _xlsxHeaders[hi] !== undefined) mapping[_xlsxHeaders[hi]] = fn;
+                else if(fx && fx.value.trim()) fixed[fn] = fx.value.trim();
+            });
+            if(!Object.keys(mapping).length && !Object.keys(fixed).length) return notify('اختر عمود إكسل أو قيمة ثابتة لحقل واحد على الأقل', 'error');
             btn.disabled = true;
             notify('جارٍ الاستيراد...', 'info');
             try{
@@ -4771,6 +4794,7 @@
                 fd.append('file', _xlsxFile);
                 fd.append('fml', currentFml);
                 fd.append('mapping', JSON.stringify(mapping));
+                fd.append('fixed', JSON.stringify(fixed));
                 fd.append('match_column', (document.getElementById('xlsxMatchCol') || {}).value || '');
                 fd.append('header_row', String(_xlsxHeaderRow || 1));
                 fd.append('data_start', String(_xlsxDataStart || 2));

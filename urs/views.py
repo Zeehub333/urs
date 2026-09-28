@@ -2125,6 +2125,12 @@ def api_fmlk_import_xlsx(request, app_name):
             mapping = {}
         if not isinstance(mapping, dict):
             mapping = {}
+        try:
+            fixed = json.loads(request.POST.get("fixed") or "{}")
+        except Exception:
+            fixed = {}
+        if not isinstance(fixed, dict):
+            fixed = {}
         match_column = (request.POST.get("match_column") or "").strip()
         eng = _fmlk_get_engine(fml, app_name)
         fields = {getattr(f, "name", ""): f for f in (eng.compiler.fields() or []) if getattr(f, "name", "")}
@@ -2146,6 +2152,12 @@ def api_fmlk_import_xlsx(request, app_name):
                     if _v == "" or _v is None:
                         continue
                     data[_fn] = _v
+                # قيم ثابتة: تُملأ عند غياب قيمة العمود (عمود فارغ أو غير مربوط)
+                for _fn, _fv in (fixed or {}).items():
+                    if _fn in fields and _fn not in data:
+                        _fv = str(_fv).strip() if _fv is not None else ""
+                        if _fv != "":
+                            data[_fn] = _fv
                 if not data:
                     skipped += 1
                     continue
