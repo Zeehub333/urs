@@ -6426,18 +6426,20 @@ class RMLReportEngine:
                     _strip = {str(_k) for _k in (strip_extra or set())}
                     _strip |= {str(_k).lower() for _k in (strip_extra or set())}
                     _fetched = cur.fetchall()
-                    # zip + strip helpers first, merges second, format last
-                    # (was: dict pass + a double loop per strip key + format;
-                    # merges must precede _fmt_cell so merged values format too)
+                    # zip first, merges second, strip helpers third, format last
+                    # (merges read the helper aliases _rmljN/_rmlaN as join
+                    # keys — stripping them before _apply_merges leaves every
+                    # remote column None with no error)
                     _rr = []
                     _append = _rr.append
                     for _r in _fetched:
                         _d = dict(zip(cols, _r))
-                        if _strip:
-                            for _k in _strip:
-                                _d.pop(_k, None)
                         _append(_d)
                     raw_rows = self._apply_merges(_rr, exec_plan)
+                    if _strip:
+                        for _d in raw_rows:
+                            for _k in _strip:
+                                _d.pop(_k, None)
                     result_rows = [{k: _fmt_cell(v) for k, v in _r.items()} for _r in raw_rows]
             finally:
                 try: cur.close()
