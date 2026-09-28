@@ -7253,9 +7253,16 @@ class RMLReportEngine:
                 _rn = str((self.metadata or {}).get("name") or "")
             except Exception:
                 _rn = ""
-            print(f"RML timings [{_rn}]: " + " ".join(
+            _tline = (f"RML timings [{_rn}]: " + " ".join(
                 f"{k}={v}" for k, v in self._timings.items() if k != "merge_stats")
                 + (f" merge_stats={self._timings['merge_stats']}" if self._timings.get("merge_stats") else ""))
+            print(_tline)
+            try:
+                # stdout is swallowed by hidden server windows -> mirror to
+                # logs/rml_stage_diag.log (same sink as staging diagnostics).
+                _emit_staging_diag(f"RML timings [{_rn}]", _tline)
+            except Exception:
+                pass
         except Exception:
             pass
         return {
