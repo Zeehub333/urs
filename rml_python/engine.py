@@ -3784,12 +3784,19 @@ class RMLReportEngine:
                 needed.add(t)
         return out, needed
 
-    def _used_tables(self, columns, filters, sort, group_by, field_table) -> set:
-        """Tables referenced by columns/filters/sort/group (via [refs], aliases, field names)."""
+    def _used_tables(self, columns, filters, sort, group_by, field_table, general_where="") -> set:
+        """Tables referenced by columns/filters/sort/group/general-where.
+
+        general_where may reference internal fields (no column binds them),
+        so its tables must be routed/JOINed too — otherwise the reference
+        dangles at runtime.
+        """
         texts: List[str] = []
         for c in (columns or []):
             texts.append(getattr(c, "expr", "") or "")
             texts.append(getattr(c, "where_clause", "") or "")
+        if general_where:
+            texts.append(str(general_where))
         extra_fields: List[str] = []
         for f in (filters or []):
             extra_fields.append(str(f.get("field") or f.get("column") or f.get("name") or ""))
@@ -3873,7 +3880,11 @@ class RMLReportEngine:
         fields = getattr(self, "fields", []) or []
         field_table = self._field_table_map()
         inlined = self._inline_column_refs(self.columns)
-        used = self._used_tables(inlined, filters, sort, group_by, field_table)
+        try:
+            _gw_text = self.compiler.general_where() if hasattr(self.compiler, "general_where") else ""
+        except Exception:
+            _gw_text = ""
+        used = self._used_tables(inlined, filters, sort, group_by, field_table, _gw_text or "")
         sec_all = sorted(t for t in used if t != base_norm)
         # Route secondaries: local (same physical DB) vs remote
         local_sec: List[str] = []
@@ -3896,6 +3907,16 @@ class RMLReportEngine:
                     raise ValueError(
                         f'تعذر الاستدلال على مفتاح الربط بين "{from_table}" و"{s}" عبر الاتصالات. '
                         f'أضف عموداً مشتركاً (مثل رقم المستند) في الجدولين.')
+        # general_where is single-DB SQL: refs on cross-DB tables fail loudly
+        # (remote merge columns are NULL placeholders at SQL time).
+        if _gw_text:
+            _gw_remote = sorted({t for t in (
+                field_table.get(r) for r in self._refs_in_text(_gw_text, field_table))
+                if t and t in (remote_sec or {})})
+            if _gw_remote:
+                raise ValueError(
+                    f'الشرط العام يذكر جدولاً من اتصال آخر ({", ".join(_gw_remote)}) — '
+                    f'غير مدعوم في SQL: انقل الشرط إلى فلاتر المشغل أو إلى عمود من الاتصال الأساسي.')
         # Sort / group-by must be base-local (cross-DB ordering impossible in SQL)
         def _field_tables_of(text):
             ts = set()
@@ -4044,6 +4065,13 @@ class RMLReportEngine:
                     f'لا يمكن حساب العمود "{getattr(col, "alias", "")}" عبر اتصالين في تعبير واحد — '
                     f'بسّط التعبير أو انقل الحساب لعمود منفصل.')
             new_cols.append(dataclasses.replace(col, expr=new_raw) if new_raw != raw else col)
+        # Tables referenced only by general_where still need their JOIN
+        # (no column binds them, so the per-column loop above skips them).
+        if _gw_text:
+            for r in self._refs_in_text(_gw_text, field_table):
+                t = field_table.get(r)
+                if t and t in local_sec:
+                    join_needed.add(t)
         joins = []
         for s in sorted(join_needed):
             ssch = self._schema_for_table(s, self._conn_key_of_table(s), report_schema)
