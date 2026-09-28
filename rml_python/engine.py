@@ -1954,7 +1954,21 @@ class RMLReportEngine:
                 new_raw = self._inline_col_ref(c, [cid], by_name, by_alias)
             except ValueError:
                 raise
-            out.append(dataclasses.replace(c, expr=new_raw) if new_raw != (c.expr or "") else c)
+            _wc0 = getattr(c, "where_clause", None) or ""
+            new_wc = _wc0
+            if _wc0 and "@" in str(_wc0):
+                try:
+                    new_wc = self._sub_at_refs(str(_wc0), by_name, by_alias, [cid])
+                except ValueError:
+                    raise
+                except Exception:
+                    new_wc = _wc0
+            _kw = {}
+            if new_raw != (c.expr or ""):
+                _kw["expr"] = new_raw
+            if new_wc != _wc0:
+                _kw["where_clause"] = new_wc
+            out.append(dataclasses.replace(c, **_kw) if _kw else c)
         return out
 
     # ── Multi-table JOIN support ────────────────────────────────────────
@@ -2627,22 +2641,22 @@ class RMLReportEngine:
                     return dict(_lc)
             except Exception:
                 pass
-            # fall through to report-fields fallback below when introspection fails
-            try:
-                _fm = {}
-                for _f in (getattr(self, "fields", []) or []):
-                    try:
-                        if self._norm_table(getattr(_f, "table_source", None) or "") == norm:
-                            _fn = str(getattr(_f, "name", "") or "")
-                            if _fn:
-                                _fm[_fn.upper()] = str(getattr(_f, "data_type", None) or "TEXT").upper()
-                    except Exception:
-                        continue
-                if _fm:
-                    self._cols_cache[key] = dict(_fm)
-                    return dict(_fm)
-            except Exception:
-                pass
+        # fall through to report-fields fallback below when introspection fails
+        try:
+            _fm = {}
+            for _f in (getattr(self, "fields", []) or []):
+                try:
+                    if self._norm_table(getattr(_f, "table_source", None) or "") == norm:
+                        _fn = str(getattr(_f, "name", "") or "")
+                        if _fn:
+                            _fm[_fn.upper()] = str(getattr(_f, "data_type", None) or "TEXT").upper()
+                except Exception:
+                    continue
+            if _fm:
+                self._cols_cache[key] = dict(_fm)
+                return dict(_fm)
+        except Exception:
+            pass
         if _api:
             # جدول API (مثل البصمة) قبل الترحيل: أعمدة منطقية ثابتة بدون وصول للجهاز
             _static = self._api_static_columns()
@@ -4029,16 +4043,15 @@ class RMLReportEngine:
                     raise ValueError(
                         f'تعذر الاستدلال على مفتاح الربط بين "{from_table}" و"{s}" عبر الاتصالات. '
                         f'أضف عموداً مشتركاً (مثل رقم المستند) في الجدولين.')
-        # general_where is single-DB SQL: refs on cross-DB tables fail loudly
-        # (remote merge columns are NULL placeholders at SQL time).
-        if _gw_text:
-            _gw_remote = sorted({t for t in (
-                field_table.get(r) for r in self._refs_in_text(_gw_text, field_table))
-                if t and t in (remote_sec or {})})
-            if _gw_remote:
-                raise ValueError(
-                    f'الشرط العام يذكر جدولاً من اتصال آخر ({", ".join(_gw_remote)}) — '
-                    f'غير مدعوم في SQL: انقل الشرط إلى فلاتر المشغل أو إلى عمود من الاتصال الأساسي.')
+        # general_where across DBs: remote conjuncts become two-phase
+        # filter dicts (base IN lists); the rest stays in base SQL.
+        try:
+            _gw_base, _gw_remote = self._split_general_where(
+                _gw_text or "", base_norm, local_sec, remote_sec, field_table)
+        except ValueError:
+            raise
+        except Exception:
+            _gw_base, _gw_remote = (_gw_text or ""), []
         # Sort / group-by must be base-local (cross-DB ordering impossible in SQL)
         def _field_tables_of(text):
             ts = set()
@@ -4090,10 +4103,11 @@ class RMLReportEngine:
         if not sec_all:
             return {"from_table": from_table, "base_norm": base_norm, "base_conn": base_conn,
                     "base_db": base_db, "base_schema": base_schema,
-                    "base_disp": (str(_bmir.get("table")) if _bmir else (from_table if "." not in from_table else from_table.split(".")[-1])),
+                    "base_disp": (from_table if "." not in from_table else from_table.split(".")[-1]),
                     "from_q": base_q,
                     "columns": inlined, "table_map": None, "merges": [], "extra": [],
-                    "strip": set(), "local_sec": [], "remote": {}, "base_alias": None}
+                    "strip": set(), "local_sec": [], "remote": {}, "base_alias": None,
+                    "gw_base": _gw_text or "", "gw_remote": []}
         # Aliases (base always aliased when other tables involved)
         base_alias = "T0"
         aliases = {s: f"T{i + 1}" for i, s in enumerate(sorted(set(local_sec)))}
@@ -4264,7 +4278,8 @@ class RMLReportEngine:
                 "from_q": from_q,
                 "columns": new_cols, "table_map": table_map, "merges": merges, "extra": extra,
                 "strip": strip, "local_sec": sorted(set(local_sec)), "remote": remote_sec,
-                "base_alias": base_alias}
+                "base_alias": base_alias,
+                "gw_base": _gw_base, "gw_remote": _gw_remote}
 
     def _plan_remote_column(self, col, raw: str, refs_tables: set, remote_sec: Dict[str, Any],
                             base_norm: str, base_alias: str, disp: Dict[str, str],
@@ -4439,8 +4454,292 @@ class RMLReportEngine:
                 f'تعذر تحديد عمود بعيد واحد للفلتر على "{fld}" — حدد عموداً واحداً.')
         return sec, uniq[0]
 
+    @staticmethod
+    def _split_top_and(text):
+        """Split on top-level AND (quote/paren aware; BETWEEN..AND kept whole)."""
+        parts, depth, cur = [], 0, []
+        in_q = False
+        seg_between = False
+        i, n = 0, len(text or "")
+        while i < n:
+            ch = text[i]
+            if in_q:
+                cur.append(ch)
+                if ch == "'":
+                    if i + 1 < n and text[i + 1] == "'":
+                        cur.append(text[i + 1])
+                        i += 1
+                    else:
+                        in_q = False
+                i += 1
+                continue
+            if ch == "'":
+                in_q = True
+                cur.append(ch)
+                i += 1
+                continue
+            if ch == "(":
+                depth += 1
+                cur.append(ch)
+                i += 1
+                continue
+            if ch == ")":
+                depth = max(0, depth - 1)
+                cur.append(ch)
+                i += 1
+                continue
+            if depth == 0 and (ch == "A" or ch == "a"):
+                _m = re.match(r"AND(?![\w\u0600-\u06FF])", text[i:], re.IGNORECASE)
+                _pre_ok = (i == 0 or not (text[i - 1].isalnum() or text[i - 1] == "_"))
+                if _m and _pre_ok:
+                    if seg_between:
+                        cur.append(text[i:i + 3])
+                        seg_between = False
+                    else:
+                        parts.append("".join(cur))
+                        cur = []
+                    i += 3
+                    continue
+            if depth == 0 and (ch == "B" or ch == "b"):
+                _m = re.match(r"BETWEEN(?![\w\u0600-\u06FF])", text[i:], re.IGNORECASE)
+                _pre_ok = (i == 0 or not (text[i - 1].isalnum() or text[i - 1] == "_"))
+                if _m and _pre_ok:
+                    seg_between = True
+            cur.append(ch)
+            i += 1
+        parts.append("".join(cur))
+        return [p.strip() for p in parts if str(p or "").strip() != ""]
+
+    @staticmethod
+    def _strip_outer_parens(s):
+        """Remove balanced outer paren pairs repeatedly."""
+        s = str(s or "").strip()
+        while len(s) >= 2 and s[0] == "(" and s[-1] == ")":
+            depth = 0
+            ok = True
+            for i, ch in enumerate(s):
+                if ch == "(":
+                    depth += 1
+                elif ch == ")":
+                    depth -= 1
+                if depth == 0 and i < len(s) - 1:
+                    ok = False
+                    break
+            if not ok or depth != 0:
+                break
+            s = s[1:-1].strip()
+        return s
+
+    def _split_general_where(self, gw_text, base_norm, local_sec, remote_sec, field_table):
+        """Split general_where into (base_sql_text, remote_filter_dicts).
+
+        Top-level AND conjuncts touching exactly ONE cross-DB table convert
+        to {field, op, value} dicts (consumed by the two-phase IN rewrite).
+        Everything else stays in base SQL. Raises loudly when a remote ref
+        cannot convert (OR/NOT mixes, cross-DB comparisons, fuzzy links,
+        unparsable shapes) — silent mis-filtering is worse.
+        """
+        remote_tables = set((remote_sec or {}).keys())
+        if not gw_text or not remote_tables:
+            return gw_text or "", []
+        local_set = set(local_sec or []) | {base_norm}
+        base_parts, remote_dicts = [], []
+        for part in self._split_top_and(gw_text):
+            core = self._strip_outer_parens(part)
+            try:
+                _refs = {r for r in self._refs_in_text(core, field_table) if field_table.get(r)}
+            except Exception:
+                _refs = set()
+            tables = {field_table[r] for r in _refs}
+            remotes = sorted(t for t in tables if t in remote_tables)
+            if not remotes:
+                base_parts.append(part)
+                continue
+            # any OR/NOT inside a remote conjunct -> unsupported mix
+            try:
+                _skel = re.sub(r"('(?:[^']|'')*')", "''", core)
+                _has_or = re.search(r"(?<![\w\u0600-\u06FF])(OR|NOT)(?![\w\u0600-\u06FF])", _skel, re.IGNORECASE)
+            except Exception:
+                _has_or = True
+            _others = sorted(t for t in tables if t != remotes[0] or len(remotes) > 1)
+            if _has_or or _others or len(remotes) > 1:
+                raise ValueError(
+                    f'الشرط العام يدمج جدولاً من اتصال آخر ({", ".join(remotes)}) مع شرط مركب — '
+                    f'غير مدعوم: انقل الشرط إلى فلاتر المشغل أو إلى عمود من الاتصال الأساسي.')
+            sec = remotes[0]
+            try:
+                _mspec = self._link_match_spec(base_norm, sec)
+            except Exception:
+                _mspec = {"match": "exact", "pattern": ""}
+            if str(_mspec.get("match") or "exact").strip().lower() != "exact":
+                raise ValueError(
+                    f'الشرط العام على الجدول "{sec}" المربوط {_mspec.get("match")} غير مدعوم — '
+                    f'اعرض العمود ثم رشّح، أو استخدم ربطاً تاماً.')
+            _fd = self._gw_remote_dict(core, sec)
+            if _fd is None:
+                raise ValueError(
+                    f'الشرط العام على الجدول "{sec}" بصيغة غير مدعومة عبر الاتصالات ({core[:80]}) — '
+                    f'المسموح: عمود = قيمة (أو > < >= <= !=) — أو انقله لفلاتر المشغل.')
+            remote_dicts.append(_fd)
+        return (" AND ".join(base_parts), remote_dicts)
+
+    @staticmethod
+    def _gw_lit(raw):
+        """Parse a general_where literal: quoted/N-quoted string | int | float, else None."""
+        s = str(raw or "").strip()
+        if len(s) >= 3 and s[0] in ("N", "n") and s[1] == "'" and s[-1] == "'":
+            s = s[1:]
+        if len(s) >= 2 and s[0] == "'" and s[-1] == "'":
+            try:
+                return s[1:-1].replace("''", "'")
+            except Exception:
+                return None
+        if re.fullmatch(r"-?\d+", s or ""):
+            try:
+                return int(s)
+            except Exception:
+                return None
+        if re.fullmatch(r"-?(\d+\.\d*|\.\d+)", s or ""):
+            try:
+                return float(s)
+            except Exception:
+                return None
+        return None
+
+    @staticmethod
+    def _gw_split_list(raw):
+        """Comma-split an IN-list litigating quoted spans; None when malformed."""
+        parts, cur, in_q = [], [], False
+        i, n = 0, len(raw or "")
+        while i < n:
+            ch = raw[i]
+            if in_q:
+                cur.append(ch)
+                if ch == "'":
+                    if i + 1 < n and raw[i + 1] == "'":
+                        cur.append(raw[i + 1])
+                        i += 1
+                    else:
+                        in_q = False
+                i += 1
+                continue
+            if ch == "'":
+                in_q = True
+                cur.append(ch)
+                i += 1
+                continue
+            if ch == ",":
+                parts.append("".join(cur))
+                cur = []
+                i += 1
+                continue
+            cur.append(ch)
+            i += 1
+        if in_q:
+            return None
+        parts.append("".join(cur))
+        return parts
+
+    def _gw_ref_key(self, ref_text, sec):
+        """Single remote field key for a ref string, or None.
+
+        Accepts [..] / @.. / get(..) single refs; exactly one field whose
+        table is `sec`, else None.
+        """
+        try:
+            ft = self._field_table_map()
+            keys = {r for r in self._refs_in_text(str(ref_text or ""), ft) if ft.get(r)}
+            if len(keys) != 1:
+                return None
+            key = next(iter(keys))
+            if ft.get(key) != sec:
+                return None
+            return key
+        except Exception:
+            return None
+
+    def _gw_remote_dict(self, core, sec):
+        """One remote conjunct -> {field, op, value} dict, or None."""
+        # IN-list shape first: ref IN (v1, v2, ...)
+        _inm = re.fullmatch(r"(?s)\s*(.+?)\s+IN\s*\((.+)\)\s*", str(core or "").strip())
+        if _inm:
+            _r1 = _inm.group(1).strip()
+            if re.search(r"[\(\)]", _r1) and not re.fullmatch(r"(?i)get\s*\(.+\)", _r1):
+                return None
+            _key = self._gw_ref_key(_r1, sec)
+            _items = self._gw_split_list(_inm.group(2))
+            if _key is None or not _items:
+                return None
+            _vals = [self._gw_lit(x) for x in _items]
+            if any(v is None for v in _vals):
+                return None
+            return {"field": _key, "op": "in", "value": _vals}
+        # scan first top-level comparison outside quotes/parens
+        depth, in_q = 0, False
+        i, n, at = 0, len(core or ""), -1
+        _op, _oplen = None, 0
+        while i < n:
+            ch = core[i]
+            if in_q:
+                if ch == "'":
+                    if i + 1 < n and core[i + 1] == "'":
+                        i += 1
+                    else:
+                        in_q = False
+                i += 1
+                continue
+            if ch == "'":
+                in_q = True
+                i += 1
+                continue
+            if ch == "(":
+                depth += 1
+                i += 1
+                continue
+            if ch == ")":
+                depth = max(0, depth - 1)
+                i += 1
+                continue
+            if depth == 0:
+                if core.startswith("!=", i) or core.startswith("<>", i):
+                    _op, _oplen, at = "not_equals", 2, i
+                    break
+                if core.startswith(">=", i) or core.startswith("<=", i):
+                    _op, _oplen, at = ("gte" if core[i] == ">" else "lte"), 2, i
+                    break
+                if ch == "=":
+                    _op, _oplen, at = "equals", 1, i
+                    break
+                if ch in (">", "<"):
+                    _op, _oplen, at = ("gt" if ch == ">" else "lt"), 1, i
+                    break
+            i += 1
+        if _op is None or at < 0:
+            return None
+        _left, _right = core[:at].strip(), core[at + _oplen:].strip()
+        if not _left or not _right:
+            return None
+        if re.search(r"[\(\)]", _left) and not re.fullmatch(r"(?i)get\s*\(.+\)", _left):
+            return None  # function-wrapped refs keep SQL semantics: unsupported
+        _key = self._gw_ref_key(_left, sec)
+        if _key is None:
+            return None
+        _val = self._gw_lit(_right)
+        if _val is None:
+            return None
+        return {"field": _key, "op": _op, "value": _val}
+
     def _apply_remote_filters(self, filters, plan):
-        """Rewrite filters touching remote tables into base-key IN lists."""
+        """Rewrite filters touching remote tables into base-key IN lists.
+
+        Also consumes plan["gw_remote"] (general_where conjuncts extracted
+        at plan time) so cross-DB general conditions filter identically.
+        """
+        try:
+            _gwf = list((plan or {}).get("gw_remote") or [])
+        except Exception:
+            _gwf = []
+        filters = list(filters or []) + _gwf
         remote = plan.get("remote") or {}
         if not remote:
             return list(filters or [])
@@ -5583,17 +5882,22 @@ class RMLReportEngine:
             pass
         return out
 
-    def _general_where_sql(self, table_map=None, conn_map=None) -> str:
+    def _general_where_sql(self, table_map=None, conn_map=None, gw_text=None) -> str:
         """Report-level <general_where> condition resolved to SQL (ANDed into master WHERE).
 
         [field] refs (+ $rule.var$) allowed, resolved with the query's table
-        aliases. Returns '' when absent. Raises a clear Arabic error when invalid.
+        aliases. `gw_text` (plan-split base text, remote conjuncts already
+        extracted) wins over the raw compiler text. Returns '' when absent.
+        Raises a clear Arabic error when invalid.
         """
         try:
-            comp = getattr(self, "compiler", None)
-            raw = ""
-            if comp is not None and hasattr(comp, "general_where"):
-                raw = comp.general_where() or ""
+            if gw_text is None:
+                comp = getattr(self, "compiler", None)
+                raw = ""
+                if comp is not None and hasattr(comp, "general_where"):
+                    raw = comp.general_where() or ""
+            else:
+                raw = gw_text or ""
             raw = str(raw).strip()
             if not raw:
                 return ""
@@ -5635,9 +5939,9 @@ class RMLReportEngine:
         except Exception as e:
             raise ValueError(f"الشرط العام للتقرير غير صالح: {e}")
 
-    def _apply_general_where(self, where_clause: str, table_map=None, conn_map=None) -> str:
+    def _apply_general_where(self, where_clause: str, table_map=None, conn_map=None, gw_text=None) -> str:
         """AND the report-level general condition into a WHERE clause (literals only, no binds)."""
-        gw = self._general_where_sql(table_map, conn_map)
+        gw = self._general_where_sql(table_map, conn_map, gw_text)
         if not gw:
             return where_clause
         if where_clause and where_clause.strip():
@@ -5665,7 +5969,8 @@ class RMLReportEngine:
                                                  fields=getattr(self, "fields", []), table_map=table_map,
                                                  conn_map=self._conn_map(), rules=getattr(self, "rules", []),
                                                  default_tables=self._rx_defaults())
-        where_clause = self._apply_general_where(where_clause, table_map, self._conn_map())
+        where_clause = self._apply_general_where(where_clause, table_map, self._conn_map(),
+                                                  plan.get("gw_base"))
         group_clause = ""
         if group_by:
             group_clause = f" GROUP BY {_resolve_filter_field(group_by, columns, getattr(self, 'fields', []), table_map, self._conn_map(), getattr(self, 'rules', []), default_tables=self._rx_defaults())}"
@@ -6982,6 +7287,10 @@ class RMLReportEngine:
         base_norm = exec_plan.get("base_norm")
         if not base_norm:
             raise ValueError("لم يتم تحديد الجدول الأساسي.")
+        if exec_plan.get("gw_remote"):
+            raise ValueError(
+                "الشرط العام على جدول باتصال آخر غير مدعوم في التنفيذ الموزع — "
+                "نفّذ التقرير بالمسار العادي.")
         primary_db, primary_engine = self._resolve_live_db(exec_plan.get("base_conn"))
         if primary_db is None:
             raise ValueError(
@@ -7190,7 +7499,8 @@ class RMLReportEngine:
             default_tables=self._rx_defaults(),
         )
         where_clause = self._apply_general_where(
-            where_clause, exec_plan.get("table_map") or {}, self._conn_map())
+            where_clause, exec_plan.get("table_map") or {}, self._conn_map(),
+            exec_plan.get("gw_base"))
         if where_clause:
             sql += where_clause
         return sql, where_params, exec_plan
