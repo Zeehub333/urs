@@ -6223,7 +6223,8 @@ class RMLReportEngine:
                 pass
             try:
                 self._report_progress({"stage": "rows", "table": _tname,
-                                       "text": f"جلب وترشيح... {_scanned} (مطابق {_matched})"})
+                                       "text": f"جلب وترشيح... {_scanned} (مطابق {_matched})",
+                                       "rows": _scanned, "matched": _matched})
             except Exception:
                 pass
         try:
@@ -6361,6 +6362,11 @@ class RMLReportEngine:
         _entries = [d for d in (exec_plan.get("gw_deferred") or []) if isinstance(d, dict)]
         if not _entries:
             return sql, params, False, False
+        try:
+            self._report_progress({"stage": "gw_ekeys",
+                                   "text": "قراءة مفاتيح الجدول البعيد المطابقة للشرط..."})
+        except Exception:
+            pass
         try:
             _bdb = exec_plan.get("base_db")
             _bms = bool(_is_mssql_db(_bdb))
