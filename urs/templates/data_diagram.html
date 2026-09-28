@@ -92,6 +92,8 @@
                 <div><label class="block text-[11px] font-semibold text-slate-600">عمود المصدر</label><select id="diagLinkFrom2" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 font-mono" dir="ltr"></select></div>
                 <div><label class="block text-[11px] font-semibold text-slate-600">عمود الهدف</label><select id="diagLinkTo2" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 font-mono" dir="ltr"></select></div>
                 <div class="sm:col-span-2"><label class="block text-[11px] font-semibold text-slate-600">نوع الربط</label><select id="diagLinkRel2" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5"><option value="one_to_one">واحد لواحد — نفس المستوى (باتجاهين)</option><option value="one_to_many">واحد لمتعدد — مستويات مختلفة (رئيسي ← فرعي)</option></select></div>
+                <div><label class="block text-[11px] font-semibold text-slate-600">نوع المطابقة</label><select id="diagLinkMatch2" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5" onchange="document.getElementById('diagLinkPatternWrap2').style.display = (this.value === 'regex' ? '' : 'none')"><option value="exact">مطابقة تامة (=)</option><option value="contains">احتواء (قيمة داخل قيمة)</option><option value="regex">تعبير نمطي (regex)</option></select></div>
+                <div id="diagLinkPatternWrap2"><label class="block text-[11px] font-semibold text-slate-600">النمط (regex)</label><input id="diagLinkPattern2" dir="ltr" placeholder="مثال: (\d+)" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 font-mono"></div>
             </div>
             <div class="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2">
                 <button onclick="document.getElementById('diagLinkModal2').classList.add('hidden')" class="px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs">إلغاء</button>
@@ -188,14 +190,14 @@
                 DG.charts = data.charts || [];
                 DG.rules = data.rules || [];
                 DG.detail = data.detail || null;
-                DG.links = (data.links || []).map(l=>({from_conn: l.from_conn || '', from_table: l.from_table, from_col: l.from_col, to_conn: l.to_conn || '', to_table: l.to_table, to_col: l.to_col, rel_type: (l.rel_type || l.relType || l.rel || 'one_to_one'), inferred: false}));
+                DG.links = (data.links || []).map(l=>({from_conn: l.from_conn || '', from_table: l.from_table, from_col: l.from_col, to_conn: l.to_conn || '', to_table: l.to_table, to_col: l.to_col, rel_type: (l.rel_type || l.relType || l.rel || 'one_to_one'), match: (l.match || 'exact'), pattern: (l.pattern || ''), inferred: false}));
                 // الجوينات المستدلة من التقرير نفسه (غير المحفوظة)
                 try{
                     const rj = await fetch(`/api/rml/joins?rml=${encodeURIComponent(DG.file)}&app=${encodeURIComponent(APP_NAME)}`);
                     const dj = await rj.json();
                     (dj.joins || []).forEach(j=>{
                         const dup = DG.links.some(l=>(l.from_table || '').toUpperCase() === (j.from_table || '').toUpperCase() && (l.to_table || '').toUpperCase() === (j.to_table || '').toUpperCase());
-                        if(!dup) DG.links.push({from_conn: j.from_conn || '', from_table: j.from_table, from_col: j.from_col, to_conn: j.to_conn || '', to_table: j.to_table, to_col: j.to_col, rel_type: (j.rel_type || j.relType || 'one_to_one'), inferred: true});
+                        if(!dup) DG.links.push({from_conn: j.from_conn || '', from_table: j.from_table, from_col: j.from_col, to_conn: j.to_conn || '', to_table: j.to_table, to_col: j.to_col, rel_type: (j.rel_type || j.relType || 'one_to_one'), match: (j.match || 'exact'), pattern: (j.pattern || ''), inferred: true});
                     });
                 }catch(e){}
                 document.getElementById('diagReportName').textContent = DG.meta.displayName || DG.file;
@@ -291,7 +293,7 @@
             document.getElementById('diagLinksCount').textContent = DG.links.length ? `(${DG.links.length})` : '';
             document.getElementById('diagTableList').innerHTML = keys.length ? keys.map(k=>{ const T = DG.tables[k]; return `<div class="flex items-center gap-2 text-xs bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5"><code class="font-mono font-bold truncate" dir="ltr">${T.table}</code>${connBadge(T.conn)}<button onclick="removeDiagTable2('${k.replace(/'/g, "\\'")}')" class="mr-auto text-slate-300 hover:text-rose-600 shrink-0"><i class="fa-solid fa-xmark text-[10px]"></i></button></div>`; }).join('') : '<p class="text-[11px] text-slate-400">لا توجد جداول</p>';
             const _relLbl = (r)=>((r === 'one_to_many') ? '1-م' : '1-1');
-            document.getElementById('diagSideLinks').innerHTML = DG.links.length ? DG.links.map((l, i)=>{ const fk = linkSideKey(l, 'from'), tk = linkSideKey(l, 'to'); const fn = fk ? DG.tables[fk].table : l.from_table; const tn = tk ? DG.tables[tk].table : l.to_table; return `<div class="flex items-center gap-1.5 text-[11px] bg-indigo-50/60 border border-indigo-100 rounded-lg px-2 py-1.5"><i class="fa-solid fa-link text-indigo-500 shrink-0"></i><code class="font-mono truncate" dir="ltr">${fn}.${l.from_col} ← ${tn}.${l.to_col}</code><span class="text-[9px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded-full font-bold shrink-0">${_relLbl(l.rel_type)}</span>${l.inferred ? '<span class="text-[9px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-bold shrink-0">تلقائي</span>' : ''}<button onclick="removeDiagLink2(${i})" class="mr-auto text-slate-300 hover:text-rose-600 shrink-0"><i class="fa-solid fa-xmark text-[10px]"></i></button></div>`; }).join('') : '<p class="text-[11px] text-slate-400">لا توجد روابط</p>';
+            document.getElementById('diagSideLinks').innerHTML = DG.links.length ? DG.links.map((l, i)=>{ const fk = linkSideKey(l, 'from'), tk = linkSideKey(l, 'to'); const fn = fk ? DG.tables[fk].table : l.from_table; const tn = tk ? DG.tables[tk].table : l.to_table; return `<div class="flex items-center gap-1.5 text-[11px] bg-indigo-50/60 border border-indigo-100 rounded-lg px-2 py-1.5"><i class="fa-solid fa-link text-indigo-500 shrink-0"></i><code class="font-mono truncate" dir="ltr">${fn}.${l.from_col} ← ${tn}.${l.to_col}</code><span class="text-[9px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded-full font-bold shrink-0">${_relLbl(l.rel_type)}</span>${(l.match && l.match !== 'exact') ? `<span class="text-[9px] bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded-full font-bold shrink-0" title="${(l.pattern || '').replace(/\"/g, '&quot;')}">${l.match === 'contains' ? 'احتواء' : 'regex'}</span>` : ''}${l.inferred ? '<span class="text-[9px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-bold shrink-0">تلقائي</span>' : ''}<button onclick="removeDiagLink2(${i})" class="mr-auto text-slate-300 hover:text-rose-600 shrink-0"><i class="fa-solid fa-xmark text-[10px]"></i></button></div>`; }).join('') : '<p class="text-[11px] text-slate-400">لا توجد روابط</p>';
             bindDiagramEvents();
             drawDiagramLinks();
         }
@@ -408,6 +410,9 @@
             await fill('diagLinkTo2', toKey, toCol);
             const _ex = DG.links.find(l=>l.from_table === fp.table && l.to_table === tp.table && (l.from_conn || '') === fp.conn && (l.to_conn || '') === tp.conn);
             document.getElementById('diagLinkRel2').value = (_ex && _ex.rel_type) || 'one_to_one';
+            document.getElementById('diagLinkMatch2').value = (_ex && _ex.match) || 'exact';
+            document.getElementById('diagLinkPattern2').value = (_ex && _ex.pattern) || '';
+            document.getElementById('diagLinkPatternWrap2').style.display = (document.getElementById('diagLinkMatch2').value === 'regex' ? '' : 'none');
             // تخمين: أول عمود مشترك
             const fc = ((DG.tables[fromKey] || {}).cols || []).map(c=>c.name);
             const tc = ((DG.tables[toKey] || {}).cols || []);
@@ -421,10 +426,13 @@
             const fc = document.getElementById('diagLinkFrom2').value;
             const tc = document.getElementById('diagLinkTo2').value;
             const rc = document.getElementById('diagLinkRel2').value || 'one_to_one';
+            const mt = document.getElementById('diagLinkMatch2').value || 'exact';
+            const pat = (document.getElementById('diagLinkPattern2').value || '').trim();
             if(!fc || !tc) return;
+            if(mt === 'regex' && !pat){ alert('وضع regex يتطلب نمطاً — مثال: (\\d+)'); return; }
             const fp = dgParseKey(DG.linkDraft.fromKey), tp = dgParseKey(DG.linkDraft.toKey);
             DG.links = DG.links.filter(l=>!(l.from_table === fp.table && l.to_table === tp.table && (l.from_conn || '') === fp.conn && (l.to_conn || '') === tp.conn));
-            DG.links.push({from_conn: fp.conn, from_table: fp.table, from_col: fc, to_conn: tp.conn, to_table: tp.table, to_col: tc, rel_type: rc});
+            DG.links.push({from_conn: fp.conn, from_table: fp.table, from_col: fc, to_conn: tp.conn, to_table: tp.table, to_col: tc, rel_type: rc, match: mt, pattern: pat});
             document.getElementById('diagLinkModal2').classList.add('hidden');
             DG.linkDraft = null;
             renderDiagram();

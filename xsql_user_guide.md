@@ -333,6 +333,44 @@ SELECT
 FROM conn_a.products;
 ```
 
+### 2.7 مطابقة النصوص: regex و wildcard
+
+#### `WILDCARDMATCH(text, 'a*b?')`
+
+مطابقة كاملة بنمط wildcard: `*` أي مقطع، `?` حرف واحد. تُترجم إلى `LIKE` — تعمل على كل القواعد (بما فيها MSSQL)، وتصلح في `WHERE` أيضاً.
+
+```sql
+SELECT
+    notes,
+    WILDCARDMATCH(notes, 'رقم الاكسبرس *') AS has_express_no
+FROM conn_a.tblIncomingTransfers
+WHERE WILDCARDMATCH(notes, 'رقم الاكسبرس *');
+```
+
+#### `REGEXMATCH(text, pattern)`
+
+`True` عندما يوجد النمط داخل النص (`re.search`). على Postgres تُترجم إلى `~` (وتصلح في `WHERE`)؛ على MSSQL تُحسب في Python بعد الجلب (لا تصلح في `WHERE` على MSSQL).
+
+**ملاحظة الشرطة المائلة:** اكتب `\d` مباشرة (المحلّل يحفظ الشرطة)؛ `\\` تعني شرطة حرفية.
+
+```sql
+SELECT
+    notes,
+    REGEXMATCH(notes, '\d{10,}') AS has_long_number
+FROM conn_a.tblIncomingTransfers;
+```
+
+#### `REGEXEXTRACT(text, pattern)`
+
+تستخرج أول مجموعة إمساك `(\d+)` — أو المطابقة الكاملة بلا مجموعات — أو `NULL`. على Postgres تُترجم إلى `substring(text from pattern)`؛ على MSSQL تُحسب في Python.
+
+```sql
+SELECT
+    notes,
+    REGEXEXTRACT(notes, '(\d{10,})') AS express_no
+FROM conn_a.tblIncomingTransfers;
+```
+
 ---
 
 ## 3) استعلامات JOIN متعددة الاتصالات

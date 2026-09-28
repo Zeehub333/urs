@@ -3919,7 +3919,9 @@ def _xsql_resolve_marker(marker_alias: str, primary_row: dict, primary_columns: 
             lit = spec[4:]
             if len(lit) >= 2 and ((lit.startswith("'") and lit.endswith("'"))
                                   or (lit.startswith('"') and lit.endswith('"'))):
-                return lit[1:-1]
+                # Undo repr() doubling so backslash patterns round-trip
+                # (tokenizer value `\d` -> meta `'\\d'` -> value `\d`).
+                return lit[1:-1].replace("\\\\", "\\")
             try:
                 if "." in lit:
                     return float(lit)
@@ -3947,6 +3949,37 @@ def _xsql_resolve_marker(marker_alias: str, primary_row: dict, primary_columns: 
         if not parts:
             return None
         return _resolve_ref(parts[0])
+    if func == "regexmatch":
+        # REGEXMATCH(text, pattern) → True/False via re.search.
+        if len(parts) < 2:
+            return None
+        import re as _re_fx
+        try:
+            t = _resolve_ref(parts[0])
+            p = _resolve_ref(parts[1])
+            if t is None or p is None:
+                return None
+            return bool(_re_fx.search(str(p), str(t)))
+        except Exception:
+            return None
+    if func == "regexextract":
+        # REGEXEXTRACT(text, pattern) → group(1) or full match, else None.
+        if len(parts) < 2:
+            return None
+        try:
+            from rml_python.xsql import regex_extract as _rxx
+            return _rxx(_resolve_ref(parts[0]), _resolve_ref(parts[1]))
+        except Exception:
+            return None
+    if func == "wildcardmatch":
+        # WILDCARDMATCH(text, 'a*b?') → full-string wildcard match.
+        if len(parts) < 2:
+            return None
+        try:
+            from rml_python.xsql import wildcard_match as _wcm
+            return bool(_wcm(_resolve_ref(parts[0]), _resolve_ref(parts[1])))
+        except Exception:
+            return None
     if func in ("xlookup", "vlookup"):
         # XLOOKUP(value, lookup_range, return_range, [not_found])
         if len(parts) < 3:
@@ -4630,7 +4663,7 @@ def _write_table_opts_el(rml, ET, table_opts):
 
 
 def _write_links_el(rml, ET, links):
-    """Write <links><link from_table from_col to_table to_col rel_type/> (data diagram)."""
+    """Write <links><link from_table from_col to_table to_col rel_type match pattern/> (data diagram)."""
     if not links:
         return
     links_el = ET.SubElement(rml, "links")
@@ -4653,6 +4686,12 @@ def _write_links_el(rml, ET, links):
         if rel in ("one_to_one", "one_one", "one_to_many", "one_many"):
             rel = "one_to_one" if rel in ("one_to_one", "one_one") else "one_to_many"
             el.set("rel_type", rel)
+        mt = str(l.get("match") or l.get("match_type") or l.get("matchType") or "").strip().lower()
+        if mt and mt != "exact":
+            el.set("match", mt)
+        pat = str(l.get("pattern") or l.get("regex") or "").strip()
+        if pat:
+            el.set("pattern", pat)
 
 
 def _write_groups_el(rml, ET, groups):

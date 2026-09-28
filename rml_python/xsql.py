@@ -32,7 +32,92 @@ _FUNCTIONS = {
     "SUM", "MIN", "MAX", "AVG", "COUNT", "SUMIF", "SUMIFS",
     "COUNTBLANK", "COUNTIF", "COUNTA", "IF", "FILTER",
     "XLOOKUP", "VLOOKUP", "SUMBY", "COUNTBY", "SERIAL",
+    "REGEXMATCH", "WILDCARDMATCH", "REGEXEXTRACT",
 }
+
+
+def wildcard_to_like(wc: str) -> str:
+    """Translate `*`/`?` wildcard to a LIKE pattern (ESCAPE '\\').
+
+    Used for SQL emission; the Python twin is wildcard_to_regex below.
+    """
+    out = []
+    for ch in str(wc or ""):
+        if ch == "*":
+            out.append("%")
+        elif ch == "?":
+            out.append("_")
+        elif ch in ("\\", "%", "_", "["):
+            out.append("\\" + ch)
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+def wildcard_to_regex(wc: str) -> str:
+    """Translate `*`/`?` wildcard to a regex (for Python evaluation)."""
+    out = []
+    for ch in str(wc or ""):
+        if ch == "*":
+            out.append(".*")
+        elif ch == "?":
+            out.append(".")
+        else:
+            out.append(re.escape(ch))
+    return "".join(out)
+
+
+def wildcard_match(value: Any, wc: str) -> bool:
+    """Full-string wildcard match (`*` any run, `?` one char)."""
+    if value is None:
+        return False
+    try:
+        return re.fullmatch(wildcard_to_regex(wc), str(value)) is not None
+    except Exception:
+        return False
+
+
+def regex_extract(value: Any, pattern: str) -> Optional[str]:
+    """First capture group (or full match) of pattern in value, else None."""
+    if value is None or pattern is None:
+        return None
+    try:
+        m = re.search(str(pattern), str(value))
+    except Exception:
+        return None
+    if not m:
+        return None
+    try:
+        if m.lastindex:
+            return m.group(1)
+        return m.group(0)
+    except Exception:
+        return None
+
+
+def fuzzy_link_match(match: str, pattern: str, base_val: Any, sec_val: Any) -> bool:
+    """Python-side link predicate between two column values.
+
+    - exact: normalized equality (mirrors _norm_key_value semantics loosely).
+    - contains: symmetric substring (either side inside the other).
+    - regex: extract `pattern` from both sides and compare extracts.
+    NULL/empty never matches.
+    """
+    m = str(match or "exact").strip().lower()
+    if base_val is None or sec_val is None:
+        return False
+    bs, ss = str(base_val), str(sec_val)
+    if m == "contains":
+        if not bs or not ss:
+            return False
+        return ss in bs or bs in ss
+    if m == "regex":
+        pat = str(pattern or "")
+        if not pat:
+            return False
+        eb, es = regex_extract(bs, pat), regex_extract(ss, pat)
+        return eb is not None and eb == es
+    return bs == ss
 
 # Registry for name-based marker metadata. Postgres truncates identifiers
 # at 63 bytes, so long "__py_<func>_<alias>__<args>" markers would lose
@@ -85,7 +170,9 @@ def _tokenize(text: str) -> List[Token]:
             j = i + 1
             buf: List[str] = []
             while j < n and text[j] != quote:
-                if text[j] == "\\" and j + 1 < n:
+                if text[j] == "\\" and j + 1 < n and text[j + 1] in ("\\", quote):
+                    # Only `\\` and escaped-quote collapse; other `\x`
+                    # sequences (regex `\d`, `\s`...) keep the backslash.
                     buf.append(text[j + 1]); j += 2
                 else:
                     buf.append(text[j]); j += 1
@@ -612,7 +699,8 @@ class XSQLCompiler:
     `needs_python_eval=True` so the engine can hydrate and join in Python.
     """
 
-    PYTHON_FUNCTIONS = {"XLOOKUP", "VLOOKUP", "FILTER", "IF", "GET"}
+    PYTHON_FUNCTIONS = {"XLOOKUP", "VLOOKUP", "FILTER", "IF", "GET",
+                          "REGEXMATCH", "REGEXEXTRACT"}
 
     def __init__(self, parsed: ParsedQuery, conn_map: Dict[str, Dict[str, Any]]):
         self.p = parsed
@@ -778,6 +866,11 @@ class XSQLCompiler:
             # not by hitting the database. They still need Python eval so
             # the result rows get patched after fetch.
             if expr.name in self.PYTHON_FUNCTIONS:
+                # REGEXMATCH/REGEXEXTRACT compile to native SQL on pg —
+                # Python eval is only needed on MSSQL (no regex engine).
+                if expr.name in ("REGEXMATCH", "REGEXEXTRACT") and getattr(
+                        self, "_cur_dialect", "pg") != "mssql":
+                    return any(self._expr_needs_python(a) for a in expr.args)
                 return True
             return any(self._expr_needs_python(a) for a in expr.args)
         if isinstance(expr, BinOp):
@@ -832,6 +925,9 @@ class XSQLCompiler:
         - COUNTBLANK(range) → SUM(CASE WHEN range IS NULL OR range = '' THEN 1 ELSE 0 END)
         - COUNTA(range) → COUNT(range)  (Postgres) / approximate for SQL Server
         - IF(cond, a, b) → CASE WHEN cond THEN a ELSE b END
+        - WILDCARDMATCH(text, 'a*b?') → (text LIKE 'a%b_' ESCAPE '\\') — all dialects
+        - REGEXMATCH(text, pat) → (text ~ pat) on pg; Python marker on mssql
+        - REGEXEXTRACT(text, pat) → substring(text from pat) on pg; Python marker on mssql
         - GET(conn.tbl.col) → NULL AS marker; resolved by Python from fields map
         - FILTER(conn.tbl.col, cond) → NULL AS marker; resolved by Python from fields map
         - XLOOKUP / VLOOKUP → NULL AS marker; resolved by Python from fields map
@@ -906,12 +1002,34 @@ class XSQLCompiler:
             a_sql = self._emit_select_expr(a, None)[0]
             b_sql = self._emit_select_expr(b, None)[0]
             return f"CASE WHEN {cond_sql} THEN {a_sql} ELSE {b_sql} END", col
+        if name == "WILDCARDMATCH":
+            # WILDCARDMATCH(text, 'lito*?') — `*` any run, `?` one char.
+            # LIKE works on every dialect (pg/oracle/mssql).
+            if len(fn.args) != 2:
+                raise ValueError("WILDCARDMATCH needs exactly 2 args: WILDCARDMATCH(text, 'a*b?')")
+            t_sql = self._emit_select_expr(fn.args[0], None)[0]
+            pat = fn.args[1]
+            if not isinstance(pat, Literal) or not isinstance(pat.value, str):
+                raise ValueError("WILDCARDMATCH pattern must be a literal '...'")
+            like = wildcard_to_like(pat.value).replace("'", "''")
+            return f"({t_sql} LIKE '{like}' ESCAPE '\\')", col
+        if name in ("REGEXMATCH", "REGEXEXTRACT"):
+            if len(fn.args) != 2:
+                raise ValueError(f"{name} needs exactly 2 args: {name}(text, pattern)")
+            if getattr(self, "_cur_dialect", "pg") != "mssql":
+                t_sql = self._emit_select_expr(fn.args[0], None)[0]
+                p_sql = self._emit_select_expr(fn.args[1], None)[0]
+                if name == "REGEXMATCH":
+                    return f"({t_sql} ~ {p_sql})", col
+                return f"(substring({t_sql} from {p_sql}))", col
+            # MSSQL has no regex engine → fall through to the NULL-marker
+            # branch below; the Python executor resolves via re.
         # Name-based resolvers — get(conn.tbl.col) / filter(conn.tbl.col, cond)
         # / xlookup(value, conn.tbl.col, conn.tbl.col2). Each emits a NULL marker
         # column with the args embedded in the alias; the Python executor
         # looks up the value from the report's fields map (no DB round-trip
         # for the lookup itself).
-        if name in ("FILTER", "XLOOKUP", "VLOOKUP", "GET"):
+        if name in self.PYTHON_FUNCTIONS:
             arg_parts = []
             for a in fn.args:
                 if isinstance(a, ColumnRef):
@@ -953,6 +1071,13 @@ class XSQLCompiler:
             # bare column → treat as truthy / IS NOT NULL
             col = self._column_name(expr)
             return f"{self._q(col)} IS NOT NULL"
+        if isinstance(expr, FuncCall) and expr.name in ("WILDCARDMATCH", "REGEXMATCH"):
+            # Bare predicate in WHERE: push the SQL form when the dialect
+            # supports it (LIKE everywhere; regex on pg only).
+            if expr.name == "REGEXMATCH" and getattr(self, "_cur_dialect", "pg") == "mssql":
+                raise ValueError("REGEXMATCH في WHERE غير مدعوم على MSSQL — اعرضه عموداً محسوباً بدلاً من ذلك")
+            frag, _ = self._emit_select_expr(expr, None)
+            return frag
         return ""
 
 

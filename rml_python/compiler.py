@@ -755,12 +755,26 @@ class RMLReportCompiler:
             })
         return result
 
+    @staticmethod
+    def _norm_match(v: str) -> str:
+        """Normalize link match mode -> exact | contains | regex."""
+        s = str(v or "").strip().lower().replace("-", "_").replace(" ", "_")
+        if s in ("exact", "equals", "=", "eq", "مطابقة", "تام"):
+            return "exact"
+        if s in ("contains", "contain", "like", "in", "يحتوي", "ضمن", "احتواء"):
+            return "contains"
+        if s in ("regex", "regexp", "pattern", "wildcard", "تعبير", "نمط"):
+            return "regex"
+        return "exact" if not s else s
+
     def links(self) -> List[Dict[str, str]]:
-        """Extract <links><link from_table from_col to_table to_col rel_type> (data diagram).
+        """Extract <links><link from_table from_col to_table to_col rel_type match pattern>.
 
         rel_type: one_to_one | one_to_many. Explicit value wins; otherwise auto:
         - same level (both tables only in main columns, or neither is the detail table) -> one_to_one bidirectional
         - different levels (one side is the <detail> table) -> one_to_many
+        match: exact (default, col = col) | contains (symmetric substring) |
+               regex (extract `pattern` from both sides, compare extracts).
         """
         result: List[Dict[str, str]] = []
         if self._root is None:
@@ -789,13 +803,16 @@ class RMLReportCompiler:
             tconn = get("to_conn", "toConn", "to_connection", "toConnection")
             rel_raw = get("rel_type", "relType", "rel", "cardinality", "join_type", "joinType")
             rel = self._norm_rel(rel_raw, default="")
+            match = self._norm_match(get("match", "match_type", "matchType", "match_mode", "matchMode"))
+            pattern = get("pattern", "regex", "regexp", "regex_pattern", "regexPattern", "wildcard")
             if ft and tt:
                 if not rel and dt_norm:
                     fn, tn = _norm(ft), _norm(tt)
                     rel = "one_to_many" if (fn == dt_norm or tn == dt_norm) else "one_to_one"
                 result.append({"from_table": ft, "from_col": fc, "to_table": tt, "to_col": tc,
                                "from_conn": fconn, "to_conn": tconn,
-                               "rel_type": rel or "one_to_one", "relType": rel or "one_to_one"})
+                               "rel_type": rel or "one_to_one", "relType": rel or "one_to_one",
+                               "match": match, "pattern": pattern})
         return result
 
     def columns(self) -> List[RMLColumn]:

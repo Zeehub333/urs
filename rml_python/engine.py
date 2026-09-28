@@ -2112,6 +2112,97 @@ class RMLReportEngine:
                 return l
         return None
 
+    def _link_match_spec(self, base_norm: str, sec_norm: str) -> Dict[str, str]:
+        """{match, pattern} of the link between two tables.
+
+        Modes are symmetric (no orientation): exact (col = col),
+        contains (either value inside the other), regex (extract `pattern`
+        from both sides, compare extracts). Unknown modes raise loudly.
+        """
+        try:
+            link = self._find_link(base_norm, sec_norm)
+        except Exception:
+            link = None
+        match = str((link or {}).get("match") or "exact").strip().lower()
+        if match not in ("exact", "contains", "regex"):
+            raise ValueError(
+                f'نوع مطابقة غير معروف "{match}" في الربط بين "{base_norm}" و"{sec_norm}" — '
+                f'المسموح: exact | contains | regex.')
+        pattern = str((link or {}).get("pattern") or "")
+        if match == "regex":
+            if not pattern:
+                raise ValueError(
+                    f'الربط regex بين "{base_norm}" و"{sec_norm}" يتطلب pattern — '
+                    f'مثال: pattern="(\\d+)".')
+            try:
+                re.compile(pattern)
+            except Exception as e:
+                raise ValueError(
+                    f'نمط regex غير صالح في الربط بين "{base_norm}" و"{sec_norm}": {e}')
+        return {"match": match, "pattern": pattern}
+
+    @staticmethod
+    def _link_needs_python(match: str, base_db) -> bool:
+        """True when a link match mode cannot run in SQL on the base dialect.
+
+        Only regex on MSSQL (no regex engine) forces the Python merge path;
+        pg uses substring-from, oracle REGEXP_SUBSTR, contains works everywhere.
+        """
+        try:
+            if str(match or "exact").strip().lower() == "regex":
+                try:
+                    return bool(_is_mssql_db(base_db))
+                except Exception:
+                    return False
+        except Exception:
+            pass
+        return False
+
+    @staticmethod
+    def _link_join_on(match: str, pattern: str, lon: str, ron: str, base_db) -> Optional[str]:
+        """ON-clause predicate for a link match mode. None → legacy/Python path.
+
+        lon/ron: quoted "alias"."col" fragments (sec left, base right).
+        Patterns interpolate as ''-escaped literals (no bind plumbing in plans).
+        """
+        m = str(match or "exact").strip().lower()
+        if m == "exact":
+            return None  # legacy equality path (incl. CAST-mismatch logic)
+        try:
+            pg = _is_pg_db(base_db)
+        except Exception:
+            pg = False
+        try:
+            ms = _is_mssql_db(base_db)
+        except Exception:
+            ms = False
+        if m == "contains":
+            if pg:
+                l, r = f"({lon})::TEXT", f"({ron})::TEXT"
+                return (f"(POSITION({r} IN {l}) > 0 OR POSITION({l} IN {r}) > 0)"
+                        f" AND LENGTH({l}) > 0 AND LENGTH({r}) > 0")
+            if ms:
+                l, r = f"CAST({lon} AS NVARCHAR(4000))", f"CAST({ron} AS NVARCHAR(4000))"
+                return (f"(CHARINDEX({r}, {l}) > 0 OR CHARINDEX({l}, {r}) > 0)"
+                        f" AND LEN({l}) > 0 AND LEN({r}) > 0")
+            l, r = f"TO_CHAR({lon})", f"TO_CHAR({ron})"
+            return (f"(INSTR({l}, {r}) > 0 OR INSTR({r}, {l}) > 0)"
+                    f" AND LENGTH({l}) > 0 AND LENGTH({r}) > 0")
+        if m == "regex":
+            pat = str(pattern or "").replace("'", "''")
+            if not pat:
+                return None
+            if pg:
+                return (f"(substring(({lon})::TEXT from '{pat}') = "
+                        f"substring(({ron})::TEXT from '{pat}') AND "
+                        f"substring(({lon})::TEXT from '{pat}') IS NOT NULL)")
+            if ms:
+                return None  # no regex engine → Python merge
+            return (f"(REGEXP_SUBSTR(TO_CHAR({lon}), '{pat}', 1, 1, NULL, 1) = "
+                    f"REGEXP_SUBSTR(TO_CHAR({ron}), '{pat}', 1, 1, NULL, 1) AND "
+                    f"REGEXP_SUBSTR(TO_CHAR({lon}), '{pat}', 1, 1, NULL, 1) IS NOT NULL)")
+        return None
+
     def _analyze_lookup(self, col, scope_norm: str):
         """Decide lookup handling for a column — no stored props needed.
 
@@ -2155,6 +2246,9 @@ class RMLReportEngine:
             def _orient(tn):
                 link = self._find_link(scope_norm, tn)
                 if not link:
+                    return None
+                # Fuzzy links cannot drive exact lookup proxies.
+                if str(link.get("match") or "exact").strip().lower() != "exact":
                     return None
                 fa = self._norm_table(link.get("from_table"))
                 if fa == scope_norm:
@@ -4820,12 +4914,14 @@ class RMLReportEngine:
         for s in sec_all:
             sconn = self._conn_key_of_table(s)
             sdb = self._db_for_conn(sconn)
-            if self._same_db(sdb, base_db):
+            _mspec = self._link_match_spec(base_norm, s)
+            _sec_schema = self._schema_for_table(s, sconn, report_schema)
+            if self._same_db(sdb, base_db) and not self._link_needs_python(_mspec["match"], base_db):
                 local_sec.append(s)
             else:
-                sec_schema = self._schema_for_table(s, sconn, report_schema)
-                remote_sec[s] = {"conn": sconn, "db": sdb, "schema": sec_schema, "table": s,
-                                 "key": self._infer_join_key(base_norm, s, base_schema_norm, base_db, sec_schema, sdb)}
+                remote_sec[s] = {"conn": sconn, "db": sdb, "schema": _sec_schema, "table": s,
+                                 "key": self._infer_join_key(base_norm, s, base_schema_norm, base_db, _sec_schema, sdb),
+                                 "match": _mspec["match"], "pattern": _mspec["pattern"]}
                 if not remote_sec[s]["key"]:
                     raise ValueError(
                         f'تعذر الاستدلال على مفتاح الربط بين "{from_table}" و"{s}" عبر الاتصالات. '
@@ -4991,6 +5087,20 @@ class RMLReportEngine:
                 _bcat, _scat = self._join_col_cats(base_norm, bcol, s, scol)
             except Exception:
                 _bcat = _scat = ""
+            _mspec = self._link_match_spec(base_norm, s)
+            if _mspec["match"] != "exact":
+                # Fuzzy link: predicate per match mode (never plain equality).
+                if _bcat == "DATE" or _scat == "DATE":
+                    raise ValueError(
+                        'الربط ' + _mspec["match"] + f' بين "{base_norm}" و"{s}" '
+                        'لا يعمل على أعمدة التاريخ — استخدم ربطاً تاماً.')
+                _pred = self._link_join_on(_mspec["match"], _mspec["pattern"], _lon, _ron, base_db)
+                if not _pred:
+                    raise ValueError(
+                        'الربط ' + _mspec["match"] + f' بين "{base_norm}" و"{s}" '
+                        'غير قابل للتنفيذ SQL على هذه القاعدة.')
+                joins.append(f"LEFT JOIN {sec_q} {_q(aliases[s])} ON {_pred}")
+                continue
             if _bcat and _scat and _bcat != _scat and _bcat != "DATE" and _scat != "DATE":
                 # text = integer & friends: compare as text instead of failing
                 if _is_pg_db(base_db):
@@ -5048,9 +5158,11 @@ class RMLReportEngine:
                 fkey = next(iter(fields_hit))
                 fobj = next((f for f in (fields or []) if str(getattr(f, "name", "")).lower() == fkey), None)
                 fname = str(getattr(fobj, "name", fkey)) if fobj is not None else fkey
+                _mspec = self._link_match_spec(base_norm, sec)
                 return {"kind": "direct", "alias": alias, "table": sec, "conn": info["conn"],
                         "db": info["db"], "schema": info["schema"], "disp": disp.get(sec, sec),
-                        "field": fname, "base_key": info["key"][0]}
+                        "field": fname, "base_key": info["key"][0],
+                        "match": _mspec["match"], "pattern": _mspec["pattern"]}
         # Grouped aggregate over remote (windowed w/ base anchor, or plain agg + group anchor)
         for m in list(re.finditer(r"\b(SUM|COUNT|AVG|MIN|MAX)\s*\(", core, re.IGNORECASE)):
             parsed = self._split_agg_call(core, m.start())
@@ -5113,10 +5225,12 @@ class RMLReportEngine:
                 ds = info["key"][1]
             else:
                 return None
+        _mspec = self._link_match_spec(base_norm, sec)
         return {"kind": "agg", "alias": alias, "table": sec, "conn": info["conn"], "db": info["db"],
                 "schema": info["schema"], "disp": disp.get(sec, sec), "func": func, "inner": inner,
                 "anchor_base": abase_name, "anchor_sec": ds, "base_key": info["key"][0],
-                "key_anchor": ds is None}
+                "key_anchor": ds is None,
+                "match": _mspec["match"], "pattern": _mspec["pattern"]}
     def _prepare_from_and_columns(self, active_table, filters, sort, group_by):
         """Compat wrapper: (from_q, columns, table_map) from the routing plan."""
         plan = self._plan_structure(active_table, filters, sort, group_by)
@@ -5243,6 +5357,11 @@ class RMLReportEngine:
                 continue
             sec, members_r = next(iter(per_sec.items()))
             info = remote[sec]
+            _fms = self._link_match_spec(base_norm, sec)
+            if _fms["match"] != "exact":
+                raise ValueError(
+                    'الفلترة على الجدول "' + sec + '" المربوط ' + _fms["match"] +
+                    ' غير مدعومة — اعرض العمود ثم رشّح، أو استخدم ربطاً تاماً.')
             # map members to underlying remote fields (original case)
             mapped = []
             for m in members_r:
@@ -5290,6 +5409,59 @@ class RMLReportEngine:
         _t = info.get("disp") or self._orig_col(info["table"], info["table"], info.get("db"), info.get("schema"))
         return f"{sch_q + '.' if sch_q else ''}{_q(_t)}"
 
+    def _fuzzy_inner_field(self, spec, sec_norm: str) -> str:
+        """Plain remote field behind a fuzzy-agg inner (else loud error)."""
+        inner = str(spec.get("inner") or "").strip()
+        if inner == "*":
+            return "*"
+        cand = inner.strip()
+        for _w in ("[]", "{}", '""'):
+            if len(cand) >= 2 and cand[0] == _w[0] and cand[-1] == _w[1]:
+                cand = cand[1:-1].strip()
+                break
+        for f in (getattr(self, "fields", []) or []):
+            if self._norm_table(getattr(f, "table_source", "") or "") == sec_norm \
+                    and str(getattr(f, "name", "") or "").lower() == cand.lower():
+                return str(getattr(f, "name"))
+        raise ValueError(
+            f'التجميع "{spec.get("func")}" مع ربط {spec.get("match")} يتطلب حقلاً بعيداً صريحاً — '
+            f'بسّط التعبير الداخلي ("{inner}").')
+
+    @staticmethod
+    def _fuzzy_num(v):
+        """Numeric coercion for fuzzy aggregates (non-numeric ignored)."""
+        if v is None or isinstance(v, bool):
+            return None
+        try:
+            if isinstance(v, (int, float)):
+                return v
+            s = str(v).strip().replace(",", "").replace(" ", "")
+            if not s:
+                return None
+            return float(s) if ("." in s or "e" in s.lower()) else int(s)
+        except Exception:
+            return None
+
+    def _fuzzy_agg_value(self, spec, sec_norm: str, mates) -> Any:
+        """Aggregate over fuzzy-matched secondary rows (mirrors SQL defaults)."""
+        func = str(spec.get("func") or "").upper()
+        inner = self._fuzzy_inner_field(spec, sec_norm)
+        if func == "COUNT":
+            if inner == "*":
+                return len(mates)
+            return sum(1 for m in mates if m.get(inner) is not None)
+        vals = [self._fuzzy_num(m.get(inner)) for m in mates]
+        vals = [v for v in vals if v is not None]
+        if func == "SUM":
+            return sum(vals) if vals else 0
+        if func == "AVG":
+            return (sum(vals) / len(vals)) if vals else 0
+        if func == "MIN":
+            return min(vals) if vals else None
+        if func == "MAX":
+            return max(vals) if vals else None
+        return None
+
     def _apply_merges(self, rows, plan):
         """Fill remote-merge columns (post-fetch, pre-format). Strips helper keys."""
         merges = plan.get("merges") or []
@@ -5312,6 +5484,57 @@ class RMLReportEngine:
 
             def _Q(name):
                 return _q(self._orig_col(sec, name, rdb, info.get("schema")))
+
+            _fmode = str((specs[0].get("match") if specs else None) or "exact").strip().lower()
+            if _fmode != "exact":
+                # Fuzzy link (contains/regex): full secondary scan + Python
+                # predicate per base row. First match wins for direct lookups;
+                # aggregates run over the matched subset in Python.
+                from .xsql import fuzzy_link_match as _flm
+                _fpat = str(specs[0].get("pattern") or "")
+                _need = {scol}
+                for s in specs:
+                    if s.get("kind") == "direct":
+                        _need.add(s["field"])
+                    else:
+                        _need.add(s["anchor_sec"])
+                        _need.add(self._fuzzy_inner_field(s, sec))
+                _need = sorted(_need)
+                _fcols = ", ".join([_Q(c) for c in _need])
+                _fcur = self._exec_on(rdb, f"SELECT {_fcols} FROM {self._remote_from(info)}", {})
+                try:
+                    _frows = [dict(zip(_need, rec)) for rec in _fcur.fetchall()]
+                finally:
+                    try:
+                        _fcur.close()
+                    except Exception:
+                        pass
+                for r in rows:
+                    for s in specs:
+                        if s.get("kind") == "direct":
+                            _bv = self._norm_key_value(r.get(s.get("key_alias")))
+                            _hit = None
+                            if _bv is not None:
+                                for _sr in _frows:
+                                    try:
+                                        if _flm(_fmode, _fpat, _bv, self._norm_key_value(_sr.get(scol))):
+                                            _hit = _sr
+                                            break
+                                    except Exception:
+                                        continue
+                            r[s["alias"]] = (_hit.get(s["field"]) if _hit is not None else None)
+                        else:
+                            _av = self._norm_key_value(r.get(s.get("anchor_alias")))
+                            _mates = []
+                            if _av is not None:
+                                for _sr in _frows:
+                                    try:
+                                        if _flm(_fmode, _fpat, _av, self._norm_key_value(_sr.get(s["anchor_sec"]))):
+                                            _mates.append(_sr)
+                                    except Exception:
+                                        continue
+                            r[s["alias"]] = self._fuzzy_agg_value(s, sec, _mates)
+                continue
 
             key_alias = next((s.get("key_alias") for s in specs if s.get("key_alias")), None)
             direct_fields = sorted({s["field"] for s in specs if s["kind"] == "direct"})
@@ -6853,6 +7076,7 @@ class RMLReportEngine:
                                 "to_table": l.get("to_table", ""), "to_col": l.get("to_col", ""),
                                 "from_conn": l.get("from_conn", "") or "", "to_conn": l.get("to_conn", "") or "",
                                 "rel_type": _lr or "one_to_one", "relType": _lr or "one_to_one",
+                                "match": l.get("match") or "exact", "pattern": l.get("pattern") or "",
                                 "inferred": False})
             except Exception:
                 pass
@@ -7221,12 +7445,42 @@ class RMLReportEngine:
                     continue
                 if not info:
                     continue
+                try:
+                    _dms = self._link_match_spec(base_norm, sec_norm)
+                except Exception:
+                    _dms = {"match": "exact", "pattern": ""}
                 out.append({
                     "norm": sec_norm,
                     "gid": str(info.get("gid") or info.get("conn_key") or ""),
                     "key": info.get("key"),
                     "info": info,
+                    "match": _dms["match"],
+                    "pattern": _dms["pattern"],
                 })
+        except Exception:
+            pass
+        # Same-DB fuzzy secondaries (no SQL JOIN under the distributed
+        # runner) → fetch live + Python match.
+        try:
+            for _ls in (exec_plan.get("local_sec") or []):
+                if _ls == base_norm or any(s.get("norm") == _ls for s in out):
+                    continue
+                try:
+                    _lms = self._link_match_spec(base_norm, _ls)
+                except Exception:
+                    continue
+                if _lms["match"] == "exact":
+                    continue
+                try:
+                    _lkey = self._infer_join_key(base_norm, _ls, None, None, None)
+                except Exception:
+                    _lkey = None
+                if not _lkey:
+                    continue
+                out.append({"norm": _ls,
+                            "gid": str(exec_plan.get("base_conn") or ""),
+                            "key": _lkey, "info": {},
+                            "match": _lms["match"], "pattern": _lms["pattern"]})
         except Exception:
             pass
         # Also look at merge specs (cross-DB secondaries from Python merges).
@@ -7340,6 +7594,33 @@ class RMLReportEngine:
         bcol, scol = (key[0], key[1]) if isinstance(key, (list, tuple)) else ("", "")
         if not bcol or not scol:
             return {}
+        try:
+            _im = str(spec.get("match") or "exact").strip().lower()
+        except Exception:
+            _im = "exact"
+        if _im != "exact":
+            # Fuzzy link: full secondary scan; _merge_lazy applies the
+            # Python predicate per primary row (first hit wins).
+            sec_norm = spec["norm"]
+            sec_db, sec_engine = self._resolve_live_db(spec.get("gid"))
+            if sec_db is None:
+                return {}
+            try:
+                sec_db.connect()
+            except Exception:
+                pass
+            _fcur = self._exec_on(sec_db, f"SELECT * FROM {_q(sec_norm)}", {})
+            try:
+                _names = [d[0] for d in (_fcur.description or [])] if _fcur.description else []
+                _srows = [dict(zip(_names, r)) for r in _fcur.fetchall()]
+            finally:
+                try:
+                    _fcur.close()
+                except Exception:
+                    pass
+            return {"__fuzzy__": True, "rows": _srows, "match": _im,
+                    "pattern": str(spec.get("pattern") or ""),
+                    "bcol": bcol, "scol": scol}
         # Collect distinct base key values from primary_rows.
         keys = []
         seen = set()
@@ -7395,6 +7676,27 @@ class RMLReportEngine:
                     continue
                 bcol = key[0] if isinstance(key, (list, tuple)) else ""
                 if not bcol:
+                    continue
+                if isinstance(idx, dict) and idx.get("__fuzzy__"):
+                    try:
+                        from .xsql import fuzzy_link_match as _flm
+                        _bv = r.get(idx.get("bcol") or bcol)
+                        _hit = None
+                        if _bv is not None:
+                            for _sr in (idx.get("rows") or []):
+                                try:
+                                    if _flm(idx.get("match"), idx.get("pattern"),
+                                            _bv, _sr.get(idx.get("scol"))):
+                                        _hit = _sr
+                                        break
+                                except Exception:
+                                    continue
+                        if _hit:
+                            prefix = f"{spec['norm']}."
+                            for kn, kv in _hit.items():
+                                r[prefix + kn] = kv
+                    except Exception:
+                        pass
                     continue
                 v = r.get(bcol)
                 if v is None:
@@ -7490,6 +7792,12 @@ class RMLReportEngine:
                             key = self._infer_join_key(base_norm, tbl, base_schema, base_db, ssch)
                             if not key:
                                 continue
+                            try:
+                                _sm = self._link_match_spec(base_norm, tbl)
+                            except Exception:
+                                _sm = {"match": "exact"}
+                            if _sm["match"] != "exact":
+                                continue  # best effort: no fuzzy semi-joins in summaries
                             bcol, scol = key
                             bwc, bwp = _build_where(base_only_filters, columns=cols_for_summary, fields=fields, table_map=None, conn_map=self._conn_map(), rules=getattr(self, "rules", []), default_tables=self._rx_defaults())
                             # qualify base refs inside EXISTS subquery to base table
@@ -7503,6 +7811,12 @@ class RMLReportEngine:
                             key = self._infer_join_key(base_norm, tbl, base_schema, base_db, ssch, sdb)
                             if not key:
                                 continue
+                            try:
+                                _sm2 = self._link_match_spec(base_norm, tbl)
+                            except Exception:
+                                _sm2 = {"match": "exact"}
+                            if _sm2["match"] != "exact":
+                                continue  # best effort: no fuzzy two-phase in summaries
                             bcol, scol = key
                             _bd2 = plan.get("base_disp") or base_norm
                             bfrom = f"{base_schema_q + '.' if base_schema_q else ''}{_q(_bd2)}"

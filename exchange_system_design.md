@@ -254,6 +254,15 @@
 </rml>
 ```
 
+> **أنواع المطابقة في `<link>`** (`match` + `pattern`):
+> - `match="exact"` (الافتراضي): `from_col = to_col`.
+> - `match="contains"`: إحدى القيمتين داخل الأخرى — مثالي عندما يحمل عمود الملاحظات نصاً مثل «رقم الاكسبرس 202645226783» والعمود الآخر الرقم منفرداً:
+>   ```xml
+>   <link from_table="tblIncomingTransfers" from_col="notes" to_table="confirmed_transfers" to_col="express_number" match="contains"/>
+>   ```
+> - `match="regex" pattern="(\d+)"`: استخراج النمط من الطرفين ومقارنة المستخرج — أدق من الاحتواء عندما يتضمن النص أرقاماً أخرى.
+> - يعمل في JOIN واحد (PG/Oracle) ودمج Python عبر الاتصالات؛ `regex` على MSSQL يُحوَّل تلقائياً لمسار Python. الفلترة المباشرة على جدول مربوط ضبابياً غير مدعومة (اعرض العمود ثم رشّح).
+
 > `direct="0"` يجبر الترحيل. البديل الأسرع للجداول الضخمة:
 > `payload.distributed=true` (جلب مستقل من كل اتصال + دمج Python + شريط تقدم).
 
