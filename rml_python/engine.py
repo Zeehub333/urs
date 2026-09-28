@@ -5704,6 +5704,160 @@ class RMLReportEngine:
             return max(vals) if vals else None
         return None
 
+    def _fuzzy_pushdown_fetch(self, specs, sec, scol, rows, rdb, info, qfn, need, rx, mode):
+        """Server-side fuzzy pre-filter; returns full rows or None (fallback).
+
+        Instead of hauling every secondary row for Python matching (fatal on
+        million-row tables), push the predicate to the secondary DB so only
+        candidate rows travel:
+        - regex on pg: WHERE substring(scol FROM 'pat') IN (base extracts);
+          oracle: REGEXP_SUBSTR equivalent. MSSQL has no regex engine and
+          POSIX lookahead ((?=/(?!) is rejected by pg too -> None (haul).
+        - contains on pg/mssql/oracle: WHERE POSITION/CHARINDEX/INSTR(col
+          IN literal) over base-side values (chunked).
+        Base-side values come from the page rows only, so the candidate set
+        stays tiny. Returns None when pushdown cannot apply.
+        """
+        try:
+            pg = bool(_is_pg_db(rdb))
+        except Exception:
+            pg = False
+        try:
+            ms = bool(_is_mssql_db(rdb))
+        except Exception:
+            ms = False
+        if not pg and not ms:
+            try:
+                _tn = type(rdb).__name__.lower()
+                if "pgshim" in _tn or _tn.startswith("pg"):
+                    pg = True
+            except Exception:
+                pass
+        mode = str(mode or "exact").strip().lower()
+        if mode not in ("regex", "contains"):
+            return None
+        # base-side distinct norms per role
+        _keys, _anchors = [], {}
+        for s in (specs or []):
+            try:
+                if s.get("kind") == "direct":
+                    for r in (rows or []):
+                        try:
+                            _v = self._norm_key_value(r.get(s.get("key_alias")))
+                        except Exception:
+                            _v = None
+                        if _v is not None and _v not in _keys:
+                            _keys.append(_v)
+                else:
+                    _ac = s.get("anchor_sec")
+                    _lst = _anchors.setdefault(_ac, [])
+                    for r in (rows or []):
+                        try:
+                            _v = self._norm_key_value(r.get(s.get("anchor_alias")))
+                        except Exception:
+                            _v = None
+                        if _v is not None and _v not in _lst:
+                            _lst.append(_v)
+            except Exception:
+                continue
+        if not _keys and not any(_anchors.values()):
+            return []
+        _rfrom = self._remote_from(info)
+        _fcols = ", ".join([qfn(c) for c in (need or [])])
+        _out = []
+
+        def _fetch(where, params):
+            _cur = self._exec_on(rdb, f"SELECT {_fcols} FROM {_rfrom} WHERE {where}", params or {})
+            try:
+                _out.extend(dict(zip((need or []), rec)) for rec in _cur.fetchall())
+            finally:
+                try:
+                    _cur.close()
+                except Exception:
+                    pass
+
+        if mode == "regex":
+            if ms:
+                return None
+            try:
+                _pat = str((specs[0].get("pattern") if specs else "") or "")
+            except Exception:
+                _pat = ""
+            if not _pat:
+                return None
+            if "(?=" in _pat or "(?!" in _pat or "(?<" in _pat:
+                return None  # POSIX engine rejects lookaround -> haul fallback
+            _pq = _pat.replace("'", "''")
+            if pg:
+                _ext = lambda _c: f"substring({_c} FROM '{_pq}')"
+            else:
+                _ext = lambda _c: f"REGEXP_SUBSTR({_c}, '{_pq}', 1, 1, NULL, 1)"
+            _conds, _prm, _i = [], {}, 0
+            _exts_done = set()
+
+            def _add_ext(col, vals):
+                nonlocal _i
+                _es = []
+                for _v in (vals or []):
+                    try:
+                        _e = self._rx_extract(rx, _v)
+                    except Exception:
+                        _e = None
+                    if _e is None or _e in _exts_done:
+                        continue
+                    _exts_done.add(_e)
+                    _es.append(_e)
+                if _es:
+                    _phs = ", ".join([f":fe{_i + j}" for j in range(len(_es))])
+                    for _j, _e in enumerate(_es):
+                        _prm[f"fe{_i + _j}"] = _e
+                    _i += len(_es)
+                    _conds.append(f"{_ext(qfn(col))} IN ({_phs})")
+
+            _add_ext(scol, _keys)
+            for _ac, _vals in _anchors.items():
+                if _ac and _ac != scol:
+                    _add_ext(_ac, _vals)
+            if not _conds:
+                return []
+            try:
+                _fetch(" OR ".join(f"({_c})" for _c in _conds), _prm)
+            except Exception:
+                return None  # e.g. pattern rejected server-side -> haul fallback
+            return _out
+
+        # contains: base-side literals searched server-side (one scan per
+        # chunk; chunks are wide so a normal page resolves in ONE query)
+        _lits = []
+        for _v in list(_keys or []) + [x for _lst in _anchors.values() for x in _lst]:
+            try:
+                _s = str(_v)
+            except Exception:
+                continue
+            if _s and _s not in _lits:
+                _lits.append(_s)
+        if not _lits:
+            return []
+        _cols = [scol] + [a for a in _anchors if a and a != scol]
+        try:
+            for _ch in self._chunk(_lits, 2000):
+                _conds, _prm, _i = [], {}, 0
+                for _lit in _ch:
+                    for _c in _cols:
+                        _qc = qfn(_c)
+                        if pg:
+                            _conds.append(f"POSITION({_qc} IN :fc{_i}) > 0")
+                        elif ms:
+                            _conds.append(f"CHARINDEX({_qc}, :fc{_i}) > 0")
+                        else:
+                            _conds.append(f"INSTR(:fc{_i}, {_qc}) > 0")
+                        _prm[f"fc{_i}"] = _lit
+                        _i += 1
+                _fetch(" OR ".join(_conds), _prm)
+        except Exception:
+            return None
+        return _out
+
     def _apply_merges(self, rows, plan):
         """Fill remote-merge columns (post-fetch, pre-format). Strips helper keys."""
         merges = plan.get("merges") or []
@@ -5755,80 +5909,98 @@ class RMLReportEngine:
                         _need.add(self._fuzzy_inner_field(s, sec))
                 _need = sorted(_need)
                 _rfrom = self._remote_from(info)
-                # Round 1 (narrow): DISTINCT key combos only — never haul
-                # the whole wide table when a subset matches.
-                _anchor_cols = sorted({s["anchor_sec"] for s in specs if s.get("kind") != "direct"})
-                _key_cols = [scol] + [a for a in _anchor_cols if a != scol]
-                _kcols = ", ".join([_Q(c) for c in _key_cols])
-                _kcur = self._exec_on(rdb, f"SELECT DISTINCT {_kcols} FROM {_rfrom}", {})
+                # Pushdown first: let the secondary DB filter candidates
+                # (vital on million-row tables). Falls back to key haul.
                 try:
-                    _krows = [dict(zip(_key_cols, rec)) for rec in _kcur.fetchall()]
-                finally:
+                    _pd = self._fuzzy_pushdown_fetch(specs, sec, scol, rows, rdb, info,
+                                                     _Q, list(_need), _rx, _fmode)
+                except Exception:
+                    _pd = None
+                if _pd is not None:
+                    _frows = list(_pd)
                     try:
-                        _kcur.close()
+                        self._merge_stats[str(sec)] = {"pushdown": True,
+                                                       "fetched": len(_frows)}
                     except Exception:
                         pass
-                try:
-                    _kid_scol = self._fuzzy_key_index(
-                        _fmode, _rx, [(kr.get(scol), kr.get(scol)) for kr in _krows])
-                    _kid_anchor = {}
-                    for _ac0 in _anchor_cols:
-                        _kid_anchor[_ac0] = self._fuzzy_key_index(
-                            _fmode, _rx, [(kr.get(_ac0), kr.get(scol)) for kr in _krows])
-                    _matched_raws = []
-                    for r in rows:
-                        for s in specs:
+                    _pushdown_hit = True
+                else:
+                    _pushdown_hit = False
+                if not _pushdown_hit:
+                    # Round 1 (narrow): DISTINCT key combos only — never haul
+                    # the whole wide table when a subset matches.
+                    _anchor_cols = sorted({s["anchor_sec"] for s in specs if s.get("kind") != "direct"})
+                    _key_cols = [scol] + [a for a in _anchor_cols if a != scol]
+                    _kcols = ", ".join([_Q(c) for c in _key_cols])
+                    _kcur = self._exec_on(rdb, f"SELECT DISTINCT {_kcols} FROM {_rfrom}", {})
+                    try:
+                        _krows = [dict(zip(_key_cols, rec)) for rec in _kcur.fetchall()]
+                    finally:
+                        try:
+                            _kcur.close()
+                        except Exception:
+                            pass
+                    try:
+                        _kid_scol = self._fuzzy_key_index(
+                            _fmode, _rx, [(kr.get(scol), kr.get(scol)) for kr in _krows])
+                        _kid_anchor = {}
+                        for _ac0 in _anchor_cols:
+                            _kid_anchor[_ac0] = self._fuzzy_key_index(
+                                _fmode, _rx, [(kr.get(_ac0), kr.get(scol)) for kr in _krows])
+                        _matched_raws = []
+                        for r in rows:
+                            for s in specs:
+                                try:
+                                    if s.get("kind") == "direct":
+                                        _rr0 = self._fuzzy_lookup(
+                                            _kid_scol, self._norm_key_value(r.get(s.get("key_alias"))))
+                                    else:
+                                        _rr0 = self._fuzzy_lookup(
+                                            _kid_anchor.get(s["anchor_sec"]),
+                                            self._norm_key_value(r.get(s.get("anchor_alias"))))
+                                except Exception:
+                                    _rr0 = []
+                                for _o in (_rr0 or []):
+                                    if _o not in _matched_raws:
+                                        _matched_raws.append(_o)
+                    except Exception:
+                        _matched_raws = []
+                    try:
+                        _all_raws = {kr.get(scol) for kr in _krows}
+                    except Exception:
+                        _all_raws = set()
+                    try:
+                        self._merge_stats[str(sec)] = {"keys": len(_all_raws),
+                                                       "matched": len(_matched_raws)}
+                    except Exception:
+                        pass
+                    # Round 2: full rows for matched keys only (chunked IN);
+                    # empty match set skips the haul entirely.
+                    _frows = []
+                    if _matched_raws:
+                        _fcols = ", ".join([_Q(c) for c in _need])
+                        if len(_matched_raws) < len(_all_raws):
+                            for _ch in self._chunk(list(_matched_raws), 500):
+                                _phs = ", ".join([f":mk{i}" for i in range(len(_ch))])
+                                _prm = {f"mk{i}": _v for i, _v in enumerate(_ch)}
+                                _fcur = self._exec_on(
+                                    rdb, f"SELECT {_fcols} FROM {_rfrom} WHERE {_Q(scol)} IN ({_phs})", _prm)
+                                try:
+                                    _frows.extend(dict(zip(_need, rec)) for rec in _fcur.fetchall())
+                                finally:
+                                    try:
+                                        _fcur.close()
+                                    except Exception:
+                                        pass
+                        else:
+                            _fcur = self._exec_on(rdb, f"SELECT {_fcols} FROM {_rfrom}", {})
                             try:
-                                if s.get("kind") == "direct":
-                                    _rr0 = self._fuzzy_lookup(
-                                        _kid_scol, self._norm_key_value(r.get(s.get("key_alias"))))
-                                else:
-                                    _rr0 = self._fuzzy_lookup(
-                                        _kid_anchor.get(s["anchor_sec"]),
-                                        self._norm_key_value(r.get(s.get("anchor_alias"))))
-                            except Exception:
-                                _rr0 = []
-                            for _o in (_rr0 or []):
-                                if _o not in _matched_raws:
-                                    _matched_raws.append(_o)
-                except Exception:
-                    _matched_raws = []
-                try:
-                    _all_raws = {kr.get(scol) for kr in _krows}
-                except Exception:
-                    _all_raws = set()
-                try:
-                    self._merge_stats[str(sec)] = {"keys": len(_all_raws),
-                                                   "matched": len(_matched_raws)}
-                except Exception:
-                    pass
-                # Round 2: full rows for matched keys only (chunked IN);
-                # empty match set skips the haul entirely.
-                _frows = []
-                if _matched_raws:
-                    _fcols = ", ".join([_Q(c) for c in _need])
-                    if len(_matched_raws) < len(_all_raws):
-                        for _ch in self._chunk(list(_matched_raws), 500):
-                            _phs = ", ".join([f":mk{i}" for i in range(len(_ch))])
-                            _prm = {f"mk{i}": _v for i, _v in enumerate(_ch)}
-                            _fcur = self._exec_on(
-                                rdb, f"SELECT {_fcols} FROM {_rfrom} WHERE {_Q(scol)} IN ({_phs})", _prm)
-                            try:
-                                _frows.extend(dict(zip(_need, rec)) for rec in _fcur.fetchall())
+                                _frows = [dict(zip(_need, rec)) for rec in _fcur.fetchall()]
                             finally:
                                 try:
                                     _fcur.close()
                                 except Exception:
                                     pass
-                    else:
-                        _fcur = self._exec_on(rdb, f"SELECT {_fcols} FROM {_rfrom}", {})
-                        try:
-                            _frows = [dict(zip(_need, rec)) for rec in _fcur.fetchall()]
-                        finally:
-                            try:
-                                _fcur.close()
-                            except Exception:
-                                pass
                 # secondary index: norms (+ regex extracts) computed ONCE
                 _sec_norms = []  # [(norm, row)]
                 _sec_groups = {}  # col -> {extract: [rows]} (regex only)
