@@ -4766,7 +4766,8 @@
                 const xlOpts = (sel)=>'<option value="-1">— لاشيء —</option>' + _xlsxHeaders.map((h, i)=>`<option value="${i}" ${i === sel ? 'selected' : ''}>${escHtml(h) || ('عمود ' + (i+1))}</option>`).join('');
                 // مدخل القيمة الثابتة ديناميكي حسب نوع الحقل في المصمم
                 const xlsxFixedInput = (f)=>{
-                    const t = String(f.dataType || f.data_type || f.inputType || f.input_type || 'text').toLowerCase();
+                    // الأداة (inputType) أولاً — التخزين (dataType) احتياط: حقل select على عمود INTEGER يبقى قائمة لا رقماً
+                    const t = String(f.inputType || f.input_type || f.dataType || f.data_type || 'text').toLowerCase();
                     const nm = `data-xfixed="${escAttr(f.name)}"`;
                     const cls = 'w-full bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs min-w-0';
                     const ph = 'placeholder="ثابتة..." title="قيمة ثابتة تُدخل مع كل الصفوف"';
