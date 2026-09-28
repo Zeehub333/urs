@@ -3782,16 +3782,31 @@
             updateSelectedCount();
             paintHeadCheck();
         }
-        function toggleSelectPage(checked) {
-            // تحديد الصفوف المعروضة حالياً (بلا إعادة عرض تحافظ على موضع التمرير)
-            pagedRowsCache.forEach(r => {
-                const id = String(r.__rid);
-                if (checked) selectedIds.add(id);
-                else selectedIds.delete(id);
-            });
+        async function toggleSelectAll(checked) {
+            // تحديد الكل فعلياً — بغض النظر عن السكرول: تُحمَّل بقية الصفحات أولاً ثم يُحدد الجميع
+            if(!checked){
+                selectedIds.clear();
+                try{ renderGrid(); }catch(e){}
+                updateSelectedCount();
+                paintHeadCheck();
+                return;
+            }
             try{
-                document.querySelectorAll('#tableBody input[type=checkbox], #cardsView input[type=checkbox]').forEach(b=>{ b.checked = !!checked; });
+                const total = serverTotal || allRows.length;
+                const remain = Math.max(0, total - allRows.length);
+                if(remain > 0){
+                    if(total > 10000 && !confirm(`تحديد الكل سيحمّل ${total} سجل كاملاً. متابعة؟`)){ paintHeadCheck(); return; }
+                    const st = document.getElementById('lazyStatus');
+                    let guard = 0;
+                    while(((serverTotal || 0) - allRows.length) > 0 && guard++ < 100000){
+                        if(st) st.textContent = `جارٍ تحميل الكل للتحديد (${allRows.length} / ${serverTotal})...`;
+                        await loadMoreRecords();
+                    }
+                    updateLoadMore();
+                }
+                allRows.forEach((r, i)=>selectedIds.add(String(rowId(r, i))));
             }catch(e){}
+            try{ renderGrid(); }catch(e){}
             updateSelectedCount();
             paintHeadCheck();
         }
@@ -3916,7 +3931,7 @@
             }catch(e){}
         }
         function renderTableHead(cols) {
-            let head = `<tr><th class="freeze-col-head w-10 px-2 py-1 text-center border-b border-slate-200"><input type="checkbox" onchange="toggleSelectPage(this.checked)" class="rounded text-indigo-600"></th><th class="w-12 px-2 py-1 text-center border-b border-slate-200 bg-slate-100 font-bold">#</th>`;
+            let head = `<tr><th class="freeze-col-head w-10 px-2 py-1 text-center border-b border-slate-200"><input type="checkbox" title="تحديد الكل" onchange="toggleSelectAll(this.checked)" class="rounded text-indigo-600"></th><th class="w-12 px-2 py-1 text-center border-b border-slate-200 bg-slate-100 font-bold">#</th>`;
             cols.forEach(f => {
                 const hasF = columnFilters[f.name] && columnFilters[f.name].length;
                 head += `<th class="px-2 py-1 font-bold border-b border-slate-200 ${hasF ? '!bg-indigo-50' : 'bg-slate-50'} text-slate-700 cursor-pointer hover:bg-slate-100 select-none" onclick="openColMenu(event, '${f.name}')"><div class="flex items-center justify-between gap-1"><span class="truncate">${f.alias}</span><span class="text-slate-400 text-[10px]">${activeSort.column === f.name ? (activeSort.direction === 'asc' ? '▲' : '▼') : ''}<i class="fa-solid fa-chevron-down"></i>${hasF ? '<i class="fa-solid fa-filter text-indigo-600" title="مصفّى"></i>' : ''}</span></div></th>`;
