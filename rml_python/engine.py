@@ -5456,6 +5456,64 @@ class RMLReportEngine:
             f'بسّط التعبير الداخلي ("{inner}").')
 
     @staticmethod
+    def _rx_extract(rx, value):
+        """Extract via a COMPILED pattern (group 1 or full match), else None."""
+        if value is None or rx is None:
+            return None
+        try:
+            m = rx.search(str(value))
+        except Exception:
+            return None
+        if not m:
+            return None
+        try:
+            if m.lastindex:
+                return m.group(1)
+            return m.group(0)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _contains_hit(bv, sec_norms):
+        """First secondary row whose value contains bv or vice versa."""
+        if bv is None:
+            return None
+        bs = str(bv)
+        if not bs:
+            return None
+        for sv, sr in (sec_norms or []):
+            if sv is None:
+                continue
+            ss = str(sv)
+            if not ss:
+                continue
+            if ss in bs or bs in ss:
+                return sr
+        return None
+
+    def _contains_mates(self, bv, frows, anchor_col):
+        """All secondary rows whose anchor contains bv or vice versa."""
+        out = []
+        if bv is None:
+            return out
+        bs = str(bv)
+        if not bs:
+            return out
+        for sr in (frows or []):
+            try:
+                sv = self._norm_key_value(sr.get(anchor_col))
+            except Exception:
+                continue
+            if sv is None:
+                continue
+            ss = str(sv)
+            if not ss:
+                continue
+            if ss in bs or bs in ss:
+                out.append(sr)
+        return out
+
+    @staticmethod
     def _fuzzy_num(v):
         """Numeric coercion for fuzzy aggregates (non-numeric ignored)."""
         if v is None or isinstance(v, bool):
@@ -5515,11 +5573,23 @@ class RMLReportEngine:
 
             _fmode = str((specs[0].get("match") if specs else None) or "exact").strip().lower()
             if _fmode != "exact":
-                # Fuzzy link (contains/regex): full secondary scan + Python
-                # predicate per base row. First match wins for direct lookups;
+                # Fuzzy link (contains/regex): one full secondary scan, then
+                # indexed matching — O(secondary + base) instead of
+                # O(base x secondary) regex evaluations per pair.
+                # regex: group secondary rows by extract(scol) once; each base
+                # row extracts once + dict lookup. First match wins (direct);
                 # aggregates run over the matched subset in Python.
-                from .xsql import fuzzy_link_match as _flm
+                # contains: secondary norms precomputed once; substring test
+                # per base row (C-speed, no regex).
+                import re as _re_fz
                 _fpat = str(specs[0].get("pattern") or "")
+                _rx = None
+                if _fmode == "regex":
+                    try:
+                        _rx = _re_fz.compile(_fpat)
+                    except Exception as _rxe:
+                        raise ValueError(
+                            f'نمط regex غير صالح في الربط مع "{sec}": {_rxe}')
                 _need = {scol}
                 for s in specs:
                     if s.get("kind") == "direct":
@@ -5537,30 +5607,67 @@ class RMLReportEngine:
                         _fcur.close()
                     except Exception:
                         pass
+                # secondary index: norms (+ regex extracts) computed ONCE
+                _sec_norms = []  # [(norm, row)]
+                _sec_groups = {}  # col -> {extract: [rows]} (regex only)
+                for _sr in _frows:
+                    try:
+                        _sec_norms.append((self._norm_key_value(_sr.get(scol)), _sr))
+                    except Exception:
+                        continue
+                if _fmode == "regex":
+                    _g = {}
+                    for _nv, _sr in _sec_norms:
+                        try:
+                            _e = self._rx_extract(_rx, _nv)
+                        except Exception:
+                            _e = None
+                        if _e is not None:
+                            _g.setdefault(_e, []).append(_sr)
+                    _sec_groups[scol] = _g
+                    for s in specs:
+                        if s.get("kind") != "direct":
+                            _ac = s["anchor_sec"]
+                            if _ac not in _sec_groups:
+                                _ga = {}
+                                for _sr in _frows:
+                                    try:
+                                        _av2 = self._norm_key_value(_sr.get(_ac))
+                                        _e2 = self._rx_extract(_rx, _av2)
+                                    except Exception:
+                                        _e2 = None
+                                    if _e2 is not None:
+                                        _ga.setdefault(_e2, []).append(_sr)
+                                _sec_groups[_ac] = _ga
                 for r in rows:
                     for s in specs:
                         if s.get("kind") == "direct":
                             _bv = self._norm_key_value(r.get(s.get("key_alias")))
                             _hit = None
                             if _bv is not None:
-                                for _sr in _frows:
+                                if _fmode == "regex":
                                     try:
-                                        if _flm(_fmode, _fpat, _bv, self._norm_key_value(_sr.get(scol))):
-                                            _hit = _sr
-                                            break
+                                        _be = self._rx_extract(_rx, _bv)
                                     except Exception:
-                                        continue
+                                        _be = None
+                                    _lst = _sec_groups.get(scol, {}).get(_be) if _be is not None else None
+                                    _hit = _lst[0] if _lst else None
+                                else:
+                                    _hit = self._contains_hit(_bv, _sec_norms)
                             r[s["alias"]] = (_hit.get(s["field"]) if _hit is not None else None)
                         else:
                             _av = self._norm_key_value(r.get(s.get("anchor_alias")))
                             _mates = []
                             if _av is not None:
-                                for _sr in _frows:
+                                if _fmode == "regex":
                                     try:
-                                        if _flm(_fmode, _fpat, _av, self._norm_key_value(_sr.get(s["anchor_sec"]))):
-                                            _mates.append(_sr)
+                                        _ae = self._rx_extract(_rx, _av)
                                     except Exception:
-                                        continue
+                                        _ae = None
+                                    if _ae is not None:
+                                        _mates = list(_sec_groups.get(s["anchor_sec"], {}).get(_ae) or [])
+                                else:
+                                    _mates = self._contains_mates(_av, _frows, s["anchor_sec"])
                             r[s["alias"]] = self._fuzzy_agg_value(s, sec, _mates)
                 continue
 
