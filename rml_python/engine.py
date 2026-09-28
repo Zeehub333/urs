@@ -1840,9 +1840,10 @@ class RMLReportEngine:
                     return inner_full[:k].strip()
         return inner_full.strip()
 
-    def _inline_column_refs(self, columns, scope_extra=None):
-        """Return column copies with [column] refs inlined (fields untouched)."""
-        import dataclasses
+    def _at_column_maps(self, columns=None, scope_extra=None):
+        """(by_name, by_alias) over report columns for @Alias expansion."""
+        if columns is None:
+            columns = getattr(self, "columns", None)
         all_cols = list(columns or []) + list(scope_extra or [])
         by_name: Dict[str, Any] = {}
         by_alias: Dict[str, Any] = {}
@@ -1853,33 +1854,104 @@ class RMLReportEngine:
                 by_name[n] = c
             if a and a not in by_alias and a not in by_name:
                 by_alias[a] = c
+        return by_name, by_alias
 
-        def resolve_col(col, stack):
-            raw = (getattr(col, "expr", None) or getattr(col, "name", None) or "").strip()
-            cid = getattr(col, "id", None) or getattr(col, "name", "")
+    def _inline_col_ref(self, col, stack, by_name, by_alias):
+        """Inline [column] refs in one column expr (recursive, cycle-loud)."""
+        try:
+            stack = list(stack)
+        except Exception:
+            stack = []
+        raw = (getattr(col, "expr", None) or getattr(col, "name", None) or "").strip()
+        cid = getattr(col, "id", None) or getattr(col, "name", "")
 
-            def sub(m):
-                inner = m.group(1).strip()
-                key = inner.lower()
-                tgt = by_name.get(key) or by_alias.get(key)
-                if tgt is None:
-                    return m.group(0)  # a field (validated later) or unknown
-                tid = getattr(tgt, "id", None) or getattr(tgt, "name", "")
-                if tid == stack[-1]:
-                    return m.group(0)  # same-name self mention = field ref, not recursion
-                if tid in stack:
-                    chain = " ← ".join(stack + [tid])
-                    raise ValueError(f"مرجع دائري بين الأعمدة: {chain}")
-                inlined = resolve_col(tgt, stack + [tid])
-                return "(" + self._strip_format_wrapper(inlined) + ")"
+        def sub(m):
+            inner = m.group(1).strip()
+            key = inner.lower()
+            tgt = by_name.get(key) or by_alias.get(key)
+            if tgt is None:
+                return m.group(0)  # a field (validated later) or unknown
+            tid = getattr(tgt, "id", None) or getattr(tgt, "name", "")
+            if tid == stack[-1]:
+                return m.group(0)  # same-name self mention = field ref, not recursion
+            if tid in stack:
+                chain = " ← ".join(stack + [tid])
+                raise ValueError(f"مرجع دائري بين الأعمدة: {chain}")
+            inlined = self._inline_col_ref(tgt, stack + [tid], by_name, by_alias)
+            return "(" + self._strip_format_wrapper(inlined) + ")"
 
-            return re.sub(r"[\[{]([^\].\[{}]+)[\]}]", sub, raw)
+        out = re.sub(r"[\[{]([^\].\[{}]+)[\]}]", sub, raw)
+        return self._sub_at_refs(out, by_name, by_alias, stack)
 
+    def _sub_at_refs(self, text, by_name, by_alias, stack):
+        """Expand @Alias (computed columns) in free text. Literal-safe.
+
+        get(@A) splices the wrapper (like get([A])→[A]); @A inlines
+        parenthesized. Unknown @tokens stay for the field pass ([...]/DB).
+        Cycles raise loudly. Idempotent (output holds no @Alias).
+        """
+        if not text or "@" not in str(text):
+            return text
+        keys = sorted(set(by_name) | set(by_alias), key=len, reverse=True)
+        if not keys:
+            return text
+        alt = "|".join(re.escape(k) for k in keys)
+
+        def _tgt(key):
+            return by_name.get(key) or by_alias.get(key)
+
+        def _expand(tgt):
+            tid = getattr(tgt, "id", None) or getattr(tgt, "name", "")
+            if stack and tid == stack[-1]:
+                return None  # self mention = field ref, leave it
+            if tid in stack:
+                chain = " ← ".join(list(stack) + [tid])
+                raise ValueError(f"مرجع دائري بين الأعمدة: {chain}")
+            return self._inline_col_ref(tgt, tuple(stack) + (tid,), by_name, by_alias)
+
+        def _getat(m):
+            tgt = _tgt(m.group(1).lower())
+            if tgt is None:
+                return m.group(0)
+            inner = _expand(tgt)
+            return ("(" + inner + ")") if inner is not None else m.group(0)
+
+        def _genat(m):
+            tgt = _tgt(m.group(1).lower())
+            if tgt is None:
+                return m.group(0)
+            inner = _expand(tgt)
+            return ("(" + inner + ")") if inner is not None else m.group(0)
+
+        segs = re.split(r"('(?:[^']|'')*')", str(text))
+        for i in range(0, len(segs), 2):
+            seg = segs[i]
+            seg = re.sub(r"(?<![\w$#\.\"'\u0600-\u06FF])get\s*\(\s*@(" + alt + r")\s*\)",
+                         _getat, seg, flags=re.IGNORECASE)
+            dparts = re.split(r'("[^"]*")', seg)
+            for di in range(0, len(dparts), 2):
+                dparts[di] = re.sub(
+                    r"(?<![\w$#@.\"'\u0600-\u06FF])@(" + alt + r")(?![\w\u0600-\u06FF])",
+                    _genat, dparts[di], flags=re.IGNORECASE)
+            segs[i] = "".join(dparts)
+        return "".join(segs)
+
+    def _expand_at_aliases(self, text):
+        """Expand @ColumnAlias in free text (general_where etc.). Idempotent."""
+        if not text or "@" not in str(text):
+            return text
+        by_name, by_alias = self._at_column_maps()
+        return self._sub_at_refs(str(text), by_name, by_alias, ())
+
+    def _inline_column_refs(self, columns, scope_extra=None):
+        """Return column copies with [column]/@Alias refs inlined (fields untouched)."""
+        import dataclasses
+        by_name, by_alias = self._at_column_maps(columns, scope_extra)
         out = []
         for c in (columns or []):
             cid = getattr(c, "id", None) or getattr(c, "name", "")
             try:
-                new_raw = resolve_col(c, [cid])
+                new_raw = self._inline_col_ref(c, [cid], by_name, by_alias)
             except ValueError:
                 raise
             out.append(dataclasses.replace(c, expr=new_raw) if new_raw != (c.expr or "") else c)
@@ -1950,6 +2022,49 @@ class RMLReportEngine:
                 if not _nn:
                     break
                 scan = _ns
+            # @refs (internal columns): @name / @tbl.col / @conn.tbl.col —
+            # same binding as brackets. Emails (user@host), @@globals and
+            # quoted spans never match.
+            for _dseg in re.split(r'("[^"]*")', scan)[0::2]:
+                for _am in re.finditer(
+                        r"(?<![\w$#@.\"'\u0600-\u06FF])@([A-Za-z_0-9\u0600-\u06FF][A-Za-z_0-9\u0600-\u06FF \t.]*)",
+                        _dseg):
+                    _araw = _am.group(1)
+                    _abody = _araw.strip()
+                    while _abody:
+                        _at = _abody.rstrip(".").strip()
+                        _hit = None
+                        if _at:
+                            if "." not in _at:
+                                if _at.lower() in field_table:
+                                    _hit = _at.lower()
+                            else:
+                                try:
+                                    _hit = self._match_qualified(_at, field_table)
+                                except Exception:
+                                    _hit = None
+                                if _hit is None:
+                                    # 3-part with rejected conn still reveals
+                                    # its table for routing (resolution
+                                    # raises the conn error loudly later).
+                                    try:
+                                        _pp = [p.strip() for p in _at.split(".") if p.strip() != ""]
+                                        if len(_pp) == 3:
+                                            for _f in (getattr(self, "fields", []) or []):
+                                                _n = getattr(_f, "name", None)
+                                                if _n and str(_n).strip().lower() == _pp[2].lower() and \
+                                                        self._norm_table(getattr(_f, "table_source", None) or "") == self._norm_table(_pp[1]):
+                                                    _hit = str(_n).strip().lower()
+                                                    break
+                                    except Exception:
+                                        pass
+                        if _hit is not None:
+                            found.add(_hit)
+                            break
+                        _ap = _abody.split()
+                        if len(_ap) <= 1:
+                            break
+                        _abody = " ".join(_ap[:-1])
             for m in re.finditer(r'(?<!\.)"([A-Za-z_][A-Za-z0-9_]*)"(?!\.)', scan):
                 if m.group(1).lower() in field_table:
                     found.add(m.group(1).lower())
@@ -3884,6 +3999,13 @@ class RMLReportEngine:
             _gw_text = self.compiler.general_where() if hasattr(self.compiler, "general_where") else ""
         except Exception:
             _gw_text = ""
+        try:
+            # @Alias first: routing/JOINs must see through to the real fields
+            _gw_text = self._expand_at_aliases(_gw_text) if _gw_text else ""
+        except ValueError:
+            raise
+        except Exception:
+            pass
         used = self._used_tables(inlined, filters, sort, group_by, field_table, _gw_text or "")
         sec_all = sorted(t for t in used if t != base_norm)
         # Route secondaries: local (same physical DB) vs remote
@@ -5475,6 +5597,25 @@ class RMLReportEngine:
             raw = str(raw).strip()
             if not raw:
                 return ""
+            # @Alias (computed columns) first — same expansion the plan saw,
+            # so routing and compilation agree. Idempotent.
+            try:
+                raw = self._expand_at_aliases(raw)
+            except ValueError:
+                raise
+            except Exception:
+                pass
+            # Aggregates/windowed exprs are illegal in WHERE (need HAVING or
+            # the player's outer-wrap filters) — fail loudly, not at the DB.
+            try:
+                _gw_nolit = re.sub(r"('(?:[^']|'')*')", "''", raw)
+                if re.search(r"\b(SUM|COUNT|AVG|MIN|MAX)\s*\(|\bOVER\s*\(", _gw_nolit, re.IGNORECASE):
+                    raise ValueError(
+                        "الشرط العام لا يقبل أعمدة تجميعية — رشّح بها من فلاتر المشغل (المتقدمة).")
+            except ValueError:
+                raise
+            except Exception:
+                pass
             # T-SQL leftovers from pasted SQL: GO batch separators (even glued
             # like "GO)") and doubled brackets [[..]] — normalize before resolve.
             raw = re.sub(r"(?im)^\s*GO(?=\s*(\)|;|$))", "", raw)

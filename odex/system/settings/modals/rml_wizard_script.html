@@ -1206,6 +1206,30 @@
                 showExprAC(input, target, matches);
                 return;
             }
+            // @Alias — استدعاء الأعمدة المحسوبة الموجودة في المصمم (تُوسَّع لتعبيرها)
+            const am = before.match(/@([A-Za-z0-9_.\u0600-\u06FF ]*)$/);
+            if(am){
+                const atPos = before.length - am[0].length;
+                const prev = atPos > 0 ? before[atPos - 1] : '';
+                if(prev && /[\w$#@."'\u0600-\u06FF]/.test(prev)){ hideExprAC(); return; }
+                const part = (am[1] || '').replace(/\s+$/, '').toLowerCase();
+                const pool = (wizardColumns || []).filter(c=>c.alias || c.name)
+                    .map(c=>({code: c.alias || c.name, name: c.alias || c.name, hint: (c.expr || '').slice(0, 60)}));
+                let matches = pool.filter(o=>o.code.toLowerCase().indexOf(part) >= 0 || o.name.toLowerCase().indexOf(part) >= 0).slice(0, 30);
+                matches.sort((a, b)=>{
+                    const rank = (o)=>{
+                        const c = o.code.toLowerCase(), n = o.name.toLowerCase();
+                        if(c.indexOf(part) === 0) return 0;
+                        if(n.indexOf(part) === 0) return 1;
+                        return 2;
+                    };
+                    return (rank(a) - rank(b)) || a.code.localeCompare(b.code);
+                });
+                matches = matches.slice(0, 10).map(o=>({kind:'fld', code:o.code, hint:(o.hint ? o.hint + ' • ' : '') + 'عمود', at:true}));
+                if(!matches.length){ hideExprAC(); return; }
+                showExprAC(input, target, matches);
+                return;
+            }
             // دوال SQL/XSQL: كلمة إنجليزية (حرفان+) بعد بداية/مسافة/قوس/فاصلة/عامل — وليست داخل [ ]
             if(/\[[^\]\[]*$/.test(before)){ hideExprAC(); return; }
             const wm = before.match(/([A-Za-z_][A-Za-z0-9_]*)$/);
@@ -1259,7 +1283,7 @@
             const main = (it)=>{
                 if(it.kind === 'fn') return `<span>${wbEsc(it.code)}<span class="opacity-70">(${wbEsc(exprFnSig(it.code))})</span></span>`;
                 if(it.kind === 'rule') return `<span>${wbEsc(it.code)}</span>`;
-                return `<span>[${wbEsc(it.code)}]</span>`;
+                return it.at ? `<span>@${wbEsc(it.code)}</span>` : `<span>[${wbEsc(it.code)}]</span>`;
             };
             box.innerHTML = exprAC.matches.map((it, i)=>`<div onmousedown="pickExprAC(${i})" class="px-3 py-1.5 cursor-pointer font-mono flex items-center gap-2 ${i === exprAC.sel ? 'bg-indigo-600 text-white' : 'hover:bg-indigo-50 text-slate-700'}" dir="ltr">${main(it)}${badge(it)}</div>`).join('');
         }
@@ -1282,6 +1306,8 @@
                 input.value = cur.slice(0, start) + ins + cur.slice(pos);
                 const cp = start + (mi >= 0 ? mi : ins.length);
                 try{ input.setSelectionRange(cp, cp); }catch(e){}
+            } else if(it.at){
+                input.value = cur.slice(0, pos).replace(/@[A-Za-z0-9_.\u0600-\u06FF ]*$/, '@' + it.code) + cur.slice(pos);
             } else {
                 input.value = cur.slice(0, pos).replace(/\[[A-Za-z0-9_.]*$/, '[' + it.code + ']') + cur.slice(pos);
             }
@@ -1700,7 +1726,7 @@ list.innerHTML = wizardDetail.columns.map((col, idx)=>`
                     ${wizardGeneralWhere ? `<button onclick="updateGeneralWhere('');renderWizardColumns();try{if(typeof wbRenderActiveSheet==='function')wbRenderActiveSheet();}catch(e){}" title="مسح الشرط" class="text-[10px] text-slate-400 hover:text-rose-600 font-bold">مسح <i class="fa-solid fa-xmark"></i></button>` : ''}
                 </div>
                 <div class="flex gap-1"><input value="${wbEsc(wizardGeneralWhere || '').replace(/"/g, '&quot;')}" oninput="updateGeneralWhere(this.value);exprAuto(this,'general:0')" placeholder="[RT_BILL_DATE] >= '2026-01-01' AND [BILL_AMT] > 1000" autocomplete="off" class="flex-1 min-w-0 bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-mono" dir="ltr"><button onclick="openExprExpand(0, false, 'general')" title="تحرير موسع" class="px-2.5 rounded-lg bg-violet-50 hover:bg-violet-100 text-violet-700 shrink-0"><i class="fa-solid fa-expand text-[11px]"></i></button><button onclick="openExprBuilder(0, false, 'general')" title="اختيار الاتصال ← الجدول ← الحقل" class="px-2.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 shrink-0"><i class="fa-solid fa-magnifying-glass text-[11px]"></i></button></div>
-                <p class="text-[10px] text-slate-500">مراجع الحقول بين <span class="font-mono" dir="ltr">[ ]</span> + <span class="font-mono" dir="ltr">AND / OR / NOT</span> والمقارنات — مثال: <span class="font-mono" dir="ltr">[7.IAS_PR_BILL_MST.RT_BILL_DATE] &gt;= '2026-01-01'</span>. تُقبل الحقول الداخلية (غير المعروضة) وتُربط جداولها تلقائياً — عدا جداول الاتصالات الأخرى.</p>
+                <p class="text-[10px] text-slate-500">مراجع الحقول بين <span class="font-mono" dir="ltr">[ ]</span> + <span class="font-mono" dir="ltr">AND / OR / NOT</span> والمقارنات — مثال: <span class="font-mono" dir="ltr">[TransferID] &gt; 100</span>. <span class="font-mono" dir="ltr">@</span> يستدعي عموداً محسوباً من المصمم (يُوسَّع لتعبيره): <span class="font-mono" dir="ltr">@NetAmount &gt; 1000</span>. تُربط الجداول تلقائياً — عدا جداول الاتصالات الأخرى.</p>
             </div>`;
         }
         // Auto-detect status columns: STATUS / STATE / حالة / وضع ... → enable + prompt to map

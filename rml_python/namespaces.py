@@ -441,6 +441,11 @@ def _resolve_expression(expr_text: str, fields: Optional[List[Any]],
     - `[ns.member]` resolves via the namespace registry.
     - Bare `ns.member` tokens resolve only when `ns` is a known namespace;
       otherwise left untouched (regular table.column SQL).
+    - `@` refs (internal columns): `@name` / `@table.name` /
+      `@conn.table.name` — identical to the bracket forms (validated the
+      same way, qualified the same way, usable inside get() too). Only
+      known fields convert; unknown `@tokens` (T-SQL variables, emails)
+      pass through untouched.
     - String literals (single quotes) are never touched.
     - table_map: optional {field_lower: table_alias} — when given, refs are
       emitted qualified as "alias"."COL" (for multi-table/JOIN queries).
@@ -556,6 +561,46 @@ def _resolve_expression(expr_text: str, fields: Optional[List[Any]],
     parts = re.split(r"('(?:[^']|'')*')", expr_text)
     for i in range(0, len(parts), 2):
         seg = parts[i]
+        # @refs (internal columns) → [...] BEFORE get() processing, so
+        # get(@col) transparently becomes get([col]) like get(col) does.
+        # Only known fields convert (validated below); T-SQL @vars, emails
+        # (user@host) and @@globals never match the lookbehind/pattern.
+        def _at_known(_inner: str) -> Optional[str]:
+            s = str(_inner or "").strip()
+            if not s:
+                return None
+            if "." not in s:
+                return s if s.lower() in field_map else None
+            _pts = [p.strip() for p in s.split(".") if p.strip() != ""]
+            if len(_pts) == 2 and _find_in_table(_pts[1], _pts[0]) is not None:
+                return s
+            if len(_pts) == 3 and _find_in_table(_pts[2], _pts[1]) is not None:
+                return s
+            return None
+
+        def _at_rep(_m: re.Match) -> str:
+            # Longest valid prefix wins (names may contain spaces):
+            # `@A AND ...` converts `@A`, keeps ` AND ...`.
+            _raw = _m.group(1)
+            _lead = len(_raw) - len(_raw.lstrip())
+            _body = _raw.strip()
+            while _body:
+                _t = _body.rstrip(".").strip()
+                if _t and _at_known(_t) is not None:
+                    return "[" + _t + "]" + _raw[_lead + len(_body):]
+                _parts = _body.split()
+                if len(_parts) <= 1:
+                    break
+                _body = " ".join(_parts[:-1])
+            return _m.group(0)
+
+        # Double-quoted spans stay literal (mirrors _qualify_bare).
+        _qsegs = re.split(r'("[^"]*")', seg)
+        for _qi in range(0, len(_qsegs), 2):
+            _qsegs[_qi] = re.sub(
+                r"(?<![\w$#@.\"'\u0600-\u06FF])@([A-Za-z_0-9\u0600-\u06FF][A-Za-z_0-9\u0600-\u06FF \t.]*)",
+                _at_rep, _qsegs[_qi])
+        seg = "".join(_qsegs)
         # get(...) transparent wrapper (XSQL-style field access).
         # - `get(col)` → `[col]` (validated/quoted exactly like `[col]`),
         #   EXCEPT when the designer marked a default table and col's field
