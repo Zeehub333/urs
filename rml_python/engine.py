@@ -5474,43 +5474,118 @@ class RMLReportEngine:
             return None
 
     @staticmethod
-    def _contains_hit(bv, sec_norms):
-        """First secondary row whose value contains bv or vice versa."""
-        if bv is None:
+    def _contains_alternations(sec_vals, chunk=2000):
+        """Compiled literal-alternation regexes (multi-substring in C).
+
+        Chunked so huge value lists stay compilable; order preserved so
+        the first chunk wins like the old table-order scan.
+        """
+        import re as _re_c
+        out, buf, buflen = [], [], 0
+        for v in (sec_vals or []):
+            try:
+                e = _re_c.escape(v)
+            except Exception:
+                continue
+            buf.append(e)
+            buflen += len(e)
+            if len(buf) >= chunk or buflen > 100000:
+                try:
+                    out.append(_re_c.compile("|".join(buf)))
+                except Exception:
+                    pass
+                buf, buflen = [], 0
+        if buf:
+            try:
+                out.append(_re_c.compile("|".join(buf)))
+            except Exception:
+                pass
+        return out
+
+    def _contains_index(self, frows, col):
+        """(alts, all_by_val, norms) for one secondary column.
+
+        alts: compiled alternations in scan order (longest-first twin is
+        built lazily by mates); all_by_val: text -> [rows];
+        norms: [(norm, row)] for the rare reverse-direction fallback.
+        """
+        vals, all_by_val, norms = [], {}, []
+        for sr in (frows or []):
+            try:
+                nv = self._norm_key_value(sr.get(col))
+            except Exception:
+                continue
+            if nv is None:
+                continue
+            ss = str(nv)
+            if not ss:
+                continue
+            norms.append((nv, sr))
+            if ss not in all_by_val:
+                all_by_val[ss] = []
+                vals.append(ss)
+            all_by_val[ss].append(sr)
+        return (self._contains_alternations(vals), all_by_val, norms)
+
+    @staticmethod
+    def _contains_hit_fast(bv, index):
+        """First secondary row containing bv (or contained in it).
+
+        Tier 1: one C scan per base row over the alternation (secondary
+        inside base — the sane direction). Tier 2 (no tier-1 hit only):
+        reverse scan preserving the old symmetric semantics.
+        """
+        if bv is None or not index:
             return None
         bs = str(bv)
         if not bs:
             return None
-        for sv, sr in (sec_norms or []):
+        alts, all_by_val, norms = index
+        for rxc in (alts or []):
+            try:
+                m = rxc.search(bs)
+            except Exception:
+                m = None
+            if m:
+                lst = (all_by_val or {}).get(m.group(0))
+                if lst:
+                    return lst[0]
+                break
+        for sv, sr in (norms or []):
             if sv is None:
                 continue
             ss = str(sv)
-            if not ss:
-                continue
-            if ss in bs or bs in ss:
+            if ss and bs in ss:
                 return sr
         return None
 
-    def _contains_mates(self, bv, frows, anchor_col):
-        """All secondary rows whose anchor contains bv or vice versa."""
-        out = []
-        if bv is None:
-            return out
+    def _contains_mates_fast(self, bv, index):
+        """All secondary rows containing bv (or contained in it)."""
+        if bv is None or not index:
+            return []
         bs = str(bv)
         if not bs:
-            return out
-        for sr in (frows or []):
+            return []
+        alts, all_by_val, norms = index
+        out, seen = [], set()
+        for rxc in (alts or []):
             try:
-                sv = self._norm_key_value(sr.get(anchor_col))
+                it = rxc.finditer(bs)
             except Exception:
                 continue
-            if sv is None:
-                continue
-            ss = str(sv)
-            if not ss:
-                continue
-            if ss in bs or bs in ss:
-                out.append(sr)
+            for m in it:
+                for sr in ((all_by_val or {}).get(m.group(0)) or []):
+                    if id(sr) not in seen:
+                        seen.add(id(sr))
+                        out.append(sr)
+        if not out:
+            for sv, sr in (norms or []):
+                if sv is None:
+                    continue
+                ss = str(sv)
+                if ss and bs in ss and id(sr) not in seen:
+                    seen.add(id(sr))
+                    out.append(sr)
         return out
 
     @staticmethod
@@ -5615,6 +5690,12 @@ class RMLReportEngine:
                         _sec_norms.append((self._norm_key_value(_sr.get(scol)), _sr))
                     except Exception:
                         continue
+                # contains: one compiled literal-alternation per column =
+                # C-speed multi-substring search instead of a Python
+                # base x secondary nested loop.
+                _contains_idx = {}  # col -> (alts, all_by_val, norms)
+                if _fmode == "contains":
+                    _contains_idx[scol] = self._contains_index(_frows, scol)
                 if _fmode == "regex":
                     _g = {}
                     for _nv, _sr in _sec_norms:
@@ -5653,7 +5734,7 @@ class RMLReportEngine:
                                     _lst = _sec_groups.get(scol, {}).get(_be) if _be is not None else None
                                     _hit = _lst[0] if _lst else None
                                 else:
-                                    _hit = self._contains_hit(_bv, _sec_norms)
+                                    _hit = self._contains_hit_fast(_bv, _contains_idx.get(scol))
                             r[s["alias"]] = (_hit.get(s["field"]) if _hit is not None else None)
                         else:
                             _av = self._norm_key_value(r.get(s.get("anchor_alias")))
@@ -5667,7 +5748,10 @@ class RMLReportEngine:
                                     if _ae is not None:
                                         _mates = list(_sec_groups.get(s["anchor_sec"], {}).get(_ae) or [])
                                 else:
-                                    _mates = self._contains_mates(_av, _frows, s["anchor_sec"])
+                                    _ac2 = s["anchor_sec"]
+                                    if _ac2 not in _contains_idx:
+                                        _contains_idx[_ac2] = self._contains_index(_frows, _ac2)
+                                    _mates = self._contains_mates_fast(_av, _contains_idx.get(_ac2))
                             r[s["alias"]] = self._fuzzy_agg_value(s, sec, _mates)
                 continue
 
