@@ -29,7 +29,6 @@ except ImportError:
 # Process-wide TTL cache for raw API rows: {(kind, gid, TABLE): (epoch, [rows])}.
 # A full device pull is far too slow to repeat per page view; TEMP staging per
 # request stays session-safe (rebuilt from cached rows each time).
-_API_ROWS_CACHE: Dict[str, Any] = {}
 
 def _fmt_cell(v: Any) -> Any:
     """تبسيط عرض القيم: التاريخ بدون وقت منتصف الليل، وفصل التاريخ عن الوقت بمسافة.
@@ -1197,98 +1196,11 @@ def _is_mssql_db(db) -> bool:
         return False
 
 
-# ── Local-PG staging engine ──────────────────────────────────────────────
-class _LocalPgStageEngine:
-    """Dedicated local PG used for ALL staging — both intra-PG reports (where it
-    matches the primary DB) and cross-DB reports where the remote source (e.g.
-    SQL Server login without CREATE TABLE) refuses DDL.
-
-    Connection params come from app.config (which the user's own PG account
-    already controls with full CREATE rights). All staging objects live under
-    the configured PG schema so the application schema stays untouched.
-
-    The instance deliberately exposes connect()/disconnect()/cursor() so it
-    can be slotted in wherever the engine passes a `db` object around.
-    """
-
-    DEFAULT_SCHEMA = "public"
-
-    def __init__(self, conn_row, schema: Optional[str] = None):
-        self.row = conn_row
-        self.conn = None
-        self.schema = schema or self.DEFAULT_SCHEMA
-        self._connect_url = ""
-        try:
-            host = str(getattr(conn_row, "host", "") or "127.0.0.1")
-            port = int(getattr(conn_row, "port", 0) or 5432)
-            user = str(getattr(conn_row, "user", "") or "")
-            pwd = str(getattr(conn_row, "password", "") or "")
-            name = str(getattr(conn_row, "name", "") or "urs")
-            self._connect_url = (
-                f"host={host} port={port} dbname={name} user={user} "
-                f"password={pwd} application_name=rml_local_stage"
-            )
-        except Exception:
-            self._connect_url = ""
-
-    def connect(self):
-        import psycopg2
-        if self.conn is not None:
-            try:
-                self.conn.rollback()
-                return self.conn
-            except Exception:
-                try: self.conn.close()
-                except Exception: pass
-                self.conn = None
-        if not self._connect_url:
-            raise ValueError("Local PG staging: no connection params resolved")
-        self.conn = psycopg2.connect(self._connect_url)
-        with self.conn.cursor() as cur:
-            try:
-                cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{self.schema}"')
-                cur.execute(
-                    f'ALTER SCHEMA "{self.schema}" '
-                    f'OWNER TO CURRENT_USER')
-            except Exception:
-                pass
-            self.conn.commit()
-        return self.conn
-
-    def cursor(self):
-        if self.conn is None:
-            self.connect()
-        return self.conn.cursor()
-
-    def commit(self):
-        try: self.conn.commit()
-        except Exception: pass
-
-    def rollback(self):
-        try: self.conn.rollback()
-        except Exception: pass
-
-    def disconnect(self):
-        try:
-            if self.conn is not None:
-                self.conn.close()
-        except Exception:
-            pass
-        finally:
-            self.conn = None
-
-    def _exec(self, sql, params=None):
-        """Tiny shim so the rest of the engine treats this like an OracleEngine."""
-        if not getattr(self, "conn", None):
-            self.connect()
-        cur = self.conn.cursor()
-        try:
-            cur.execute(sql, params or {})
-            return cur
-        except Exception:
-            try: cur.close()
-            except Exception: pass
-            raise
+# ── Local-PG staging engine: REMOVED ─────────────────────────────────────
+# Staging (rml_api_*/rml_union_* TEMP copies) is disabled by design: every
+# queryable SQL source is read live and merged in Python. Only genuinely
+# non-queryable sources (ZK devices, is_queryable=False) cannot run in SQL
+# and fail loudly instead of being copied.
 
 
 # Staging diagnostic sink (file + stderr). Hidden windows can swallow stderr,
@@ -1668,6 +1580,13 @@ class RMLReportEngine:
     def _conn_key_of_table(self, table_norm: str) -> Optional[str]:
         """Global connection id most used by a table's fields (None = default DB)."""
         try:
+            _im = getattr(self, "_iot_mirror", None) or {}
+            _in = self._norm_table(table_norm)
+            if _in and _in in _im:
+                return str(_im[_in].get("gid") or "") or None
+        except Exception:
+            pass
+        try:
             _um = self._union_partitions()
             if _um and self._norm_table(table_norm) in _um:
                 return None  # مدموج UNION على الأساسي — يُوجَّه لقاعدة الأساس
@@ -1808,29 +1727,13 @@ class RMLReportEngine:
                     return self._mssql_db_for(conn_key)
         except Exception:
             pass
-        # API-backed connection (e.g. ZK — is_queryable=False): its tables are
-        # staged as TEMP tables on the primary SQL DB, so route there.
+        # Non-SQL connections (e.g. ZK devices) have no live engine: their
+        # tables are served from instant local mirrors (see _iot_mirror,
+        # refreshed per request). Anything else unresolvable fails loudly.
         try:
-            _dj = self._dj_conn(conn_key) if conn_key else None
-            if _dj is not None and getattr(self, "db", None) is not None:
-                try:
-                    _fl = getattr(_dj, "is_queryable", True)
-                    _f = False if _fl is False or str(_fl).strip().lower() in ("0", "false", "no", "none") else True
-                except Exception:
-                    _f = True
-                _e = str(getattr(_dj, "engine", "") or "").lower()
-                if not _f or _e not in self.API_SQL_FAMILY:
-                    return self.db
-        except Exception:
-            pass
-        # Staged tables (API/ZK/sqlserver mirrors) physically live on the primary
-        # DB — route by staged gid instead of raising.
-        try:
-            _st = getattr(self, "_api_stage", None) or {}
-            for _norm, _spec in _st.items():
-                _gi = ((_spec or {}).get("info") or {}).get("gid")
-                if _gi is not None and str(_gi) == str(conn_key):
-                    return self.db
+            _live = self._live_engine_for_gid(conn_key)
+            if _live is not None:
+                return _live
         except Exception:
             pass
         raise ValueError(
@@ -1838,7 +1741,14 @@ class RMLReportEngine:
             f'أضف الاتصال للتقرير وتحقق من إعدادات التنفيذ.')
 
     def _schema_for_table(self, table_norm: str, conn_key: Optional[str], default_schema: Optional[str]) -> Optional[str]:
-        """Schema for a table: connection.schema -> report schema -> dialect default."""
+        """Schema for a table: IoT mirror -> connection.schema -> report schema -> dialect default."""
+        try:
+            _im = getattr(self, "_iot_mirror", None) or {}
+            _in = self._norm_table(table_norm)
+            if _in and _in in _im:
+                return str(_im[_in].get("schema") or "") or None
+        except Exception:
+            pass
         try:
             if self._staged_temp_of(table_norm):
                 return None  # جدول مؤقت مرحّل — ظاهر في الجلسة دون مخطط
@@ -2530,6 +2440,34 @@ class RMLReportEngine:
         except Exception:
             pass
         try:
+            _im = getattr(self, "_iot_mirror", None) or {}
+            if norm in _im:
+                # Instant IoT mirror: columns are exactly the report fields
+                # (they match the att-shaped mirror DDL by construction).
+                _fm = {}
+                for _f in (getattr(self, "fields", []) or []):
+                    try:
+                        if self._norm_table(getattr(_f, "table_source", "") or "") == norm:
+                            _fn = str(getattr(_f, "name", "") or "")
+                            if _fn:
+                                _fm[_fn.upper()] = str(getattr(_f, "data_type", None) or "TEXT").upper()
+                    except Exception:
+                        continue
+                if _fm:
+                    self._cols_cache[key] = dict(_fm)
+                    try:
+                        if not hasattr(self, "_cols_orig") or self._cols_orig is None:
+                            self._cols_orig = {}
+                        self._cols_orig[key] = {str(getattr(_f, "name", "") or "").upper(): str(getattr(_f, "name", "") or "")
+                                                for _f in (getattr(self, "fields", []) or [])
+                                                if self._norm_table(getattr(_f, "table_source", "") or "") == norm
+                                                and getattr(_f, "name", None)}
+                    except Exception:
+                        pass
+                    return dict(_fm)
+        except Exception:
+            pass
+        try:
             _api = self._api_table_info(norm)
         except Exception:
             _api = None
@@ -2866,9 +2804,6 @@ class RMLReportEngine:
     # (tens of thousands of records over the ZK protocol), so raw rows are
     # cached per (connection, table); TEMP staging per request stays session-safe.
     # Prefer the biotime_sql connection (local SQL mirror) over live device pulls.
-    API_STAGE_TTL = 1800
-
-    @staticmethod
     def _api_static_columns():
         """{TABLE_UPPER: {COL_UPPER: dtype}} لمصادر API — بدون أي وصول للأجهزة."""
         try:
@@ -2906,102 +2841,19 @@ class RMLReportEngine:
 
     # ---- Local PG staging (routing + lazy accessor) -----------------
     def _resolve_local_pg_row(self):
-        """Pull PG connection params from Django settings, then app.config.
-
-        Captures the first failure reason for diagnostics and never raises —
-        callers receive None on total failure.
-        """
-        _last_err = ""
-        try:
-            from django.conf import settings as _dj
-            if _dj.configured:
-                _default = _dj.DATABASES.get("default") or {}
-                _engine = str(_default.get("ENGINE") or "")
-                if _engine.endswith("postgresql") and _default.get("HOST"):
-                    _host = str(_default.get("HOST") or "")
-                    try:
-                        _port = int(_default.get("PORT") or 5432)
-                    except (TypeError, ValueError):
-                        _port = 5432
-                    if _host and _default.get("USER"):
-                        return SimpleNamespace(
-                            host=_host, port=_port,
-                            user=str(_default.get("USER") or ""),
-                            password=str(_default.get("PASSWORD") or ""),
-                            name=str(_default.get("NAME") or ""),
-                        )
-        except Exception as _e:
-            _last_err = f"django.conf lookup failed: {_e}"
-        try:
-            import config.dbconf as _d
-            _dbcfg = _d.get_db_config()
-            if _dbcfg and _dbcfg.get("ENGINE", "").endswith("postgresql"):
-                try:
-                    _port = int(_dbcfg.get("PORT") or 5432)
-                except (TypeError, ValueError):
-                    _port = 5432
-                if _dbcfg.get("USER") and _dbcfg.get("NAME"):
-                    return SimpleNamespace(
-                        host=str(_dbcfg.get("HOST") or ""),
-                        port=_port,
-                        user=str(_dbcfg.get("USER") or ""),
-                        password=str(_dbcfg.get("PASSWORD") or ""),
-                        name=str(_dbcfg.get("NAME") or ""),
-                    )
-        except Exception as _e:
-            _last_err = _last_err or f"config.dbconf.get_db_config failed: {_e}"
-        try:
-            self._local_pg_last_err = _last_err
-        except Exception:
-            pass
+        """Removed with staging — always None (no local TEMP target exists)."""
         return None
 
     def _local_pg_engine(self):
-        """Lazy accessor for the local PG staging engine (one per RML engine)."""
-        eng = getattr(self, "_local_pg", None)
-        if eng is not None:
-            return eng
-        row = self._resolve_local_pg_row()
-        if row is None:
-            raise ValueError(
-                "Local PG staging: app.config DB_HOST/USER/NAME/PASS غير مضبوطة — "
-                "لا يمكن إنشاء جداول الترحيل على الاتصال المحلي. السبب: "
-                + getattr(self, "_local_pg_last_err", ""))
-        from config.settings import BASE_DIR as _bd  # noqa
-        # Staging always happens in `public` (the user's own writable schema
-        # on the local PG). Using the report's metadata.schema would mix
-        # staging rows with real application tables on installations that
-        # share a schema for many reports.
-        schema = "public"
-        eng = _LocalPgStageEngine(row, schema=schema)
-        eng.connect()
-        # Drop our slice of the staging schema at the start of each run for a
-        # deterministic rebuild. Leaving cross-run residue would risk picking
-        # up rows from a previous execution that has since been reissued.
-        try:
-            with eng.cursor() as cur:
-                cur.execute(
-                    f'DELETE FROM "{eng.schema}".rml_stage_meta WHERE 1=1')
-                cur.execute(
-                    "SELECT tablename FROM pg_tables "
-                    f"WHERE schemaname = %s AND tablename LIKE 'rml_%%'",
-                    (eng.schema,))
-                _old = [str(r[0]) for r in (cur.fetchall() or [])]
-                for _t in _old:
-                    try:
-                        cur.execute(f'DROP TABLE IF EXISTS "{eng.schema}"."{_t}"')
-                    except Exception:
-                        pass
-            eng.commit()
-        except Exception:
-            try: eng.rollback()
-            except Exception: pass
-        self._local_pg = eng
-        return eng
+        """Staging is removed — this accessor always fails loudly."""
+        raise ValueError(
+            "الترحيل المؤقت (staging) معطّل: لا تُنسخ الجداول إلى جداول مؤقتة — "
+            "كل مصدر SQL يُقرأ مباشرة ويُدمج في Python. المصادر غير القابلة "
+            "للاستعلام (أجهزة البصمة) لا يمكن تشغيلها في SQL.")
 
     @staticmethod
     def _stage_engine_of(db) -> str:
-        """'oracle' | 'postgres' | 'mssql' — staging TEMP-table dialect for a DB wrapper."""
+        """'oracle' | 'postgres' | 'mssql' — dialect tag of a live DB wrapper."""
         try:
             _nm = (type(db).__name__ or "").lower()
             _mod = (type(db).__module__ or "").lower()
@@ -3012,40 +2864,6 @@ class RMLReportEngine:
         except Exception:
             pass
         return "postgres"
-
-    @staticmethod
-    def _stage_col_type(rml_type, engine: str) -> str:
-        """Staging column type per engine (Oracle has no TIME/BOOLEAN/TEXT; MSSQL has no BOOLEAN/TEXT)."""
-        t = str(rml_type or "").upper().strip()
-        if engine == "oracle":
-            if t in ("INTEGER", "INT", "SERIAL", "BOOLEAN"):
-                return "NUMBER(10)"
-            if t in ("NUMERIC", "DECIMAL", "FLOAT", "DOUBLE"):
-                return "NUMBER"
-            if t in ("TIMESTAMP", "DATETIME"):
-                return "TIMESTAMP"
-            if t == "DATE":
-                return "DATE"
-            return "VARCHAR2(4000)"
-        if engine == "mssql":
-            if t in ("INTEGER", "INT", "SERIAL", "BIGINT"):
-                return "BIGINT"
-            if t in ("NUMERIC", "DECIMAL", "FLOAT", "DOUBLE", "MONEY"):
-                return "DECIMAL(38,10)"
-            if t in ("TIMESTAMP", "DATETIME"):
-                return "DATETIME2"
-            if t == "DATE":
-                return "DATE"
-            if t == "TIME":
-                return "TIME"
-            if t == "BOOLEAN":
-                return "BIT"
-            # NVARCHAR(MAX) (= SQL_WLONGVARCHAR) trips HYC00 on pyodbc's
-            # SQLBindParameter for several Microsoft ODBC drivers when the
-            # staged copy uses executemany. A bounded length keeps every
-            # supported driver happy; 2000 covers all RML field metadata.
-            return "NVARCHAR(2000)"
-        return RMLReportEngine._pg_col_type(rml_type)
 
     def _api_table_info(self, table_norm):
         """None أو {gid, engine, row} عندما يكون الجدول على مصدر API (غير SQL)."""
@@ -3228,84 +3046,9 @@ class RMLReportEngine:
             _seen[_k] = True
 
     def _staged_temp_of(self, norm):
-        """TEMP table backing a staged (API) or unioned table norm, else None."""
-        try:
-            _n = self._norm_table(norm)
-        except Exception:
-            return None
-        try:
-            _st = getattr(self, "_api_stage", None) or {}
-            if _n in _st:
-                return (_st[_n] or {}).get("temp")
-        except Exception:
-            pass
-        try:
-            _un = getattr(self, "_api_union", None) or {}
-            if _n in _un:
-                return (_un[_n] or {}).get("temp")
-        except Exception:
-            pass
+        """No staging exists — always None (sources keep their own names)."""
         return None
-
-    def _coerce_api_value(self, value, rml_type, col_name="", table_name=""):
-        if value is None:
-            try:
-                if str(rml_type or "").upper().strip() in ("TIMESTAMP", "DATETIME", "DATE", "TIME"):
-                    self._note_api_quarantine(table_name, col_name, "(فارغة من الجهاز)")
-            except Exception:
-                pass
-            return None
-        _t = str(rml_type or "").upper().strip()
-        if isinstance(value, bool):
-            # SQL Server BIT arrives as bool: 1/0 for NUM targets, native for BOOLEAN
-            if _t == "BOOLEAN":
-                return value
-            if self._dtype_cat(_t) == "NUM":
-                return 1 if value else 0
-        if _t in ("TIMESTAMP", "DATETIME", "DATE", "TIME"):
-            try:
-                import datetime as _dt
-                if isinstance(value, (_dt.datetime, _dt.date, _dt.time)):
-                    return value
-                _s = str(value).strip()
-                if _t == "TIME":
-                    try:
-                        return _dt.time.fromisoformat(_s)
-                    except Exception:
-                        pass
-                try:
-                    _d = _dt.datetime.fromisoformat(_s)
-                except ValueError:
-                    _d = _dt.datetime.strptime(_s, "%Y-%m-%d %H:%M:%S")
-                if _t == "DATE":
-                    return _d.date() if isinstance(_d, _dt.datetime) else _d
-                if _t == "TIME":
-                    return _d.time() if isinstance(_d, _dt.datetime) else _d
-                return _d
-            except Exception:
-                raise ValueError(
-                    f"قيمة التاريخ/الوقت '{value}' في العمود '{col_name}' "
-                    f"(جدول '{table_name}') غير صالحة.")
-        return value
-
-    def _note_api_quarantine(self, table_norm, col_name, value):
-        """Record a quarantined API value (kept as NULL): first sample + count."""
-        try:
-            _w = getattr(self, "_api_warnings", None)
-            if _w is None:
-                self._api_warnings = _w = []
-            _key = (str(table_norm).lower(), str(col_name).lower())
-            for _e in _w:
-                if isinstance(_e, dict) and _e.get("key") == _key:
-                    _e["skipped"] = int(_e.get("skipped") or 0) + 1
-                    return
-            _w.append({"key": _key,
-                       "message": f"قيم غير صالحة في العمود '{col_name}' "
-                                  f"(جدول '{str(table_norm).lower()}') حُوّلت إلى فارغ"
-                                  f" — مثال: '{str(value)[:60]}'",
-                       "skipped": 1})
-        except Exception:
-            pass
+        return None
 
     def _render_api_warnings(self):
         try:
@@ -3355,18 +3098,6 @@ class RMLReportEngine:
 
     STAGE_MAX_ROWS = 500000
 
-    def _stage_max_rows(self) -> int:
-        """Staging safety gate; per-report override via <rpt_metadata stage_max_rows="..">."""
-        try:
-            _ra = (getattr(self, "metadata", None) or {}).get("raw_attrs") or {}
-            for _k, _v in _ra.items():
-                if str(_k).lower() in ("stage_max_rows", "stagemaxrows", "max_stage_rows"):
-                    return max(0, int(str(_v)))
-        except Exception:
-            pass
-        return int(self.STAGE_MAX_ROWS)
-
-    @staticmethod
     def _split_and_top(text):
         """Split on top-level AND (quote/paren aware) for static filter pushdown."""
         parts, depth, q, cur = [], 0, None, []
@@ -3403,306 +3134,6 @@ class RMLReportEngine:
             i += 1
         parts.append("".join(cur))
         return [p.strip() for p in parts if p.strip()]
-
-    def _static_where_for(self, table_norm, want_cols):
-        """Static general_where conditions applicable to ONE table (for pushdown).
-
-        Bracket refs [t.c]/[c] must resolve to this table; bare idents must belong
-        only to it; literals-only conditions apply everywhere. $rule.var$ expanded.
-        GO batch lines are dropped. Returns SQL WHERE fragment (T-SQL brackets) or "".
-        """
-        try:
-            gw = self.compiler.general_where() if hasattr(self.compiler, "general_where") else ""
-        except Exception:
-            gw = ""
-        gw = str(gw or "")
-        if not gw.strip():
-            return ""
-        if self.rules and "$" in gw:
-            try:
-                from .rulevars import expand_rule_vars as _expand_rv
-                gw = _expand_rv(gw, self.rules)
-            except Exception:
-                pass
-        lines = [l for l in gw.splitlines() if not re.match(r"^\s*GO\s*$", l, re.IGNORECASE)]
-        gw = " ".join(lines)
-        my_cols = {str(c).lower() for c in (want_cols or [])}
-        others: set = set()
-        try:
-            for _f in (getattr(self, "fields", []) or []):
-                _ts = str(getattr(_f, "table_source", "") or "")
-                if _ts and self._norm_table(_ts) != table_norm:
-                    others.add(str(getattr(_f, "name", "") or "").lower())
-        except Exception:
-            pass
-        keep = []
-        for cond in self._split_and_top(gw):
-            c = cond.strip()
-            if not c:
-                continue
-            refs = re.findall(r"\[{1,2}\{?\s*([^\]}]{1,200})\s*}?\]{1,2}", c)
-            ok = True
-            _table_norm_norm = self._norm_table(table_norm)
-            for r in refs:
-                parts = [p.strip() for p in r.split(".")]
-                if len(parts) == 2:
-                    if self._norm_table(parts[0]) != _table_norm_norm:
-                        ok = False
-                        break
-                elif len(parts) == 1:
-                    if parts[0].lower() not in my_cols:
-                        ok = False
-                        break
-                else:
-                    ok = False
-                    break
-            if not ok:
-                continue
-            # bare identifiers must all be mine (or SQL noise)
-            _bare = re.findall(r"[A-Za-z_\u0600-\u06FF][\w$\u0600-\u06FF]*", re.sub(r"\[[^\]]*\]|\{[^}]*\}|'(?:''|[^'])*'", " ", c))
-            bad = False
-            for w in _bare:
-                uw = w.upper()
-                if uw in ("AND", "OR", "NOT", "IN", "IS", "NULL", "LIKE", "BETWEEN", "EXISTS",
-                          "CASE", "WHEN", "THEN", "ELSE", "END", "TRUE", "FALSE"):
-                    continue
-                if re.fullmatch(r"-?\d+(\.\d+)?", w):
-                    continue
-                if w.lower() in my_cols or w.lower() in others:
-                    if w.lower() not in my_cols:
-                        bad = True
-                        break
-                    continue
-                # function call or unknown token → only safe if it looks like a function
-                rest = c[c.upper().find(uw) + len(w):] if uw in c.upper() else ""
-                if not re.match(r"\s*\(", rest):
-                    bad = True
-                    break
-            if bad:
-                continue
-            # rewrite [t.c]/[c] → T-SQL [c] (also collapses doubled brackets like [[c]])
-            def _rw(m):
-                inner = m.group(1)
-                parts = [p.strip() for p in inner.split(".")]
-                return "[" + parts[-1] + "]"
-            rewritten = re.sub(r"\[{1,2}\{?\s*([^\]}]{1,200})\s*}?\]{1,2}", _rw, c)
-            # Final cleanup: any leftover ]] → ] (defensive against odd RML)
-            rewritten = rewritten.replace("]]", "]").replace("[[", "[")
-            keep.append(rewritten)
-        return " AND ".join(keep)
-
-    def _fetch_sqlserver_rows(self, table_norm, info, refresh=False):
-        """Fetch rows of a SQL Server table via pyodbc (for PG-TEMP staging).
-
-        Schema resolved from the report field's table_source, else the
-        connection's schema, else dbo. Cached like API rows (API_STAGE_TTL).
-        """
-        _ckey = ("api_rows", str(info.get("gid") or ""), str(table_norm).upper())
-        if not refresh:
-            try:
-                _hit = _API_ROWS_CACHE.get(_ckey)
-                if _hit:
-                    import time as _tm
-                    if _tm.time() - float(_hit[0]) < self.API_STAGE_TTL:
-                        return [dict(_r) for _r in _hit[1]]
-            except Exception:
-                pass
-        row = info.get("row")
-        plan = self._sqlserver_plan(table_norm, info, row)
-        rows: list = []
-        for _names, _batch in self._iter_sqlserver_batches(
-                row, plan["user"], plan["pwd"], plan["sch"], plan["tbl"],
-                plan["sellist"], plan["where"]):
-            rows.extend(_batch)
-        try:
-            import time as _tm2
-            _API_ROWS_CACHE[_ckey] = (_tm2.time(), [dict(_r) for _r in rows])
-        except Exception:
-            pass
-        return rows
-
-    def _sqlserver_plan(self, table_norm, info, row):
-        """Resolve fetch plan for one sqlserver table: creds/schema/cols/filter."""
-        user = str(getattr(row, "user", "") or "")
-        pwd = str(getattr(row, "password", "") or "")
-        sch, tbl = "", self._norm_table(table_norm)
-        want: list = []
-        try:
-            for _f in (getattr(self, "fields", []) or []):
-                if self._norm_table(getattr(_f, "table_source", None) or "") == tbl:
-                    _fn = str(getattr(_f, "name", "") or "")
-                    if _fn and _fn not in want:
-                        want.append(_fn)
-            if not want:
-                raise ValueError(f"لا حقول للتقرير على الجدول '{tbl.lower()}' — أضف حقوله أولاً")
-            for _f in (getattr(self, "fields", []) or []):
-                if self._norm_table(getattr(_f, "table_source", None) or "") == tbl:
-                    _ts = str(getattr(_f, "table_source", "") or "")
-                    if "." in _ts:
-                        sch = _ts.split(".")[0]
-                    break
-        except ValueError:
-            raise
-        except Exception:
-            pass
-        if not sch:
-            sch = str(getattr(row, "schema", "") or "").strip() or "dbo"
-        sellist = ", ".join(f"[{c}]" for c in want)
-        where = self._static_where_for(table_norm, want)
-        return {"user": user, "pwd": pwd, "sch": sch, "tbl": tbl,
-                "want": want, "sellist": sellist, "where": where}
-        try:
-            import time as _tm2
-            _API_ROWS_CACHE[_ckey] = (_tm2.time(), [dict(_r) for _r in rows])
-        except Exception:
-            pass
-        return rows
-
-    def _iter_sqlserver_batches(self, row, user, pwd, sch, tbl, sellist, where):
-        """Yield (names, batch_dicts) streaming a SQL Server table (fetchmany).
-
-        COUNT-gate applies when no static filter; raises the gate error directly.
-        Connection/cursor closed when exhausted or on error.
-        """
-        last = None
-        _gate_stop = False
-        for _srv, _dbn in self._sqlserver_targets(row):
-            for _drv, _modern in self._sqlserver_drivers():
-                try:
-                    import pyodbc
-                    _parts = [f"DRIVER={{{_drv}}}", f"SERVER={_srv}", f"DATABASE={_dbn}",
-                              f"UID={user}", f"PWD={pwd}"]
-                    if _modern:
-                        _parts += ["TrustServerCertificate=yes", "Connect Timeout=15"]
-                    # See SqlServerDirect.connect() — HYC00 workaround.
-                    _parts += ["AutoTranslate=no", "UseProcForPrepare=0"]
-                    _cn = pyodbc.connect(";".join(_parts) + ";", timeout=15)
-                    try:
-                        _cur = _cn.cursor()
-                        if not where:
-                            _cur.execute(f"SELECT COUNT(*) FROM [{sch}].[{tbl}]")
-                            _n = (_cur.fetchone() or [0])[0] or 0
-                            if int(_n) > int(self._stage_max_rows()):
-                                raise ValueError(
-                                    f"الجدول '{tbl.lower()}' ضخم ({int(_n)} صف) بلا شرط تصفية — "
-                                    f"ضع شرطاً عاماً (general_where) في التقرير لتقليص السحب، "
-                                    f"مثل [{tbl.lower()}.<العمود>] = ...")
-                        _cur.execute(f"SELECT {sellist} FROM [{sch}].[{tbl}]"
-                                     + (f" WHERE {where}" if where else ""))
-                        _names = [d[0] for d in (_cur.description or [])]
-                        while True:
-                            _batch = _cur.fetchmany(2000)
-                            if not _batch:
-                                break
-                            yield _names, [dict(zip(_names, r)) for r in _batch]
-                        try:
-                            _cur.close()
-                        except Exception:
-                            pass
-                    finally:
-                        try:
-                            _cn.close()
-                        except Exception:
-                            pass
-                    return
-                except Exception as e:
-                    _m = str(e)
-                    if "الجدول" in _m and "ضخم" in _m:
-                        raise
-                    if "IM002" in _m or "Data source name not found" in _m:
-                        last = e
-                        continue
-                    try:
-                        import traceback as _tb
-                        _emit_staging_diag(
-                            "RML _iter_sqlserver_batches diagnostic",
-                            f"driver: {_drv!r}  sch/tbl: {sch}/{tbl}\n"
-                            + _tb.format_exc())
-                    except Exception:
-                        pass
-                    last = e
-        raise ValueError(f"تعذر جلب {sch}.{tbl} من SQL Server: {str(last)[:200]}")
-
-    def _fetch_api_rows(self, table_norm, info, refresh=False):
-        """Fetch ALL rows of an API table via its source API (no staging).
-
-        Results are cached per (connection, table) for API_STAGE_TTL seconds —
-        a full device pull is far too slow to repeat on every page view.
-        refresh=True bypasses the cache (forced fresh pull).
-        """
-        try:
-            _gid = str(info.get("gid") or "")
-        except Exception:
-            _gid = ""
-        _ckey = ("api_rows", _gid, str(table_norm).upper())
-        if not refresh:
-            try:
-                _hit = _API_ROWS_CACHE.get(_ckey)
-                if _hit:
-                    import time as _tm
-                    if _tm.time() - float(_hit[0]) < self.API_STAGE_TTL:
-                        return [dict(_r) for _r in _hit[1]]
-            except Exception:
-                pass
-        eng = str(info.get("engine") or "").lower()
-        row = info.get("row")
-        try:
-            _label = str(getattr(row, "name", "") or info.get("gid") or "")
-        except Exception:
-            _label = str(info.get("gid") or "")
-        if eng == "sqlserver":
-            return self._fetch_sqlserver_rows(table_norm, info, refresh)
-        if eng != "zk":
-            raise ValueError(
-                f"المصدر '{_label}' من نوع '{eng or '?'}' غير قابل للاستعلام SQL "
-                f"ولا يوجد له API مدعوم — حدّث الاتصال أو وجّه التقرير لاتصال SQL.")
-        try:
-            from odex.engines.zk import ZKEngine
-        except Exception as _e:
-            raise ValueError(f"تعذر تحميل محرك أجهزة البصمة: {_e}")
-        _static = self._api_static_columns()
-        if table_norm not in _static:
-            _avail = ", ".join(sorted(_static.keys())) or "—"
-            raise ValueError(
-                f"الجدول '{table_norm.lower()}' غير متوفر على جهاز البصمة '{_label}' — "
-                f"الجداول المتاحة: {_avail}.")
-        try:
-            _host = str(getattr(row, "host", "") or "")
-            _port = int(getattr(row, "port", 0) or 4370)
-        except Exception:
-            _host, _port = str(getattr(row, "host", "") or ""), 4370
-        try:
-            _zk = ZKEngine(ip=_host, port=_port, timeout=15, password=0)
-            _zk.connect()
-        except Exception as _e:
-            raise ValueError(
-                f"تعذر الاتصال بجهاز البصمة '{_label}' ({_host}:{_port}) — "
-                f"تحقق من الشبكة والجهاز. ({_e})")
-        # سحبة واحدة كاملة: list_all يسحب سجل الجهاز كله في كل استدعاء،
-        # فالترقيم هنا O(n²) على البروتوكول — نسحب مرة واحدة فقط.
-        # tolerant_zk_decode يجعل سجلات التواريخ الفاسدة None بدل إسقاط السحبة كلها.
-        try:
-            try:
-                from odex.engines.zk import tolerant_zk_decode as _tzd
-            except Exception:
-                _tzd = None
-            import contextlib as _cl
-            _cm = _tzd() if _tzd else _cl.nullcontext()
-            with _cm:
-                _api_rows = list(_zk.list_all(table_norm.lower(), limit=1000000) or [])
-            try:
-                import time as _tm
-                _API_ROWS_CACHE[_ckey] = (_tm.time(), [dict(_r) for _r in _api_rows])
-            except Exception:
-                pass
-            return _api_rows
-        except Exception as _e:
-            raise ValueError(f"تعذر قراءة الجدول '{table_norm.lower()}' من جهاز البصمة '{_label}': {_e}")
-        finally:
-            try:
-                _zk.disconnect()
-            except Exception:
-                pass
 
     def _fetch_sql_partition(self, table_norm, gid, fields, report_schema):
         """Fetch ALL rows of a SQL table partition (chunked SELECT, no staging)."""
@@ -3751,431 +3182,12 @@ class RMLReportEngine:
             _page += 1
         return _rows
 
-    @staticmethod
-    def _stage_phy_name(temp, coldefs) -> str:
-        """Stable persistent stage name: base + columns hash (report edits auto-isolate)."""
-        import hashlib as _hl
-        _hs = _hl.md5("|".join(
-            f"{str(_n).lower()}:{str(_t or '').upper()}" for _n, _t in (coldefs or [])
-        ).encode()).hexdigest()[:8]
-        return (re.sub(r"[^a-z0-9_]", "_", str(temp).lower()) + "_" + _hs)[:100]
-
-    @staticmethod
-    def _stage_normtype(t) -> str:
-        s = str(t or "").lower().strip()
-        if s.startswith("timestamp") or s.startswith("datetime"):
-            return "timestamp"
-        if s.startswith("time"):
-            return "time"
-        if "varchar" in s or s in ("character varying", "text", "nvarchar"):
-            return "text"
-        if s in ("bit", "boolean"):
-            return "boolean"
-        if s in ("bigint", "int", "integer", "smallint", "tinyint", "serial"):
-            return "integer"
-        if s.startswith("decimal") or s.startswith("numeric") or s in ("float", "double", "real", "money"):
-            return "numeric"
-        if s == "date":
-            return "date"
-        return s
-
-    def _stage_table_ready(self, db, phy, coldefs) -> bool:
-        """True if a persistent stage table exists with exactly these columns AND types.
-
-        Type check defeats stale reuse (e.g. a TEXT Delivered from before the
-        field was corrected to INTEGER). A meta rows=-1 means an interrupted
-        fill → never ready (self-healing refill).
-        """
         try:
-            if self._stage_engine_of(db) == "mssql":
-                return self._stage_table_ready_mssql(db, phy, coldefs)
-            _cur = db.conn.cursor()
-            try:
-                _cur.execute("SELECT to_regclass(%s)", (str(phy),))
-                _row = _cur.fetchone()
-                if not _row or not _row[0]:
-                    return False
-            finally:
-                try:
-                    _cur.close()
-                except Exception:
-                    pass
-            _cur2 = db.conn.cursor()
-            try:
-                _cur2.execute(
-                    "SELECT column_name, data_type FROM information_schema.columns "
-                    "WHERE table_name=%s AND table_schema = ANY (current_schemas(false))",
-                    (str(phy),))
-                _have = {str(r[0]).lower(): self._stage_normtype(r[1]) for r in (_cur2.fetchall() or [])}
-            finally:
-                try:
-                    _cur2.close()
-                except Exception:
-                    pass
-            _want = {str(_n).lower(): self._stage_normtype(_t) for _n, _t in (coldefs or [])}
-            if not _want or set(_want) != set(_have):
-                return False
-            if any(_have.get(_k) != _v for _k, _v in _want.items()):
-                return False
-            try:
-                _cur3 = db.conn.cursor()
-                try:
-                    _cur3.execute("SELECT rows FROM rml_stage_meta WHERE stage=%s", (str(phy),))
-                    _mr = _cur3.fetchone()
-                    if _mr is not None and int(_mr[0] or 0) < 0:
-                        return False
-                finally:
-                    try:
-                        _cur3.close()
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-            return True
-        except Exception:
-            return False
-
-    def _stage_table_ready_mssql(self, db, phy, coldefs) -> bool:
-        """MSSQL variant: OBJECT_ID existence + information_schema shape match.
-
-        No rml_stage_meta on MSSQL (PG-only registry) — shape match reuses,
-        anything else refills. Best-effort, never raises.
-        """
-        try:
-            _cur = db.conn.cursor()
-            try:
-                _cur.execute("SELECT OBJECT_ID(?, 'U')", (str(phy),))
-                _row = _cur.fetchone()
-                if not _row or not _row[0]:
-                    return False
-            finally:
-                try:
-                    _cur.close()
-                except Exception:
-                    pass
-            _cur2 = db.conn.cursor()
-            try:
-                _cur2.execute(
-                    "SELECT column_name, data_type FROM information_schema.columns "
-                    "WHERE table_name=?", (str(phy),))
-                _have = {str(r[0]).lower(): self._stage_normtype(r[1]) for r in (_cur2.fetchall() or [])}
-            finally:
-                try:
-                    _cur2.close()
-                except Exception:
-                    pass
-            _want = {str(_n).lower(): self._stage_normtype(_t) for _n, _t in (coldefs or [])}
-            if not _want or set(_want) != set(_have):
-                return False
-            if any(_have.get(_k) != _v for _k, _v in _want.items()):
-                return False
-            return True
-        except Exception:
-            return False
-
-    def _stage_touch_meta(self, db, phy, rows=None):
-        """Upsert stage registry (for TTL cleanup). Best-effort."""
-        try:
-            _cur = db.conn.cursor()
-            try:
-                _cur.execute(
-                    "CREATE TABLE IF NOT EXISTS rml_stage_meta "
-                    "(stage TEXT PRIMARY KEY, created_at TIMESTAMPTZ DEFAULT now(), rows BIGINT DEFAULT 0)")
-                _cur.execute(
-                    "INSERT INTO rml_stage_meta (stage, created_at, rows) VALUES (%s, now(), %s) "
-                    "ON CONFLICT (stage) DO UPDATE SET created_at=EXCLUDED.created_at, rows=EXCLUDED.rows",
-                    (str(phy), int(rows or 0)))
-                db.conn.commit()
-            finally:
-                try:
-                    _cur.close()
-                except Exception:
-                    pass
-        except Exception:
-            try:
-                db.conn.rollback()
-            except Exception:
-                pass
-
-    def _stage_gc(self, db, ttl_hours=24, limit=20):
-        """Drop stage tables older than TTL. Best-effort, postgres only."""
-        try:
-            if self._stage_engine_of(db) != "postgres":
-                return
-            _cur = db.conn.cursor()
-            try:
-                _cur.execute(
-                    "SELECT stage FROM rml_stage_meta WHERE created_at < now() - (%s || ' hours')::interval "
-                    "ORDER BY created_at LIMIT %s", (str(int(ttl_hours)), int(limit)))
-                _old = [str(r[0]) for r in (_cur.fetchall() or []) if r and r[0]]
-                for _st in _old:
-                    if not re.fullmatch(r"[a-z0-9_]{1,100}", _st):
-                        continue
-                    try:
-                        _cur.execute(f'DROP TABLE IF EXISTS {_q(_st)}')
-                        _cur.execute("DELETE FROM rml_stage_meta WHERE stage=%s", (_st,))
-                    except Exception:
-                        try:
-                            db.conn.rollback()
-                        except Exception:
-                            pass
-                        continue
-                db.conn.commit()
-            finally:
-                try:
-                    _cur.close()
-                except Exception:
-                    pass
-        except Exception:
-            try:
-                db.conn.rollback()
-            except Exception:
-                pass
-
-    def _write_temp_table(self, db, temp, coldefs, data, label, refresh=False):
-        """CREATE staging table + bulk INSERT on the primary DB (any engine).
-
-        postgres: PERSISTENT shared table rml_<..>_<colhash> (cross-request reuse;
-          refresh or missing/changed table refills; 24h TTL via rml_stage_meta).
-        oracle: PRIVATE TEMPORARY TABLE ORA$PTT_* ON COMMIT PRESERVE DEFINITION
-          (18c+, session-private; dropped automatically at session end).
-        """
-        try:
-            if not getattr(db, "conn", None):
-                try:
-                    db.connect()
-                except Exception as _e:
-                    raise ValueError(f"تعذر الاتصال بقاعدة SQL الأساسية لترحيل البيانات: {_e}")
-            _eng = self._stage_engine_of(db)
-            if _eng == "oracle":
-                # Global Temporary Table (works 8i+; Private Temp needs 18c+).
-                # Definition persists and is REUSED across runs; rows stay
-                # session-private. Name carries a columns-hash so differing
-                # column sets never collide on a stale definition.
-                import hashlib as _hl
-                _hs = _hl.md5(",".join(str(_n).lower() for _n, _t in coldefs).encode()).hexdigest()[:6]
-                _temp = (re.sub(r"[^a-z0-9_]", "_", str(temp).lower()) + "_" + _hs)[:100]
-            else:
-                _temp = temp
-            _cur = db.conn.cursor()
-            try:
-                if _eng == "oracle":
-                    _collist = ", ".join(f"{_q(_n)} {_t}" for _n, _t in coldefs)
-                    try:
-                        _cur.execute(
-                            f"CREATE GLOBAL TEMPORARY TABLE {_q(_temp)} ({_collist}) "
-                            f"ON COMMIT PRESERVE ROWS")
-                    except Exception as _ce:
-                        _msg = str(_ce)
-                        if "-00955" in _msg or "already used" in _msg.lower():
-                            pass  # definition reused from a previous run
-                        elif "-01031" in _msg or "insufficient privileges" in _msg.lower():
-                            try:
-                                _who = getattr(db, "user", "") or "?"
-                            except Exception:
-                                _who = "?"
-                            raise ValueError(
-                                f"حساب أوراكل ({_who}) لا يملك صلاحية إنشاء الجداول المؤقتة — "
-                                f"نفّذ مرة واحدة كـ DBA: GRANT CREATE TABLE TO {_who}. "
-                                f"(تعريف الجدول المؤقت يُنشأ مرة واحدة ويُعاد استخدامه، "
-                                f"والصفوف خاصة بكل جلسة ولا تظهر للآخرين.)")
-                        elif "-01950" in _msg:
-                            raise ValueError(
-                                "لا توجد حصة تخزين (quota) لحساب أوراكل لإنشاء الجداول المؤقتة — "
-                                "راجع الـ DBA.")
-                        else:
-                            raise
-                    _cur.execute(f"DELETE FROM {_q(_temp)}")
-                    if data:
-                        import datetime as _dtm
-                        _ph = ", ".join(f":{i + 1}" for i in range(len(coldefs)))
-                        _clean = []
-                        for _r in data:
-                            _row = []
-                            for _v in (list(_r) if not isinstance(_r, dict) else list(_r.values())):
-                                if isinstance(_v, bool):
-                                    _row.append(int(_v))
-                                elif isinstance(_v, _dtm.time):
-                                    _row.append(_v.isoformat())
-                                else:
-                                    _row.append(_v)
-                            _clean.append(tuple(_row))
-                        for _i in range(0, len(_clean), 1000):
-                            _cur.executemany(
-                                f"INSERT INTO {_q(_temp)} ({', '.join(_q(_n) for _n, _t in coldefs)}) "
-                                f"VALUES ({_ph})", _clean[_i:_i + 1000])
-                    db.conn.commit()
-                else:
-                    # Persistent shared stage (cross-request): stable name + columns hash.
-                    # Reuse skips the whole fetch; refresh (or missing/changed table) refills.
-                    _phy = self._stage_phy_name(_temp, coldefs)
-                    _collist = ", ".join(f"{_q(_n)} {_t}" for _n, _t in coldefs)
-                    _is_ms = self._stage_engine_of(db) == "mssql"
-                    if not refresh and self._stage_table_ready(db, _phy, coldefs):
-                        self._report_progress({"stage": "cached", "table": str(label).lower(),
-                                               "text": f"استخدام مرحلة مخزنة: {str(label).lower()}…"})
-                        return _phy
-                    try:
-                        _cur.execute(f"DROP TABLE IF EXISTS {_q(_phy)}")
-                        _cur.execute(f"CREATE TABLE {_q(_phy)} ({_collist})")
-                    except Exception as _dce:
-                        _dm = str(_dce)
-                        if "permission denied" in _dm.lower() or "42501" in _dm or "(262)" in _dm:
-                            if self._stage_engine_of(db) == "mssql":
-                                raise ValueError(
-                                    "حساب SQL Server لا يملك صلاحية إنشاء الجداول المؤقتة "
-                                    "(CREATE TABLE permission denied) — اطلب من الـ DBA منحه، "
-                                    "أو شغّل التقارير أحادية الاتصال مباشرة (لا تحتاج ترحيلاً).")
-                            raise ValueError(
-                                "حساب قاعدة البيانات لا يملك صلاحية إنشاء جداول الترحيل — "
-                                "نفّذ مرة واحدة كـ DBA: GRANT CREATE ON SCHEMA public TO <user>.")
-                        raise
-                    if data:
-                        _ph_ins = "?" if _is_ms else "%s"
-                        _cur.executemany(
-                            f"INSERT INTO {_q(_phy)} ({', '.join(_q(_n) for _n, _t in coldefs)}) "
-                            f"VALUES ({', '.join([_ph_ins] * len(coldefs))})", data)
-                    db.conn.commit()
-                    # -1 = filling in progress (streaming path sets the real count
-                    # afterwards); an interrupted fill is never treated as ready.
-                    if not _is_ms:
-                        self._stage_touch_meta(db, _phy, len(data) if data else -1)
-                    return _phy
-            except Exception as _e:
-                try:
-                    db.conn.rollback()
-                except Exception:
-                    pass
-                raise ValueError(f"تعذر ترحيل بيانات '{label}' إلى جدول مؤقت: {_e}")
-            finally:
-                try:
-                    _cur.close()
-                except Exception:
-                    pass
-            return _temp
-        except ValueError:
-            raise
-        except Exception as _e:
-            raise ValueError(f"فشل ترحيل الجدول '{label}': {_e}")
-
-    def _stage_union_table(self, table_norm, parts, db, report_schema, refresh=False):
-        """UNION ALL instances of one table across connections into ONE TEMP table.
-
-        parts: [[(field, gid), ...], ...] — one partition per physical source.
-        Returns (temp, cols). Fetches records from every connection completely.
-        """
-        # union of RML field names (first-seen order) — temp DDL + link validation
-        _cols = []
-        _seen = set()
-        for _part in parts:
-            for _f, _gid in _part:
-                _n = str(getattr(_f, "name", "") or "")
-                if _n and _n.lower() not in _seen:
-                    _seen.add(_n.lower())
-                    _cols.append((_n, getattr(_f, "data_type", None)))
-        if not _cols:
-            raise ValueError(f"لا توجد حقول معرفة للجدول '{table_norm.lower()}' في التقرير.")
-        _names = {str(_n).lower() for _n, _t in _cols}
-        try:
-            for _l in (getattr(self, "report_links", []) or []):
-                if not isinstance(_l, dict):
-                    continue
-                for _k, _side in (("from_table", "from_col"), ("to_table", "to_col")):
-                    try:
-                        if self._norm_table(_l.get(_k) or "") == table_norm:
-                            _lc = str(_l.get(_side) or "").strip().lower()
-                            if _lc and _lc not in _names:
-                                raise ValueError(
-                                    f"الرابط يشير للعمود '{_l.get(_side)}' في الجدول "
-                                    f"'{table_norm.lower()}' وهو غير موجود في حقول التقرير — "
-                                    f"أضف العمود أولاً.")
-                    except ValueError:
-                        raise
-                    except Exception:
-                        pass
-        except ValueError:
-            raise
+            _cb = getattr(self, "_progress_cb", None)
+            if callable(_cb):
+                _cb(info)
         except Exception:
             pass
-        _temp = re.sub(r"[^a-z0-9_]", "_", f"rml_union_{table_norm}".lower())
-        _coldefs = [(_n, self._stage_col_type(_t, self._stage_engine_of(db))) for _n, _t in _cols]
-        _low_names = [str(_n).lower() for _n, _t in _cols]
-        _cols_retU = [(str(_n), str(_t or "")) for _n, _t in _cols]
-        if ((not refresh) and self._stage_engine_of(db) == "postgres"
-                and self._stage_table_ready(db, self._stage_phy_name(_temp, _coldefs), _coldefs)):
-            self._report_progress({"stage": "cached", "table": str(table_norm).lower(),
-                                   "text": f"استخدام مرحلة مخزنة: {str(table_norm).lower()}…"})
-            return self._stage_phy_name(_temp, _coldefs), _cols_retU
-        # resolve partition sources first (no I/O beyond cached Django lookups)
-        _jobs = []
-        for _part in parts:
-            _pgid = None
-            for _, _g in _part:
-                if _g:
-                    _pgid = _g
-                    break
-            _part_fields = [_f for _f, _g in _part]
-            if _pgid and self._is_api_gid(_pgid):
-                try:
-                    _row0 = self._dj_conn(_pgid)
-                except Exception:
-                    _row0 = None
-                _eng0 = str(getattr(_row0, "engine", "") or "").lower() if _row0 is not None else ""
-                _jobs.append(("api", _part_fields, table_norm,
-                              {"gid": _pgid, "engine": _eng0, "row": _row0}))
-            else:
-                _jobs.append(("sql", _part_fields, table_norm, _pgid))
-        # API partitions: fetch distinct devices in parallel (separate sessions);
-        # same device sequentially (single-session devices). SQL stays main-thread.
-        _raws = {}
-        _api_idx = [i for i, _j in enumerate(_jobs) if _j[0] == "api"]
-        if _api_idx:
-            _groups = {}
-            for _i in _api_idx:
-                _, _, _, _inf = _jobs[_i]
-                _rw = (_inf or {}).get("row")
-                _hk = (str(getattr(_rw, "host", "") or ""),
-                       str(getattr(_rw, "port", 0) or ""))
-                _groups.setdefault(_hk, []).append(_i)
-
-            def _run_group(_idxs):
-                _out = {}
-                for _i in _idxs:
-                    _, _, _tn2, _inf2 = _jobs[_i]
-                    _out[_i] = self._fetch_api_rows(_tn2, _inf2, refresh)
-                return _out
-
-            if len(_groups) > 1:
-                from concurrent.futures import ThreadPoolExecutor
-                with ThreadPoolExecutor(max_workers=min(len(_groups), 4)) as _ex:
-                    _futs = { _ex.submit(_run_group, _idxs): _idxs for _idxs in _groups.values() }
-                    for _fu in _futs:
-                        _raws.update(_fu.result())
-            else:
-                _raws.update(_run_group(next(iter(_groups.values()))))
-        _data = []
-        for _i, _job in enumerate(_jobs):
-            if _job[0] == "api":
-                for _r in (_raws.get(_i) or []):
-                    _lm = {str(_k).lower(): _v for _k, _v in dict(_r or {}).items()}
-                    _frow = []
-                    for _fn, _ft in _coldefs:
-                        try:
-                            _frow.append(self._coerce_api_value(
-                                _lm.get(str(_fn).lower()), _ft, _fn, table_norm.lower()))
-                        except ValueError:
-                            self._note_api_quarantine(table_norm, _fn, _lm.get(str(_fn).lower()))
-                            _frow.append(None)
-                    _data.append(tuple(_frow))
-            else:
-                _, _part_fields, _, _pgid3 = _job
-                _rows = self._fetch_sql_partition(table_norm, _pgid3, _part_fields, report_schema)
-                for _r in (_rows or []):
-                    _lm = {str(_k).lower(): _v for _k, _v in dict(_r or {}).items()}
-                    _frow = [_lm.get(_ln) for _ln in _low_names]
-                    _data.append(tuple(_frow))
-        _eff = self._write_temp_table(db, _temp, _coldefs, _data, table_norm.lower(), refresh=refresh)
-        return _eff, [(str(_n), str(_t or "")) for _n, _t in _cols]
 
     def _report_progress(self, info):
         try:
@@ -4184,235 +3196,6 @@ class RMLReportEngine:
                 _cb(info)
         except Exception:
             pass
-
-    def _stage_sqlserver_streamed(self, table_norm, info, db, refresh=False):
-        """Stage a SQL Server table streaming fetchmany→executemany (bounded RAM).
-
-        Validates RML fields against the first fetched batch (missing → warning,
-        NULLs), creates the TEMP table empty, then streams batches in.
-        Returns (temp, cols) like _stage_api_table.
-        """
-        _flds = [f for f in (getattr(self, "fields", []) or [])
-                 if self._norm_table(getattr(f, "table_source", None) or "") == table_norm]
-        if not _flds:
-            raise ValueError(f"لا توجد حقول معرفة للجدول '{table_norm.lower()}' في التقرير.")
-        _coldefs = [(str(getattr(_f, "name", "")),
-                     self._stage_col_type(getattr(_f, "data_type", None), self._stage_engine_of(db)))
-                    for _f in _flds]
-        _gid = str(info.get("gid") or "x")
-        _temp = re.sub(r"[^a-z0-9_]", "_", f"rml_api_{_gid}_{table_norm}".lower())
-        _cols_ret = [(str(getattr(_f, "name", "")), str(getattr(_f, "data_type", None) or "")) for _f in _flds]
-        if ((not refresh) and self._stage_engine_of(db) == "postgres"
-                and self._stage_table_ready(db, self._stage_phy_name(_temp, _coldefs), _coldefs)):
-            _phy0 = self._stage_phy_name(_temp, _coldefs)
-            self._report_progress({"stage": "cached", "table": str(table_norm).lower(),
-                                   "text": f"استخدام مرحلة مخزنة: {str(table_norm).lower()}…"})
-            return _phy0, _cols_ret
-        _eff = self._write_temp_table(db, _temp, _coldefs, [], table_norm.lower(), refresh=refresh)
-        # Streaming always refills fully: clear any reused rows first (idempotent,
-        # also self-heals interrupted fills on engines without a meta registry).
-        _cur0 = db.conn.cursor()
-        try:
-            _cur0.execute(f"DELETE FROM {_q(_eff)}")
-            db.conn.commit()
-        except Exception:
-            try:
-                db.conn.rollback()
-            except Exception:
-                pass
-        finally:
-            try:
-                _cur0.close()
-            except Exception:
-                pass
-        _plan = self._sqlserver_plan(table_norm, info, info.get("row"))
-        _cur = db.conn.cursor()
-        _is_ms_stream = (self._stage_engine_of(db) == "mssql")
-        _use_ev = (self._stage_engine_of(db) == "postgres")
-        # Pin the input sizes once for the cursor (pyodbc only — speeds bind,
-        # also dodges HYC00 on SQLBindParameter for some MSSQL drivers).
-        if _is_ms_stream:
-            try:
-                import pyodbc as _p
-                _sizes = []
-                for _n, _t in _coldefs:
-                    _tu = str(_t or "").upper()
-                    if _tu.startswith("BIGINT"):
-                        _sizes.append(_p.SQL_BIGINT)
-                    elif _tu.startswith("INT"):
-                        _sizes.append(_p.SQL_INTEGER)
-                    elif _tu.startswith("DECIMAL") or _tu.startswith("NUMERIC"):
-                        _sizes.append(_p.SQL_DECIMAL)
-                    elif _tu.startswith("DATETIME2") or _tu.startswith("DATETIME"):
-                        _sizes.append(_p.SQL_TYPE_TIMESTAMP)
-                    elif _tu == "DATE":
-                        _sizes.append(_p.SQL_TYPE_DATE)
-                    elif _tu == "TIME":
-                        _sizes.append(_p.SQL_TYPE_TIME)
-                    elif _tu == "BIT":
-                        _sizes.append(_p.SQL_BIT)
-                    elif _tu.startswith("FLOAT") or _tu.startswith("REAL"):
-                        _sizes.append(_p.SQL_DOUBLE)
-                    else:
-                        _sizes.append(_p.SQL_WVARCHAR)
-                _cur.setinputsizes(*_sizes)
-            except Exception:
-                pass
-        # Streaming always refills fully: clear any reused rows first (idempotent,
-        # also self-heals interrupted fills on engines without a meta registry).
-        _cur0 = db.conn.cursor()
-        try:
-            _cur0.execute(f"DELETE FROM {_q(_eff)}")
-            db.conn.commit()
-        except Exception:
-            try:
-                db.conn.rollback()
-            except Exception:
-                pass
-        finally:
-            try:
-                _cur0.close()
-            except Exception:
-                pass
-        _plan = self._sqlserver_plan(table_norm, info, info.get("row"))
-        _cur = db.conn.cursor()
-        _is_ms_stream = (self._stage_engine_of(db) == "mssql")
-        _use_ev = (self._stage_engine_of(db) == "postgres")
-        try:
-            from psycopg2.extras import execute_values as _ev
-        except Exception:
-            _ev = None
-            _use_ev = False
-        try:
-            _ph_s = "?" if _is_ms_stream else "%s"
-            _ins = (f'INSERT INTO {_q(_eff)} ({", ".join(_q(_n) for _n, _t in _coldefs)}) '
-                    f'VALUES ({", ".join([_ph_s] * len(_coldefs))})')
-            _ev_sql = (f'INSERT INTO {_q(_eff)} ({", ".join(_q(_n) for _n, _t in _coldefs)}) VALUES %s')
-            _first = True
-            _staged_rows = 0
-            for _names, _batch in self._iter_sqlserver_batches(
-                    info.get("row"), _plan["user"], _plan["pwd"], _plan["sch"],
-                    _plan["tbl"], _plan["sellist"], _plan["where"]):
-                if _first:
-                    _first = False
-                    _have = {str(_k).lower() for _k in (_names or [])}
-                    _miss = [str(getattr(_f, "name", "")) for _f in _flds
-                             if str(getattr(_f, "name", "") or "").lower() not in _have]
-                    if _miss:
-                        try:
-                            _w = getattr(self, "_api_warnings", None)
-                            if _w is None:
-                                self._api_warnings = _w = []
-                            _w.append({"key": (str(table_norm).lower(), ""),
-                                       "message": f"أعمدة غير موجودة في جدول SQL Server "
-                                                  f"'{table_norm.lower()}': {'، '.join(_miss)} — ستظهر فارغة",
-                                       "skipped": 0})
-                        except Exception:
-                            pass
-                _clean = []
-                for _r in (_batch or []):
-                    _low = {str(_k).lower(): _v for _k, _v in dict(_r or {}).items()}
-                    _row = []
-                    for _fn, _ft in _coldefs:
-                        try:
-                            _row.append(self._coerce_api_value(
-                                _low.get(str(_fn).lower()), _ft, _fn, table_norm.lower()))
-                        except ValueError:
-                            self._note_api_quarantine(table_norm, _fn, _low.get(str(_fn).lower()))
-                            _row.append(None)
-                    _clean.append(tuple(_row))
-                if _clean:
-                    if _use_ev and _ev is not None:
-                        _ev(_cur, _ev_sql, _clean, page_size=1000)
-                    elif _is_ms_stream:
-                        # MSSQL path: avoid executemany. Several Microsoft
-                        # ODBC drivers raise HYC00 ("Optional feature not
-                        # implemented" / SQLBindParameter) when bind types
-                        # are inferred per row in batch mode. Issuing one
-                        # execute per row, with setinputsizes pre-applied,
-                        # makes the call work on every driver we've seen.
-                        for _row in _clean:
-                            _cur.execute(_ins, _row)
-                    else:
-                        _cur.executemany(_ins, _clean)
-                    _staged_rows += len(_clean)
-                    self._report_progress({"stage": "rows", "table": str(table_norm).lower(),
-                                           "rows": _staged_rows,
-                                           "text": f"ترحيل {str(table_norm).lower()}… {_staged_rows:,}"})
-            db.conn.commit()
-            if self._stage_engine_of(db) != "mssql":
-                self._stage_touch_meta(db, _eff, _staged_rows)
-        except Exception as _e:
-            try:
-                db.conn.rollback()
-            except Exception:
-                pass
-            # Diagnostic dump to file + stderr (always, not gated by DEBUG): pinpoints
-            # whether HYC00 originates in pyodbc.connect(), the SELECT in
-            # _iter_sqlserver_batches, the INSERT, or setinputsizes itself.
-            try:
-                import traceback as _tb
-                _info_row = info.get("row") if isinstance(info, dict) else None
-                _srv = str(getattr(_info_row, "host", "") or "") if _info_row is not None else ""
-                _dbn = str(getattr(_info_row, "name", "") or "") if _info_row is not None else ""
-                _emit_staging_diag(
-                    "RML staging diagnostic",
-                    f"table: {table_norm!r}\n"
-                    f"is_mssql_stream: {_is_ms_stream}\n"
-                    f"coldefs: {coldefs!r}\n"
-                    f"sqlserver_target: {_srv}/{_dbn}\n"
-                    + _tb.format_exc())
-            except Exception:
-                pass
-            raise ValueError(f"تعذر ترحيل بيانات '{table_norm.lower()}': {_e}")
-        finally:
-            try:
-                _cur.close()
-            except Exception:
-                pass
-        return _eff, [(str(getattr(_f, "name", "")), str(getattr(_f, "data_type", None) or "")) for _f in _flds]
-
-    def _stage_api_table(self, table_norm, info, db, refresh=False):
-        """Fetch one API table via its source API and stage as TEMP table. Returns (temp, cols)."""
-        _eng_info = str((info or {}).get("engine") or "").lower()
-        _static = self._api_static_columns()
-        _flds = [f for f in (getattr(self, "fields", []) or [])
-                 if self._norm_table(getattr(f, "table_source", None) or "") == table_norm]
-        if not _flds:
-            raise ValueError(f"لا توجد حقول معرفة للجدول '{table_norm.lower()}' في التقرير.")
-        if _eng_info == "sqlserver":
-            # streaming stage: validate on first batch, INSERT per batch (no full list in RAM)
-            return self._stage_sqlserver_streamed(table_norm, info, db, refresh)
-        _gid = str(info.get("gid") or "x")
-        _temp = re.sub(r"[^a-z0-9_]", "_", f"rml_api_{_gid}_{table_norm}".lower())
-        _coldefs = [(str(getattr(_f, "name", "")), self._stage_col_type(getattr(_f, "data_type", None), self._stage_engine_of(db))) for _f in _flds]
-        _cols_ret2 = [(str(getattr(_f, "name", "")), str(getattr(_f, "data_type", None) or "")) for _f in _flds]
-        if ((not refresh) and self._stage_engine_of(db) in ("postgres", "mssql")
-                and self._stage_table_ready(db, self._stage_phy_name(_temp, _coldefs), _coldefs)):
-            self._report_progress({"stage": "cached", "table": str(table_norm).lower(),
-                                   "text": f"استخدام مرحلة مخزنة: {str(table_norm).lower()}…"})
-            return self._stage_phy_name(_temp, _coldefs), _cols_ret2
-        _avail_cols = {str(_n).lower() for _n in (_static.get(table_norm) or {})}
-        for _f in _flds:
-            if str(getattr(_f, "name", "") or "").lower() not in _avail_cols:
-                raise ValueError(
-                    f"العمود '{getattr(_f, 'name', '')}' غير موجود في جدول الجهاز "
-                    f"'{table_norm.lower()}' — الأعمدة المتاحة: "
-                    f"{', '.join(sorted(_avail_cols))}.")
-        _api_rows = self._fetch_api_rows(table_norm, info, refresh)
-        _data = []
-        for _r in (_api_rows or []):
-            _low = {str(_k).lower(): _v for _k, _v in dict(_r or {}).items()}
-            _row = []
-            for _fn, _ft in _coldefs:
-                try:
-                    _row.append(self._coerce_api_value(_low.get(str(_fn).lower()), _ft, _fn, table_norm.lower()))
-                except ValueError:
-                    self._note_api_quarantine(table_norm, _fn, _low.get(str(_fn).lower()))
-                    _row.append(None)
-            _data.append(tuple(_row))
-        _eff = self._write_temp_table(db, _temp, _coldefs, _data, table_norm.lower(), refresh=refresh)
-        return _eff, _cols_ret2
 
     def _reject_direct_sql_unions(self, _umap) -> None:
         """Fail loudly when one table spans 2+ directly-readable SQL DBs.
@@ -4448,101 +3231,257 @@ class RMLReportEngine:
         except Exception:
             pass
 
-    def _ensure_api_staged(self, refresh=False):
-        """Stage ONLY non-directly-readable API tables as TEMP tables (once per instance).
+    # ── Instant IoT mirrors (no periodic sync) ──────────────────────────
+    # When a report table lives on an IoT connection whose driver exists in
+    # odex/engines (e.g. zk), the device data is pulled LIVE during this
+    # request into the default local mirror table (iot_<engine>_<endpoint>)
+    # and the query runs against that mirror — no 15-minute sync script.
+    _IOT_AT_ENDPOINTS = ("att",)
 
-        - Queryable SQL sources (postgres/oracle/mysql/sqlite/sqlserver) are
-          NEVER staged: they are read live and merged in Python, even across
-          different connections.
-        - Single-source non-readable tables (e.g. ZK devices) ->
-          rml_api_<gid>_<table> (their only execution bridge).
-        - One table on 2+ readable SQL sources -> loud error (no UNION copy).
-        """
+    @staticmethod
+    def _iot_driver(engine):
+        """Driver module for an IoT engine name, or None (unsupported)."""
         try:
-            if self._get_direct_gid():
-                self._api_staged_done = True
-                self._api_stage = {}
-                self._api_union = {}
-                self._api_warnings = []
-                return
+            eng = str(engine or "").strip().lower()
+        except Exception:
+            return None
+        if not eng:
+            return None
+        try:
+            import importlib as _il
+            _mod = _il.import_module("odex.engines." + eng)
+            if getattr(_mod, "ZKEngine", None) is not None or getattr(_mod, "Engine", None) is not None:
+                return _mod
         except Exception:
             pass
-        if getattr(self, "_api_staged_done", False) and not refresh:
-            return
-        self._api_staged_done = True
-        self._api_stage = {}
-        self._api_union = {}
-        self._api_warnings = []
+        return None
+
+    def _live_engine_for_gid(self, gid):
+        """Live engine for a global connection id outside `databases`.
+
+        Builds the connection's OWN engine (postgres via the RML pipeline
+        class, sqlserver direct) and caches it in `databases` — never a
+        shared staging copy.
+        """
         try:
-            _api_tables = self._api_involved_tables()
+            if not gid:
+                return None
+            if gid in (self.databases or {}):
+                return self.databases[gid]
+            row = self._dj_conn(gid)
+            if row is None:
+                return None
+            eng = str(getattr(row, "engine", "") or "").lower()
+            if eng == "sqlserver":
+                try:
+                    w = self._mssql_db_for(gid)
+                    try:
+                        (self.databases or {})[gid] = w
+                    except Exception:
+                        pass
+                    return w
+                except Exception:
+                    return None
+            if eng in ("postgres", "postgresql"):
+                try:
+                    from urs.views import PostgresEngine as _VPG
+                except Exception:
+                    return None
+                try:
+                    _port = int(getattr(row, "port", 0) or 5432)
+                except (TypeError, ValueError):
+                    _port = 5432
+                try:
+                    w = _VPG(host=str(getattr(row, "host", "") or ""),
+                             dbname=str(getattr(row, "instance", "") or "urs"),
+                             user=str(getattr(row, "user", "") or ""),
+                             password=str(getattr(row, "password", "") or ""),
+                             port=_port)
+                    try:
+                        (self.databases or {})[gid] = w
+                    except Exception:
+                        pass
+                    return w
+                except Exception:
+                    return None
         except Exception:
-            _api_tables = {}
+            pass
+        return None
+
+    def _iot_tables(self):
+        """{NORM: gid} for report tables on IoT connections (any flag)."""
+        out = {}
+        try:
+            for f in (getattr(self, "fields", []) or []):
+                try:
+                    ts = getattr(f, "table_source", None)
+                    if not ts:
+                        continue
+                    t = self._norm_table(ts)
+                    if not t or t in out:
+                        continue
+                    gid = self._global_conn_id(getattr(f, "connection_id", None)
+                                               or getattr(f, "conn_id", None))
+                    if not gid:
+                        continue
+                    try:
+                        row = self._dj_conn(gid)
+                    except Exception:
+                        row = None
+                    if row is None:
+                        continue
+                    eng = str(getattr(row, "engine", "") or "").lower()
+                    ctype = str(getattr(row, "conn_type", "") or "").lower()
+                    if ctype == "iot" or eng in ("zk",):
+                        if self._iot_driver(eng) is not None or ctype == "iot":
+                            out[t] = str(gid)
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        return out
+
+    def _iot_register(self, table_norm, gid, pull: bool):
+        """Ensure the default local mirror for an IoT table; optionally pull.
+
+        - Finds (or provisions) the IoTMirror row: default local connection
+          = first is_local postgres Connection; auto_sync=False so the
+          15-minute sweeper never touches instant mirrors.
+        - pull=True: full device pull + upsert NOW (blocking, in-request).
+        - Registers self._iot_mirror[NORM] = {gid, schema, table} for routing.
+        """
+        try:
+            from urs.models import Connection as _C, IoTMirror as _M
+            from urs.iot_sync import (mirror_table_name, mirror_schema,
+                                      ensure_mirror_table, local_pg, fetch_union,
+                                      _norm_att_row, _MIRROR_UPSERT, _q as _iq)
+        except Exception as _imp:
+            raise ValueError(
+                "تهيئة مرآة IoT تتطلب بيئة Django الكاملة "
+                f"(تعذر الاستيراد: {_imp}).")
+        norm = self._norm_table(table_norm)
+        row = self._dj_conn(gid)
+        if row is None:
+            raise ValueError(f"الاتصال ({gid}) غير موجود — لا يمكن بناء مرآة IoT.")
+        eng = str(getattr(row, "engine", "") or "").lower()
+        if self._iot_driver(eng) is None:
+            raise ValueError(
+                f"المحرك '{eng or '?'}' غير مدعوم لحظياً — لا يوجد محرك له في odex/engines.")
+        ep = norm.lower()
+        if ep not in self._IOT_AT_ENDPOINTS:
+            try:
+                ep = str(getattr(row, "endpoint", "") or "att").strip().lower() or "att"
+            except Exception:
+                ep = "att"
+        if ep not in self._IOT_AT_ENDPOINTS:
+            raise ValueError(
+                f"نقطة البيانات '{ep}' للجدول '{norm.lower()}' غير مدعومة لحظياً — "
+                "المدعوم: att.")
+        table = mirror_table_name(eng, ep)
+        m = _M.objects.select_related("local_connection").filter(
+            connection_id=getattr(row, "id", None), endpoint=ep).first()
+        if m is None:
+            local = _C.objects.filter(is_local=True, engine="postgres").order_by("id").first()
+            if local is None:
+                raise ValueError(
+                    "لا يوجد اتصال محلي (is_local + postgres) لاستضافة مرآة IoT — "
+                    "أنشئ اتصالاً محلياً أو صف IoTMirror يدوياً.")
+            m = _M.objects.create(
+                connection_id=getattr(row, "id", None), endpoint=ep,
+                local_connection=local, table_name=table,
+                auto_sync=False, interval_min=15, clear_device=False,
+                status="idle")
+        else:
+            table = m.table_name or table
+            local = m.local_connection
+        if local is None or str(getattr(local, "engine", "") or "").lower() != "postgres":
+            raise ValueError("الاتصال المحلي للمرآة يجب أن يكون postgres.")
+        schema = (mirror_schema(local) or "").strip() or "public"
+        if pull:
+            self._report_progress({"stage": "iot", "table": norm.lower(),
+                                   "text": f"سحب لحظي من أجهزة {norm.lower()}…"})
+            data = fetch_union(row, ep)
+            normed = []
+            for r in (data.get("rows") or []):
+                try:
+                    n = _norm_att_row(r if isinstance(r, dict) else {},
+                                      str(r.get("device_ip", "") or ""))
+                except Exception:
+                    n = None
+                if n:
+                    normed.append(n)
+            pg = local_pg(local)
+            try:
+                ensure_mirror_table(pg, schema, table)
+                if normed:
+                    cur = pg.cursor()
+                    try:
+                        sql_up = _MIRROR_UPSERT.format(schema=_iq(schema), table=_iq(table))
+                        for i in range(0, len(normed), 1000):
+                            cur.executemany(sql_up, normed[i:i + 1000])
+                        pg.commit()
+                    finally:
+                        cur.close()
+            finally:
+                try:
+                    pg.close()
+                except Exception:
+                    pass
+            try:
+                import datetime as _dt
+                _M.objects.filter(id=m.id).update(
+                    status="done", progress_pct=100, rows_pulled=len(normed),
+                    last_sync_at=_dt.datetime.now(_dt.timezone.utc), last_error="")
+            except Exception:
+                pass
+            self._report_progress({"stage": "iot", "table": norm.lower(),
+                                   "text": f"المرآة {table}: {len(normed)} صف لحظياً.",
+                                   "rows": len(normed)})
+        try:
+            _map = getattr(self, "_iot_mirror", None) or {}
+            _map[norm] = {"gid": str(getattr(local, "id", "")),
+                          "schema": schema, "table": table}
+            self._iot_mirror = _map
+        except Exception:
+            pass
+        return str(getattr(local, "id", ""))
+
+    def _ensure_api_staged(self, refresh=False):
+        """No TEMP staging. Two validations + instant IoT mirrors.
+
+        - Queryable SQL sources are read live and merged in Python.
+        - One table on 2+ readable SQL sources -> loud error (no UNION copy).
+        - IoT tables with a supported odex/engines driver -> instant pull
+          into the default local mirror (this request, no sync script).
+        - Other non-readable sources -> loud error.
+        """
         try:
             _umap = self._union_partitions()
         except Exception:
             _umap = {}
         self._reject_direct_sql_unions(_umap)
-        # union-owned norms are staged only by the union path (never single)
-        _api_tables = {t: i for t, i in _api_tables.items() if t not in _umap}
-        if not _api_tables and not _umap:
-            return
-        _db = getattr(self, "db", None)
-        if _db is None:
+        try:
+            _iot = self._iot_tables()
+        except Exception:
+            _iot = {}
+        try:
+            _api_tables = self._api_involved_tables()
+        except Exception:
+            _api_tables = {}
+        _api_tables = {t: i for t, i in (_api_tables or {}).items() if t not in (_umap or {})}
+        _rest = {t: i for t, i in _api_tables.items() if t not in (_iot or {})}
+        if _rest or _umap:
+            _names = sorted(set(list(_rest.keys()) + list((_umap or {}).keys())))
             raise ValueError(
-                "تعذر ترحيل البيانات مؤقتاً: لا توجد قاعدة SQL أساسية — "
-                "وجّه التقرير لاتصال قاعدة بيانات (postgres/oracle).")
-        # Staging ALWAYS runs through the local PG (schema=public). Remote
-        # sources refuse DDL (e.g. SQL Server logins without CREATE TABLE),
-        # and routing the staging copy through the local instance gives one
-        # uniform execution target for the final SELECT.
-        try:
-            _local_pg = self._local_pg_engine()
-            _db = _local_pg
-        except Exception:
-            # Local PG unavailable — keep the primary db so the original error
-            # surfaces, but flag it so the SELECT-side fallback can adapt.
-            self._local_pg = None
-        try:
-            self._stage_gc(_db)
-        except Exception:
-            pass
-        try:
-            _rschema = self.metadata.get("schema") if isinstance(getattr(self, "metadata", None), dict) else None
-        except Exception:
-            _rschema = None
-        _staged = {}
-        _tbl_items = list(_api_tables.items())
-        for _ti, (_norm, _info) in enumerate(_tbl_items):
-            self._report_progress({"stage": "table", "table": str(_norm).lower(),
-                                   "i": _ti + 1, "of": len(_tbl_items),
-                                   "text": f"ترحيل الجدول {_ti + 1}/{len(_tbl_items)}: {str(_norm).lower()}…"})
-            _temp, _cols = self._stage_api_table(_norm, _info, _db, refresh)
-            _staged[_norm] = {"temp": _temp, "cols": _cols, "info": _info}
-            try:
-                _ckey = f"{self._db_identity(_db)}|.{_temp.upper()}"
-                self._cols_cache[_ckey] = {_n.upper(): (_t or "TEXT").upper() for _n, _t in _cols}
-                if not hasattr(self, "_cols_orig") or self._cols_orig is None:
-                    self._cols_orig = {}
-                self._cols_orig[_ckey] = {_n.upper(): _n for _n, _t in _cols}
-            except Exception:
-                pass
-        self._api_stage = _staged
-        _unions = {}
-        for _norm, _parts in _umap.items():
-            _temp, _cols = self._stage_union_table(_norm, _parts, _db, _rschema, refresh)
-            _unions[_norm] = {"temp": _temp, "cols": _cols, "parts": len(_parts)}
-            try:
-                _ckey = f"{self._db_identity(_db)}|.{_temp.upper()}"
-                self._cols_cache[_ckey] = {_n.upper(): (_t or "TEXT").upper() for _n, _t in _cols}
-                if not hasattr(self, "_cols_orig") or self._cols_orig is None:
-                    self._cols_orig = {}
-                self._cols_orig[_ckey] = {_n.upper(): _n for _n, _t in _cols}
-            except Exception:
-                pass
-        self._api_union = _unions
-        # NOTE: field/link names stay ORIGINAL everywhere (resolution, filters,
-        # links, display). Only SQL emission maps staged tables to TEMP names
-        # (disp override, base_q/from_q, _remote_from, _schema_for_table).
+                "الجداول التالية على مصادر غير قابلة للاستعلام SQL "
+                f"({', '.join(str(_n).lower() for _n in _names)}) ولا يوجد لها محرك IoT — "
+                "وجّه التقرير لاتصال قاعدة بيانات قابل للاستعلام.")
+        for _t, _g in (_iot or {}).items():
+            self._iot_register(_t, _g, pull=True)
+        self._api_staged_done = True
+        self._api_stage = {}
+        self._api_union = {}
+        self._api_warnings = []
 
     def _uniq_ratio(self, db, table_norm: str, schema: Optional[str], col: str) -> Optional[float]:
         """Distinct ratio of a column (0..1) for join-key ranking; None on failure."""
@@ -4988,13 +3927,19 @@ class RMLReportEngine:
                 _check_routable(str(s.get("column") or s.get("field") or s.get("name") or ""), "الفرز")
         if group_by:
             _check_routable(str(group_by), "التجميع")
-        # Base FROM
+        # Base FROM (IoT mirrors emit their local schema.table)
         try:
             _btmp = self._staged_temp_of(base_norm)
         except Exception:
             _btmp = None
+        try:
+            _bmir = (getattr(self, "_iot_mirror", None) or {}).get(base_norm)
+        except Exception:
+            _bmir = None
         if _btmp:
             base_q = _q(_btmp)
+        elif _bmir:
+            base_q = f"{_q(str(_bmir.get('schema') or ''))}.{_q(str(_bmir.get('table') or base_norm))}"
         elif base_schema and "." not in from_table:
             base_q = f"{_q(base_schema)}.{_q(from_table)}"
         else:
@@ -5002,7 +3947,7 @@ class RMLReportEngine:
         if not sec_all:
             return {"from_table": from_table, "base_norm": base_norm, "base_conn": base_conn,
                     "base_db": base_db, "base_schema": base_schema,
-                    "base_disp": (from_table if "." not in from_table else from_table.split(".")[-1]),
+                    "base_disp": (str(_bmir.get("table")) if _bmir else (from_table if "." not in from_table else from_table.split(".")[-1])),
                     "from_q": base_q,
                     "columns": inlined, "table_map": None, "merges": [], "extra": [],
                     "strip": set(), "local_sec": [], "remote": {}, "base_alias": None}
@@ -5034,9 +3979,14 @@ class RMLReportEngine:
                 disp.setdefault(s, s)
         # Staged tables (API singles + UNIONs): SQL must reference the TEMP table
         # (same session, no schema). Display/alias maps stay intact; only emission names switch.
+        # IoT mirrors: SQL references the local mirror schema.table likewise.
         try:
+            _im = getattr(self, "_iot_mirror", None) or {}
             for _sn in list(disp.keys()):
                 try:
+                    if _sn in _im:
+                        disp[_sn] = str(_im[_sn].get("table") or _sn)
+                        continue
                     _tt = self._staged_temp_of(_sn)
                     if _tt:
                         disp[_sn] = _tt
@@ -5436,6 +4386,15 @@ class RMLReportEngine:
                 return _q(_tmp)
         except Exception:
             pass
+        try:
+            _t = info.get("table") if isinstance(info, dict) else None
+            _im = getattr(self, "_iot_mirror", None) or {}
+            _in = self._norm_table(_t) if _t else ""
+            if _in and _in in _im:
+                _msch = str(_im[_in].get("schema") or "")
+                return f"{(_q(_msch) + '.') if _msch else ''}{_q(str(_im[_in].get('table') or _t))}"
+        except Exception:
+            pass
         sch_q = _q(info["schema"]) if info.get("schema") else ""
         _t = info.get("disp") or self._orig_col(info["table"], info["table"], info.get("db"), info.get("schema"))
         return f"{sch_q + '.' if sch_q else ''}{_q(_t)}"
@@ -5704,6 +4663,49 @@ class RMLReportEngine:
             return max(vals) if vals else None
         return None
 
+    @staticmethod
+    def _text_keys(keys):
+        """(use_cast, params) for remote key IN-lists.
+
+        Text-compare (CAST(col AS TEXT) + str params) kills the
+        `character varying = bigint` class when int keys meet varchar
+        columns. Temporal/bool values bypass the cast (their text forms
+        differ per dialect) and compare natively as before.
+        """
+        import datetime as _dt
+        vals = list(keys or [])
+        for v in vals:
+            if v is None:
+                continue
+            if isinstance(v, (bool, _dt.datetime, _dt.date, _dt.time)):
+                return False, vals
+        return True, ["" if v is None else str(v) for v in vals]
+
+    @staticmethod
+    def _text_cast(col_q, rdb) -> str:
+        """CAST(col AS text-ish) so int base keys compare with varchar keys.
+
+        Kills the whole `character varying = bigint` class on remote key
+        comparisons regardless of which side declared which type.
+        """
+        try:
+            if _is_mssql_db(rdb):
+                return f"CAST({col_q} AS NVARCHAR(4000))"
+        except Exception:
+            pass
+        try:
+            if _is_pg_db(rdb):
+                return f"CAST({col_q} AS TEXT)"
+        except Exception:
+            pass
+        try:
+            _tn = type(rdb).__name__.lower()
+            if "pgshim" in _tn or _tn.startswith("pg"):
+                return f"CAST({col_q} AS TEXT)"
+        except Exception:
+            pass
+        return f"CAST({col_q} AS VARCHAR2(4000))"
+
     def _fuzzy_pushdown_fetch(self, specs, sec, scol, rows, rdb, info, qfn, need, rx, mode):
         """Server-side fuzzy pre-filter; returns full rows or None (fallback).
 
@@ -5810,9 +4812,9 @@ class RMLReportEngine:
                 if _es:
                     _phs = ", ".join([f":fe{_i + j}" for j in range(len(_es))])
                     for _j, _e in enumerate(_es):
-                        _prm[f"fe{_i + _j}"] = _e
+                        _prm[f"fe{_i + _j}"] = str(_e)
                     _i += len(_es)
-                    _conds.append(f"{_ext(qfn(col))} IN ({_phs})")
+                    _conds.append(f"{_ext(self._text_cast(qfn(col), rdb))} IN ({_phs})")
 
             _add_ext(scol, _keys)
             for _ac, _vals in _anchors.items():
@@ -5844,14 +4846,14 @@ class RMLReportEngine:
                 _conds, _prm, _i = [], {}, 0
                 for _lit in _ch:
                     for _c in _cols:
-                        _qc = qfn(_c)
+                        _qc = self._text_cast(qfn(_c), rdb)
                         if pg:
-                            _conds.append(f"POSITION({_qc} IN :fc{_i}) > 0")
+                            _conds.append(f"POSITION({_qc} IN CAST(:fc{_i} AS TEXT)) > 0")
                         elif ms:
-                            _conds.append(f"CHARINDEX({_qc}, :fc{_i}) > 0")
+                            _conds.append(f"CHARINDEX({_qc}, CAST(:fc{_i} AS NVARCHAR(4000))) > 0")
                         else:
-                            _conds.append(f"INSTR(:fc{_i}, {_qc}) > 0")
-                        _prm[f"fc{_i}"] = _lit
+                            _conds.append(f"INSTR(CAST(:fc{_i} AS VARCHAR2(4000)), {_qc}) > 0")
+                        _prm[f"fc{_i}"] = str(_lit)
                         _i += 1
                 _fetch(" OR ".join(_conds), _prm)
         except Exception:
@@ -5982,9 +4984,11 @@ class RMLReportEngine:
                         if len(_matched_raws) < len(_all_raws):
                             for _ch in self._chunk(list(_matched_raws), 500):
                                 _phs = ", ".join([f":mk{i}" for i in range(len(_ch))])
-                                _prm = {f"mk{i}": _v for i, _v in enumerate(_ch)}
+                                _cast, _vals = self._text_keys(_ch)
+                                _prm = {f"mk{i}": _v for i, _v in enumerate(_vals)}
+                                _sc = self._text_cast(_Q(scol), rdb) if _cast else _Q(scol)
                                 _fcur = self._exec_on(
-                                    rdb, f"SELECT {_fcols} FROM {_rfrom} WHERE {_Q(scol)} IN ({_phs})", _prm)
+                                    rdb, f"SELECT {_fcols} FROM {_rfrom} WHERE {_sc} IN ({_phs})", _prm)
                                 try:
                                     _frows.extend(dict(zip(_need, rec)) for rec in _fcur.fetchall())
                                 finally:
@@ -6089,8 +5093,10 @@ class RMLReportEngine:
                     cols_sql = ", ".join([_Q(scol)] + [_Q(c) for c in direct_fields])
                     for chunk in self._chunk(base_keys):
                         phs = ", ".join([f":rk{i}" for i in range(len(chunk))])
-                        prm = {f"rk{i}": v for i, v in enumerate(chunk)}
-                        cur = self._exec_on(rdb, f"SELECT {cols_sql} FROM {self._remote_from(info)} WHERE {_Q(scol)} IN ({phs})", prm)
+                        _cast, _vals = self._text_keys(chunk)
+                        prm = {f"rk{i}": v for i, v in enumerate(_vals)}
+                        _sc = self._text_cast(_Q(scol), rdb) if _cast else _Q(scol)
+                        cur = self._exec_on(rdb, f"SELECT {cols_sql} FROM {self._remote_from(info)} WHERE {_sc} IN ({phs})", prm)
                         try:
                             for rec in cur.fetchall():
                                 fmap[self._norm_key_value(rec[0])] = rec[1:]
@@ -6148,10 +5154,12 @@ class RMLReportEngine:
                     agg = f"{func}({inner_sql})"
                     for chunk in self._chunk(avals):
                         phs = ", ".join([f":ak{i}" for i in range(len(chunk))])
-                        prm = {f"ak{i}": v for i, v in enumerate(chunk)}
+                        _cast, _vals = self._text_keys(chunk)
+                        prm = {f"ak{i}": v for i, v in enumerate(_vals)}
+                        _dc = self._text_cast(_Q(ds), rdb) if _cast else _Q(ds)
                         cur = self._exec_on(
                             rdb, f"SELECT {_Q(ds)}, {agg} FROM {self._remote_from(info)} "
-                                 f"WHERE {_Q(ds)} IN ({phs}) GROUP BY {_Q(ds)}", prm)
+                                 f"WHERE {_dc} IN ({phs}) GROUP BY {_Q(ds)}", prm)
                         try:
                             for rec in cur.fetchall():
                                 amap[self._norm_key_value(rec[0])] = rec[1]
@@ -6627,95 +5635,15 @@ class RMLReportEngine:
         return self._preview_compile(payload)
 
     def _ensure_stage_names_only(self):
-        """Populate _api_stage/_api_union with deterministic TEMP names — zero I/O.
-
-        Same names _ensure_api_staged would create (same coldefs → same hash),
-        so the compiled SQL is byte-identical to what execute() runs. Never
-        touches source devices and never creates tables. Leaves
-        _api_staged_done False so a later execute() still stages for real.
-        """
+        """No staging exists — clear the maps so previews show source names."""
         self._api_stage = {}
         self._api_union = {}
         self._api_warnings = []
-        try:
-            _api_tables = self._api_involved_tables()
-        except Exception:
-            _api_tables = {}
         try:
             _umap = self._union_partitions()
         except Exception:
             _umap = {}
         self._reject_direct_sql_unions(_umap)
-        _api_tables = {t: i for t, i in _api_tables.items() if t not in _umap}
-        if not _api_tables and not _umap:
-            return
-        _db = getattr(self, "db", None)
-        if _db is None:
-            raise ValueError(
-                "تعذر ترحيل البيانات مؤقتاً: لا توجد قاعدة SQL أساسية — "
-                "وجّه التقرير لاتصال قاعدة بيانات (postgres/oracle).")
-        _eng = self._stage_engine_of(_db)
-        try:
-            _ident = self._db_identity(_db)
-        except Exception:
-            _ident = "?"
-
-        def _remember(_temp, _cols):
-            try:
-                _ckey = f"{_ident}|.{_temp.upper()}"
-                self._cols_cache[_ckey] = {_n.upper(): (_t or "TEXT").upper() for _n, _t in _cols}
-                if not hasattr(self, "_cols_orig") or self._cols_orig is None:
-                    self._cols_orig = {}
-                self._cols_orig[_ckey] = {_n.upper(): _n for _n, _t in _cols}
-            except Exception:
-                pass
-
-        _staged = {}
-        for _norm, _info in _api_tables.items():
-            _flds = [f for f in (getattr(self, "fields", []) or [])
-                     if self._norm_table(getattr(f, "table_source", None) or "") == _norm]
-            if not _flds:
-                raise ValueError(f"لا توجد حقول معرفة للجدول '{str(_norm).lower()}' في التقرير.")
-            _coldefs = [(str(getattr(_f, "name", "")),
-                         self._stage_col_type(getattr(_f, "data_type", None), _eng))
-                        for _f in _flds]
-            _cols = [(str(getattr(_f, "name", "")), str(getattr(_f, "data_type", None) or ""))
-                     for _f in _flds]
-            _gid = str((_info or {}).get("gid") or "x")
-            _temp = re.sub(r"[^a-z0-9_]", "_", f"rml_api_{_gid}_{_norm}".lower())
-            if _eng == "oracle":
-                import hashlib as _hl
-                _hs = _hl.md5(",".join(str(_n).lower() for _n, _t in _coldefs).encode()).hexdigest()[:6]
-                _phy = (re.sub(r"[^a-z0-9_]", "_", str(_temp).lower()) + "_" + _hs)[:100]
-            else:
-                _phy = self._stage_phy_name(_temp, _coldefs)
-            _staged[_norm] = {"temp": _phy, "cols": _cols, "info": _info}
-            _remember(_phy, _cols)
-        self._api_stage = _staged
-        _unions = {}
-        for _norm, _parts in _umap.items():
-            _cols = []
-            _seen = set()
-            for _part in (_parts or []):
-                for _f, _gid in (_part or []):
-                    _n = str(getattr(_f, "name", "") or "")
-                    if _n and _n.lower() not in _seen:
-                        _seen.add(_n.lower())
-                        _cols.append((_n, getattr(_f, "data_type", None)))
-            if not _cols:
-                raise ValueError(f"لا توجد حقول معرفة للجدول '{str(_norm).lower()}' في التقرير.")
-            _temp = re.sub(r"[^a-z0-9_]", "_", f"rml_union_{_norm}".lower())
-            _coldefs = [(_n, self._stage_col_type(_t, _eng)) for _n, _t in _cols]
-            _cols2 = [(str(_n), str(_t or "")) for _n, _t in _cols]
-            if _eng == "oracle":
-                import hashlib as _hl2
-                _hs2 = _hl2.md5(",".join(str(_n).lower() for _n, _t in _coldefs).encode()).hexdigest()[:6]
-                _phy = (re.sub(r"[^a-z0-9_]", "_", str(_temp).lower()) + "_" + _hs2)[:100]
-            else:
-                _phy = self._stage_phy_name(_temp, _coldefs)
-            _unions[_norm] = {"temp": _phy, "cols": _cols2, "parts": len(_parts or [])}
-            _remember(_phy, _cols2)
-        self._api_union = _unions
 
     def preview_real_sql(self, payload: Dict[str, Any]) -> str:
         """The exact SQL execute() would run (stage TEMP names) — without staging or executing.
@@ -6796,19 +5724,6 @@ class RMLReportEngine:
         except Exception:
             _refresh = False
         self._ensure_api_staged(refresh=_refresh)
-        # When staging ran through the local PG, every SQL emitted against
-        # staged tables must also execute there — the remote db may not even
-        # own those temp objects, and re-routing avoids 42S02 races.
-        try:
-            if getattr(self, "_local_pg", None) is not None and (
-                    getattr(self, "_api_stage", None) or getattr(self, "_api_union", None)):
-                self._primary_db_was_remote = (self.db is not self._local_pg)
-                self.db = self._local_pg
-                # Plan cache may hold a base_db pointing to the remote —
-                # invalidate so this run rebuilds with the new primary.
-                self._plan_cache = {}
-        except Exception:
-            pass
         filters = payload.get("filters") or payload.get("activeFilters") or []
         column_filters = payload.get("columnFilters") or {}
         for col, vals in column_filters.items():
@@ -7193,8 +6108,15 @@ class RMLReportEngine:
             _dtmp = self._staged_temp_of(_dtnorm)
         except Exception:
             _dtmp = None
+        try:
+            _dmir = (getattr(self, "_iot_mirror", None) or {}).get(_dtnorm)
+        except Exception:
+            _dmir = None
         if _dtmp:
             from_q = _q(_dtmp)
+        elif _dmir:
+            _dsch = str(_dmir.get("schema") or "")
+            from_q = f"{(_q(_dsch) + '.') if _dsch else ''}{_q(str(_dmir.get('table') or table))}"
         else:
             from_q = f"{_q(schema)}.{_q(table)}" if schema and "." not in table else _q(table)
         # Runtime lookup derivation: columns need NO stored lookup props —
@@ -7860,7 +6782,7 @@ class RMLReportEngine:
 
         Required shape:
         - activeTable / base is the primary (the FROM table); live engine
-          via _db_for_conn / _mssql_db_for / _local_pg_engine if applicable.
+          via _db_for_conn / _mssql_db_for / _resolve_live_db.
         - Each secondary table (in columns / links / merges / table_opts)
           gets its own live engine; rows are joined on the link's
           (base_col, sec_col) key.
@@ -7988,16 +6910,15 @@ class RMLReportEngine:
                 return self._mssql_db_for(conn_key), "mssql"
         except Exception:
             pass
-        # Fallback: Django Connection lookup.
+        # Fallback: live engine for the connection's OWN database.
         try:
-            _row = self._dj_conn(conn_key)
-            if _row is not None:
-                _eng = str(getattr(_row, "engine", "") or "").lower()
-                if _eng == "sqlserver":
-                    return self._mssql_db_for(conn_key), "mssql"
-                if _eng in ("postgres", "postgresql"):
-                    # Construct a tiny psycopg2-backed engine just for fetch.
-                    return self._local_pg_engine(), "postgres"
+            _live = self._live_engine_for_gid(conn_key)
+            if _live is not None:
+                try:
+                    _eng2 = str(getattr(self._dj_conn(conn_key), "engine", "") or "").lower()
+                except Exception:
+                    _eng2 = ""
+                return _live, ("mssql" if _eng2 == "sqlserver" else "postgres")
         except Exception:
             pass
         return None, ""
@@ -8208,11 +7129,14 @@ class RMLReportEngine:
         sec_db, sec_engine = self._resolve_live_db(spec.get("gid"))
         if sec_db is None:
             return {}
-        # Build SELECT * FROM sec WHERE scol IN (?, ?, …).
+        # Build SELECT * FROM sec WHERE scol IN (?, ?, …) — text-compared
+        # so int keys match varchar columns (and vice versa).
         ph = "%s"
         placeholders = ", ".join([ph] * len(keys))
-        sql = f"SELECT * FROM {_q(sec_norm)} WHERE {_q(scol)} IN ({placeholders})"
-        params = keys if isinstance(keys, list) else tuple(keys)
+        _cast, _vals = self._text_keys(keys)
+        _sc = self._text_cast(_q(scol), sec_db) if _cast else _q(scol)
+        sql = f"SELECT * FROM {_q(sec_norm)} WHERE {_sc} IN ({placeholders})"
+        params = list(_vals)
         try:
             sec_db.connect()
         except Exception:
@@ -8402,9 +7326,11 @@ class RMLReportEngine:
                             parts, prm = [], {}
                             for _ci, _ch in enumerate(self._chunk(bkeys)):
                                 phs = ", ".join([f":sk{_ci}_{i}" for i in range(len(_ch))])
-                                for i, _v in enumerate(_ch):
+                                _cast, _vals = self._text_keys(_ch)
+                                for i, _v in enumerate(_vals):
                                     prm[f"sk{_ci}_{i}"] = _v
-                                parts.append(f"{_q(scol)} IN ({phs})")
+                                _sc = self._text_cast(_q(scol), sdb) if _cast else _q(scol)
+                                parts.append(f"{_sc} IN ({phs})")
                             rwc = " WHERE " + " OR ".join(f"({p})" for p in parts)
                             cur = self._exec_on(sdb, f"SELECT {expr} as s FROM {ssch_q + '.' if ssch_q else ''}{_q(sdisp)}{rwc}", prm)
                     try:
