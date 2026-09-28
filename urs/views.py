@@ -2238,6 +2238,103 @@ def api_fmlk_import_xlsx(request, app_name):
             return data
 
         datas = [_row_data(_r) for _r in chunk]
+
+        def _is_int_text(s):
+            try:
+                _t = str(s).strip().replace(",", "")
+                return bool(_t) and float(_t).is_integer()
+            except Exception:
+                return False
+
+        # مطابقة الأسماء ← معرفات للحقول الصحيحة المرجعية (قيم الإكسل أسماء عادة):
+        # خيارات ثابتة أولاً، ثم جدول المرجع (refTable/refFk/refDisplay أو options_source) دفعة واحدة
+        display_resolvers = {}
+        for _fn, _f in fields.items():
+            try:
+                _dt = str(getattr(_f, "data_type", "") or "").upper()
+            except Exception:
+                _dt = ""
+            if "INT" not in _dt:
+                continue
+            _m = {}
+            try:
+                for _o in (getattr(_f, "options", None) or []):
+                    _vv = _o.get("value") if isinstance(_o, dict) else _o
+                    _ll = (_o.get("label", _vv) if isinstance(_o, dict) else _o)
+                    if str(_vv).strip() != str(_ll).strip():
+                        _m.setdefault(str(_ll).strip(), str(_vv).strip())
+            except Exception:
+                pass
+            if _m:
+                display_resolvers[_fn] = _m
+                continue
+            _ref = (getattr(_f, "ref_table", None) or getattr(_f, "refTable", None) or "")
+            _fk = (getattr(_f, "ref_fk", None) or getattr(_f, "refFk", None) or "id")
+            _dp = (getattr(_f, "ref_display", None) or getattr(_f, "refDisplay", None) or "")
+            _srcs = list(getattr(_f, "options_source", None) or getattr(_f, "optionsSource", None) or [])
+            _jobs = []
+            if _ref:
+                _rs = str(_ref).split(".")
+                _jobs.append(((_rs[0] if len(_rs) > 1 else ""), _rs[-1], _fk, _dp or "name"))
+            for _s in _srcs:
+                try:
+                    if isinstance(_s, dict) and _s.get("table"):
+                        _jobs.append((_s.get("schema") or "", _s.get("table"),
+                                      _fk, _s.get("column") or _dp or "name"))
+                except Exception:
+                    continue
+            for (_sch, _tbl, _fkc, _dpc) in _jobs:
+                if not _tbl or not _dpc:
+                    continue
+                try:
+                    _db2 = eng.db
+                    if not getattr(_db2, "conn", None):
+                        _db2.connect()
+                    _qq = lambda _x: '"%s"' % str(_x).replace('"', '""')
+                    _qstr = (_qq(_sch) + "." if _sch else "") + _qq(_tbl)
+                    _cur = _db2._exec(
+                        f"SELECT {_qq(_fkc)}, {_qq(_dpc)} FROM {_qstr}", {})
+                    try:
+                        for _rr in (_cur.fetchall() or []):
+                            try:
+                                _m.setdefault(str(_rr[1]).strip(), str(_rr[0]).strip())
+                            except Exception:
+                                continue
+                    finally:
+                        try:
+                            _cur.close()
+                        except Exception:
+                            pass
+                except Exception:
+                    continue
+            if _m:
+                display_resolvers[_fn] = _m
+
+        for _d in datas:
+            if not _d:
+                continue
+            for _fn, _m in display_resolvers.items():
+                if _fn in _d:
+                    _v = str(_d[_fn]).strip()
+                    if _v and not _is_int_text(_v) and _v in _m:
+                        _d[_fn] = _m[_v]
+            # تحقق مبكر برسالة واضحة بدل خطأ PG الخام
+            for _fn, _f in fields.items():
+                if _fn not in _d:
+                    continue
+                try:
+                    _dt = str(getattr(_f, "data_type", "") or "").upper()
+                except Exception:
+                    _dt = ""
+                if "INT" in _dt:
+                    _v = str(_d[_fn]).strip()
+                    if _v and not _is_int_text(_v):
+                        try:
+                            _al = str(getattr(_f, "alias", "") or _fn)
+                        except Exception:
+                            _al = _fn
+                        _d["_x_int_err"] = f"{_al}: القيمة '{_v[:40]}' ليست رقماً (الحقل يريد معرفاً — طابق عمود المعرفات أو اسماً موجوداً)"
+                        break
         # upsert جماعي: استعلام IN واحد لقيم المطابقة بدل N استعلامات
         match_map = {}
         if match_column and match_column in fields:
@@ -2274,6 +2371,13 @@ def api_fmlk_import_xlsx(request, app_name):
                 data = datas[_k]
                 if not data:
                     skipped += 1
+                    continue
+                _xerr = data.pop("_x_int_err", None)
+                if _xerr:
+                    if len(errors) < 10:
+                        errors.append(f"صف {_ri}: {_xerr}"[:160])
+                    else:
+                        skipped += 1
                     continue
                 _rid = None
                 if match_column and match_column in data and str(data[match_column]).strip() != "":
