@@ -2085,40 +2085,61 @@ def api_fmlk_import_xlsx(request, app_name):
                 return int(v) if v == int(v) else float(v)
             return v
 
+        # قراءة شريحية (min/max_row): كل طلب يقرأ صفوفه فقط — لا مادية كاملة للملف
         wb = openpyxl.load_workbook(up, read_only=True, data_only=True)
         try:
             ws = wb.active
-            rows = list(ws.iter_rows(values_only=True))
+            if ws is None:
+                return JsonResponse({"error": "لا توجد ورقة في الملف"}, status=400)
+            max_row = ws.max_row or 0
+            if not max_row:
+                return JsonResponse({"error": "الملف فارغ"}, status=400)
+            try:
+                header_row = int(request.POST.get("header_row") or 1)
+            except (TypeError, ValueError):
+                header_row = 1
+            try:
+                data_start = int(request.POST.get("data_start") or 0) or (header_row + 1)
+            except (TypeError, ValueError):
+                data_start = header_row + 1
+            if header_row < 1 or header_row > max_row:
+                return JsonResponse({"error": f"صف الترويسات ({header_row}) خارج الملف (1..{max_row})"}, status=400)
+            if data_start <= header_row:
+                return JsonResponse({"error": "صف بدء البيانات يجب أن يكون بعد صف الترويسات"}, status=400)
+            _hvals = next(ws.iter_rows(min_row=header_row, max_row=header_row, values_only=True), None)
+            headers = [str(c or "").strip() for c in (_hvals or [])]
+            if not any(headers):
+                return JsonResponse({"error": f"الصف {header_row} فارغ — اختر صف الترويسات الصحيح"}, status=400)
+            total_rows = max(0, max_row - data_start + 1)
+            if request.POST.get("preview"):
+                sample_rows = []
+                if total_rows:
+                    for _r in ws.iter_rows(min_row=data_start, max_row=max_row, values_only=True):
+                        if any(c is not None and str(c).strip() != "" for c in (_r or [])):
+                            sample_rows.append([_norm(c) for c in (_r or [])])
+                            if len(sample_rows) >= 5:
+                                break
+                return JsonResponse({"ok": True, "headers": headers,
+                                     "sample_rows": sample_rows,
+                                     "total_rows": total_rows,
+                                     "header_row": header_row, "data_start": data_start},
+                                    json_dumps_params={"ensure_ascii": False})
+            try:
+                row_offset = max(0, int(request.POST.get("row_offset") or 0))
+            except (TypeError, ValueError):
+                row_offset = 0
+            try:
+                row_limit = int(request.POST.get("row_limit") or 0) or 0
+            except (TypeError, ValueError):
+                row_limit = 0
+            _lo = data_start + row_offset
+            _hi = max_row if not row_limit else min(max_row, _lo + min(row_limit, 500) - 1)
+            data_rows = list(ws.iter_rows(min_row=_lo, max_row=_hi, values_only=True)) if _lo <= max_row else []
         finally:
             try:
                 wb.close()
             except Exception:
                 pass
-        rows = [r for r in (rows or []) if any(c is not None and str(c).strip() != "" for c in (r or []))]
-        if not rows:
-            return JsonResponse({"error": "الملف فارغ"}, status=400)
-        try:
-            header_row = int(request.POST.get("header_row") or 1)
-        except (TypeError, ValueError):
-            header_row = 1
-        try:
-            data_start = int(request.POST.get("data_start") or 0) or (header_row + 1)
-        except (TypeError, ValueError):
-            data_start = header_row + 1
-        if header_row < 1 or header_row > len(rows):
-            return JsonResponse({"error": f"صف الترويسات ({header_row}) خارج الملف (1..{len(rows)})"}, status=400)
-        if data_start <= header_row:
-            return JsonResponse({"error": "صف بدء البيانات يجب أن يكون بعد صف الترويسات"}, status=400)
-        headers = [str(c or "").strip() for c in (rows[header_row - 1] or [])]
-        if not any(headers):
-            return JsonResponse({"error": f"الصف {header_row} فارغ — اختر صف الترويسات الصحيح"}, status=400)
-        data_rows = rows[data_start - 1:]
-        if request.POST.get("preview"):
-            return JsonResponse({"ok": True, "headers": headers,
-                                 "sample_rows": [[_norm(c) for c in (r or [])] for r in data_rows[:5]],
-                                 "total_rows": len(data_rows),
-                                 "header_row": header_row, "data_start": data_start},
-                                json_dumps_params={"ensure_ascii": False})
         try:
             mapping = json.loads(request.POST.get("mapping") or "{}")
         except Exception:
@@ -2132,27 +2153,19 @@ def api_fmlk_import_xlsx(request, app_name):
         if not isinstance(fixed, dict):
             fixed = {}
         match_column = (request.POST.get("match_column") or "").strip()
-        try:
-            row_offset = max(0, int(request.POST.get("row_offset") or 0))
-        except (TypeError, ValueError):
-            row_offset = 0
-        try:
-            row_limit = int(request.POST.get("row_limit") or 0) or 0
-        except (TypeError, ValueError):
-            row_limit = 0
         eng = _fmlk_get_engine(fml, app_name)
         fields = {getattr(f, "name", ""): f for f in (eng.compiler.fields() or []) if getattr(f, "name", "")}
         MAX_ROWS = 2000
-        effective_total = min(len(data_rows), MAX_ROWS)
-        truncated = len(data_rows) > MAX_ROWS
-        chunk = data_rows[row_offset:]
-        if row_limit:
-            chunk = chunk[:min(row_limit, 500)]
-        chunk = chunk[:MAX_ROWS]
+        effective_total = min(total_rows, MAX_ROWS)
+        truncated = total_rows > MAX_ROWS
+        chunk = data_rows[:MAX_ROWS]
         created = updated = skipped = 0
         errors = []
 
         def _row_data(_r):
+            # الصف الفارغ تماماً يُتجاهل قبل الثابتة (حتى لا تُنشئ سجلات خردة)
+            if not any(c is not None and str(c).strip() != "" for c in (_r or [])):
+                return None
             vals = list(_r or []) + [""] * max(0, len(headers) - len(_r or []))
             data = {}
             for _hi, _h in enumerate(headers):
@@ -2189,6 +2202,8 @@ def api_fmlk_import_xlsx(request, app_name):
         if match_column and match_column in fields:
             _mvals = []
             for _d in datas:
+                if not _d:
+                    continue
                 if match_column in _d and str(_d[match_column]).strip() != "":
                     _sv = str(_d[match_column]).strip()
                     if _sv not in _mvals:
