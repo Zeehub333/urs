@@ -6195,6 +6195,260 @@ class RMLReportEngine:
             pass
         return _out, _matched
 
+    # ── Deferred-GW acceleration: E-driven semi-join pre-filter ──────────
+    # A deferred condition lives on the (usually SMALL) remote table.  Fetch
+    # the DISTINCT remote link-keys satisfying it (E, capped), then narrow
+    # the base fetch server-side to rows that can possibly survive the
+    # post-merge eval.  Post-merge eval stays the SOLE arbiter of exactness:
+    # the wrapper is a proven superset (or absent), never a filter.
+    _GW_PREFILTER_MAX_KEYS = 1000
+    _GW_EKEY_FETCH_CAP = 2001
+
+    @staticmethod
+    def _gw_stringy(dtype) -> bool:
+        """String-like RML field type? (textual pre-filter compares textually)."""
+        t = str(dtype or "").upper()
+        return any(k in t for k in ("CHAR", "TEXT", "CLOB", "STRING", "NVARCHAR", "VARCHAR", "NCHAR"))
+
+    def _gw_base_field_type(self, base_norm, base_key) -> str:
+        """RML field type for a base link-key field, or '' when unknown."""
+        try:
+            for f in (getattr(self, "fields", []) or []):
+                if self._norm_table(getattr(f, "table_source", "") or "") != (base_norm or ""):
+                    continue
+                if str(getattr(f, "name", "") or "").upper() == str(base_key or "").upper():
+                    return str(getattr(f, "type", "") or "")
+        except Exception:
+            pass
+        return ""
+
+    def _gw_entry_keys(self, entry, plan):
+        """Usable remote key set for one deferred entry: (keys, had_null).
+
+        (None, False) = not pushable/failed/too big -> caller full-scans.
+        regex links: keys are PYTHON extracts (exact engine semantics, zero
+        dialect divergence). had_null = a NULL raw key satisfied the cond
+        (match-impotent, but forbids early-empty).
+        """
+        try:
+            sec = entry.get("sec")
+            flts = self._gw_pred_to_filters(entry.get("pred"))
+            if not flts:
+                return None, False
+            remote = plan.get("remote") or {}
+            info = remote.get(sec)
+            if not info or not info.get("key"):
+                return None, False
+            base_norm = plan.get("base_norm")
+            rdb = info.get("db")
+            rcols = self._table_columns(sec, info.get("schema"), rdb)
+            wc, wp = self._where_for_table(flts, sec, rcols, rdb, info.get("schema"))
+            if not wc:
+                return None, False
+            _scol = self._orig_col(sec, info["key"][1], rdb, info.get("schema"))
+            _rfrom = self._remote_from(info)
+            try:
+                _ms = bool(_is_mssql_db(rdb))
+            except Exception:
+                _ms = False
+            try:
+                _pg = bool(_is_pg_db(rdb))
+            except Exception:
+                _pg = False
+            _n = int(self._GW_EKEY_FETCH_CAP)
+            if _ms:
+                _q1 = f"SELECT DISTINCT TOP {_n} {_q(_scol)} FROM {_rfrom}{wc}"
+            elif _pg:
+                _q1 = f"SELECT DISTINCT {_q(_scol)} FROM {_rfrom}{wc} LIMIT {_n}"
+            else:
+                _q1 = f"SELECT DISTINCT {_q(_scol)} FROM {_rfrom}{wc} FETCH FIRST {_n} ROWS ONLY"
+            _cur = self._exec_on(rdb, _q1, dict(wp or {}))
+            try:
+                _raw = [_r[0] for _r in _cur.fetchall()]
+            finally:
+                try:
+                    _cur.close()
+                except Exception:
+                    pass
+            if len(_raw) >= _n:
+                return None, False  # capped -> completeness unproven -> full scan
+            _had_null = any(_v is None for _v in _raw)
+            try:
+                _mspec = self._link_match_spec(base_norm, sec)
+            except Exception:
+                _mspec = {"match": "exact", "pattern": ""}
+            _match = str(_mspec.get("match") or "exact").strip().lower()
+            if _match == "regex":
+                try:
+                    _rx = re.compile(str(_mspec.get("pattern") or ""))
+                except Exception:
+                    return None, False
+                _outs, _seen = [], set()
+                for _v in _raw:
+                    if _v is None:
+                        continue
+                    try:
+                        _ex = self._rx_extract(_rx, _v)
+                    except Exception:
+                        _ex = None
+                    if _ex is None or _ex in _seen:
+                        continue
+                    _seen.add(_ex)
+                    _outs.append(_ex)
+                if len(_outs) > int(self._GW_PREFILTER_MAX_KEYS):
+                    return None, False
+                return _outs, _had_null
+            _keys = [_v for _v in _raw if _v is not None]
+            if len(_keys) > int(self._GW_PREFILTER_MAX_KEYS):
+                return None, False
+            return _keys, _had_null
+        except Exception:
+            return None, False
+
+    def _gw_prefilter_wrap(self, sql, params, exec_plan):
+        """(sql, params, applied, early_empty) with E-driven pre-filter.
+
+        Rules per deferred entry (ANDed): usable E (pushable, complete,
+        string-typed, expressible) narrows; empty E (+NULL-rejecting pred)
+        empties the whole fetch; anything else stays with the post-merge
+        arbiter. Any failure -> (sql, params, False, False).
+        """
+        import time as _tmod
+        _t0 = _tmod.time()
+        try:
+            self._timings["gw_prefilter"] = False
+            self._timings["gw_ekeys_n"] = -1
+        except Exception:
+            pass
+        _entries = [d for d in (exec_plan.get("gw_deferred") or []) if isinstance(d, dict)]
+        if not _entries:
+            return sql, params, False, False
+        try:
+            _bdb = exec_plan.get("base_db")
+            _bms = bool(_is_mssql_db(_bdb))
+        except Exception:
+            _bms = False
+        try:
+            _bpg = bool(_is_pg_db(_bdb))
+        except Exception:
+            _bpg = False
+        _ct = "NVARCHAR(4000)" if _bms else ("TEXT" if _bpg else "VARCHAR2(4000)")
+        base_norm = exec_plan.get("base_norm")
+        remote = exec_plan.get("remote") or {}
+        _conds = []
+        _binds = {}
+        _seq = [0]
+
+        def _np(val):
+            _seq[0] += 1
+            _k = f"dp{_seq[0]}"
+            _binds[_k] = val
+            return _k
+
+        try:
+            for _en in _entries:
+                _sec = _en.get("sec")
+                _pred = _en.get("pred")
+                _nullkeeps = self._gw_pred_eval(_pred, lambda rk, raw: None) is True
+                _keys, _had_null = self._gw_entry_keys(_en, exec_plan)
+                if _keys is None or _had_null:
+                    continue
+                if not _keys:
+                    if not _nullkeeps:
+                        try:
+                            self._timings["gw_ekeys_ms"] = int((_tmod.time() - _t0) * 1000)
+                            self._timings["gw_ekeys_n"] = 0
+                            self._timings["gw_early_empty"] = True
+                        except Exception:
+                            pass
+                        return sql, params, False, True
+                    continue
+                if _nullkeeps:
+                    continue
+                if any(not isinstance(_v, str) for _v in _keys):
+                    continue
+                try:
+                    _mspec = self._link_match_spec(base_norm, _sec)
+                except Exception:
+                    continue
+                _match = str(_mspec.get("match") or "exact").strip().lower()
+                if _match not in ("exact", "contains", "regex"):
+                    continue
+                _helpers = []
+                for _sp in (exec_plan.get("merges") or []):
+                    if _sp.get("table") != _sec:
+                        continue
+                    _hh = _sp.get("key_alias") if _sp.get("kind") == "direct" else _sp.get("anchor_alias")
+                    _bk = _sp.get("base_key") if _sp.get("kind") == "direct" else _sp.get("anchor_base")
+                    if _hh and _bk and all(_hh != h for h, _ in _helpers):
+                        _helpers.append((_hh, _bk))
+                if not _helpers:
+                    continue
+                if any(not self._gw_stringy(self._gw_base_field_type(base_norm, _bk)) for _hh, _bk in _helpers):
+                    continue
+                _parts = []
+                for _hh, _bk in _helpers:
+                    _h = f'"t".{_q(_hh)}'
+                    if _match == "exact":
+                        _phs = ", ".join(f"CAST(:{_np(_v)} AS {_ct})" for _v in _keys)
+                        _parts.append(f"CAST({_h} AS {_ct}) IN ({_phs})")
+                    elif _match == "contains":
+                        _ors = []
+                        for _v in _keys:
+                            _k = _np(_v)
+                            if _bms:
+                                _ors.append(f"(CHARINDEX(CAST(:{_k} AS {_ct}), CAST({_h} AS {_ct})) > 0 OR CHARINDEX(CAST({_h} AS {_ct}), CAST(:{_k} AS {_ct})) > 0)")
+                            elif _bpg:
+                                _ors.append(f"(POSITION(CAST(:{_k} AS {_ct}) IN CAST({_h} AS {_ct})) > 0 OR POSITION(CAST({_h} AS {_ct}) IN CAST(:{_k} AS {_ct})) > 0)")
+                            else:
+                                _ors.append(f"(INSTR(CAST({_h} AS {_ct}), CAST(:{_k} AS {_ct})) > 0 OR INSTR(CAST(:{_k} AS {_ct}), CAST({_h} AS {_ct})) > 0)")
+                        _parts.append("(" + " OR ".join(_ors) + ")")
+                    else:  # regex: a merge hit means the base CONTAINS the
+                        # extract, so containment alone is a safe superset
+                        # (no dialect extract function needed).
+                        _ors = []
+                        for _v in _keys:
+                            _k = _np(_v)
+                            if _bms:
+                                _ors.append(f"CHARINDEX(CAST(:{_k} AS {_ct}), CAST({_h} AS {_ct})) > 0")
+                            elif _bpg:
+                                _ors.append(f"POSITION(CAST(:{_k} AS {_ct}) IN CAST({_h} AS {_ct})) > 0")
+                            else:
+                                _ors.append(f"INSTR(CAST({_h} AS {_ct}), CAST(:{_k} AS {_ct})) > 0")
+                        _parts.append("(" + " OR ".join(_ors) + ")")
+                if not _parts:
+                    continue
+                _conds.append("(" + " OR ".join(_parts) + ")")
+        except Exception:
+            return sql, params, False, False
+        try:
+            self._timings["gw_ekeys_ms"] = int((_tmod.time() - _t0) * 1000)
+        except Exception:
+            pass
+        if not _conds:
+            return sql, params, False, False
+        _gsql = f"SELECT * FROM ({sql}) t WHERE " + " AND ".join(_conds)
+        _gparams = dict(params or {})
+        _gparams.update(_binds)
+        # probe before the heavy stream (syntax/dialect/shape validation)
+        try:
+            _pc = self._exec_on(_bdb, f"SELECT 1 FROM ({_gsql}) t WHERE 1=0", dict(_gparams))
+            try:
+                _pc.fetchall()
+            finally:
+                try:
+                    _pc.close()
+                except Exception:
+                    pass
+        except Exception:
+            return sql, params, False, False
+        try:
+            self._timings["gw_prefilter"] = True
+            self._timings["gw_ekeys_n"] = _seq[0]
+        except Exception:
+            pass
+        return _gsql, _gparams, True, False
+
     # ── SQL Compilation ─────────────────────────────────────────────────
 
     def _paginate_clause(self, page, page_size, params: Dict[str, Any], db=None) -> Tuple[str, Dict[str, Any]]:
@@ -6797,6 +7051,14 @@ class RMLReportEngine:
         sql, params = self._compile_sql2(
             exec_plan, base_f, sort, 1 if _need_all else page,
             "all" if _need_all else page_size, group_by, extra)
+        _gsql, _gparams, _gwpre, _gwempty = (sql, params, False, False)
+        if _deferred:
+            # E-driven pre-filter (and early-empty): the condition narrows
+            # the base fetch instead of only filtering after it.
+            try:
+                _gsql, _gparams, _gwpre, _gwempty = self._gw_prefilter_wrap(sql, params, exec_plan)
+            except Exception:
+                _gsql, _gparams, _gwpre, _gwempty = sql, params, False, False
         strip_extra = [a for _, a in extra]
         if outer_f:
             _ow0, _op0 = _build_outer_where(outer_f, outer_cols, rules=getattr(self, "rules", []))
@@ -6910,9 +7172,18 @@ class RMLReportEngine:
             self._report_progress({"stage": "rows", "table": str(exec_plan.get("from_table") or "").lower(),
                                    "text": "جلب الصفوف..."})
             _t_rows = _tmod.time()
-            cur = self._exec_on(base_db, sql, params)
+            if _gwempty:
+                result_rows, total = [], 0
+                try:
+                    self._timings["gw_early_empty"] = True
+                    self._timings["rows_n"] = 0
+                except Exception:
+                    pass
+                cur = None
+            else:
+                cur = self._exec_on(base_db, _gsql, _gparams)
             try:
-                cols = [d[0].lower() for d in cur.description] if cur.description else []
+                cols = [d[0].lower() for d in cur.description] if cur is not None and cur.description else []
                 if not cols:
                     result_rows = []
                 elif _deferred:
