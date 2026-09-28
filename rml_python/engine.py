@@ -2127,7 +2127,11 @@ class RMLReportEngine:
             _trans = [t for t in (sec_all or []) if t != s and self._find_link(s, t) is not None]
             if _trans:
                 return (f'الجدول "{s}" مربوط بالجدول "{_trans[0]}" وليس بالجدول الأساسي "{base_norm}" — '
-                        f'الربط عبر جدول وسيط غير مدعوم: أضف رابطاً مباشراً بين "{s}" و"{base_norm}" '
+                        f'المخطط الحالي سلسلة: "{base_norm}" ↔ "{_trans[0]}" ↔ "{s}". '
+                        f'المحرك يربط كل جدول بالأساسي مباشرة فقط ولا يتبع السلاسل، '
+                        f'لذلك لا تُجلب بيانات "{s}". '
+                        f'الحل: أضف رابطاً مباشراً بين "{s}" و"{base_norm}" '
+                        f'(وإن كانت القيمة مضمّنة داخل نص استخدم match="contains" أو match="regex" مع pattern)، '
                         f'أو اجعل "{_trans[0]}" هو الجدول الافتراضي.')
         except Exception:
             pass
