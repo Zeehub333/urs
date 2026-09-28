@@ -1684,10 +1684,11 @@ class RMLReportEngine:
 
     def _get_direct_gid(self) -> Optional[str]:
         """sqlserver gid when EVERY involved table lives on ONE queryable
-        sqlserver connection (else None → normal staged execution).
+        sqlserver connection (else None → normal execution: direct reads +
+        Python merges, never staged).
 
         Pure metadata (cached Django lookups only) — safe to call anywhere.
-        Opt-out per report: <rpt_metadata direct="0"> forces staging.
+        Opt-out per report: <rpt_metadata direct="0"> disables the shortcut.
         """
         try:
             try:
@@ -1724,21 +1725,27 @@ class RMLReportEngine:
             _gids = set()
             for t in _norms:
                 try:
-                    info = self._api_table_info(t)
+                    _ck = self._conn_key_of_table(t)
                 except Exception:
-                    info = None
-                if not info:
                     return None
-                if str((info or {}).get("engine") or "").lower() != "sqlserver":
+                if not _ck:
                     return None
                 try:
-                    _fl = getattr((info or {}).get("row"), "is_queryable", True)
+                    _row = self._dj_conn(_ck)
+                except Exception:
+                    return None
+                if _row is None:
+                    return None
+                if str(getattr(_row, "engine", "") or "").lower() != "sqlserver":
+                    return None
+                try:
+                    _fl = getattr(_row, "is_queryable", True)
                     _ok = False if _fl is False or str(_fl).strip().lower() in ("0", "false", "no", "none") else True
                 except Exception:
                     _ok = True
                 if not _ok:
                     return None
-                _gids.add(str((info or {}).get("gid") or ""))
+                _gids.add(str(_ck))
             if len(_gids) == 1:
                 return next(iter(_gids))
         except Exception:
@@ -1785,6 +1792,19 @@ class RMLReportEngine:
                 return self._mssql_db_for(conn_key)
         except Exception:
             pass
+        # Queryable SQL Server on ANY gid: live direct reads (transpiled),
+        # never staged — multi-connection reports merge in Python.
+        try:
+            if conn_key and self._direct_sql_gid(conn_key):
+                _e2 = ""
+                try:
+                    _e2 = str(getattr(self._dj_conn(conn_key), "engine", "") or "").lower()
+                except Exception:
+                    _e2 = ""
+                if _e2 == "sqlserver":
+                    return self._mssql_db_for(conn_key)
+        except Exception:
+            pass
         # API-backed connection (e.g. ZK — is_queryable=False): its tables are
         # staged as TEMP tables on the primary SQL DB, so route there.
         try:
@@ -1822,13 +1842,13 @@ class RMLReportEngine:
         except Exception:
             pass
         try:
-            # Direct sqlserver mode: source schema only (never the PG report schema)
-            if conn_key and str(conn_key) == str(self._get_direct_gid()):
-                dj = self._dj_conn(conn_key)
-                _ds = str(getattr(dj, "schema", "") or "").strip() if dj is not None else ""
-                if _ds:
-                    return _ds
-                return "dbo"
+            # SQL Server: source schema (or dbo) — never the PG report schema,
+            # for any gid, not just single-connection direct mode.
+            if conn_key:
+                dj0 = self._dj_conn(conn_key)
+                if dj0 is not None and str(getattr(dj0, "engine", "") or "").lower() == "sqlserver":
+                    _ds = str(getattr(dj0, "schema", "") or "").strip()
+                    return _ds or "dbo"
         except Exception:
             pass
         dj = self._dj_conn(conn_key)
@@ -2391,33 +2411,45 @@ class RMLReportEngine:
             _api = self._api_table_info(norm)
         except Exception:
             _api = None
-        if _api and str((_api or {}).get("engine") or "").lower() == "sqlserver":
-            # Direct live mode: introspect the source itself (no staging).
+        _ms_gid = None
+        try:
+            _ms_gid = self._conn_key_of_table(norm)
+        except Exception:
+            _ms_gid = None
+        _ms_live = False
+        if _ms_gid and self._direct_sql_gid(_ms_gid):
             try:
-                if str((_api or {}).get("gid") or "") == str(self._get_direct_gid()):
-                    _w = self._mssql_db_for(str((_api or {}).get("gid")))
-                    _cur = _w._exec(
-                        "SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS "
-                        "WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?",
-                        [schema, norm])
+                _ms_row = self._dj_conn(_ms_gid)
+                _ms_live = (_ms_row is not None
+                            and str(getattr(_ms_row, "engine", "") or "").lower() == "sqlserver")
+            except Exception:
+                _ms_live = False
+        if _ms_live:
+            # Live source introspection (no staging): true-case columns + types.
+            try:
+                _w = self._mssql_db_for(str(_ms_gid))
+                _cur = _w._exec(
+                    "SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS "
+                    "WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?",
+                    [schema, norm])
+                try:
+                    _rows = list(_cur.fetchall() or [])
+                finally:
                     try:
-                        _rows = list(_cur.fetchall() or [])
-                    finally:
-                        try:
-                            _cur.close()
-                        except Exception:
-                            pass
-                    _lc = {str(r[0]).upper(): str(r[1]).upper() for r in _rows}
-                    _lo = {str(r[0]).upper(): str(r[0]) for r in _rows}
-                    if _lc:
-                        self._cols_cache[key] = dict(_lc)
-                        try:
-                            if not hasattr(self, "_cols_orig") or self._cols_orig is None:
-                                self._cols_orig = {}
-                            self._cols_orig[key] = dict(_lo)
-                        except Exception:
-                            pass
-                        return dict(_lc)
+                        _cur.close()
+                    except Exception:
+                        pass
+                _lc = {str(r[0]).upper(): str(r[1]).upper() for r in _rows}
+                _lo = {str(r[0]).upper(): str(r[0]) for r in _rows}
+                if _lc:
+                    self._cols_cache[key] = dict(_lc)
+                    try:
+                        if not hasattr(self, "_cols_orig") or self._cols_orig is None:
+                            self._cols_orig = {}
+                        self._cols_orig[key] = dict(_lo)
+                    except Exception:
+                        pass
+                    return dict(_lc)
             except Exception:
                 pass
             # fall through to report-fields fallback below when introspection fails
@@ -2582,15 +2614,18 @@ class RMLReportEngine:
         return out
 
     def _sqlserver_source_of(self, table_norm):
-        """(row, gid, sch, tbl) — original SQL Server location of a staged table, else None."""
+        """(row, gid, sch, tbl) — live SQL Server location of a table, else None."""
         try:
-            info = self._api_table_info(table_norm)
+            _gid = self._conn_key_of_table(table_norm)
         except Exception:
-            info = None
-        if not info or str((info or {}).get("engine") or "").lower() != "sqlserver":
             return None
-        row = (info or {}).get("row")
-        if row is None:
+        if not _gid:
+            return None
+        try:
+            row = self._dj_conn(_gid)
+        except Exception:
+            return None
+        if row is None or str(getattr(row, "engine", "") or "").lower() != "sqlserver":
             return None
         sch, tbl = "", ""
         try:
@@ -2609,7 +2644,7 @@ class RMLReportEngine:
             return None
         if not sch:
             sch = str(getattr(row, "schema", "") or "").strip() or "dbo"
-        return (row, str((info or {}).get("gid") or ""), sch, tbl)
+        return (row, str(_gid), sch, tbl)
 
     def _mssql_fk_keys(self, row, sch, tbl):
         """[(col, ref_schema, ref_table, ref_col)] FKs where parent = sch.tbl (upper)."""
@@ -2935,12 +2970,37 @@ class RMLReportEngine:
                 out[t] = info
         return out
 
+    def _direct_sql_gid(self, gid) -> bool:
+        """True when a global connection id is directly SQL-readable live.
+
+        Queryable SQL Server reads via SqlServerDirect (transpiled) and is
+        merged in Python — never staged. Only genuinely non-queryable
+        sources (ZK devices, is_queryable=False, unknown engines) are NOT
+        direct.
+        """
+        try:
+            if not gid:
+                return False
+            row = self._dj_conn(gid)
+            if row is None:
+                return False
+            try:
+                _fl = getattr(row, "is_queryable", True)
+                flag = False if _fl is False or str(_fl).strip().lower() in ("0", "false", "no", "none") else True
+            except Exception:
+                flag = True
+            if not flag:
+                return False
+            eng = str(getattr(row, "engine", "") or "").lower()
+            return eng in (tuple(self.API_SQL_FAMILY or ()))
+        except Exception:
+            return False
+
     def _is_api_gid(self, gid) -> bool:
         """True when a global connection id is an API source (not SQL-queryable).
 
-        sqlserver counts as API here too: this engine emits postgres/oracle SQL,
-        so SQL Server tables are fetched via pyodbc and staged as PG TEMP
-        (same bridge as ZK mirrors) instead of being queried directly.
+        Queryable sqlserver is NOT api: it is read live and merged in Python,
+        even across different connections — no staging copies.
         """
         if not gid:
             return False
@@ -2951,14 +3011,9 @@ class RMLReportEngine:
         if row is None:
             return False
         try:
-            _fl = getattr(row, "is_queryable", True)
-            flag = False if _fl is False or str(_fl).strip().lower() in ("0", "false", "no", "none") else True
+            return not self._direct_sql_gid(gid)
         except Exception:
-            flag = True
-        eng = str(getattr(row, "engine", "") or "").lower()
-        if eng == "sqlserver":
-            return True
-        return (not flag) or (eng not in self.API_SQL_FAMILY)
+            return False
 
     def _instance_db_key(self, gid):
         """Physical-DB identity for union partitioning — never connects."""
@@ -4237,14 +4292,49 @@ class RMLReportEngine:
         _eff = self._write_temp_table(db, _temp, _coldefs, _data, table_norm.lower(), refresh=refresh)
         return _eff, _cols_ret2
 
-    def _ensure_api_staged(self, refresh=False):
-        """Stage API tables and multi-source UNION tables as TEMP tables (once per instance).
+    def _reject_direct_sql_unions(self, _umap) -> None:
+        """Fail loudly when one table spans 2+ directly-readable SQL DBs.
 
-        - Single-source API tables -> rml_api_<gid>_<table> (existing path).
-        - One table on 2+ physical sources -> ONE rml_union_<table> with rows
-          from every connection completely (UNION ALL semantics).
-        - Direct live mode (every table on one queryable sqlserver conn):
-          no staging at all — names stay source, query runs on the source.
+        Staging is disabled for readable SQL sources and there is no
+        cross-DB UNION machinery — copying rows or silently misrouting would
+        be worse than an explicit error.
+        """
+        try:
+            for _norm, _parts in ((_umap or {}).items()):
+                if len(_parts or []) < 2:
+                    continue
+                _readable = True
+                for _part in (_parts or []):
+                    for _, _g in (_part or []):
+                        if not _g:
+                            continue
+                        try:
+                            if not self._direct_sql_gid(_g):
+                                _readable = False
+                                break
+                        except Exception:
+                            _readable = False
+                            break
+                    if not _readable:
+                        break
+                if _readable:
+                    raise ValueError(
+                        f"الجدول '{str(_norm).lower()}' موزع على اتصالين مختلفين — "
+                        f"الترحيل المؤقت معطّل: وحّد الجدول على اتصال واحد أو افصل التقارير.")
+        except ValueError:
+            raise
+        except Exception:
+            pass
+
+    def _ensure_api_staged(self, refresh=False):
+        """Stage ONLY non-directly-readable API tables as TEMP tables (once per instance).
+
+        - Queryable SQL sources (postgres/oracle/mysql/sqlite/sqlserver) are
+          NEVER staged: they are read live and merged in Python, even across
+          different connections.
+        - Single-source non-readable tables (e.g. ZK devices) ->
+          rml_api_<gid>_<table> (their only execution bridge).
+        - One table on 2+ readable SQL sources -> loud error (no UNION copy).
         """
         try:
             if self._get_direct_gid():
@@ -4269,6 +4359,7 @@ class RMLReportEngine:
             _umap = self._union_partitions()
         except Exception:
             _umap = {}
+        self._reject_direct_sql_unions(_umap)
         # union-owned norms are staged only by the union path (never single)
         _api_tables = {t: i for t, i in _api_tables.items() if t not in _umap}
         if not _api_tables and not _umap:
@@ -4904,6 +4995,8 @@ class RMLReportEngine:
                 # text = integer & friends: compare as text instead of failing
                 if _is_pg_db(base_db):
                     _lon, _ron = f"CAST({_lon} AS TEXT)", f"CAST({_ron} AS TEXT)"
+                elif _is_mssql_db(base_db):
+                    _lon, _ron = f"CAST({_lon} AS NVARCHAR(4000))", f"CAST({_ron} AS NVARCHAR(4000))"
                 else:
                     _lon, _ron = f"CAST({_lon} AS VARCHAR2(4000))", f"CAST({_ron} AS VARCHAR2(4000))"
             joins.append(f"LEFT JOIN {sec_q} {_q(aliases[s])} ON {_lon} = {_ron}")
@@ -5791,6 +5884,7 @@ class RMLReportEngine:
             _umap = self._union_partitions()
         except Exception:
             _umap = {}
+        self._reject_direct_sql_unions(_umap)
         _api_tables = {t: i for t, i in _api_tables.items() if t not in _umap}
         if not _api_tables and not _umap:
             return
