@@ -2085,61 +2085,101 @@ def api_fmlk_import_xlsx(request, app_name):
                 return int(v) if v == int(v) else float(v)
             return v
 
-        # قراءة شريحية (min/max_row): كل طلب يقرأ صفوفه فقط — لا مادية كاملة للملف
-        wb = openpyxl.load_workbook(up, read_only=True, data_only=True)
+        # ذاكرة صفوف: المعاينة تخزن الصفوف مرة واحدة (file_key) والدفعات تقرأ
+        # منها — بلا إعادة تحميل الملف كل دفعة. سقوط احتياطي: تحليل الملف المرفق.
+        import hashlib as _hl
+        from django.core.cache import cache as _qcache
         try:
-            ws = wb.active
-            if ws is None:
-                return JsonResponse({"error": "لا توجد ورقة في الملف"}, status=400)
-            max_row = ws.max_row or 0
-            if not max_row:
-                return JsonResponse({"error": "الملف فارغ"}, status=400)
-            try:
-                header_row = int(request.POST.get("header_row") or 1)
-            except (TypeError, ValueError):
-                header_row = 1
-            try:
-                data_start = int(request.POST.get("data_start") or 0) or (header_row + 1)
-            except (TypeError, ValueError):
-                data_start = header_row + 1
-            if header_row < 1 or header_row > max_row:
-                return JsonResponse({"error": f"صف الترويسات ({header_row}) خارج الملف (1..{max_row})"}, status=400)
-            if data_start <= header_row:
-                return JsonResponse({"error": "صف بدء البيانات يجب أن يكون بعد صف الترويسات"}, status=400)
-            _hvals = next(ws.iter_rows(min_row=header_row, max_row=header_row, values_only=True), None)
-            headers = [str(c or "").strip() for c in (_hvals or [])]
-            if not any(headers):
-                return JsonResponse({"error": f"الصف {header_row} فارغ — اختر صف الترويسات الصحيح"}, status=400)
-            total_rows = max(0, max_row - data_start + 1)
+            header_row = int(request.POST.get("header_row") or 1)
+        except (TypeError, ValueError):
+            header_row = 1
+        try:
+            data_start = int(request.POST.get("data_start") or 0) or (header_row + 1)
+        except (TypeError, ValueError):
+            data_start = header_row + 1
+        if data_start <= header_row:
+            return JsonResponse({"error": "صف بدء البيانات يجب أن يكون بعد صف الترويسات"}, status=400)
+        try:
+            row_offset = max(0, int(request.POST.get("row_offset") or 0))
+        except (TypeError, ValueError):
+            row_offset = 0
+        try:
+            row_limit = int(request.POST.get("row_limit") or 0) or 0
+        except (TypeError, ValueError):
+            row_limit = 0
+        _ckey = "xlsxrows:%s:%d:%d" % (
+            _hl.sha1(up.read()).hexdigest()[:24], header_row, data_start)
+        try:
+            up.seek(0)
+        except Exception:
+            pass
+        _cached = _qcache.get(_ckey)
+        headers = max_row = total_rows = None
+        data_rows = None
+        if isinstance(_cached, dict) and _cached.get("rows") is not None:
+            headers = _cached.get("headers") or []
+            max_row = _cached.get("max_row") or 0
+            total_rows = _cached.get("total") or 0
             if request.POST.get("preview"):
                 sample_rows = []
-                if total_rows:
-                    for _r in ws.iter_rows(min_row=data_start, max_row=max_row, values_only=True):
+                for _r in (_cached.get("rows") or []):
+                    if any(c is not None and str(c).strip() != "" for c in (_r or [])):
+                        sample_rows.append([_norm(c) for c in (_r or [])])
+                        if len(sample_rows) >= 5:
+                            break
+                return JsonResponse({"ok": True, "headers": headers,
+                                     "sample_rows": sample_rows, "total_rows": total_rows,
+                                     "header_row": header_row, "data_start": data_start,
+                                     "file_key": _ckey},
+                                    json_dumps_params={"ensure_ascii": False})
+            data_rows = (_cached.get("rows") or [])[row_offset:]
+            if row_limit:
+                data_rows = data_rows[:min(row_limit, 1000)]
+        else:
+            wb = openpyxl.load_workbook(up, read_only=True, data_only=True)
+            try:
+                ws = wb.active
+                if ws is None:
+                    return JsonResponse({"error": "لا توجد ورقة في الملف"}, status=400)
+                max_row = ws.max_row or 0
+                if not max_row:
+                    return JsonResponse({"error": "الملف فارغ"}, status=400)
+                if header_row < 1 or header_row > max_row:
+                    return JsonResponse({"error": f"صف الترويسات ({header_row}) خارج الملف (1..{max_row})"}, status=400)
+                _hvals = next(ws.iter_rows(min_row=header_row, max_row=header_row, values_only=True), None)
+                headers = [str(c or "").strip() for c in (_hvals or [])]
+                if not any(headers):
+                    return JsonResponse({"error": f"الصف {header_row} فارغ — اختر صف الترويسات الصحيح"}, status=400)
+                total_rows = max(0, max_row - data_start + 1)
+                # مادية واحدة لكل الملف (صفوف خام بترويسات مُطبّعة JSON) ثم تخزين
+                _all = [[_norm(c) for c in (_r or [])]
+                        for _r in ws.iter_rows(min_row=data_start, max_row=max_row, values_only=True)] \
+                    if total_rows else []
+                try:
+                    _qcache.set(_ckey, {"headers": headers, "rows": _all,
+                                        "max_row": max_row, "total": total_rows}, 7200)
+                except Exception:
+                    pass
+                if request.POST.get("preview"):
+                    sample_rows = []
+                    for _r in _all:
                         if any(c is not None and str(c).strip() != "" for c in (_r or [])):
-                            sample_rows.append([_norm(c) for c in (_r or [])])
+                            sample_rows.append(list(_r))
                             if len(sample_rows) >= 5:
                                 break
-                return JsonResponse({"ok": True, "headers": headers,
-                                     "sample_rows": sample_rows,
-                                     "total_rows": total_rows,
-                                     "header_row": header_row, "data_start": data_start},
-                                    json_dumps_params={"ensure_ascii": False})
-            try:
-                row_offset = max(0, int(request.POST.get("row_offset") or 0))
-            except (TypeError, ValueError):
-                row_offset = 0
-            try:
-                row_limit = int(request.POST.get("row_limit") or 0) or 0
-            except (TypeError, ValueError):
-                row_limit = 0
-            _lo = data_start + row_offset
-            _hi = max_row if not row_limit else min(max_row, _lo + min(row_limit, 500) - 1)
-            data_rows = list(ws.iter_rows(min_row=_lo, max_row=_hi, values_only=True)) if _lo <= max_row else []
-        finally:
-            try:
-                wb.close()
-            except Exception:
-                pass
+                    return JsonResponse({"ok": True, "headers": headers,
+                                         "sample_rows": sample_rows, "total_rows": total_rows,
+                                         "header_row": header_row, "data_start": data_start,
+                                         "file_key": _ckey},
+                                        json_dumps_params={"ensure_ascii": False})
+                data_rows = list(_all[row_offset:])
+                if row_limit:
+                    data_rows = data_rows[:min(row_limit, 1000)]
+            finally:
+                try:
+                    wb.close()
+                except Exception:
+                    pass
         try:
             mapping = json.loads(request.POST.get("mapping") or "{}")
         except Exception:
