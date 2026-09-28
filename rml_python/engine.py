@@ -6134,7 +6134,7 @@ class RMLReportEngine:
         a row is kept iff every deferred predicate evaluates True.
         """
         import time as _tmod
-        _CH = 50000
+        _CH = 20000
         _t_rows = _tmod.time()
         _deferred = [d for d in (exec_plan.get("gw_deferred") or []) if isinstance(d, dict)]
         _pcols = exec_plan.get("columns") or []
@@ -6217,6 +6217,11 @@ class RMLReportEngine:
                             _r.pop(_k, None)
                     _out.append({k: _fmt_cell(v) for k, v in _r.items()})
                 _matched += 1
+            # free the chunk BEFORE the next fetch allocates (peak = 1 chunk)
+            try:
+                del _batch, _rr, _mrows
+            except Exception:
+                pass
             try:
                 self._timings["gw_post_ms"] = int(self._timings.get("gw_post_ms") or 0) + int((_tmod.time() - _t_gw) * 1000)
             except Exception:
@@ -6241,7 +6246,12 @@ class RMLReportEngine:
     # post-merge eval.  Post-merge eval stays the SOLE arbiter of exactness:
     # the wrapper is a proven superset (or absent), never a filter.
     _GW_PREFILTER_MAX_KEYS = 1000
-    _GW_EKEY_FETCH_CAP = 2001
+    _GW_EKEY_FETCH_CAP = 5001
+    _GW_EXTRACT_MAX_KEYS = 5000
+    # regex patterns eligible for server-side trailing-run extraction
+    # (normalized, no spaces). ONLY these shapes — anything else keeps the
+    # exact full-scan path. They all mean "trailing digit run".
+    _GW_TRAILING_PATTERNS = (r"(\d+)(?!.*\d)", r"([0-9]+)(?!.*[0-9])")
 
     @staticmethod
     def _gw_stringy(dtype) -> bool:
@@ -6334,7 +6344,7 @@ class RMLReportEngine:
                         continue
                     _seen.add(_ex)
                     _outs.append(_ex)
-                if len(_outs) > int(self._GW_PREFILTER_MAX_KEYS):
+                if len(_outs) > int(self._GW_EXTRACT_MAX_KEYS):
                     return None, False
                 return _outs, _had_null
             _keys = [_v for _v in _raw if _v is not None]
@@ -6456,6 +6466,11 @@ class RMLReportEngine:
                 if any(not self._gw_stringy(self._gw_base_field_type(base_norm, _bk)) for _hh, _bk in _helpers):
                     _skip("non-string-base")
                     continue
+                if _match == "contains" and len(_helpers) * len(_keys) > 200:
+                    # OR-chain would be a plan/RAM monster (helpers x keys
+                    # CHARINDEX pairs) -> exact full-scan path instead.
+                    _skip("chain-too-wide")
+                    continue
                 _parts = []
                 for _hh, _bk in _helpers:
                     _h = f'"t".{_q(_hh)}'
@@ -6473,19 +6488,48 @@ class RMLReportEngine:
                             else:
                                 _ors.append(f"(INSTR(CAST({_h} AS {_ct}), CAST(:{_k} AS {_ct})) > 0 OR INSTR(CAST(:{_k} AS {_ct}), CAST({_h} AS {_ct})) > 0)")
                         _parts.append("(" + " OR ".join(_ors) + ")")
-                    else:  # regex: a merge hit means the base CONTAINS the
-                        # extract, so containment alone is a safe superset
-                        # (no dialect extract function needed).
-                        _ors = []
-                        for _v in _keys:
-                            _k = _np(_v)
+                    else:  # regex, trailing-run family ONLY: server-side
+                        # extract + hash IN (ONE predicate per 1000 keys —
+                        # never a CHARINDEX monster). Gates: whitelisted
+                        # pattern shape + ASCII-only E (equivalence with the
+                        # Python extract rests on exactly these two facts).
+                        _praw = ""
+                        try:
+                            _praw = re.sub(r"\s+", "", str(_mspec.get("pattern") or ""))
+                        except Exception:
+                            _praw = ""
+                        _ascii_e = False
+                        try:
+                            _ascii_e = bool(_keys) and all(
+                                isinstance(_v, str) and re.fullmatch(r"[0-9]+", _v) for _v in _keys)
+                        except Exception:
+                            _ascii_e = False
+                        if _praw not in self._GW_TRAILING_PATTERNS or not _ascii_e:
+                            _skip("no-server-extract")
+                            _parts = None
+                            break
+                        _ins = []
+                        for _ci in range(0, len(_keys), 1000):
+                            _ch = _keys[_ci:_ci + 1000]
+                            _phs = ", ".join(f"CAST(:{_np(_v)} AS {_ct})" for _v in _ch)
                             if _bms:
-                                _ors.append(f"CHARINDEX(CAST(:{_k} AS {_ct}), CAST({_h} AS {_ct})) > 0")
+                                # LAST digit-run anywhere (cut trailing
+                                # non-digits, then take the run). RTRIM
+                                # defeats LEN()'s trailing-space blindness;
+                                # control chars need no guard (cut by digit).
+                                _rh = f"RTRIM({_h})"
+                                _d = f"PATINDEX('%[0-9]%', REVERSE({_rh}))"
+                                _core = f"LEFT({_rh}, LEN({_rh}) - {_d} + 1)"
+                                _ext = (f"CASE WHEN {_d} > 0 THEN RIGHT({_core}, "
+                                        f"PATINDEX('%[^0-9]%', REVERSE({_core}) + 'X') - 1) END")
+                                _ins.append(f"{_ext} IN ({_phs})")
                             elif _bpg:
-                                _ors.append(f"POSITION(CAST(:{_k} AS {_ct}) IN CAST({_h} AS {_ct})) > 0")
+                                _ext = f"substring({_h} FROM '([0-9]+)[^0-9]*$')"
+                                _ins.append(f"{_ext} IN ({_phs})")
                             else:
-                                _ors.append(f"INSTR(CAST({_h} AS {_ct}), CAST(:{_k} AS {_ct})) > 0")
-                        _parts.append("(" + " OR ".join(_ors) + ")")
+                                _ext = f"REGEXP_SUBSTR({_h}, '([0-9]+)[^0-9]*$', 1, 1, NULL, 1)"
+                                _ins.append(f"{_ext} IN ({_phs})")
+                        _parts.append("(" + " OR ".join(_ins) + ")")
                 if not _parts:
                     _skip("no-parts")
                     continue
