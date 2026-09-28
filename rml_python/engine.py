@@ -6088,6 +6088,113 @@ class RMLReportEngine:
                 r.pop(k, None)
         return rows
 
+    def _exec_deferred_stream(self, cur, cols, exec_plan, strip_extra, page, page_size):
+        """Stream base rows in chunks: merge + post-merge GW per chunk.
+
+        The deferred path cannot paginate in SQL (the filter needs merged
+        rows), so the full base set is scanned — but only the requested
+        page is materialized; memory stays ~one chunk + one page.
+        Returns (formatted_page_rows, total_matches). SQL WHERE semantics:
+        a row is kept iff every deferred predicate evaluates True.
+        """
+        import time as _tmod
+        _CH = 50000
+        _t_rows = _tmod.time()
+        _deferred = [d for d in (exec_plan.get("gw_deferred") or []) if isinstance(d, dict)]
+        _pcols = exec_plan.get("columns") or []
+        _exp_keys = {str(getattr(c, "alias", "") or getattr(c, "name", "") or "").lower()
+                     for c in _pcols}
+        _exp_keys |= {str(m.get("alias") or "").lower()
+                      for m in (exec_plan.get("merges") or []) if m.get("alias")}
+        _strip = {str(_k) for _k in (strip_extra or set())}
+        _strip |= {str(_k).lower() for _k in (strip_extra or set())}
+        _all = str(page_size).lower() == "all"
+        try:
+            _ps_n = None if _all else max(1, int(page_size))
+            _p0 = 1 if _all else max(1, int(page or 1))
+        except Exception:
+            _ps_n, _p0 = None, 1
+        _start = 0 if _all else (_p0 - 1) * _ps_n
+        _end = None if _all else _start + _ps_n
+        _get = None
+        _allkeys = set(_exp_keys)
+        _matched = 0
+        _scanned = 0
+        _out = []
+        try:
+            _tname = str(exec_plan.get("from_table") or "").lower()
+        except Exception:
+            _tname = ""
+        while True:
+            try:
+                _batch = cur.fetchmany(_CH)
+            except Exception:
+                break
+            if not _batch:
+                break
+            _rr = [dict(zip(cols, _r)) for _r in _batch]
+            _scanned += len(_rr)
+            _t_merge = _tmod.time()
+            _mrows = self._apply_merges(_rr, exec_plan)
+            try:
+                self._timings["merge_ms"] = int(self._timings.get("merge_ms") or 0) + int((_tmod.time() - _t_merge) * 1000)
+            except Exception:
+                pass
+            if _get is None:
+                # First chunk: lock ref->alias bindings (loud when a GW ref
+                # binds no report column — never silently drop rows).
+                for _r0 in _mrows:
+                    try:
+                        _allkeys |= set(str(_k).lower() for _k in dict(_r0 or {}).keys())
+                    except Exception:
+                        pass
+                _get, _al = self._gw_make_row_getter(_pcols, _allkeys)
+                for _dd in _deferred:
+                    _miss = self._gw_pred_unbound(_dd.get("pred"), _allkeys, _pcols)
+                    if _miss:
+                        raise ValueError(
+                            f'تعذر ربط الشرط العام المؤجل ({_miss}) بأعمدة التقرير — '
+                            f'اعرض العمود أولاً.')
+            _t_gw = _tmod.time()
+            for _r in _mrows:
+                try:
+                    _rl = {str(_k).lower(): _v for _k, _v in dict(_r or {}).items()}
+                except Exception:
+                    continue
+                _lk = lambda _rk, _raw, _g=_get, _w=_rl: _g(_w, _rk, _raw)
+                _okr = True
+                for _dd in _deferred:
+                    try:
+                        _pv = self._gw_pred_eval(_dd.get("pred"), _lk)
+                    except Exception:
+                        _pv = None
+                    if _pv is not True:
+                        _okr = False
+                        break
+                if not _okr:
+                    continue
+                if _end is None or (_start <= _matched < _end):
+                    if _strip:
+                        for _k in _strip:
+                            _r.pop(_k, None)
+                    _out.append({k: _fmt_cell(v) for k, v in _r.items()})
+                _matched += 1
+            try:
+                self._timings["gw_post_ms"] = int(self._timings.get("gw_post_ms") or 0) + int((_tmod.time() - _t_gw) * 1000)
+            except Exception:
+                pass
+            try:
+                self._report_progress({"stage": "rows", "table": _tname,
+                                       "text": f"جلب وترشيح... {_scanned} (مطابق {_matched})"})
+            except Exception:
+                pass
+        try:
+            self._timings["rows_ms"] = int((_tmod.time() - _t_rows) * 1000)
+            self._timings["rows_n"] = _scanned
+        except Exception:
+            pass
+        return _out, _matched
+
     # ── SQL Compilation ─────────────────────────────────────────────────
 
     def _paginate_clause(self, page, page_size, params: Dict[str, Any], db=None) -> Tuple[str, Dict[str, Any]]:
@@ -6750,6 +6857,10 @@ class RMLReportEngine:
             _skip_total = bool(payload.get("skipTotal") or payload.get("skip_total"))
         except Exception:
             _skip_total = False
+        if _deferred:
+            # The stream computes the post-filter total itself; the base
+            # COUNT(*) would double the heavy I/O for nothing.
+            _skip_total = True
         try:
             # Ensure connection (on the routed base DB)
             if not getattr(base_db, "conn", None):
@@ -6787,18 +6898,8 @@ class RMLReportEngine:
                     except: pass
                 self._timings["count_ms"] = int((_tmod.time() - _t_count) * 1000)
 
-            if _deferred:
-                # Deferred GW filters post-merge, so the whole base set is
-                # fetched: guard memory with a row cap (metadata
-                # stage_max_rows or 200000). `total` is the pre-filter count.
-                try:
-                    _cap = int((self.metadata or {}).get("stage_max_rows") or 200000)
-                except Exception:
-                    _cap = 200000
-                if total > _cap:
-                    raise ValueError(
-                        f'الشرط العام المؤجل يحتاج جلب {total} صفاً قبل الترشيح (الحد {_cap}) — '
-                        f'ضيّق التقرير بفلاتر المشغل أولاً.')
+            # Deferred GW: unlimited rows (user-confirmed) — the streaming
+            # fetch below bounds memory by processing in chunks, so no cap.
 
             # Get paged rows (raw -> cross-DB merges -> strip helpers -> format)
             try:
@@ -6814,6 +6915,11 @@ class RMLReportEngine:
                 cols = [d[0].lower() for d in cur.description] if cur.description else []
                 if not cols:
                     result_rows = []
+                elif _deferred:
+                    # Streaming path: chunked merge+filter, only the requested
+                    # page materialized (unlimited rows, bounded memory).
+                    result_rows, total = self._exec_deferred_stream(
+                        cur, cols, exec_plan, strip_extra, page, page_size)
                 else:
                     _strip = {str(_k) for _k in (strip_extra or set())}
                     _strip |= {str(_k).lower() for _k in (strip_extra or set())}
@@ -6832,60 +6938,6 @@ class RMLReportEngine:
                     _t_merge = _tmod.time()
                     raw_rows = self._apply_merges(_rr, exec_plan)
                     self._timings["merge_ms"] = int((_tmod.time() - _t_merge) * 1000)
-                    if _deferred:
-                        # Post-merge GW: SQL WHERE semantics over merged rows
-                        # (keep iff True; NULL/unknown drops the row).
-                        _t_gw = _tmod.time()
-                        try:
-                            _pcols = exec_plan.get("columns") or []
-                            _exp_keys = {str(getattr(c, "alias", "") or getattr(c, "name", "") or "").lower()
-                                         for c in _pcols}
-                            _exp_keys |= {str(m.get("alias") or "").lower()
-                                          for m in (exec_plan.get("merges") or []) if m.get("alias")}
-                            _rls, _allkeys = [], set(_exp_keys)
-                            for _r in raw_rows:
-                                try:
-                                    _rl = {str(_k).lower(): _v for _k, _v in dict(_r or {}).items()}
-                                except Exception:
-                                    continue
-                                _rls.append((_r, _rl))
-                                _allkeys |= set(_rl.keys())
-                            _get, _al = self._gw_make_row_getter(_pcols, _allkeys)
-                            for _dd in _deferred:
-                                _miss = self._gw_pred_unbound(_dd.get("pred"), _allkeys, _pcols)
-                                if _miss:
-                                    raise ValueError(
-                                        f'تعذر ربط الشرط العام المؤجل ({_miss}) بأعمدة التقرير — '
-                                        f'اعرض العمود أولاً.')
-                            _kept = []
-                            for _r, _rl in _rls:
-                                _lk = lambda _rk, _raw, _g=_get, _w=_rl: _g(_w, _rk, _raw)
-                                _okr = True
-                                for _dd in _deferred:
-                                    try:
-                                        _pv = self._gw_pred_eval(_dd.get("pred"), _lk)
-                                    except Exception:
-                                        _pv = None
-                                    if _pv is not True:
-                                        _okr = False
-                                        break
-                                if _okr:
-                                    _kept.append(_r)
-                            raw_rows = _kept
-                        finally:
-                            try:
-                                self._timings["gw_post_ms"] = int((_tmod.time() - _t_gw) * 1000)
-                            except Exception:
-                                pass
-                        total = len(raw_rows)
-                        if str(page_size).lower() != "all":
-                            try:
-                                _ps_n = max(1, int(page_size))
-                                _p0 = max(1, int(page or 1))
-                            except Exception:
-                                _ps_n, _p0 = len(raw_rows), 1
-                            _s0 = (_p0 - 1) * _ps_n
-                            raw_rows = raw_rows[_s0:_s0 + _ps_n]
                     if _strip:
                         for _d in raw_rows:
                             for _k in _strip:
