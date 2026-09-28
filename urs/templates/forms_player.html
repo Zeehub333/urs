@@ -4754,6 +4754,27 @@
                     return hi;
                 };
                 const xlOpts = (sel)=>'<option value="-1">— لاشيء —</option>' + _xlsxHeaders.map((h, i)=>`<option value="${i}" ${i === sel ? 'selected' : ''}>${escHtml(h) || ('عمود ' + (i+1))}</option>`).join('');
+                // مدخل القيمة الثابتة ديناميكي حسب نوع الحقل في المصمم
+                const xlsxFixedInput = (f)=>{
+                    const t = String(f.dataType || f.data_type || f.inputType || f.input_type || 'text').toLowerCase();
+                    const nm = `data-xfixed="${escAttr(f.name)}"`;
+                    const cls = 'w-full bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs min-w-0';
+                    const ph = 'placeholder="ثابتة..." title="قيمة ثابتة تُدخل مع كل الصفوف"';
+                    if(['number','integer','int','decimal','float','numeric','double','real','money','ipv4'].includes(t))
+                        return `<input type="number" ${nm} ${ph} class="${cls}" dir="ltr"/>`;
+                    if(t === 'date')
+                        return `<input type="date" ${nm} ${ph} class="${cls}" dir="ltr"/>`;
+                    if(t === 'time')
+                        return `<input type="time" ${nm} ${ph} class="${cls}" dir="ltr"/>`;
+                    if(['datetime','date_time','timestamp'].includes(t))
+                        return `<input type="datetime-local" data-xdt="1" ${nm} ${ph} class="${cls}" dir="ltr"/>`;
+                    if(['boolean','bool','checkbox','check'].includes(t))
+                        return `<select ${nm} title="قيمة ثابتة تُدخل مع كل الصفوف" class="${cls}"><option value="">—</option><option value="true">نعم</option><option value="false">لا</option></select>`;
+                    const _opts = (f.options || []).map(fmlkOptPair);
+                    if(_opts.length && ['select','dropdown','choice','list','combobox','status','radio','multiselect'].includes(t))
+                        return `<select ${nm} title="قيمة ثابتة تُدخل مع كل الصفوف" class="${cls}"><option value="">—</option>` + _opts.map(o=>`<option value="${escAttr(o.value)}">${escHtml(o.label)}</option>`).join('') + `</select>`;
+                    return `<input type="text" ${nm} ${ph} class="${cls}"/>`;
+                };
                 let html = `<div class="text-[11px] font-bold text-slate-600 mb-1">${data.total_rows} صف (الترويسات: صف ${data.header_row || hr}):</div>`;
                 // 1) عينات الملف فوق الربط
                 if((data.sample_rows || []).length) html += `<div class="text-[11px] font-bold text-slate-600 mb-1">عينات من الملف (أول 5 صفوف بيانات):</div><div class="overflow-x-auto border border-slate-200 rounded-lg mb-2"><table class="w-full text-[10px]"><tr>${_xlsxHeaders.map(h=>`<th class="px-1.5 py-1 bg-slate-50 border-b font-mono" dir="ltr">${escHtml(h)}</th>`).join('')}</tr>` + data.sample_rows.map(r=>`<tr>${_xlsxHeaders.map((h,i)=>`<td class="px-1.5 py-1 border-b truncate max-w-[140px]">${escHtml(String(r[i] ?? ''))}</td>`).join('')}</tr>`).join('') + `</table></div>`;
@@ -4763,7 +4784,7 @@
                     + `<div class="space-y-1">` + fields.map(f=>{
                         const hi = autoCol(f);
                         return `<div data-xrow class="grid grid-cols-[1fr_1fr_1fr] gap-1 items-center bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5"><span class="font-bold text-slate-700 truncate" title="${escAttr(f.name)}">${escHtml(f.alias || f.name)}</span>`
-                            + `<input data-xfixed="${escAttr(f.name)}" placeholder="ثابتة..." title="قيمة ثابتة تُدخل مع كل الصفوف" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs min-w-0"/>`
+                            + xlsxFixedInput(f)
                             + `<select data-xfield="${escAttr(f.name)}" onchange="var fx=this.closest('[data-xrow]').querySelector('[data-xfixed]'); if(fx){ fx.disabled = this.value !== '-1'; if(this.value !== '-1') fx.value=''; }" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs min-w-0">${xlOpts(hi)}</select></div>`;
                     }).join('') + `</div>`;
                 box.innerHTML = html;
@@ -4795,7 +4816,11 @@
                 const hi = parseInt(s.value, 10);
                 const fx = s.closest('[data-xrow]') ? s.closest('[data-xrow]').querySelector('[data-xfixed]') : null;
                 if(hi >= 0 && _xlsxHeaders[hi] !== undefined) mapping[_xlsxHeaders[hi]] = fn;
-                else if(fx && fx.value.trim()) fixed[fn] = fx.value.trim();
+                else if(fx && String(fx.value || '').trim()){
+                    let fv = String(fx.value).trim();
+                    if(fx.dataset && fx.dataset.xdt) fv = fv.replace('T', ' ');
+                    fixed[fn] = fv;
+                }
             });
             if(!Object.keys(mapping).length && !Object.keys(fixed).length) return notify('اختر عمود إكسل أو قيمة ثابتة لحقل واحد على الأقل', 'error');
             const total = Math.min(_xlsxTotal || 0, 2000);
