@@ -4693,7 +4693,8 @@
                 m = document.createElement('div');
                 m.id = 'xlsxImportModal';
                 m.className = 'hidden fixed inset-0 z-[70] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4';
-                m.setAttribute('onclick', 'if(event.target===this)closeXlsxImport()');
+                // إغلاق يدوي فقط (X / إلغاء) — النقر خارج المودال لا يلغي العمل
+                m.removeAttribute('onclick');
                 m.innerHTML = '<div class="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[88vh] overflow-hidden flex flex-col">'
                     + '<div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-emerald-50 shrink-0"><h3 class="text-sm font-bold text-slate-800"><i class="fa-solid fa-file-excel text-emerald-600"></i> استيراد من Excel</h3><button onclick="closeXlsxImport()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button></div>'
                     + '<div class="p-4 space-y-3 overflow-y-auto custom-scroll text-xs">'
