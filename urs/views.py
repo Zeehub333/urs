@@ -2120,6 +2120,11 @@ def api_fmlk_import_xlsx(request, app_name):
             headers = _cached.get("headers") or []
             max_row = _cached.get("max_row") or 0
             total_rows = _cached.get("total") or 0
+            if request.POST.get("preview") and request.POST.get("headers_only"):
+                return JsonResponse({"ok": True, "headers": headers,
+                                     "total_rows": total_rows,
+                                     "header_row": header_row, "data_start": data_start},
+                                    json_dumps_params={"ensure_ascii": False})
             if request.POST.get("preview"):
                 sample_rows = []
                 for _r in (_cached.get("rows") or []):
@@ -2151,6 +2156,12 @@ def api_fmlk_import_xlsx(request, app_name):
                 if not any(headers):
                     return JsonResponse({"error": f"الصف {header_row} فارغ — اختر صف الترويسات الصحيح"}, status=400)
                 total_rows = max(0, max_row - data_start + 1)
+                # فحص الترويسات فقط (للملفات اللاحقة): بلا مادية صفوف ولا تخزين
+                if request.POST.get("preview") and request.POST.get("headers_only"):
+                    return JsonResponse({"ok": True, "headers": headers,
+                                         "total_rows": total_rows,
+                                         "header_row": header_row, "data_start": data_start},
+                                        json_dumps_params={"ensure_ascii": False})
                 # مادية واحدة لكل الملف (صفوف خام بترويسات مُطبّعة JSON) ثم تخزين
                 _all = [[_norm(c) for c in (_r or [])]
                         for _r in ws.iter_rows(min_row=data_start, max_row=max_row, values_only=True)] \

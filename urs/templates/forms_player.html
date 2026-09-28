@@ -4687,6 +4687,7 @@
         }
         let _xlsxFile = null, _xlsxHeaders = [], _xlsxHeaderRow = 1, _xlsxDataStart = 2, _xlsxTotal = 0;
         let _xlsxRunning = false, _xlsxCancel = false;
+        let _xlsxFiles = []; // [{file, headers, total}] — ملفات متطابقة الترتيب
         function openXlsxImport(){
             let m = document.getElementById('xlsxImportModal');
             if(!m){
@@ -4698,7 +4699,7 @@
                 m.innerHTML = '<div class="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[88vh] overflow-hidden flex flex-col">'
                     + '<div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-emerald-50 shrink-0"><h3 class="text-sm font-bold text-slate-800"><i class="fa-solid fa-file-excel text-emerald-600"></i> استيراد من Excel</h3><button onclick="closeXlsxImport()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button></div>'
                     + '<div class="p-4 space-y-3 overflow-y-auto custom-scroll text-xs">'
-                    + '<div><label class="block text-[11px] font-bold text-slate-500 mb-1">ملف XLSX (يُحلَّل تلقائياً فور اختياره)</label><input id="xlsxFileInput" type="file" accept=".xlsx,.xlsm,.xltx,.xltm" onchange="autoXlsxParse()" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"/></div>'
+                    + '<div><label class="block text-[11px] font-bold text-slate-500 mb-1">ملفات XLSX (يُحلَّل تلقائياً فور اختيارها — تُقبل عدة ملفات بشرط تطابق ترتيب الأعمدة)</label><input id="xlsxFileInput" type="file" multiple accept=".xlsx,.xlsm,.xltx,.xltm" onchange="autoXlsxParse()" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"/></div>'
                     + '<div class="flex gap-2"><div class="flex-1"><label class="block text-[11px] font-bold text-slate-500 mb-1">صف الترويسات (أسماء الأعمدة)</label><input id="xlsxHeaderRow" type="number" min="1" value="1" onchange="var h=Math.max(1,parseInt(this.value||\'1\',10)||1); this.value=h; var d=document.getElementById(\'xlsxDataStart\'); if(d) d.value=String(h+1); autoXlsxParse();" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"/></div>'
                     + '<div class="flex-1"><label class="block text-[11px] font-bold text-slate-500 mb-1">صف بدء البيانات (= الترويسات +1)</label><input id="xlsxDataStart" type="number" min="2" value="2" onchange="autoXlsxParse()" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"/></div></div>'
                     + '<div><label class="block text-[11px] font-bold text-slate-500 mb-1">عمود المطابقة — مفتاح الـ upsert (الموجود يُحدَّث والجديد يُنشأ — فارغ = إنشاء فقط)</label><select id="xlsxMatchCol" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"></select></div>'
@@ -4713,7 +4714,7 @@
             document.getElementById('xlsxMatchCol').innerHTML = '<option value="">— بلا (إنشاء فقط) —</option>' + fields.map(f=>`<option value="${escAttr(f.name)}">${escHtml(f.alias || f.name)} <span class="text-slate-400">(${escHtml(f.name)})</span></option>`).join('');
             document.getElementById('xlsxMapOut').innerHTML = '<span class="text-slate-400">اختر الملف ثم اضغط تحليل.</span>';
             document.getElementById('xlsxImportBtn').disabled = true;
-            _xlsxFile = null; _xlsxHeaders = []; _xlsxHeaderRow = 1; _xlsxDataStart = 2; _xlsxTotal = 0; _xlsxCancel = false;
+            _xlsxFile = null; _xlsxHeaders = []; _xlsxHeaderRow = 1; _xlsxDataStart = 2; _xlsxTotal = 0; _xlsxCancel = false; _xlsxFiles = [];
             const _pw = document.getElementById('xlsxProgWrap'); if(_pw) _pw.classList.add('hidden');
             const _hr = document.getElementById('xlsxHeaderRow'); if(_hr) _hr.value = '1';
             const _ds = document.getElementById('xlsxDataStart'); if(_ds) _ds.value = '2';
@@ -4725,27 +4726,63 @@
             document.getElementById('xlsxImportModal').classList.add('hidden');
             if(typeof unlockScroll === 'function') unlockScroll();
         }
+        async function xlsxAnalyzeOne(file, hr, ds, headersOnly){
+            const fd = new FormData();
+            fd.append('file', file);
+            fd.append('fml', currentFml);
+            fd.append('preview', '1');
+            if(headersOnly) fd.append('headers_only', '1');
+            fd.append('header_row', String(hr));
+            fd.append('data_start', String(ds));
+            const res = await fetch(`/api/apps/${encodeURIComponent(currentApp)}/models/import-xlsx/`, {method:'POST', body: fd});
+            const data = await res.json();
+            if(!res.ok) throw new Error(data.error || 'فشل التحليل');
+            return data;
+        }
+        // وصف أول اختلاف بين ترويستين لرسالة صريحة (رقم العمود 1-based)
+        function xlsxHeaderDiff(ref, got){
+            const a = ref || [], b = got || [];
+            if(a.length !== b.length) return `عدد الأعمدة مختلف (المرجع ${a.length} مقابل ${b.length})`;
+            for(let i = 0; i < a.length; i++){
+                const x = String(a[i] || '').trim(), y = String(b[i] || '').trim();
+                if(x !== y) return `عمود ${i + 1}: المرجع «${x || '(فارغ)'}» مقابل «${y || '(فارغ)'}»`;
+            }
+            return '';
+        }
         async function runXlsxParse(){
             const box = document.getElementById('xlsxMapOut');
             const inp = document.getElementById('xlsxFileInput');
-            _xlsxFile = inp && inp.files && inp.files[0];
-            if(!_xlsxFile){ box.innerHTML = '<span class="text-rose-500">اختر ملف XLSX أولاً</span>'; return; }
+            const picked = inp && inp.files ? [...inp.files] : [];
+            if(!picked.length){ box.innerHTML = '<span class="text-rose-500">اختر ملف XLSX أولاً</span>'; return; }
             box.innerHTML = '<span class="text-slate-400">جارٍ التحليل...</span>';
             document.getElementById('xlsxImportBtn').disabled = true;
             try{
-                const fd = new FormData();
-                fd.append('file', _xlsxFile);
-                fd.append('fml', currentFml);
-                fd.append('preview', '1');
                 const hr = Math.max(1, parseInt((document.getElementById('xlsxHeaderRow') || {}).value || '1', 10) || 1);
                 const dsEl = document.getElementById('xlsxDataStart');
                 let ds = parseInt((dsEl || {}).value || '0', 10) || 0;
                 if(!(ds > hr)){ ds = hr + 1; if(dsEl) dsEl.value = String(ds); }
-                fd.append('header_row', String(hr));
-                fd.append('data_start', String(ds));
-                const res = await fetch(`/api/apps/${encodeURIComponent(currentApp)}/models/import-xlsx/`, {method:'POST', body: fd});
-                const data = await res.json();
-                if(!res.ok) throw new Error(data.error || 'فشل التحليل');
+                // الملف الأول: تحليل كامل (عينات + تخزين)؛ البقية: فحص ترويسات خفيف فقط
+                _xlsxFiles = [];
+                const rejected = [];
+                for(let _fi = 0; _fi < picked.length; _fi++){
+                    const f = picked[_fi];
+                    try{
+                        const first = !_xlsxFiles.length;
+                        const data = await xlsxAnalyzeOne(f, hr, ds, !first);
+                        const headers = data.headers || [];
+                        if(first){
+                            _xlsxFiles.push({file: f, headers, total: data.total_rows || 0, samples: data.sample_rows || []});
+                        }else{
+                            const diff = xlsxHeaderDiff(_xlsxFiles[0].headers, headers);
+                            if(!diff) _xlsxFiles.push({file: f, headers, total: data.total_rows || 0, samples: []});
+                            else rejected.push(f.name + ' — ' + diff);
+                        }
+                    }catch(e){ rejected.push(f.name + ' (' + String((e && e.message) || e).slice(0, 80) + ')'); }
+                }
+                if(!_xlsxFiles.length) throw new Error('لا ملف صالح' + (rejected.length ? ' — مرفوض: ' + rejected.join('، ') : ''));
+                const data = {headers: _xlsxFiles[0].headers, total_rows: _xlsxFiles.reduce((a, x)=>a + x.total, 0),
+                              sample_rows: _xlsxFiles[0].samples, header_row: hr, data_start: ds, rejected};
+                _xlsxFile = _xlsxFiles[0].file;
                 _xlsxHeaders = data.headers || [];
                 _xlsxHeaderRow = hr; _xlsxDataStart = ds; _xlsxTotal = data.total_rows || 0;
                 // المفاتيح الرئيسية والترقيم التلقائي لا تُستورد (تولّدها القاعدة)
@@ -4805,7 +4842,9 @@
                         return String(html || '').replace(/<label class="fx-label">[\s\S]*?<\/label>/, '');
                     }catch(e){ return xlsxFixedInput(f); }
                 };
-                let html = `<div class="text-[11px] font-bold text-slate-600 mb-1">${data.total_rows} صف (الترويسات: صف ${data.header_row || hr}):</div>`;
+                let html = `<div class="text-[11px] font-bold text-slate-600 mb-1">${data.total_rows} صف (الترويسات: صف ${data.header_row || hr}):</div>`
+                    + `<div class="mb-2 space-y-0.5">` + _xlsxFiles.map((x, i)=>`<div class="text-[11px] ${i ? 'text-slate-500' : 'text-emerald-700 font-bold'}">📄 ${escHtml(x.file.name)} — ${x.total} صف${i ? '' : ' (مرجع الترتيب)'}</div>`).join('') + `</div>`
+                    + ((data.rejected || []).length ? `<div class="text-rose-600 text-[11px] mb-2">مرفوض (اختلاف ترتيب الأعمدة): ${data.rejected.map(escHtml).join('، ')}</div>` : '');
                 // 1) عينات الملف فوق الربط
                 if((data.sample_rows || []).length) html += `<div class="text-[11px] font-bold text-slate-600 mb-1">عينات من الملف (أول 5 صفوف بيانات):</div><div class="overflow-x-auto border border-slate-200 rounded-lg mb-2"><table class="w-full text-[10px]"><tr>${_xlsxHeaders.map(h=>`<th class="px-1.5 py-1 bg-slate-50 border-b font-mono" dir="ltr">${escHtml(h)}</th>`).join('')}</tr>` + data.sample_rows.map(r=>`<tr>${_xlsxHeaders.map((h,i)=>`<td class="px-1.5 py-1 border-b truncate max-w-[140px]">${escHtml(String(r[i] ?? ''))}</td>`).join('')}</tr>`).join('') + `</table></div>`;
                 // 2) الربط: لكل حقل (تسمية النظام | قيمة ثابتة | عمود الإكسل)
@@ -4848,7 +4887,8 @@
         }
         async function applyXlsxImport(){
             const btn = document.getElementById('xlsxImportBtn');
-            if(!_xlsxFile || _xlsxRunning) return;
+            const files = (_xlsxFiles && _xlsxFiles.length) ? _xlsxFiles : ((_xlsxFile) ? [{file: _xlsxFile, total: _xlsxTotal || 0}] : []);
+            if(!files.length || _xlsxRunning) return;
             const mapping = {}, fixed = {};
             const _wval = window._xlsxWrapVal || ((w)=>{ const v = w ? w.querySelector('[data-field]') : null; return (v && !v.disabled) ? String(v.value || '').trim() : ''; });
             document.querySelectorAll('#xlsxMapOut [data-xfield]').forEach(s=>{
@@ -4863,15 +4903,15 @@
                 }
             });
             if(!Object.keys(mapping).length && !Object.keys(fixed).length) return notify('اختر عمود إكسل أو قيمة ثابتة لحقل واحد على الأقل', 'error');
-            const total = _xlsxTotal || 0;
-            if(!total) return notify('لا صفوف للاستيراد', 'error');
+            const grand = files.reduce((a, x)=>a + (x.total || 0), 0);
+            if(!grand) return notify('لا صفوف للاستيراد', 'error');
             _xlsxRunning = true; _xlsxCancel = false;
             btn.disabled = true;
             const wrap = document.getElementById('xlsxProgWrap'), bar = document.getElementById('xlsxProgBar'),
                 lbl = document.getElementById('xlsxProgLbl'), eta = document.getElementById('xlsxProgEta');
             if(wrap) wrap.classList.remove('hidden');
             const BATCH = 500;
-            let off = 0, lastTruncated = false, lastPaint = 0;
+            let off = 0, lastTruncated = false, lastPaint = 0, curFile = '';
             const agg = {created: 0, updated: 0, skipped: 0, errors: []};
             const t0 = Date.now();
             const paint = (force)=>{
@@ -4879,34 +4919,42 @@
                 const now = Date.now();
                 if(!force && now - lastPaint < 300) return;
                 lastPaint = now;
-                const pct = total ? Math.round(off / total * 100) : 0;
+                const pct = grand ? Math.round(off / grand * 100) : 0;
                 if(bar) bar.style.width = pct + '%';
-                if(lbl) lbl.textContent = `تم ${off} من ${total} (${pct}%) — جديد ${agg.created} + محدّث ${agg.updated} + متجاوز ${agg.skipped}`;
+                if(lbl) lbl.textContent = `تم ${off} من ${grand} (${pct}%)${curFile ? ' — ' + curFile : ''} — جديد ${agg.created} + محدّث ${agg.updated} + متجاوز ${agg.skipped}`;
                 const el = (now - t0) / 1000, rate = off / Math.max(el, 0.1);
-                if(eta) eta.textContent = (off < total && rate > 0) ? ('متبقي ' + fmtEta((total - off) / rate)) : '';
+                if(eta) eta.textContent = (off < grand && rate > 0) ? ('متبقي ' + fmtEta((grand - off) / rate)) : '';
             };
             paint(true);
             try{
-                while(off < total && !_xlsxCancel){
-                    const fd = new FormData();
-                    fd.append('file', _xlsxFile);
-                    fd.append('fml', currentFml);
-                    fd.append('mapping', JSON.stringify(mapping));
-                    fd.append('fixed', JSON.stringify(fixed));
-                    fd.append('match_column', (document.getElementById('xlsxMatchCol') || {}).value || '');
-                    fd.append('header_row', String(_xlsxHeaderRow || 1));
-                    fd.append('data_start', String(_xlsxDataStart || 2));
-                    fd.append('row_offset', String(off));
-                    fd.append('row_limit', String(BATCH));
-                    const res = await fetch(`/api/apps/${encodeURIComponent(currentApp)}/models/import-xlsx/`, {method:'POST', body: fd});
-                    const data = await res.json();
-                    if(!res.ok) throw new Error(data.error || 'فشل الاستيراد');
-                    agg.created += data.created || 0; agg.updated += data.updated || 0; agg.skipped += data.skipped || 0;
-                    lastTruncated = !!data.truncated;
-                    (data.errors || []).slice(0, 10 - agg.errors.length).forEach(e=>agg.errors.push(e));
-                    off = (typeof data.next_offset === 'number') ? data.next_offset : (off + (data.processed || 0));
-                    paint(data.done);
-                    if(data.done) break;
+                for(const _xf of files){
+                    if(_xlsxCancel) break;
+                    curFile = _xf.file.name || '';
+                    let foff = 0;
+                    const ftotal = _xf.total || 0;
+                    while(foff < ftotal && !_xlsxCancel){
+                        const fd = new FormData();
+                        fd.append('file', _xf.file);
+                        fd.append('fml', currentFml);
+                        fd.append('mapping', JSON.stringify(mapping));
+                        fd.append('fixed', JSON.stringify(fixed));
+                        fd.append('match_column', (document.getElementById('xlsxMatchCol') || {}).value || '');
+                        fd.append('header_row', String(_xlsxHeaderRow || 1));
+                        fd.append('data_start', String(_xlsxDataStart || 2));
+                        fd.append('row_offset', String(foff));
+                        fd.append('row_limit', String(BATCH));
+                        const res = await fetch(`/api/apps/${encodeURIComponent(currentApp)}/models/import-xlsx/`, {method:'POST', body: fd});
+                        const data = await res.json();
+                        if(!res.ok) throw new Error((_xf.file.name + ': ' + (data.error || 'فشل الاستيراد')));
+                        agg.created += data.created || 0; agg.updated += data.updated || 0; agg.skipped += data.skipped || 0;
+                        lastTruncated = !!data.truncated;
+                        (data.errors || []).slice(0, 10 - agg.errors.length).forEach(e=>agg.errors.push(e));
+                        const adv = (typeof data.next_offset === 'number') ? data.next_offset : (foff + (data.processed || 0));
+                        off += Math.max(0, adv - foff);
+                        foff = adv;
+                        paint(data.done);
+                        if(data.done) break;
+                    }
                 }
             }catch(e){ notify('تعذر الاستيراد: ' + String((e && e.message) || e).slice(0, 250), 'error'); }
             _xlsxRunning = false;
@@ -4914,7 +4962,7 @@
             if(wrap) wrap.classList.add('hidden');
             if(_xlsxCancel){ notify(`أُوقف الاستيراد عند ${off} صف (جديد ${agg.created} + محدّث ${agg.updated})`, 'info'); }
             else{
-                let msg = `تم (upsert): ${agg.created} جديد + ${agg.updated} محدّث${agg.skipped ? ` (تُجوهل ${agg.skipped})` : ''}`;
+                let msg = `تم (upsert) ${files.length > 1 ? `(${files.length} ملفات) ` : ''}: ${agg.created} جديد + ${agg.updated} محدّث${agg.skipped ? ` (تُجوهل ${agg.skipped})` : ''}`;
                 if(lastTruncated) msg += ' — اقتصر على أول 100000 صف';
                 if(!agg.created && !agg.updated) msg += ' — لا قيم مستخرجة: تحقق من ربط الأعمدة وصفوف البيانات';
                 if(agg.errors.length) msg += ' — أخطاء: ' + agg.errors.slice(0, 3).join('، ');
