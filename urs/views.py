@@ -2161,11 +2161,22 @@ def api_fmlk_import_xlsx(request, app_name):
                 _fn = mapping.get(_h)
                 if not _fn or _fn not in fields:
                     continue
+                try:
+                    if getattr(fields[_fn], "primary_key", False):
+                        continue  # المفاتيح الرئيسية تولّدها القاعدة
+                except Exception:
+                    pass
                 _v = _norm(vals[_hi] if _hi < len(vals) else "")
                 if _v == "" or _v is None:
                     continue
                 data[_fn] = _v
+            # قيم ثابتة: تُملأ عند غياب قيمة العمود (عمود فارغ أو غير مربوط)
             for _fn, _fv in (fixed or {}).items():
+                try:
+                    if getattr(fields.get(_fn), "primary_key", False):
+                        continue
+                except Exception:
+                    pass
                 if _fn in fields and _fn not in data:
                     _fv = str(_fv).strip() if _fv is not None else ""
                     if _fv != "":

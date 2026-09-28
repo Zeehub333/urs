@@ -4746,7 +4746,7 @@
                 if(!res.ok) throw new Error(data.error || 'فشل التحليل');
                 _xlsxHeaders = data.headers || [];
                 _xlsxHeaderRow = hr; _xlsxDataStart = ds; _xlsxTotal = data.total_rows || 0;
-                const fields = (fmlMeta.fields || []).filter(f => !f.destination || f.destination === 'main');
+                const fields = (fmlMeta.fields || []).filter(f => (!f.destination || f.destination === 'main') && !xlsxIsPkOrAuto(f));
                 // مطابقة تلقائية: ترويسة الإكسل == اسم الحقل أو مسماه
                 const autoCol = (f)=>{
                     let hi = _xlsxHeaders.findIndex(h=>String(h || '').trim().toLowerCase() === String(f.name || '').toLowerCase());
@@ -4754,6 +4754,16 @@
                     return hi;
                 };
                 const xlOpts = (sel)=>'<option value="-1">— لاشيء —</option>' + _xlsxHeaders.map((h, i)=>`<option value="${i}" ${i === sel ? 'selected' : ''}>${escHtml(h) || ('عمود ' + (i+1))}</option>`).join('');
+                // المفاتيح الرئيسية والترقيم التلقائي لا تُستورد (تولّدها القاعدة)
+                const xlsxIsPkOrAuto = (f)=>{
+                    if(!f) return true;
+                    if(f.primary_key || f.primaryKey || f.pk) return true;
+                    const t = String(f.dataType || f.data_type || '').toUpperCase();
+                    if(t.indexOf('SERIAL') >= 0) return true;
+                    try{ if(/nextval/i.test(String(f.default ?? f.defaultValue ?? ''))) return true; }catch(e){}
+                    if(t === 'INTEGER' && String(f.name || '').toLowerCase() === 'id') return true;
+                    return false;
+                };
                 // مدخل القيمة الثابتة ديناميكي حسب نوع الحقل في المصمم
                 const xlsxFixedInput = (f)=>{
                     const t = String(f.dataType || f.data_type || f.inputType || f.input_type || 'text').toLowerCase();
