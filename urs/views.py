@@ -2346,17 +2346,37 @@ def api_fmlk_import_xlsx(request, app_name):
                             _al = _fn
                         _d["_x_int_err"] = f"{_al}: القيمة '{_v[:40]}' ليست رقماً (الحقل يريد معرفاً — طابق عمود المعرفات أو اسماً موجوداً)"
                         break
-        # upsert جماعي: استعلام IN واحد لقيم المطابقة بدل N استعلامات
-        match_map = {}
+        # upsert جماعي: استعلام IN واحد لقيم المطابقة بدل N استعلامات.
+        # التحديث يتم على عمود المطابقة نفسه (WHERE match_col = value) — لا
+        # يعتمد على __pk_id الذي قد يكون NULL (جداول بلا PK مُعبأ).
+        try:
+            _mdt = str(getattr(fields.get(match_column), "data_type", "") or "").upper() \
+                if match_column and match_column in fields else ""
+        except Exception:
+            _mdt = ""
+        _match_is_int = "INT" in _mdt
+
+        def _mlookup(v):
+            if _match_is_int:
+                try:
+                    return int(float(str(v).strip().replace(",", "")))
+                except Exception:
+                    return str(v).strip()
+            return str(v).strip()
+
+        def _mstr(v):
+            return "" if v is None else str(v).strip()
+
+        match_existing = set()
         if match_column and match_column in fields:
             _mvals = []
             for _d in datas:
                 if not _d:
                     continue
                 if match_column in _d and str(_d[match_column]).strip() != "":
-                    _sv = str(_d[match_column]).strip()
-                    if _sv not in _mvals:
-                        _mvals.append(_sv)
+                    _lv = _mlookup(_d[match_column])
+                    if _mstr(_lv) != "" and _lv not in _mvals:
+                        _mvals.append(_lv)
             try:
                 _malias = str(getattr(fields[match_column], "alias", "") or match_column).lower()
             except Exception:
@@ -2369,9 +2389,8 @@ def api_fmlk_import_xlsx(request, app_name):
                     for _row in (_lr.get("rows") or []):
                         try:
                             _rv = _row.get(_malias, _row.get(match_column, _row.get(match_column.lower(), "")))
-                            _pk = _row.get("__pk_id", _row.get("id"))
-                            if _rv is not None and _pk is not None and str(_pk).strip() != "":
-                                match_map.setdefault(str(_rv).strip(), _pk)
+                            if _rv is not None and _mstr(_rv) != "":
+                                match_existing.add(_mstr(_rv))
                         except Exception:
                             continue
                 except Exception:
@@ -2390,15 +2409,20 @@ def api_fmlk_import_xlsx(request, app_name):
                     else:
                         skipped += 1
                     continue
-                _rid = None
-                if match_column and match_column in data and str(data[match_column]).strip() != "":
-                    _rid = match_map.get(str(data[match_column]).strip())
-                if _rid is not None and str(_rid).strip() != "":
-                    eng.update_record({"id": _rid}, data)
+                _mkey = _mstr(data.get(match_column)) if match_column and match_column in data else ""
+                if _mkey != "" and _mkey in match_existing:
+                    try:
+                        eng.update_record({match_column: data[match_column]}, data)
+                    except Exception as _ue:
+                        # الصف يحمل المفتاح وحده (لا أعمدة للكتابة) — مطابق أصلاً
+                        if "No columns to update" not in str(_ue):
+                            raise
                     updated += 1
                 else:
                     eng.create_record(data)
                     created += 1
+                    if _mkey != "":
+                        match_existing.add(_mkey)
             except Exception as e:
                 if len(errors) < 10:
                     errors.append(f"صف {_ri}: {str(e)[:120]}")
