@@ -16,7 +16,7 @@
         <option value="iot">IoT (أجهزة)</option>
       </options>
     </field>
-    <field id="2" name="name" alias="اسم الاتصال" dataType="VARCHAR" inputType="text" required="true" nullable="false" editable="true" primary_key="false" tab="أساسية" destination="main" category="أساسية"/>
+    <field id="2" name="name" alias="اسم الاتصال" dataType="VARCHAR" inputType="text" required="true" nullable="false" editable="true" primary_key="false" tab="أساسية" destination="main" category="أساسية" is_main_col="1"/>
     <field id="3" name="engine" alias="نوع المحرك" dataType="VARCHAR" inputType="select" required="true" nullable="false" editable="true" primary_key="false" tab="أساسية" destination="main" category="أساسية">
       <options>
         <option>postgres</option>
@@ -26,26 +26,23 @@
         <option>zk</option>
       </options>
     </field>
-    <field id="4" name="host" alias="المضيف / IP الجهاز" dataType="VARCHAR" inputType="text" required="false" nullable="true" editable="true" primary_key="false" tab="أساسية" visibleIf="conn_type!=iot" destination="main" category="أساسية"/>
-    <field id="5" name="port" alias="المنفذ" dataType="INTEGER" inputType="number" required="false" nullable="true" editable="true" primary_key="false" tab="أساسية" visibleIf="conn_type!=iot" destination="main" category="أساسية"/>
+    <field id="4" name="host" alias="المضيف / IP الجهاز" dataType="VARCHAR" inputType="ip_address" required="false" nullable="true" editable="true" primary_key="false" tab="أساسية" visibleIf="conn_type!=iot" destination="main" category="أساسية"/>
+    <field id="5" name="port" alias="المنفذ" dataType="INTEGER" inputType="port_picker" required="false" nullable="true" editable="true" primary_key="false" tab="أساسية" visibleIf="conn_type!=iot" destination="main" category="أساسية"/>
     <field id="6" name="user" alias="المستخدم" dataType="VARCHAR" inputType="text" required="false" nullable="true" editable="true" primary_key="false" tab="المصادقة" visibleIf="conn_type!=iot" destination="main" category="المصادقة"/>
     <field id="7" name="password" alias="كلمة المرور" dataType="VARCHAR" inputType="password" required="false" nullable="true" editable="true" primary_key="false" tab="المصادقة" visibleIf="conn_type!=iot" destination="main" category="المصادقة"/>
     <field id="8" name="instance" alias="القاعدة / SID" dataType="VARCHAR" inputType="text" required="false" nullable="true" editable="true" primary_key="false" tab="الاتصال" visibleIf="conn_type!=iot" destination="main" category="الاتصال"/>
-    <field id="15" name="instance_name" alias="اسم المثيل (SQL Server)" dataType="VARCHAR" inputType="text" required="false" nullable="true" editable="true" primary_key="false" tab="الاتصال" visibleIf="engine==sqlserver" destination="main" category="الاتصال"/>
-    <field id="9" name="schema" alias="السكيما" dataType="VARCHAR" inputType="text" required="false" nullable="true" editable="true" primary_key="false" tab="الاتصال" visibleIf="conn_type!=iot" destination="main" category="الاتصال"/>
-    <field id="10" name="devices" alias="أجهزة إضافية (IP-Port)" dataType="TEXT" inputType="list-input" required="false" nullable="true" editable="true" primary_key="false" tab="أجهزة IoT" visibleIf="conn_type==iot" destination="main" category="أجهزة IoT"/>
-    <field id="11" name="endpoint" alias="نقطة البيانات (endpoint)" dataType="VARCHAR" inputType="select" required="false" nullable="true" editable="true" primary_key="false" tab="أجهزة IoT" visibleIf="conn_type==iot" destination="main" category="أجهزة IoT">
+    <field id="9" name="instance_name" alias="اسم المثيل (SQL Server)" dataType="VARCHAR" inputType="text" required="false" nullable="true" editable="true" primary_key="false" tab="الاتصال" visibleIf="engine==sqlserver" destination="main" category="الاتصال"/>
+    <field id="10" name="schema" alias="السكيما" dataType="VARCHAR" inputType="text" required="false" nullable="true" editable="true" primary_key="false" tab="الاتصال" visibleIf="conn_type!=iot" destination="main" category="الاتصال"/>
+    <field id="11" name="devices" alias="أجهزة إضافية (IP-Port)" dataType="TEXT" inputType="list-input" required="false" nullable="true" editable="true" primary_key="false" tab="أجهزة IoT" visibleIf="conn_type==iot" destination="main" category="أجهزة IoT"/>
+    <field id="12" name="endpoint" alias="نقطة البيانات (endpoint)" dataType="VARCHAR" inputType="select" required="false" nullable="true" editable="true" primary_key="false" tab="أجهزة IoT" visibleIf="conn_type==iot" destination="main" category="أجهزة IoT">
       <options>
         <option value="att">الحضور (att)</option>
         <option value="users">المستخدمون (users)</option>
         <option value="attendance">السجلات الخام (attendance)</option>
       </options>
     </field>
-    <field id="12" name="is_local" alias="محلي (قابل للترحيل)" dataType="BOOLEAN" inputType="boolean" required="false" nullable="true" editable="true" primary_key="false" tab="الحالة" destination="main" category="الحالة"/>
-    <field id="13" name="is_queryable" alias="قابل للاستعلام (SQL)" dataType="BOOLEAN" inputType="boolean" required="false" nullable="true" editable="true" primary_key="false" tab="الحالة" destination="main" category="الحالة"/>
-    <field id="14" name="description" alias="الوصف" dataType="TEXT" inputType="textarea" required="false" nullable="true" editable="true" primary_key="false" tab="إضافية" destination="main" category="إضافية"/>
+    <field id="13" name="is_local" alias="محلي (قابل للترحيل)" dataType="BOOLEAN" inputType="boolean" required="false" nullable="true" editable="true" primary_key="false" tab="الحالة" destination="main" category="الحالة"/>
+    <field id="14" name="is_queryable" alias="قابل للاستعلام (SQL)" dataType="BOOLEAN" inputType="boolean" required="false" nullable="true" editable="true" primary_key="false" tab="الحالة" destination="main" category="الحالة"/>
+    <field id="15" name="description" alias="الوصف" dataType="TEXT" inputType="textarea" required="false" nullable="true" editable="true" primary_key="false" tab="إضافية" destination="main" category="إضافية"/>
   </fields>
-  <custom_actions>
-    <action name="test_connection" label="اختبار الاتصال" endpoint="/api/fmlk/action/test-connection" icon="fa-plug" badge_color="#059669" level="record"/>
-  </custom_actions>
 </fml>

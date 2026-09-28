@@ -201,10 +201,23 @@
         }
 
         function doImport(file) {
-            if (!file || state.busy) return;
-            state.busy = true;
-            var done = function () { state.busy = false; try { fileInp.value = ''; } catch (e) {} };
+            // فتح مودال استيراد الإكسل المطابق للمواصفات
             try {
+                var cols = [];
+                try { cols = columnsFn() || []; } catch (e) {}
+                ExcelImportModal.open({
+                    columns: cols,
+                    initialColumn: state.column,
+                    onApply: function (res) {
+                        onImportValues(res);
+                    }
+                });
+                try { fileInp.value = ''; } catch (e) {}
+            } catch (e) {
+                // Fallback مباشر
+                if (!file || state.busy) return;
+                state.busy = true;
+                var done = function () { state.busy = false; try { fileInp.value = ''; } catch (e) {} };
                 var fd = new FormData();
                 fd.append('file', file);
                 if (state.column) fd.append('column', state.column);
@@ -222,12 +235,9 @@
                     });
                 }).catch(function (e) {
                     done();
-                    try {
-                        if (typeof notify === 'function') notify('فشل استيراد الإكسل: ' + (e.message || e), 'error');
-                        else alert('فشل استيراد الإكسل: ' + (e.message || e));
-                    } catch (_e) {}
+                    try { notify('فشل استيراد الإكسل: ' + (e.message || e), 'error'); } catch (_e) {}
                 });
-            } catch (e) { done(); }
+            }
         }
 
         // — events: لا بحث فوري أبداً — الكتابة تُرشّح قائمة الأعمدة فقط —

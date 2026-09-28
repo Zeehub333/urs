@@ -536,6 +536,7 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
 {% block scripts %}
     <script src="{% static 'components/search_engine.js' %}"></script>
     <script src="{% static 'components/advanced_filter.js' %}"></script>
+    <script src="{% static 'components/excel_import_modal.js' %}"></script>
     <script>
         // Injected Django context
         const DJANGO_RML = "{{ rml_file|escapejs }}";
