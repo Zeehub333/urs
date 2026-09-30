@@ -717,7 +717,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                 m.id = 'fwNewTableModal';
                 m.className = 'hidden fixed inset-0 z-[120] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4';
                 m.setAttribute('onclick', 'if(event.target===this)fwNewTableClose()');
-                m.innerHTML = '<div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[88vh] overflow-hidden flex flex-col">'
+                m.innerHTML = '<div class="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[88vh] overflow-hidden flex flex-col">'
                     + '<div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-emerald-50 shrink-0"><h3 class="text-sm font-bold text-slate-800"><i class="fa-solid fa-table text-emerald-600"></i> جدول جديد — يُحفظ في custom_models ويُرحّل لقاعدة البيانات</h3><button onclick="fwNewTableClose()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button></div>'
                     + '<div class="p-4 space-y-3 overflow-y-auto custom-scroll text-xs">'
                     + '<div class="grid grid-cols-2 gap-2"><div><label class="block font-bold text-slate-600 mb-1">الاسم البرمجي * <span class="font-mono font-normal text-slate-400" dir="ltr">latin_</span></label><input id="fwNtName" placeholder="custody" class="wb-inp font-mono" dir="ltr"></div>'
@@ -735,26 +735,28 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             document.getElementById('fwNtLabel').value = '';
             document.getElementById('fwNtStatus').innerHTML = '';
             fwNtFields = [
-                {name: 'id', label: 'م', type: 'INTEGER', length: '', nullable: false, pk: true},
-                {name: '', label: '', type: 'VARCHAR', length: '200', nullable: true, pk: false},
+                {name: 'id', label: 'م', type: 'INTEGER', length: '', nullable: false, pk: true, def: '', uniq: false},
+                {name: '', label: '', type: 'VARCHAR', length: '200', nullable: true, pk: false, def: '', uniq: false},
             ];
             fwNtRenderRows();
             m.classList.remove('hidden');
         }
         function fwNewTableClose(){ const m = document.getElementById('fwNewTableModal'); if(m) m.classList.add('hidden'); }
-        function fwNtAddRow(){ fwNtFields.push({name: '', label: '', type: 'VARCHAR', length: '', nullable: true, pk: false}); fwNtRenderRows(); }
-        function fwNtDelRow(i){ fwNtFields.splice(i, 1); if(!fwNtFields.length) fwNtFields.push({name: '', label: '', type: 'VARCHAR', length: '', nullable: true, pk: false}); fwNtRenderRows(); }
+        function fwNtAddRow(){ fwNtFields.push({name: '', label: '', type: 'VARCHAR', length: '', nullable: true, pk: false, def: '', uniq: false}); fwNtRenderRows(); }
+        function fwNtDelRow(i){ fwNtFields.splice(i, 1); if(!fwNtFields.length) fwNtFields.push({name: '', label: '', type: 'VARCHAR', length: '', nullable: true, pk: false, def: '', uniq: false}); fwNtRenderRows(); }
         function fwNtRenderRows(){
             const box = document.getElementById('fwNtRows');
             if(!box) return;
             const types = fwNtTypes || ['VARCHAR'];
             box.innerHTML = fwNtFields.map((f, i)=>{
                 return '<div class="grid grid-cols-12 gap-1 items-center bg-slate-50 border border-slate-200 rounded-xl p-1.5">'
-                    + `<div class="col-span-3"><input value="${fwEsc(f.name)}" oninput="fwNtFields[${i}].name=this.value" placeholder="field_name" class="wb-inp font-mono" dir="ltr"></div>`
-                    + `<div class="col-span-3"><input value="${fwEsc(f.label)}" oninput="fwNtFields[${i}].label=this.value" placeholder="الاسم العربي" class="wb-inp"></div>`
+                    + `<div class="col-span-2"><input value="${fwEsc(f.name)}" oninput="fwNtFields[${i}].name=this.value" placeholder="field_name" title="الاسم البرمجي" class="wb-inp font-mono" dir="ltr"></div>`
+                    + `<div class="col-span-2"><input value="${fwEsc(f.label)}" oninput="fwNtFields[${i}].label=this.value" placeholder="الاسم العربي" class="wb-inp"></div>`
                     + `<div class="col-span-2"><select onchange="fwNtFields[${i}].type=this.value" class="wb-inp font-mono" dir="ltr">` + types.map(t=>`<option value="${t}" ${f.type===t?'selected':''}>${t}</option>`).join('') + `</select></div>`
-                    + `<div class="col-span-1"><input value="${fwEsc(f.length)}" oninput="fwNtFields[${i}].length=this.value" placeholder="طول" class="wb-inp font-mono" dir="ltr"></div>`
-                    + `<label class="col-span-2 text-[10px] text-slate-500 flex items-center gap-1"><input type="checkbox" ${f.nullable?'checked':''} onchange="fwNtFields[${i}].nullable=this.checked" class="rounded"> يقبل فراغ</label>`
+                    + `<div class="col-span-1"><input value="${fwEsc(f.length)}" oninput="fwNtFields[${i}].length=this.value" placeholder="طول" title="الطول (VARCHAR)" class="wb-inp font-mono" dir="ltr"></div>`
+                    + `<div class="col-span-2"><input value="${fwEsc(f.def)}" oninput="fwNtFields[${i}].def=this.value" placeholder="قيمة افتراضية" title="القيمة الافتراضية" class="wb-inp font-mono" dir="ltr"></div>`
+                    + `<label class="col-span-1 text-[10px] text-slate-500 flex items-center gap-1" title="يقبل فراغ (NULL)"><input type="checkbox" ${f.nullable?'checked':''} onchange="fwNtFields[${i}].nullable=this.checked" class="rounded"> فراغ</label>`
+                    + `<label class="col-span-1 text-[10px] text-slate-500 flex items-center gap-1" title="قيمة فريدة (UNIQUE)"><input type="checkbox" ${f.uniq?'checked':''} onchange="fwNtFields[${i}].uniq=this.checked" class="rounded"> فريد</label>`
                     + `<label class="col-span-1 text-[10px] text-slate-500 flex items-center gap-1" title="مفتاح أساسي"><input type="radio" name="fwNtPk" ${f.pk?'checked':''} onchange="fwNtFields.forEach((x,j)=>x.pk=(j===${i}));fwNtRenderRows();" class="rounded"> PK</label>`
                     + `</div>`;
             }).join('') + `<div class="text-left"><button onclick="fwNtDelRow(${fwNtFields.length - 1})" class="text-[10px] text-rose-500 hover:text-rose-700">حذف آخر صف</button></div>`;
@@ -771,6 +773,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             const fields = (fwNtFields || []).filter(f=>String(f.name || '').trim() !== '').map(f=>({
                 name: String(f.name).trim(), label: String(f.label || '').trim(), type: f.type || 'VARCHAR',
                 length: String(f.length || '').trim(), nullable: !!f.nullable, pk: !!f.pk,
+                default: String(f.def ?? ''), unique: !!f.uniq,
             }));
             if(!fields.length) throw new Error('حقل واحد على الأقل مطلوب');
             return {name: name, label: label, table: name, schema: fwSchema || 'public',
