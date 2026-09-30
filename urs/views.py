@@ -1604,16 +1604,20 @@ def api_models_design_save(request, app_name):
                 _has_j = any(isinstance(c, dict) and c.get("junction") for c in _dcols)
                 if not _dd and not _has_j:
                     return JsonResponse({"error": f"التفاصيل {_dt}: حدد عمود الربط (FK) أو أضف حقول رابط"}, status=400)
-                _seen_c = set()
+                _seen_c = {}
                 for _cc in _dcols:
                     if not isinstance(_cc, dict):
                         continue
                     _cn = (_cc.get("name") or "").strip()
                     if not _cn:
                         continue
+                    _kind = ("حقل رابط" if _cc.get("junction")
+                             else ("مرجع بحث" if _cc.get("ref") else "عمود تفاصيل"))
                     if _cn.lower() in _seen_c:
-                        return JsonResponse({"error": f"عمود مكرر '{_cn}' في تفاصيل {_dt}"}, status=400)
-                    _seen_c.add(_cn.lower())
+                        return JsonResponse({"error": f"العمود '{_cn}' مكرر في تفاصيل {_dt} "
+                                                     f"({_seen_c[_cn.lower()]} + {_kind}) — "
+                                                     "احذف أحدهما أو غيّر الاسم"}, status=400)
+                    _seen_c[_cn.lower()] = _kind
                     if _cc.get("junction") and _cn.lower() in ("id", "master_id", "detail_id"):
                         return JsonResponse({"error": f"الحقل '{_cn}' محجوز لجدول الرابط (id/master_id/detail_id) في {_dt}"}, status=400)
                 de = ET.SubElement(d_el, "detail")
@@ -3185,8 +3189,9 @@ def api_fmlk_detail_search(request):
             return JsonResponse({"columns": [], "rows": [], "total": 0, "page": page, "pageSize": page_size})
         _sel = ", ".join(f'"{c}"' for c in _cols)
         _where, _params = "", {}
+        _col_found = bool(col and _re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", col) and col in _allcols)
         if q:
-            if col and _re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", col) and col in _allcols:
+            if _col_found:
                 # إكمال رأسي لعمود واحد: اقتراحات قيم هذا العمود فقط
                 _where = f' WHERE CAST("{col}" AS TEXT) ILIKE :q'
             else:
@@ -3221,7 +3226,8 @@ def api_fmlk_detail_search(request):
         _out_cols = [{"name": c, "alias": _alias.get(c, c),
                       "sub_key": (c == _subkey)} for c in names]
         return JsonResponse({"columns": _out_cols, "rows": rows, "total": total,
-                             "page": page, "pageSize": page_size, "sub_key": _subkey})
+                             "page": page, "pageSize": page_size, "sub_key": _subkey,
+                             "col_found": _col_found})
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 

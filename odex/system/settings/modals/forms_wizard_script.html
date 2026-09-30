@@ -1722,6 +1722,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
         }
         function fwTabAlias(id){ const t = fwTabs.find(x=>x.id===id); return t ? (t.alias || t.name || id) : id; }
         function fwCollect(){
+            fwCollect.warnings = [];
             const file = document.getElementById('fmlFileName').value.trim();
             const prog = document.getElementById('fmlProgName').value.trim();
             const disp = document.getElementById('fmlDisplayName').value.trim();
@@ -1768,12 +1769,34 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             const fwColOpts = (x)=> (Array.isArray(x.options) ? x.options.map(o=>((o && typeof o === 'object') ? (o.value ?? o.label ?? '') : o)).filter(o=>String(o).trim() !== '') : []);
             const fwColDef = (x)=> (x.defaultValue != null ? String(x.defaultValue) : (x.default != null ? String(x.default) : ''));
             const details = fwBranches.map(b=>{
-                const fromInputs = fwInputs.filter(x=>x.destination === b.table && x.name).map(x=>({name: x.name.trim(), alias: (x.alias || x.name).trim(), data_type: x.dataType || 'VARCHAR', input_type: x.inputType || 'text', required: !!x.required, default: fwColDef(x), options: fwColOpts(x), editable: x.editable !== false, visibleIf: x.visibleIf || '', tab: x.tab || ''}));
-                const refs = fwInputs.filter(x=>x.destination === ('ref:' + b.table) && x.name).map(x=>({name: x.name.trim(), alias: (x.alias || x.name).trim(), data_type: x.dataType || 'VARCHAR', input_type: x.inputType || 'text', required: false, default: fwColDef(x), options: fwColOpts(x), editable: x.editable !== false, visibleIf: x.visibleIf || '', tab: x.tab || '', ref: true}));
-                const customs = fwInputs.filter(x=>x.destination === ('junction:' + b.table) && x.name).map(x=>({name: x.name.trim(), alias: (x.alias || x.name).trim(), data_type: x.dataType || 'VARCHAR', input_type: x.inputType || 'text', required: !!x.required, default: fwColDef(x), options: fwColOpts(x), editable: x.editable !== false, visibleIf: x.visibleIf || '', tab: x.tab || '', junction: true}));
-                const _known = new Set([...fromInputs, ...refs].map(f=>f.name));
-                const gridOnly = (b.cols || []).filter(c=>!_known.has(c.name)).map(c=>({name: c.name, alias: c.alias || c.name, data_type: c.data_type || 'VARCHAR', input_type: 'text'}));
-                return {table: b.table, alias: b.alias || b.table, master: b.master, detail: b.detail, sub_key: (b.sub_key || 'id'), visible: b.visible !== false, rel_type: 'one_to_many', columns: [...fromInputs, ...gridOnly, ...refs, ...customs]};
+                const fromInputs = fwInputs.filter(x=>x.destination === b.table && x.name).map(x=>({name: x.name.trim(), alias: (x.alias || x.name).trim(), data_type: x.dataType || 'VARCHAR', input_type: x.inputType || 'text', required: !!x.required, default: fwColDef(x), options: fwColOpts(x), editable: x.editable !== false, visibleIf: x.visibleIf || '', tab: x.tab || '', _src: 'عمود مباشر'}));
+                const refs = fwInputs.filter(x=>x.destination === ('ref:' + b.table) && x.name).map(x=>({name: x.name.trim(), alias: (x.alias || x.name).trim(), data_type: x.dataType || 'VARCHAR', input_type: x.inputType || 'text', required: false, default: fwColDef(x), options: fwColOpts(x), editable: x.editable !== false, visibleIf: x.visibleIf || '', tab: x.tab || '', ref: true, _src: 'مرجع بحث'}));
+                const customs = fwInputs.filter(x=>x.destination === ('junction:' + b.table) && x.name).map(x=>({name: x.name.trim(), alias: (x.alias || x.name).trim(), data_type: x.dataType || 'VARCHAR', input_type: x.inputType || 'text', required: !!x.required, default: fwColDef(x), options: fwColOpts(x), editable: x.editable !== false, visibleIf: x.visibleIf || '', tab: x.tab || '', junction: true, _src: 'حقل رابط'}));
+                // دمج تلقائي عند تطابق الاسم بين مصادر مختلفة (الأقوى يبقى، والباقي
+                // يُحذف من الحمولة مع تنبيه) — الأولوية: حقل رابط > عمود مباشر >
+                // مرجع بحث > عمود شبكة. يمنع خطأ «مكرر» عند أي تعديل.
+                const _known = new Set([...fromInputs, ...refs].map(f=>(f.name || '').toLowerCase()));
+                const gridOnly = (b.cols || []).filter(c=>!_known.has((c.name || '').toLowerCase())).map(c=>({name: c.name, alias: c.alias || c.name, data_type: c.data_type || 'VARCHAR', input_type: 'text', _src: 'عمود شبكة'}));
+                const _prio = {'حقل رابط': 4, 'عمود مباشر': 3, 'مرجع بحث': 2, 'عمود شبكة': 1};
+                const _merged = [...fromInputs, ...gridOnly, ...refs, ...customs];
+                const _best = {};
+                for(const _c of _merged){
+                    const _k = (_c.name || '').trim().toLowerCase();
+                    if(!_k) continue;
+                    const _p = _prio[_c._src] || 0;
+                    if(!_best[_k] || _p > _best[_k]._p){
+                        if(_best[_k] && _best[_k]._c._src !== _c._src){
+                            (fwCollect.warnings = fwCollect.warnings || []).push(
+                                `تفاصيل ${b.alias || b.table}: العمود '${_c.name}' مكرر (${_best[_k]._c._src} + ${_c._src}) — اعتُمد ${_p > _best[_k]._p ? _c._src : _best[_k]._c._src}`);
+                        }
+                        _best[_k] = {_p, _c};
+                    } else if(_best[_k]._c._src !== _c._src){
+                        (fwCollect.warnings = fwCollect.warnings || []).push(
+                            `تفاصيل ${b.alias || b.table}: العمود '${_c.name}' مكرر (${_best[_k]._c._src} + ${_c._src}) — اعتُمد ${_best[_k]._c._src}`);
+                    }
+                }
+                const _cols = Object.values(_best).map(x=>{ const {_src, ...rest} = x._c; return rest; });
+                return {table: b.table, alias: b.alias || b.table, master: b.master, detail: b.detail, sub_key: (b.sub_key || 'id'), visible: b.visible !== false, rel_type: 'one_to_many', columns: _cols};
             });
             return {
                 file: (fwEditMode ? fwEditMode.file : file),
@@ -1817,7 +1840,9 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                 } else {
                     try{
                         const _hasJ = (fwInputs || []).some(x=>String(x.destination || '').startsWith('junction:') && (x.name || '').trim());
-                        notify(`تم حفظ النموذج ${data.file} ✓` + (_hasJ ? ' — تنبيه: نفّذ (حفظ + ترحيل) حتى تُنشأ أعمدة حقول الرابط، وإلا حُفظت السطور بالأيديهات فقط' : ''), _hasJ ? 'info' : 'success');
+                        const _warns = fwCollect.warnings || [];
+                        const _wmsg = _warns.length ? ' — ملاحظات: ' + _warns.join('؛ ') : '';
+                        notify(`تم حفظ النموذج ${data.file} ✓` + (_hasJ ? ' — تنبيه: نفّذ (حفظ + ترحيل) حتى تُنشأ أعمدة حقول الرابط، وإلا حُفظت السطور بالأيديهات فقط' : '') + _wmsg, (_hasJ || _warns.length) ? 'info' : 'success');
                     }catch(e){}
                 }
                 setTimeout(()=>location.reload(), 900);

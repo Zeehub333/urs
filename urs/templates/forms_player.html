@@ -1009,8 +1009,9 @@
                 if(it === 'password'){
                     return `<td class="p-1"><input type="password" data-drow="${i}" data-dcol="${escAttr(nm)}" data-didx="${ri}" value="${escAttr(val)}"${req} autocomplete="new-password" title="حقل سري — يُخزَّن HASH" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5" dir="auto"></td>`;
                 }
+                // نص/رقم مخصص: إكمال تلقائي من عمود الفرعي المطابق (إن وجد) + تنقل لوحة المفاتيح
                 const num = /INT|NUMERIC|DECIMAL|FLOAT|DOUBLE|REAL|NUMBER/.test(dt) || it === 'number';
-                return `<td class="p-1"><input type="${num ? 'number' : 'text'}" data-drow="${i}" data-dcol="${escAttr(nm)}" data-didx="${ri}" value="${escAttr(val)}"${req} class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5"></td>`;
+                return `<td class="p-1"><input type="${num ? 'number' : 'text'}" data-drow="${i}" data-dcol="${escAttr(nm)}" data-didx="${ri}" value="${escAttr(val)}"${req} oninput="fwDetailAC(${i},${ri},'${escAttr(nm)}',this,true)" onkeydown="fwGridKey(event,${i},${ri},'${escAttr(nm)}',this)" onfocus="if(this.value.trim())fwDetailAC(${i},${ri},'${escAttr(nm)}',this,true)" autocomplete="off" title="اكتب للبحث — ↑↓ للتنقل و Enter للاختيار" class="w-full bg-white border border-teal-200 rounded-lg px-2 py-1.5" dir="auto"></td>`;
             }
             // أعمدة جدول الفرعي + مراجع البحث: إكمال تلقائي رأسي لقيم العمود — الاختيار يملأ السطر أفقياً
             // (السرية type=password: بلا إكمال تلقائي أبداً حتى لا تتسرب القيم في الاقتراحات)
@@ -1020,14 +1021,24 @@
             const num = /INT|NUMERIC|DECIMAL|FLOAT|DOUBLE|REAL|NUMBER/.test(dt);
             const isRef = !!c.ref;
             const _bd = isRef ? 'border-amber-300' : 'border-violet-200';
-            const _tt = isRef ? `مرجع بحث 🔍 — اكتب للبحث في ${escAttr(al)} (لا يُخزَّن) — الاختيار يملأ السطر كاملاً` : `اكتب للبحث في سجلات ${escAttr(al)} — الاختيار يملأ السطر كاملاً`;
-            return `<td class="p-1 relative"><div class="relative"><input type="${num ? 'number' : 'text'}" data-drow="${i}" data-dcol="${escAttr(nm)}" data-didx="${ri}" value="${escAttr(val)}" oninput="fwDetailAC(${i},${ri},'${escAttr(nm)}',this)" onkeydown="fwDetailACKey(event,${i},${ri},'${escAttr(nm)}',this)" onfocus="if(this.value.trim())fwDetailAC(${i},${ri},'${escAttr(nm)}',this)" autocomplete="off" title="${_tt}" class="w-full bg-white border ${_bd} rounded-lg px-2 ${isRef ? 'pl-7' : ''} py-1.5" dir="auto">${isRef ? '<span class="absolute left-2 top-1/2 -translate-y-1/2 text-amber-500 text-[11px] pointer-events-none">🔍</span>' : ''}</div><div id="fwAC_${i}_${ri}_${escAttr(nm)}" class="hidden absolute z-30 right-0 left-0 top-full bg-white border border-slate-200 rounded-xl mt-1 max-h-44 overflow-y-auto custom-scroll shadow-lg"></div></td>`;
+            const _tt = isRef ? `مرجع بحث 🔍 — اكتب للبحث في ${escAttr(al)} (لا يُخزَّن) — ↑↓ ثم Enter يملأ السطر كاملاً` : `اكتب للبحث في سجلات ${escAttr(al)} — ↑↓ ثم Enter يملأ السطر كاملاً`;
+            return `<td class="p-1"><div class="relative"><input type="${num ? 'number' : 'text'}" data-drow="${i}" data-dcol="${escAttr(nm)}" data-didx="${ri}" value="${escAttr(val)}" oninput="fwDetailAC(${i},${ri},'${escAttr(nm)}',this,false)" onkeydown="fwGridKey(event,${i},${ri},'${escAttr(nm)}',this)" onfocus="if(this.value.trim())fwDetailAC(${i},${ri},'${escAttr(nm)}',this,false)" autocomplete="off" title="${_tt}" class="w-full bg-white border ${_bd} rounded-lg px-2 ${isRef ? 'pl-7' : ''} py-1.5" dir="auto">${isRef ? '<span class="absolute left-2 top-1/2 -translate-y-1/2 text-amber-500 text-[11px] pointer-events-none">🔍</span>' : ''}</div></td>`;
+        }
+        // مخزون 10 صفوف فارغة دائماً — ينمو مع الإدخال (لا يمس الصفوف القائمة)
+        function fwDetailEnsurePool(i){
+            try{
+                fwDetailRows[i] = fwDetailRows[i] || [];
+                const isEmpty = (r)=>{ if(!r) return true; return !Object.keys(r).some(k=>{ const v = r[k]; return v !== '' && v !== null && v !== undefined; }); };
+                let n = fwDetailRows[i].filter(isEmpty).length, guard = 0;
+                while(n < 10 && guard < 12){ fwDetailRows[i].push({}); n++; guard++; }
+            }catch(e){}
         }
         function paintDetailGrids(){
             const wrap = document.getElementById('fwDetailWrap');
             if(!wrap) return;
             const dets = fwDetails();
             const visDets = dets.map((d, i)=>({d, i})).filter(x=>x.d.visible !== false);
+            visDets.forEach(({i})=>{ fwDetailEnsurePool(i); });
             let mkey = '';
             try{ mkey = fwMasterKey() || ''; }catch(e){}
             wrap.innerHTML = visDets.map(({d, i})=>{
@@ -1052,20 +1063,22 @@
                         <div class="flex items-center gap-1 flex-wrap">${sibBar}${dlBtn}<button onclick="fwDetailAddRow(${i})" class="px-2.5 py-1 bg-violet-50 hover:bg-violet-100 text-violet-700 rounded-lg text-[11px] font-bold"><i class="fa-solid fa-plus"></i> إضافة سطر</button></div>
                     </div>
                     <div class="overflow-x-auto border border-slate-200 rounded-xl"><table class="w-full text-[11px]" dir="rtl">
-                        <thead class="bg-slate-100 text-slate-700"><tr><th class="p-1.5 text-right whitespace-nowrap w-28"><span class="inline-block px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 text-[10px] font-bold ml-1">ID</span>${escHtml(refAlias)}</th>${cols.map(c=>`<th class="p-1.5 text-right whitespace-nowrap" ${c.ref ? 'title="مرجع بحث — لا يُخزَّن"' : ''}>${escHtml(c.alias || c.name)}${c.required ? ' <span class="text-rose-500 font-bold">*</span>' : ''}${c.junction ? ' <span class="text-[9px] text-teal-600 font-bold">⬡</span>' : ''}${c.ref ? ' <span class="text-[9px] text-amber-500 font-bold">🔍</span>' : ''}</th>`).join('')}<th class="w-10"></th></tr></thead>
+                        <thead class="bg-slate-100 text-slate-700"><tr><th class="p-1.5 text-right whitespace-nowrap w-28"><span class="inline-block px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 text-[10px] font-bold ml-1">ID</span>${escHtml(refAlias)}</th><th class="w-6" title="سطر جديد لم يُحفظ"></th>${cols.map(c=>`<th class="p-1.5 text-right whitespace-nowrap" ${c.ref ? 'title="مرجع بحث — لا يُخزَّن"' : ''}>${escHtml(c.alias || c.name)}${c.required ? ' <span class="text-rose-500 font-bold">*</span>' : ''}${c.junction ? ' <span class="text-[9px] text-teal-600 font-bold">⬡</span>' : ''}${c.ref ? ' <span class="text-[9px] text-amber-500 font-bold">🔍</span>' : ''}</th>`).join('')}<th class="w-10"></th></tr></thead>
                         <tbody>${rows.map((r, ri)=>{
                             const refVal = jx ? (((r['detail_id'] ?? '') !== '' ? String(r['detail_id']) : '(New)')) : ((r[d.detail] ?? '') !== '' ? String(r[d.detail]) : (mkey !== '' ? String(mkey) : '(New)'));
-                            const isNew = jx ? ((r['detail_id'] ?? '') === '') : ((r[d.detail] ?? '') === '');
+                            // جديد = بلا هوية مخزنة (رابط: بلا id، مباشر: بلا FK) — يُعلَّم بنجمة ★
+                            const isNew = jx ? !(r['id'] ?? '') : ((r[d.detail] ?? '') === '');
                             return `<tr class="border-t border-slate-100 ${isNew ? 'bg-indigo-50/60' : 'bg-white'}">`
                             + `<td class="p-1"><input value="${escAttr(refVal)}" readonly tabindex="-1" title="العمود المرجعي للمطابقة one_to_many" class="w-full bg-slate-100 border border-slate-200 rounded-lg px-2 py-1.5 text-slate-500 font-mono" dir="ltr"></td>`
-                            + cols.map(c=>fwDetailCell(i, ri, c, r)).join('') + `<td class="p-1 text-center"><button onclick="fwDetailDelRow(${i},${ri})" class="text-rose-400 hover:text-rose-600 px-1"><i class="fa-solid fa-trash"></i></button></td></tr>`; }).join('') || `<tr><td colspan="${cols.length + 2}" class="p-3 text-center text-slate-400">لا سطور — أضف سطراً أو أنزل البيانات</td></tr>`}</tbody>
+                            + `<td class="p-1 text-center">${isNew ? '<span class="text-amber-500 font-bold" title="سطر جديد — سيُحفظ">★</span>' : ''}</td>`
+                            + cols.map(c=>fwDetailCell(i, ri, c, r)).join('') + `<td class="p-1 text-center"><button onclick="fwDetailDelRow(${i},${ri})" class="text-rose-400 hover:text-rose-600 px-1"><i class="fa-solid fa-trash"></i></button></td></tr>`; }).join('') || `<tr><td colspan="${cols.length + 3}" class="p-3 text-center text-slate-400">لا سطور — أضف سطراً أو أنزل البيانات</td></tr>`}</tbody>
                     </table></div>
                 </div>`;
             }).join('');
             visDets.forEach(({i})=>{ try{ fwSibLoad(i); }catch(e){} });
         }
-        function fwDetailAddRow(i){ (fwDetailRows[i] = fwDetailRows[i] || []).push({}); paintDetailGrids(); }
-        function fwDetailDelRow(i, ri){ fwDetailRows[i].splice(ri, 1); paintDetailGrids(); }
+        function fwDetailAddRow(i){ try{ collectDetailRows(); }catch(e){} (fwDetailRows[i] = fwDetailRows[i] || []).push({}); paintDetailGrids(); }
+        function fwDetailDelRow(i, ri){ try{ collectDetailRows(); }catch(e){} fwDetailRows[i].splice(ri, 1); paintDetailGrids(); }
         function collectDetailRows(){
             document.querySelectorAll('[data-drow]').forEach(el=>{
                 const i = +el.dataset.drow, ri = +el.dataset.didx, col = el.dataset.dcol;
@@ -1081,91 +1094,186 @@
                 return (d.sub_key || d.subKey || 'id');
             }catch(e){ return 'id'; }
         }
-        function fwDetailAC(i, ri, col, el){
-            const box = document.getElementById(`fwAC_${i}_${ri}_${col}`);
+        // بوابة اقتراحات واحدة على مستوى الصفحة (position:fixed) — تبرز فوق الجريد
+        // بدل الصناديق داخل الخلايا التي كانت تُقصّ داخل التمرير
+        function fwACPortal(){
+            let p = document.getElementById('fwACPortal');
+            if(!p){
+                p = document.createElement('div');
+                p.id = 'fwACPortal';
+                p.className = 'hidden fixed z-[9999] bg-white border border-slate-200 rounded-xl shadow-2xl overflow-y-auto custom-scroll text-xs';
+                p.style.maxHeight = '224px';
+                document.body.appendChild(p);
+            }
+            return p;
+        }
+        function fwACHide(){ try{ const p = document.getElementById('fwACPortal'); if(p) p.classList.add('hidden'); }catch(e){} try{ fwDetailAC._anchor = null; }catch(e){} }
+        try{
+            if(!window._fwACBound){
+                window._fwACBound = true;
+                document.addEventListener('scroll', ()=>{ try{ fwACHide(); }catch(e){} }, true);
+                window.addEventListener('resize', ()=>{ try{ fwACHide(); }catch(e){} });
+            }
+        }catch(e){}
+        function fwDetailAC(i, ri, col, el, isJx){
             const q = (el.value || '').trim();
-            try{ if(fwACTimers[i + '_' + ri + '_' + col]) clearTimeout(fwACTimers[i + '_' + ri + '_' + col]); }catch(e){}
-            if(!box) return;
-            if(!q){ box.classList.add('hidden'); box.innerHTML = ''; try{ fwDetailAC._sel[i + '_' + ri + '_' + col] = -1; }catch(e){} return; }
-            fwACTimers[i + '_' + ri + '_' + col] = setTimeout(async ()=>{
+            const akey = i + '_' + ri + '_' + col;
+            try{ if(fwACTimers[akey]) clearTimeout(fwACTimers[akey]); }catch(e){}
+            if(!q){ fwACHide(); return; }
+            fwACTimers[akey] = setTimeout(async ()=>{
                 try{
                     // إكمال رأسي: اقتراحات قيم هذا العمود حصراً (col=)
                     const res = await fetch(`/api/fmlk/detail-search?fml=${encodeURIComponent(currentFml)}&app=${encodeURIComponent(currentApp)}&detail=${i}&q=${encodeURIComponent(q)}&col=${encodeURIComponent(col)}&pageSize=8`);
                     const d = await res.json();
                     if(!res.ok || d.error) throw new Error(d.error || 'بحث');
-                    const rows = d.rows || [];
+                    let rows = d.rows || [];
                     const sk = d.sub_key || 'id';
+                    if(isJx){
+                        // هدف رابط: بلا عمود مطابق في الفرعي = إدخال حر بلا اقتراحات
+                        if(d.col_found === false){ fwACHide(); return; }
+                        const seen = new Set();
+                        rows = rows.filter(r=>{ const v = String(r[col] ?? ''); if(seen.has(v)) return false; seen.add(v); return true; });
+                        if(!rows.length){ fwACHide(); return; }
+                    }
                     fwDetailAC._cache = fwDetailAC._cache || {};
                     fwDetailAC._sel = fwDetailAC._sel || {};
                     rows.forEach((r, k)=>{ fwDetailAC._cache[`${i}_${ri}_${col}_${k}`] = r; });
-                    fwDetailAC._sel[i + '_' + ri + '_' + col] = -1;
-                    box.innerHTML = rows.length ? rows.map((r, k)=>{
+                    fwDetailAC._sel[akey] = -1;
+                    fwDetailAC._anchor = {i, ri, col, isJx: !!isJx};
+                    const p = fwACPortal();
+                    p.innerHTML = rows.length ? rows.map((r, k)=>{
                         const rest = Object.keys(r).filter(c=>c !== col && c !== sk).slice(0, 2).map(c=>String(r[c] ?? '')).filter(Boolean).join(' — ');
-                        return `<div data-ack="${k}" onclick="fwDetailACPick(${i},${ri},'${escAttr(col)}','${k}')" onmouseenter="fwDetailACSel(${i},${ri},'${escAttr(col)}',${k})" class="px-3 py-2 hover:bg-violet-50 cursor-pointer text-xs text-slate-700 border-b border-slate-100"><div class="font-bold text-violet-700" dir="auto">${escHtml(r[col] ?? '')}</div><div class="text-slate-400 text-[10px]"><span class="font-mono" dir="ltr">${escHtml(r[sk] ?? '')}</span>${rest ? ' — ' + escHtml(rest) : ''}</div></div>`;
-                    }).join('') : '<div class="px-3 py-2 text-xs text-slate-400">لا نتائج مطابقة</div>';
-                    box.classList.remove('hidden');
-                }catch(e){ box.classList.add('hidden'); }
+                        return `<div data-ack="${k}" onclick="fwDetailACPick(${i},${ri},'${escAttr(col)}','${k}',${isJx ? 1 : 0})" onmouseenter="fwDetailACSel(${i},${ri},'${escAttr(col)}',${k})" class="px-3 py-2 hover:bg-violet-50 cursor-pointer text-slate-700 border-b border-slate-100"><div class="font-bold text-violet-700" dir="auto">${escHtml(r[col] ?? '')}</div><div class="text-slate-400 text-[10px]"><span class="font-mono" dir="ltr">${escHtml(r[sk] ?? '')}</span>${rest ? ' — ' + escHtml(rest) : ''}</div></div>`;
+                    }).join('') : '<div class="px-3 py-2 text-slate-400">لا نتائج مطابقة</div>';
+                    const rct = el.getBoundingClientRect();
+                    p.style.visibility = 'hidden';
+                    p.classList.remove('hidden');
+                    p.style.minWidth = Math.max(220, rct.width) + 'px';
+                    let top = rct.bottom + 4;
+                    const h = Math.min(224, p.scrollHeight || 200);
+                    if(top + h > window.innerHeight) top = Math.max(4, rct.top - h - 4);
+                    p.style.top = top + 'px';
+                    p.style.left = 'auto';
+                    p.style.right = Math.max(4, window.innerWidth - rct.right) + 'px';
+                    p.scrollTop = 0;
+                    p.style.visibility = '';
+                }catch(e){ fwACHide(); }
             }, 300);
         }
         function fwDetailACSel(i, ri, col, k){
             try{
+                const a = fwDetailAC._anchor || {};
+                if(a.i !== i || a.ri !== ri || a.col !== col) return;
                 fwDetailAC._sel = fwDetailAC._sel || {};
                 fwDetailAC._sel[i + '_' + ri + '_' + col] = k;
-                const box = document.getElementById(`fwAC_${i}_${ri}_${col}`);
-                if(!box) return;
-                box.querySelectorAll('[data-ack]').forEach(el=>{
+                const p = document.getElementById('fwACPortal');
+                if(!p) return;
+                p.querySelectorAll('[data-ack]').forEach(el=>{
                     el.style.background = (String(el.getAttribute('data-ack')) === String(k)) ? '#ede9fe' : '';
                 });
-                const cur = box.querySelector(`[data-ack="${k}"]`);
+                const cur = p.querySelector(`[data-ack="${k}"]`);
                 if(cur && cur.scrollIntoView) cur.scrollIntoView({block: 'nearest'});
             }catch(e){}
         }
-        function fwDetailACKey(e, i, ri, col, el){
+        function fwACAnchorFor(i, ri, col){
             try{
-                const box = document.getElementById(`fwAC_${i}_${ri}_${col}`);
-                const hidden = !box || box.classList.contains('hidden');
-                const key = i + '_' + ri + '_' + col;
-                fwDetailAC._sel = fwDetailAC._sel || {};
-                const n = box ? box.querySelectorAll('[data-ack]').length : 0;
-                if(e.key === 'ArrowDown' || e.key === 'ArrowUp'){
-                    if(hidden || !n) return;
-                    e.preventDefault();
-                    let k = (fwDetailAC._sel[key] == null ? -1 : fwDetailAC._sel[key]);
-                    k = e.key === 'ArrowDown' ? Math.min(n - 1, k + 1) : Math.max(0, k - 1);
-                    fwDetailACSel(i, ri, col, k);
-                } else if(e.key === 'Enter'){
-                    const k = fwDetailAC._sel[key];
-                    if(!hidden && k != null && k >= 0){ e.preventDefault(); fwDetailACPick(i, ri, col, String(k)); }
-                } else if(e.key === 'Escape'){
-                    if(box) box.classList.add('hidden');
-                    fwDetailAC._sel[key] = -1;
-                }
-            }catch(ex){}
+                const a = fwDetailAC._anchor;
+                if(!a || a.i !== i || a.ri !== ri || a.col !== col) return null;
+                const p = document.getElementById('fwACPortal');
+                if(!p || p.classList.contains('hidden')) return null;
+                return a;
+            }catch(e){ return null; }
         }
-        function fwDetailACPick(i, ri, col, k){
-            // توافق: النداء القديم fwDetailACPick(i,ri,k) بدون عمود
-            if(k === undefined){ k = col; col = null; }
-            const rec = (fwDetailAC._cache || {})[`${i}_${ri}_${col !== null && col !== undefined ? col + '_' : ''}${k}`]
-                || (fwDetailAC._cache || {})[`${i}_${ri}_${k}`];
+        function fwDetailACPick(i, ri, col, k, isJx){
+            const rec = (fwDetailAC._cache || {})[`${i}_${ri}_${col}_${k}`];
+            fwACHide();
             if(!rec) return;
+            try{ collectDetailRows(); }catch(e){}
             const {d, jx, cols} = fwDetailGridCols(i);
             const sk = fwDetailSubKey(i);
             fwDetailRows[i] = fwDetailRows[i] || [];
             const row = Object.assign({}, fwDetailRows[i][ri] || {});
-            if(jx) row['detail_id'] = rec[sk] ?? '';
-            // ملء أفقي: كامل السجل الواحد (بقية الأعمدة) — حقول الرابط تُملأ يدوياً
-            cols.forEach(c=>{
-                if(c.junction) return;
-                if(rec[c.name] !== undefined && rec[c.name] !== null) row[c.name] = rec[c.name];
-            });
-            if(!jx && d.detail) row[d.detail] = row[d.detail] ?? '';
+            if(isJx){
+                // هدف رابط: يُضبط مفتاحه فقط (بقية السطر تُملأ يدوياً)
+                if(rec[col] !== undefined && rec[col] !== null) row[col] = rec[col];
+            } else {
+                if(jx) row['detail_id'] = rec[sk] ?? '';
+                // ملء أفقي: كامل السجل الواحد (بقية الأعمدة) — حقول الرابط تُملأ يدوياً
+                cols.forEach(c=>{
+                    if(c.junction) return;
+                    if(rec[c.name] !== undefined && rec[c.name] !== null) row[c.name] = rec[c.name];
+                });
+                if(!jx && d.detail) row[d.detail] = row[d.detail] ?? '';
+            }
             fwDetailRows[i][ri] = row;
             paintDetailGrids();
+            try{
+                const el2 = document.querySelector(`[data-drow="${i}"][data-didx="${ri}"][data-dcol="${CSS.escape(col)}"]`);
+                if(el2) el2.focus();
+            }catch(e){}
             try{ notify('مُلئ السطر من السجل ' + (rec[sk] ?? ''), 'success'); }catch(e){}
+        }
+        // تنقل شبكي: أسهم للتماشي بين الخلايا، Enter للأسفل، ومع قائمة مفتوحة للاقتراحات
+        function fwGridFocus(i, ri, col){
+            try{
+                let el = document.querySelector(`[data-drow="${i}"][data-didx="${ri}"][data-dcol="${CSS.escape(col)}"]`);
+                if(!el){
+                    const rows = fwDetailRows[i] || [];
+                    if(ri >= 0 && ri <= rows.length){
+                        try{ collectDetailRows(); }catch(e){}
+                        while((fwDetailRows[i] || []).length <= ri) (fwDetailRows[i] = fwDetailRows[i] || []).push({});
+                        paintDetailGrids();
+                        el = document.querySelector(`[data-drow="${i}"][data-didx="${ri}"][data-dcol="${CSS.escape(col)}"]`);
+                    }
+                }
+                if(el){ el.focus(); try{ if(el.select && /text|number|password/.test(el.type)) el.select(); }catch(e){} }
+            }catch(e){}
+        }
+        function fwGridKey(e, i, ri, col, el){
+            try{
+                const a = fwACAnchorFor(i, ri, col);
+                if(a){
+                    const p = document.getElementById('fwACPortal');
+                    const items = p ? p.querySelectorAll('[data-ack]') : [];
+                    const key = i + '_' + ri + '_' + col;
+                    fwDetailAC._sel = fwDetailAC._sel || {};
+                    if(e.key === 'ArrowDown' || e.key === 'ArrowUp'){
+                        if(!items.length) return;
+                        e.preventDefault();
+                        let k = (fwDetailAC._sel[key] == null ? -1 : fwDetailAC._sel[key]);
+                        k = e.key === 'ArrowDown' ? Math.min(items.length - 1, k + 1) : Math.max(0, k - 1);
+                        fwDetailACSel(i, ri, col, k);
+                        return;
+                    }
+                    if(e.key === 'Enter'){
+                        const k = fwDetailAC._sel[key];
+                        if(k != null && k >= 0){ e.preventDefault(); fwDetailACPick(i, ri, col, String(k), a.isJx ? 1 : 0); return; }
+                        fwACHide();
+                    }
+                    if(e.key === 'Escape'){ fwACHide(); e.preventDefault(); return; }
+                    return;
+                }
+                if(e.key === 'ArrowDown'){ e.preventDefault(); fwGridFocus(i, ri + 1, col); }
+                else if(e.key === 'ArrowUp'){ e.preventDefault(); fwGridFocus(i, ri - 1, col); }
+                else if(e.key === 'Enter'){ e.preventDefault(); fwGridFocus(i, ri + 1, col); }
+                else if(e.key === 'ArrowLeft' || e.key === 'ArrowRight'){
+                    e.preventDefault();
+                    try{
+                        const cells = [...document.querySelectorAll(`[data-drow="${i}"][data-didx="${ri}"]`)];
+                        const ix = cells.indexOf(el);
+                        const nx = cells[ix + (e.key === 'ArrowLeft' ? 1 : -1)];
+                        if(nx){ nx.focus(); try{ if(nx.select && /text|number|password/.test(nx.type)) nx.select(); }catch(_){} }
+                    }catch(_){}
+                }
+            }catch(ex){}
         }
         document.addEventListener('click', (e)=>{
             try{
-                if(!e.target.closest('[id^="fwAC_"]') && !(e.target.dataset && e.target.dataset.dcol)) document.querySelectorAll('[id^="fwAC_"]').forEach(b=>b.classList.add('hidden'));
+                const p = document.getElementById('fwACPortal');
+                if(!p || p.classList.contains('hidden')) return;
+                if(e.target.closest && (e.target.closest('#fwACPortal'))) return;
+                if(e.target.dataset && e.target.dataset.dcol) return;
+                fwACHide();
             }catch(ex){}
         });
         /* ── إنزال البيانات: مودال سجلات الفرعي (بحث + تحديد الكل/متعدد) ── */
@@ -1240,6 +1348,7 @@
             const {d, jx, cols} = fwDetailGridCols(st.i);
             const sk = st.sub_key;
             let added = 0, dup = 0;
+            try{ collectDetailRows(); }catch(e){}
             fwDetailRows[st.i] = fwDetailRows[st.i] || [];
             const have = new Set((fwDetailRows[st.i] || []).map(r=>String((jx ? r['detail_id'] : r[sk]) ?? '')));
             st.sel.forEach(id=>{
@@ -1345,6 +1454,7 @@
                 if(!rows.length){ try{ notify('لا متفرعات لهذا السجل', 'info'); }catch(e){} return; }
                 const {jx} = fwDetailGridCols(st.i);
                 const sk = fwDetailSubKey(st.i);
+                try{ collectDetailRows(); }catch(e){}
                 fwDetailRows[st.i] = fwDetailRows[st.i] || [];
                 const have = new Set((fwDetailRows[st.i] || []).map(r=>String((jx ? r['detail_id'] : r[sk]) ?? '')));
                 let added = 0;
@@ -1360,6 +1470,22 @@
                 try{ notify(`جُلب ${added} سجلاً للجريد`, 'success'); }catch(e){}
             }catch(e){ try{ notify(e.message || e, 'error'); }catch(e2){} }
         }
+        async function fwDetailReload(i){
+            // إعادة قراءة تفاصيل واحدة من الخادم (تُسقط ★ بعد الحفظ وتجلب الهويات)
+            try{
+                const dets = fwDetails();
+                const d = dets[i];
+                if(!d || d.visible === false) return;
+                const key = fwMasterKey();
+                if(key === '' || key == null) return;
+                const res = await fetch(`/api/fmlk/branch?fml=${encodeURIComponent(currentFml)}&app=${encodeURIComponent(currentApp)}&detail=${i}&key=${encodeURIComponent(key)}`);
+                const dd = await res.json();
+                if(res.ok && !dd.error){
+                    fwDetailRows[i] = Array.isArray(dd.rows) ? dd.rows : [];
+                    if(dd.columns && dd.columns.length) fwDetailCols[i] = dd.columns;
+                }
+            }catch(e){}
+        }
         async function saveDetailRows(key){
             const dets = fwDetails();
             if(!dets.length) return true;
@@ -1372,8 +1498,10 @@
                         body: JSON.stringify({fml: currentFml, app: currentApp, detail: i, key: key, rows: rows})});
                     const d = await res.json();
                     if(!res.ok || d.error) throw new Error(d.error || 'فشل حفظ التفاصيل');
+                    await fwDetailReload(i);
                 }catch(e){ showError(e, 'حفظ التفاصيل: ' + (dets[i].alias || dets[i].table)); return false; }
             }
+            paintDetailGrids();
             return true;
         }
 
