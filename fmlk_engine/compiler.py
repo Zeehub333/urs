@@ -341,9 +341,14 @@ class FMLKFormCompiler:
                         _nm = (cg("name") or "").strip()
                         if not _nm:
                             continue
+                        _copts = (cg("options") or "").strip()
+                        _opts = [o.strip() for o in _copts.split(",") if o.strip()] if _copts else []
                         cols.append({"name": _nm, "alias": (cg("alias", "label") or _nm).strip(),
                                      "data_type": (cg("dataType", "datatype", "data_type") or "VARCHAR").strip().upper(),
                                      "input_type": normalize_input_type(cg("inputType", "input_type", "type", default="text")),
+                                     "required": str(cg("required") or "").strip().lower() in ("1", "true", "yes"),
+                                     "default": (cg("default", "defaultValue") or ""),
+                                     "options": _opts,
                                      "junction": str(cg("junction") or "").strip().lower() in ("1", "true", "yes")})
                 _subk = (get("sub_key", "subKey", "sub-key") or "id").strip() or "id"
                 _vis = str(get("visible", "show", default="1") or "1").strip().lower() not in ("0", "false", "no", "hide", "hidden")

@@ -241,6 +241,12 @@ def validate_model(data: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], str]
         "fields": out_fields,
         "updated_at": _now(),
     }
+    _refs = data.get("refs")
+    if isinstance(_refs, dict):
+        _clean = {k: str(v or "") for k, v in _refs.items()
+                  if k in ("master_table", "master_col", "sub_table", "sub_col") and str(v or "").strip()}
+        if _clean:
+            model["refs"] = _clean
     return model, ""
 
 
@@ -364,10 +370,13 @@ def junction_name(main_table: str, sub_table: str) -> str:
 
 
 def ensure_junction(main_table: str, sub_table: str, schema: str, connection: Any,
-                    customs: List[Dict[str, Any]]) -> Tuple[Optional[Dict[str, Any]], str]:
+                    customs: List[Dict[str, Any]],
+                    refs: Optional[Dict[str, Any]] = None) -> Tuple[Optional[Dict[str, Any]], str]:
     """Build (+save) the junction custom model id/master_id/detail_id/[customs].
 
     customs: [{name, alias?, data_type?/type?}] designer detail columns.
+    refs: optional {master_table, master_col, sub_table, sub_col} recorded
+    on the model for FK creation/inspection.
     Returns (model, error). Caller migrates it.
     """
     jn = junction_name(main_table, sub_table)
@@ -397,6 +406,9 @@ def ensure_junction(main_table: str, sub_table: str, schema: str, connection: An
              "connection": str(connection or "").strip(),
              "description": f"جدول رابط تلقائي: {main_table} × {sub_table}",
              "fields": fields}
+    if isinstance(refs, dict) and refs:
+        model["refs"] = {k: str(v or "") for k, v in refs.items()
+                         if k in ("master_table", "master_col", "sub_table", "sub_col")}
     saved, err, _code = save_model(model, overwrite=True)
     if err:
         return None, err

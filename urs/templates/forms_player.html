@@ -928,6 +928,11 @@
 
         // ── تبويبة التفاصيل: الجداول المتفرعة one-to-many كشبكة أسفل النموذج ──
         let fwDetailRows = []; // per-detail array of row objects
+        let fwDetailCols = []; // per-detail server grid columns (types/options)
+        let fwDetailSibs = []; // per-detail sibling-master sources cache
+        let fwDlState = null; // download modal state
+        let fwSibState = null; // sibling-master modal state
+        let fwACTimers = {}; // autocomplete debounce timers
         function fwDetails(){ return (fmlMeta && fmlMeta.details) || []; }
         function fwMasterKey(){
             if(currentRecordId && !String(currentRecordId).startsWith('__row')) return currentRecordId;
@@ -954,6 +959,8 @@
             if(root) root.insertAdjacentHTML('beforeend', `<div data-tab-content="cat_details" style="display:none"><div id="fwDetailWrap" class="space-y-4"></div></div>`);
             try{ stackAppendDetailsCard(); }catch(e){}
             fwDetailRows = dets.map(()=>[]);
+            fwDetailCols = dets.map(()=>null);
+            fwDetailSibs = dets.map(()=>null);
             const key = fwMasterKey();
             for(const {d, i} of visDets){
                 if(key === '' || key == null){
@@ -963,10 +970,47 @@
                         const res = await fetch(`/api/fmlk/branch?fml=${encodeURIComponent(currentFml)}&app=${encodeURIComponent(currentApp)}&detail=${i}&key=${encodeURIComponent(key)}`);
                         const dd = await res.json();
                         fwDetailRows[i] = Array.isArray(dd.rows) ? dd.rows : [];
+                        if(dd.columns && dd.columns.length) fwDetailCols[i] = dd.columns;
                     }catch(e){ fwDetailRows[i] = []; }
                 }
             }
             paintDetailGrids();
+        }
+        function fwDetailGridCols(i){
+            const d = (fwDetails() || [])[i] || {};
+            const srv = fwDetailCols[i];
+            const base = (srv && srv.length ? srv : (d.columns || [])).filter(c=>c && c.name !== d.detail);
+            return {d, jx: !!(d.junction && d.junction.table), cols: base};
+        }
+        function fwDetailCell(i, ri, c, r){
+            const nm = c.name, al = c.alias || c.name;
+            const val = (r[nm] ?? '') === '' && (c.default != null && String(c.default) !== '') && (r[nm] === undefined || r[nm] === '') ? String(c.default) : (r[nm] ?? '');
+            const req = c.required ? ' required' : '';
+            const it = String(c.input_type || '').toLowerCase();
+            const dt = String(c.data_type || '').toUpperCase();
+            // حقول الرابط المخصصة: تُرسم حسب نوع المدخل المهيأ في «تعديل التفاصيل»
+            if(c.junction){
+                if(it === 'select' || it === 'status' || it === 'radio'){
+                    const opts = Array.isArray(c.options) ? c.options : [];
+                    return `<td class="p-1"><select data-drow="${i}" data-dcol="${escAttr(nm)}" data-didx="${ri}"${req} class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5"><option value="">—</option>${opts.map(o=>{ const v = (o && typeof o === 'object') ? (o.value ?? o.label ?? '') : o; const l = (o && typeof o === 'object') ? (o.label ?? o.value ?? '') : o; return `<option value="${escAttr(v)}" ${String(val) === String(v) ? 'selected' : ''}>${escHtml(l)}</option>`; }).join('')}</select></td>`;
+                }
+                if(it === 'boolean'){
+                    const on = String(val).toLowerCase() === '1' || String(val).toLowerCase() === 'true';
+                    return `<td class="p-1 text-center"><input type="checkbox" data-drow="${i}" data-dcol="${escAttr(nm)}" data-didx="${ri}" ${on ? 'checked' : ''} class="w-4 h-4 accent-emerald-600"></td>`;
+                }
+                if(it === 'date' || it === 'datetime' || it === 'time'){
+                    const tp = it === 'date' ? 'date' : (it === 'time' ? 'time' : 'datetime-local');
+                    return `<td class="p-1"><input type="${tp}" data-drow="${i}" data-dcol="${escAttr(nm)}" data-didx="${ri}" value="${escAttr(val)}"${req} class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5"></td>`;
+                }
+                if(it === 'textarea'){
+                    return `<td class="p-1"><input type="text" data-drow="${i}" data-dcol="${escAttr(nm)}" data-didx="${ri}" value="${escAttr(val)}"${req} class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5"></td>`;
+                }
+                const num = /INT|NUMERIC|DECIMAL|FLOAT|DOUBLE|REAL|NUMBER/.test(dt) || it === 'number';
+                return `<td class="p-1"><input type="${num ? 'number' : 'text'}" data-drow="${i}" data-dcol="${escAttr(nm)}" data-didx="${ri}" value="${escAttr(val)}"${req} class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5"></td>`;
+            }
+            // أعمدة جدول الفرعي: إكمال تلقائي — الكتابة في أي عمود تقترح السجل كاملاً
+            const num = /INT|NUMERIC|DECIMAL|FLOAT|DOUBLE|REAL|NUMBER/.test(dt);
+            return `<td class="p-1 relative"><input type="${num ? 'number' : 'text'}" data-drow="${i}" data-dcol="${escAttr(nm)}" data-didx="${ri}" value="${escAttr(val)}" oninput="fwDetailAC(${i},${ri},'${escAttr(nm)}',this)" autocomplete="off" title="اكتب للبحث في سجلات ${escAttr(al)} — الاختيار يملأ السطر كاملاً" class="w-full bg-white border border-violet-200 rounded-lg px-2 py-1.5" dir="auto"><div id="fwAC_${i}_${ri}_${escAttr(nm)}" class="hidden absolute z-30 right-0 left-0 top-full bg-white border border-slate-200 rounded-xl mt-1 max-h-44 overflow-y-auto custom-scroll shadow-lg"></div></td>`;
         }
         function paintDetailGrids(){
             const wrap = document.getElementById('fwDetailWrap');
@@ -976,36 +1020,38 @@
             let mkey = '';
             try{ mkey = fwMasterKey() || ''; }catch(e){}
             wrap.innerHTML = visDets.map(({d, i})=>{
-                const jx = !!(d.junction && d.junction.table);
-                const cols = (d.columns || []).filter(c=>c.name !== d.detail);
+                const {jx, cols} = fwDetailGridCols(i);
                 const rows = fwDetailRows[i] || [];
                 // عمود ID = العمود المرجعي لمطابقة one_to_many (يُختم خادمياً عند الحفظ)
                 let refAlias = d.detail;
                 try{
-                    const rc = (d.columns || []).find(c=>c.name === d.detail);
-                    if(rc && (rc.alias || rc.name)) refAlias = rc.alias || rc.name;
+                    if(jx){
+                        const dc = cols.find(c=>c.name === 'detail_id');
+                        refAlias = (dc && (dc.alias || dc.name)) || 'detail_id';
+                    } else {
+                        const rc = (d.columns || []).find(c=>c.name === d.detail);
+                        if(rc && (rc.alias || rc.name)) refAlias = rc.alias || rc.name;
+                    }
                 }catch(e){}
+                const sibBar = `<span id="fwSibBar_${i}" class="inline-flex items-center gap-1"></span>`;
+                const dlBtn = `<button onclick="fwDownloadOpen(${i})" title="إنزال سجلات جدول التفاصيل بالبحث والاختيار المتعدد" class="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[11px] font-bold"><i class="fa-solid fa-download"></i> إنزال البيانات</button>`;
                 return `<div class="fmlk-category p-4">
-                    <div class="flex items-center justify-between mb-2">
+                    <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
                         <div class="text-xs font-bold text-slate-700 flex items-center gap-2"><i class="fa-solid fa-diagram-project text-violet-600"></i> ${escHtml(d.alias || d.table)} <span class="text-[10px] text-slate-400 font-normal">(${rows.length})</span></div>
-                        <button onclick="fwDetailAddRow(${i})" class="px-2.5 py-1 bg-violet-50 hover:bg-violet-100 text-violet-700 rounded-lg text-[11px] font-bold"><i class="fa-solid fa-plus"></i> إضافة سطر</button>
+                        <div class="flex items-center gap-1 flex-wrap">${sibBar}${dlBtn}<button onclick="fwDetailAddRow(${i})" class="px-2.5 py-1 bg-violet-50 hover:bg-violet-100 text-violet-700 rounded-lg text-[11px] font-bold"><i class="fa-solid fa-plus"></i> إضافة سطر</button></div>
                     </div>
                     <div class="overflow-x-auto border border-slate-200 rounded-xl"><table class="w-full text-[11px]" dir="rtl">
-                        <thead class="bg-slate-100 text-slate-700"><tr><th class="p-1.5 text-right whitespace-nowrap w-28"><span class="inline-block px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 text-[10px] font-bold ml-1">ID</span>${escHtml(refAlias)}</th>${cols.map(c=>`<th class="p-1.5 text-right whitespace-nowrap">${escHtml(c.alias || c.name)}</th>`).join('')}<th class="w-10"></th></tr></thead>
+                        <thead class="bg-slate-100 text-slate-700"><tr><th class="p-1.5 text-right whitespace-nowrap w-28"><span class="inline-block px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 text-[10px] font-bold ml-1">ID</span>${escHtml(refAlias)}</th>${cols.map(c=>`<th class="p-1.5 text-right whitespace-nowrap">${escHtml(c.alias || c.name)}${c.junction ? ' <span class="text-[9px] text-teal-600 font-bold">⬡</span>' : ''}</th>`).join('')}<th class="w-10"></th></tr></thead>
                         <tbody>${rows.map((r, ri)=>{
-                            const refVal = (r[d.detail] ?? '') !== '' ? String(r[d.detail]) : (mkey !== '' ? String(mkey) : '(New)');
-                            const isNew = (r[d.detail] ?? '') === '';
+                            const refVal = jx ? (((r['detail_id'] ?? '') !== '' ? String(r['detail_id']) : '(New)')) : ((r[d.detail] ?? '') !== '' ? String(r[d.detail]) : (mkey !== '' ? String(mkey) : '(New)'));
+                            const isNew = jx ? ((r['detail_id'] ?? '') === '') : ((r[d.detail] ?? '') === '');
                             return `<tr class="border-t border-slate-100 ${isNew ? 'bg-indigo-50/60' : 'bg-white'}">`
                             + `<td class="p-1"><input value="${escAttr(refVal)}" readonly tabindex="-1" title="العمود المرجعي للمطابقة one_to_many" class="w-full bg-slate-100 border border-slate-200 rounded-lg px-2 py-1.5 text-slate-500 font-mono" dir="ltr"></td>`
-                            + cols.map(c=>{
-                            const t = String(c.data_type || '').toUpperCase();
-                            const inp = /INT|NUMERIC|DECIMAL|FLOAT|DOUBLE|REAL|NUMBER/.test(t) ? 'number' : 'text';
-                            const editable = (!jx) || !!c.junction;
-                            if(!editable) return `<td class="p-1"><div title="قراءة فقط من جدول الفرعي" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-slate-500">${escHtml(r[c.name] ?? '')}</div></td>`;
-                            return `<td class="p-1"><input type="${inp}" data-drow="${i}" data-dcol="${escAttr(c.name)}" data-didx="${ri}" value="${escAttr(r[c.name] ?? '')}" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5"></td>`; }).join('') + `<td class="p-1 text-center"><button onclick="fwDetailDelRow(${i},${ri})" class="text-rose-400 hover:text-rose-600 px-1"><i class="fa-solid fa-trash"></i></button></td></tr>`; }).join('') || `<tr><td colspan="${cols.length + 2}" class="p-3 text-center text-slate-400">لا سطور — أضف سطراً</td></tr>`}</tbody>
+                            + cols.map(c=>fwDetailCell(i, ri, c, r)).join('') + `<td class="p-1 text-center"><button onclick="fwDetailDelRow(${i},${ri})" class="text-rose-400 hover:text-rose-600 px-1"><i class="fa-solid fa-trash"></i></button></td></tr>`; }).join('') || `<tr><td colspan="${cols.length + 2}" class="p-3 text-center text-slate-400">لا سطور — أضف سطراً أو أنزل البيانات</td></tr>`}</tbody>
                     </table></div>
                 </div>`;
             }).join('');
+            visDets.forEach(({i})=>{ try{ fwSibLoad(i); }catch(e){} });
         }
         function fwDetailAddRow(i){ (fwDetailRows[i] = fwDetailRows[i] || []).push({}); paintDetailGrids(); }
         function fwDetailDelRow(i, ri){ fwDetailRows[i].splice(ri, 1); paintDetailGrids(); }
@@ -1014,8 +1060,252 @@
                 const i = +el.dataset.drow, ri = +el.dataset.didx, col = el.dataset.dcol;
                 fwDetailRows[i] = fwDetailRows[i] || [];
                 fwDetailRows[i][ri] = fwDetailRows[i][ri] || {};
-                fwDetailRows[i][ri][col] = el.value;
+                if(el.type === 'checkbox'){ fwDetailRows[i][ri][col] = el.checked ? (el.value || '1') : ''; }
+                else fwDetailRows[i][ri][col] = el.value;
             });
+        }
+        function fwDetailSubKey(i){
+            try{
+                const d = (fwDetails() || [])[i] || {};
+                return (d.sub_key || d.subKey || 'id');
+            }catch(e){ return 'id'; }
+        }
+        function fwDetailAC(i, ri, col, el){
+            const box = document.getElementById(`fwAC_${i}_${ri}_${col}`);
+            const q = (el.value || '').trim();
+            try{ if(fwACTimers[i + '_' + ri + '_' + col]) clearTimeout(fwACTimers[i + '_' + ri + '_' + col]); }catch(e){}
+            if(!box) return;
+            if(!q){ box.classList.add('hidden'); box.innerHTML = ''; return; }
+            fwACTimers[i + '_' + ri + '_' + col] = setTimeout(async ()=>{
+                try{
+                    const res = await fetch(`/api/fmlk/detail-search?fml=${encodeURIComponent(currentFml)}&app=${encodeURIComponent(currentApp)}&detail=${i}&q=${encodeURIComponent(q)}&pageSize=8`);
+                    const d = await res.json();
+                    if(!res.ok || d.error) throw new Error(d.error || 'بحث');
+                    const rows = d.rows || [];
+                    const sk = d.sub_key || 'id';
+                    fwDetailAC._cache = fwDetailAC._cache || {};
+                    rows.forEach((r, k)=>{ fwDetailAC._cache[`${i}_${ri}_${k}`] = r; });
+                    box.innerHTML = rows.length ? rows.map((r, k)=>{
+                        const lbl = Object.keys(r).filter(c=>c !== sk).slice(0, 3).map(c=>String(r[c] ?? '')).filter(Boolean).join(' — ') || String(r[sk] ?? '');
+                        return `<div onclick="fwDetailACPick(${i},${ri},'${k}')" class="px-3 py-2 hover:bg-violet-50 cursor-pointer text-xs text-slate-700 border-b border-slate-100"><span class="font-mono font-bold text-violet-700" dir="ltr">${escHtml(r[sk] ?? '')}</span> <span class="text-slate-500">${escHtml(lbl)}</span></div>`;
+                    }).join('') : '<div class="px-3 py-2 text-xs text-slate-400">لا نتائج مطابقة</div>';
+                    box.classList.remove('hidden');
+                }catch(e){ box.classList.add('hidden'); }
+            }, 300);
+        }
+        function fwDetailACPick(i, ri, k){
+            const rec = (fwDetailAC._cache || {})[`${i}_${ri}_${k}`];
+            if(!rec) return;
+            const {d, jx, cols} = fwDetailGridCols(i);
+            const sk = fwDetailSubKey(i);
+            fwDetailRows[i] = fwDetailRows[i] || [];
+            const row = Object.assign({}, fwDetailRows[i][ri] || {});
+            if(jx) row['detail_id'] = rec[sk] ?? '';
+            cols.forEach(c=>{
+                if(c.junction) return; // حقول الرابط تُملأ يدوياً
+                if(rec[c.name] !== undefined && rec[c.name] !== null) row[c.name] = rec[c.name];
+            });
+            if(!jx && d.detail) row[d.detail] = row[d.detail] ?? '';
+            fwDetailRows[i][ri] = row;
+            paintDetailGrids();
+            try{ notify('مُلئ السطر من السجل ' + (rec[sk] ?? ''), 'success'); }catch(e){}
+        }
+        document.addEventListener('click', (e)=>{
+            try{
+                if(!e.target.closest('[id^="fwAC_"]') && !(e.target.dataset && e.target.dataset.dcol)) document.querySelectorAll('[id^="fwAC_"]').forEach(b=>b.classList.add('hidden'));
+            }catch(ex){}
+        });
+        /* ── إنزال البيانات: مودال سجلات الفرعي (بحث + تحديد الكل/متعدد) ── */
+        function fwDlClose(){ const m = document.getElementById('fwDlModal'); if(m) m.remove(); fwDlState = null; }
+        async function fwDownloadOpen(i){
+            const {d, jx} = fwDetailGridCols(i);
+            fwDlState = {i, jx, q: '', page: 1, rows: [], total: 0, sel: new Set(), cols: [], sub_key: fwDetailSubKey(i)};
+            let m = document.getElementById('fwDlModal');
+            if(m) m.remove();
+            m = document.createElement('div');
+            m.id = 'fwDlModal';
+            m.className = 'fixed inset-0 z-[80] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4';
+            m.setAttribute('onclick', 'if(event.target===this)fwDlClose()');
+            m.innerHTML = `<div class="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[86vh] overflow-hidden flex flex-col">
+                <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-emerald-50 shrink-0"><h3 class="text-sm font-bold text-slate-800"><i class="fa-solid fa-download text-emerald-600"></i> البحث في ${escHtml(d.alias || d.table)} المتاحة وإضافتها</h3><button onclick="fwDlClose()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button></div>
+                <div class="px-5 pt-3 shrink-0"><input id="fwDlSearch" oninput="fwDlSearch(this.value)" placeholder="ابحث برقم أو اسم..." class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs"></div>
+                <div id="fwDlList" class="flex-1 min-h-0 overflow-y-auto custom-scroll p-3"><p class="text-slate-400 text-center py-6 text-xs">جاري التحميل...</p></div>
+                <div class="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between shrink-0"><span id="fwDlCount" class="text-[11px] text-slate-500"></span><div class="flex gap-2"><button onclick="fwDlClose()" class="px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs">إلغاء</button><button onclick="fwDlConfirm()" class="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold">تأكيد الإضافة</button></div></div>
+            </div>`;
+            document.body.appendChild(m);
+            await fwDlFetch();
+            setTimeout(()=>{ const s = document.getElementById('fwDlSearch'); if(s) s.focus(); }, 100);
+        }
+        let fwDlDeb = null;
+        function fwDlSearch(q){ fwDlState.q = q; fwDlState.page = 1; try{ clearTimeout(fwDlDeb); }catch(e){} fwDlDeb = setTimeout(fwDlFetch, 350); }
+        async function fwDlFetch(){
+            const st = fwDlState;
+            if(!st) return;
+            const box = document.getElementById('fwDlList');
+            try{
+                const res = await fetch(`/api/fmlk/detail-search?fml=${encodeURIComponent(currentFml)}&app=${encodeURIComponent(currentApp)}&detail=${st.i}&q=${encodeURIComponent(st.q)}&page=${st.page}&pageSize=50`);
+                const d = await res.json();
+                if(!res.ok || d.error) throw new Error(d.error || 'بحث');
+                st.cols = (d.columns || []).filter(c=>c && c.name !== st.sub_key).slice(0, 5);
+                st.subcol = (d.columns || []).find(c=>c && c.sub_key) || {name: d.sub_key || 'id'};
+                st.sub_key = d.sub_key || st.sub_key;
+                st.rows = d.rows || [];
+                st.total = d.total || 0;
+                fwDlState._recs = {};
+                st.rows.forEach(r=>{ fwDlState._recs[String(r[st.sub_key] ?? '')] = r; });
+            }catch(e){ if(box) box.innerHTML = `<p class="text-rose-500 text-center py-6 text-xs">${escHtml(e.message || e)}</p>`; return; }
+            fwDlRender();
+        }
+        function fwDlKey(r){ return String(r[fwDlState.sub_key] ?? ''); }
+        function fwDlRender(){
+            const st = fwDlState;
+            const box = document.getElementById('fwDlList');
+            const cnt = document.getElementById('fwDlCount');
+            if(!box || !st) return;
+            const head = st.subcol ? [st.subcol, ...st.cols] : st.cols;
+            const allIds = st.rows.map(fwDlKey).filter(Boolean);
+            const allOn = allIds.length && allIds.every(id=>st.sel.has(id));
+            box.innerHTML = `<table class="w-full text-[11px]" dir="rtl"><thead class="bg-slate-100 text-slate-700 sticky top-0"><tr><th class="p-1.5 w-10 text-center"><input type="checkbox" ${allOn ? 'checked' : ''} onchange="fwDlAll(this.checked)" title="تحديد الكل" class="w-4 h-4 accent-emerald-600"></th>${head.map(c=>`<th class="p-1.5 text-right whitespace-nowrap">${escHtml(c.alias || c.name)}</th>`).join('')}</tr></thead><tbody>`
+                + (st.rows.map(r=>{
+                    const id = fwDlKey(r);
+                    const on = st.sel.has(id);
+                    return `<tr class="border-t border-slate-100 ${on ? 'bg-emerald-50/60' : 'bg-white'} hover:bg-slate-50"><td class="p-1.5 text-center"><input type="checkbox" ${on ? 'checked' : ''} onchange="fwDlToggle('${escAttr(id)}',this.checked)" class="w-4 h-4 accent-emerald-600"></td>${head.map(c=>`<td class="p-1.5 whitespace-nowrap">${escHtml(r[c.name] ?? '')}</td>`).join('')}</tr>`;
+                }).join('') || `<tr><td colspan="${head.length + 1}" class="p-4 text-center text-slate-400">لا سجلات مطابقة</td></tr>`) + `</tbody></table>`
+                + (st.total > st.page * 50 ? `<div class="text-center py-2"><button onclick="fwDlMore()" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-[11px] font-bold">المزيد (${st.total - st.page * 50} متبقٍ)</button></div>` : '');
+            if(cnt) cnt.textContent = `${st.sel.size} محدد • ${st.total} سجل`;
+        }
+        function fwDlToggle(id, on){ if(!fwDlState) return; if(on) fwDlState.sel.add(id); else fwDlState.sel.delete(id); fwDlRender(); }
+        function fwDlAll(on){
+            if(!fwDlState) return;
+            fwDlState.rows.forEach(r=>{ const id = fwDlKey(r); if(!id) return; if(on) fwDlState.sel.add(id); else fwDlState.sel.delete(id); });
+            fwDlRender();
+        }
+        async function fwDlMore(){ if(!fwDlState) return; fwDlState.page++; const st = fwDlState; const keep = new Set(st.sel); await fwDlFetch(); st.sel = keep; fwDlRender(); }
+        function fwDlConfirm(){
+            const st = fwDlState;
+            if(!st) return;
+            const {d, jx, cols} = fwDetailGridCols(st.i);
+            const sk = st.sub_key;
+            let added = 0, dup = 0;
+            fwDetailRows[st.i] = fwDetailRows[st.i] || [];
+            const have = new Set((fwDetailRows[st.i] || []).map(r=>String((jx ? r['detail_id'] : r[sk]) ?? '')));
+            st.sel.forEach(id=>{
+                if(have.has(id)){ dup++; return; }
+                const rec = (st._recs || {})[id];
+                if(!rec) return;
+                const row = {};
+                if(jx){
+                    row['detail_id'] = rec[sk] ?? '';
+                    cols.forEach(c=>{ if(!c.junction && rec[c.name] !== undefined) row[c.name] = rec[c.name]; });
+                } else {
+                    cols.forEach(c=>{ if(rec[c.name] !== undefined) row[c.name] = rec[c.name]; });
+                }
+                fwDetailRows[st.i].push(row);
+                have.add(id);
+                added++;
+            });
+            fwDlClose();
+            paintDetailGrids();
+            try{ notify(`أُسقط ${added} سجلاً للجريد${dup ? ` (${dup} مكرر تُجوهل)` : ''}`, added ? 'success' : 'info'); }catch(e){}
+        }
+        /* ── إضافة من ماستر آخر: سجلاته المتفرعة من نفس الجدول الفرعي ── */
+        async function fwSibLoad(i){
+            const bar = document.getElementById(`fwSibBar_${i}`);
+            if(!bar || fwDetailSibs[i] !== null) { if(bar && fwDetailSibs[i]) fwSibPaint(i); return; }
+            try{
+                const res = await fetch(`/api/fmlk/detail-sources?fml=${encodeURIComponent(currentFml)}&app=${encodeURIComponent(currentApp)}&detail=${i}`);
+                const d = await res.json();
+                fwDetailSibs[i] = (res.ok && !d.error) ? (d.sources || []) : [];
+            }catch(e){ fwDetailSibs[i] = []; }
+            fwSibPaint(i);
+        }
+        function fwSibPaint(i){
+            const bar = document.getElementById(`fwSibBar_${i}`);
+            const srcs = fwDetailSibs[i] || [];
+            if(!bar) return;
+            bar.innerHTML = srcs.map((s, k)=>`<button onclick="fwSiblingOpen(${i},${k})" title="يجلب سجلات ${escAttr(s.master_label || '')} المتفرعة من نفس الجدول" class="px-2.5 py-1 bg-orange-500 hover:bg-orange-600 text-white rounded-lg text-[11px] font-bold"><i class="fa-solid fa-plus"></i> إضافة من ${escHtml(s.master_label || s.fml)}</button>`).join('');
+        }
+        function fwSibClose(){ const m = document.getElementById('fwSibModal'); if(m) m.remove(); fwSibState = null; }
+        async function fwSiblingOpen(i, k){
+            const src = (fwDetailSibs[i] || [])[k];
+            if(!src) return;
+            fwSibState = {i, src, q: '', mrows: [], sel: null, cols: [], keyAlias: null};
+            let m = document.getElementById('fwSibModal');
+            if(m) m.remove();
+            m = document.createElement('div');
+            m.id = 'fwSibModal';
+            m.className = 'fixed inset-0 z-[80] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4';
+            m.setAttribute('onclick', 'if(event.target===this)fwSibClose()');
+            m.innerHTML = `<div class="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[86vh] overflow-hidden flex flex-col">
+                <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-orange-50 shrink-0"><h3 class="text-sm font-bold text-slate-800"><i class="fa-solid fa-plus text-orange-500"></i> إضافة من ${escHtml(src.master_label || src.fml)} — اختر سجل الماستر لجلب متفرعاته</h3><button onclick="fwSibClose()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button></div>
+                <div class="px-5 pt-3 shrink-0"><input id="fwSibSearch" oninput="fwSibSearch(this.value)" placeholder="ابحث في سجلات الماستر..." class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs"></div>
+                <div id="fwSibList" class="flex-1 min-h-0 overflow-y-auto custom-scroll p-3"><p class="text-slate-400 text-center py-6 text-xs">جاري التحميل...</p></div>
+                <div class="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2 shrink-0"><button onclick="fwSibClose()" class="px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs">إلغاء</button><button onclick="fwSibConfirm()" class="px-4 py-1.5 bg-orange-500 hover:bg-orange-600 text-white rounded-xl text-xs font-bold">جلب المتفرعات للجريد</button></div>
+            </div>`;
+            document.body.appendChild(m);
+            await fwSibFetchMasters();
+        }
+        let fwSibDeb = null;
+        function fwSibSearch(q){ if(!fwSibState) return; fwSibState.q = q; try{ clearTimeout(fwSibDeb); }catch(e){} fwSibDeb = setTimeout(fwSibRenderMasters, 300); }
+        async function fwSibFetchMasters(){
+            const st = fwSibState;
+            const box = document.getElementById('fwSibList');
+            if(!st) return;
+            try{
+                const mres = await fetch(`/api/fmlk/metadata?fml=${encodeURIComponent(st.src.fml)}&app=${encodeURIComponent(st.src.app)}`);
+                const md = await mres.json();
+                if(!mres.ok || md.error) throw new Error(md.error || 'تعذر وصف الماستر');
+                const fields = md.fields || [];
+                const pkf = fields.find(f=>f.primary_key || f.primaryKey) || fields.find(f=>String(f.name || '').toLowerCase() === 'id');
+                const mcol = st.src.master_col || (pkf ? pkf.name : 'id');
+                const hit = fields.find(f=>f.name === mcol);
+                st.keyAlias = (hit && (hit.alias || hit.name)) || mcol;
+                const res = await fetch('/api/fmlk/records', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({fml: st.src.fml, app: st.src.app, page: 1, pageSize: 50})});
+                const d = await res.json();
+                if(!res.ok || d.error) throw new Error(d.error || 'تعذر سجلات الماستر');
+                st.mrows = d.rows || d.records || [];
+                st.mcols = Object.keys(st.mrows[0] || {}).filter(c=>c !== '__pk_id').slice(0, 5);
+            }catch(e){ if(box) box.innerHTML = `<p class="text-rose-500 text-center py-6 text-xs">${escHtml(e.message || e)}</p>`; return; }
+            fwSibRenderMasters();
+        }
+        function fwSibRenderMasters(){
+            const st = fwSibState;
+            const box = document.getElementById('fwSibList');
+            if(!st || !box) return;
+            const q = (st.q || '').trim();
+            const rows = q ? st.mrows.filter(r=>Object.values(r || {}).some(v=>String(v ?? '').includes(q))) : st.mrows;
+            box.innerHTML = rows.length ? `<table class="w-full text-[11px]" dir="rtl"><thead class="bg-slate-100 text-slate-700 sticky top-0"><tr><th class="p-1.5 w-10 text-center">اختيار</th>${(st.mcols || []).map(c=>`<th class="p-1.5 text-right whitespace-nowrap">${escHtml(c)}</th>`).join('')}</tr></thead><tbody>`
+                + rows.slice(0, 50).map((r, k)=>{
+                    const kv = r[st.keyAlias] ?? r['__pk_id'] ?? '';
+                    return `<tr class="border-t border-slate-100 ${String(st.sel) === String(kv) ? 'bg-orange-50' : 'bg-white'} hover:bg-slate-50"><td class="p-1.5 text-center"><input type="radio" name="fwSibPick" ${String(st.sel) === String(kv) ? 'checked' : ''} onchange="fwSibPick('${escAttr(String(kv ?? ''))}')" class="w-4 h-4 accent-orange-500"></td>${(st.mcols || []).map(c=>`<td class="p-1.5 whitespace-nowrap">${escHtml(r[c] ?? '')}</td>`).join('')}</tr>`;
+                }).join('') + `</tbody></table>` : '<p class="text-slate-400 text-center py-6 text-xs">لا سجلات ماستر</p>';
+        }
+        function fwSibPick(v){ if(fwSibState) fwSibState.sel = v; fwSibRenderMasters(); }
+        async function fwSibConfirm(){
+            const st = fwSibState;
+            if(!st || st.sel === null || st.sel === undefined || String(st.sel) === ''){ try{ notify('اختر سجل ماستر أولاً', 'info'); }catch(e){} return; }
+            try{
+                const res = await fetch(`/api/fmlk/master-branch?fml=${encodeURIComponent(currentFml)}&app=${encodeURIComponent(currentApp)}&detail=${st.i}&src_fml=${encodeURIComponent(st.src.fml)}&src_app=${encodeURIComponent(st.src.app)}&src_detail=${st.src.detail_idx}&master_key=${encodeURIComponent(st.sel)}`);
+                const d = await res.json();
+                if(!res.ok || d.error) throw new Error(d.error || 'تعذر الجلب');
+                const rows = d.rows || [];
+                if(!rows.length){ try{ notify('لا متفرعات لهذا السجل', 'info'); }catch(e){} return; }
+                const {jx} = fwDetailGridCols(st.i);
+                const sk = fwDetailSubKey(st.i);
+                fwDetailRows[st.i] = fwDetailRows[st.i] || [];
+                const have = new Set((fwDetailRows[st.i] || []).map(r=>String((jx ? r['detail_id'] : r[sk]) ?? '')));
+                let added = 0;
+                rows.forEach(r=>{
+                    const id = String((jx ? r['detail_id'] : r[sk]) ?? '');
+                    if(id && have.has(id)) return;
+                    fwDetailRows[st.i].push(r);
+                    if(id) have.add(id);
+                    added++;
+                });
+                fwSibClose();
+                paintDetailGrids();
+                try{ notify(`جُلب ${added} سجلاً للجريد`, 'success'); }catch(e){}
+            }catch(e){ try{ notify(e.message || e, 'error'); }catch(e2){} }
         }
         async function saveDetailRows(key){
             const dets = fwDetails();

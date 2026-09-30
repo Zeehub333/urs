@@ -220,7 +220,7 @@ def _find_fml_path(fml_name: str, app_name: str | None = None):
                      BASE_DIR / "odex" / "system" / app_name / f"{fml_name}.fml",
                      BASE_DIR / "system" / app_name / fml_name,
                      BASE_DIR / "system" / app_name / f"{fml_name}.fmlk"]:
-            if cand.exists():
+            if cand.is_file():
                 return cand
         # also glob search inside app folder for partial match
         for base in [BASE_DIR / "odex" / "system" / app_name, BASE_DIR / "system" / app_name]:
@@ -231,7 +231,7 @@ def _find_fml_path(fml_name: str, app_name: str | None = None):
     # Search globally
     for fml_dir in [BASE_DIR / "fmlk_engine" / "examples", BASE_DIR / "odex" / "web"]:
         for cand in [fml_dir / fml_name, fml_dir / f"{fml_name}.fmlk", fml_dir / f"{fml_name}.fml"]:
-            if cand.exists():
+            if cand.is_file():
                 return cand
     # Search all system apps
     for system in [BASE_DIR / "odex" / "system", BASE_DIR / "system"]:
@@ -1636,6 +1636,22 @@ def api_models_design_save(request, app_name):
                         ce.set("alias", str(_c.get("alias") or _c.get("name")).strip())
                         ce.set("data_type", str(_c.get("data_type") or _c.get("dataType") or "VARCHAR").upper())
                         ce.set("input_type", str(_c.get("input_type") or _c.get("inputType") or "text"))
+                        if _c.get("required"):
+                            ce.set("required", "1")
+                        _cdef = str(_c.get("default", _c.get("defaultValue", "")) or "")
+                        if _cdef:
+                            ce.set("default", _cdef)
+                        _copts = _c.get("options") or []
+                        if isinstance(_copts, list):
+                            _copts = [str(o.get("value", o.get("label", o)) if isinstance(o, dict) else o).strip()
+                                      for o in _copts]
+                            _copts = [o for o in _copts if o]
+                        elif isinstance(_copts, str):
+                            _copts = [o.strip() for o in _copts.split(",") if o.strip()]
+                        else:
+                            _copts = []
+                        if _copts:
+                            ce.set("options", ",".join(_copts))
                         if _c.get("junction"):
                             ce.set("junction", "1")
         acts = data.get("actions") or []
@@ -1790,9 +1806,56 @@ def api_models_migrate(request, app_name):
         # تحقق من الأعمدة الفعلية
         cur.execute("SELECT column_name, data_type FROM information_schema.columns WHERE table_schema=%s AND table_name=%s ORDER BY ordinal_position", (sch, tbl))
         cols = [{"name": r[0], "db_type": r[1]} for r in cur.fetchall()]
+
+        def _fk_add(_sch, _child, _col, _psch, _ptbl, _pcol):
+            """1-to-many FK best-effort: exists→skip, missing cols→skip, violation→warning."""
+            import re as _re_fk
+            for _v in (_sch, _child, _col, _psch, _ptbl, _pcol):
+                if not _re_fk.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", str(_v or "")):
+                    return {"child": f"{_sch}.{_child}", "column": _col,
+                            "parent": f"{_psch}.{_ptbl}.{_pcol}", "status": "skipped",
+                            "note": "اسم غير صالح"}
+            _cn = f"fk_{_child}_{_col}"[:52]
+            try:
+                cur.execute("SELECT 1 FROM pg_constraint WHERE conname=%s", (_cn,))
+                if cur.fetchone():
+                    return {"constraint": _cn, "child": f"{_sch}.{_child}", "column": _col,
+                            "parent": f"{_psch}.{_ptbl}.{_pcol}", "status": "exists"}
+                cur.execute("SELECT 1 FROM information_schema.columns WHERE table_schema=%s AND table_name=%s AND column_name=%s",
+                            (_sch, _child, _col))
+                if not cur.fetchone():
+                    return {"constraint": _cn, "child": f"{_sch}.{_child}", "column": _col,
+                            "parent": f"{_psch}.{_ptbl}.{_pcol}", "status": "skipped",
+                            "note": "عمود الابن غير موجود"}
+                cur.execute("SELECT 1 FROM information_schema.columns WHERE table_schema=%s AND table_name=%s AND column_name=%s",
+                            (_psch, _ptbl, _pcol))
+                if not cur.fetchone():
+                    return {"constraint": _cn, "child": f"{_sch}.{_child}", "column": _col,
+                            "parent": f"{_psch}.{_ptbl}.{_pcol}", "status": "skipped",
+                            "note": "عمود الأب غير موجود"}
+                cur.execute(f'ALTER TABLE "{_sch}"."{_child}" ADD CONSTRAINT "{_cn}" '
+                            f'FOREIGN KEY ("{_col}") REFERENCES "{_psch}"."{_ptbl}" ("{_pcol}")')
+                return {"constraint": _cn, "child": f"{_sch}.{_child}", "column": _col,
+                        "parent": f"{_psch}.{_ptbl}.{_pcol}", "status": "created"}
+            except Exception as _fe:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                return {"constraint": _cn, "child": f"{_sch}.{_child}", "column": _col,
+                        "parent": f"{_psch}.{_ptbl}.{_pcol}", "status": "warning",
+                        "note": str(_fe)[:160]}
+
+        def _split_sch_tbl(_t, _dflt):
+            _t = (_t or "").strip()
+            if "." in _t:
+                _a, _b = _t.split(".", 1)
+                return (_a.strip() or _dflt), _b.strip()
+            return _dflt, _t
+
         # الجداول الرابطة: لكل فرع فيه حقول مخصصة → موديل main_sub + ترحيله
         # (بلا حقول مخصصة: لا جدول رابط — يبقى المسار المباشر FK القديم)
-        junctions = []
+        junctions, fks = [], []
         try:
             from . import custom_models as _cmj
             for _det in (comp.details() or []):
@@ -1801,33 +1864,50 @@ def api_models_migrate(request, app_name):
                 except Exception:
                     continue
                 _cust = [c for c in (_dd.get("columns") or []) if isinstance(c, dict) and c.get("junction")]
-                if not _cust:
-                    continue
                 _dtab = (_dd.get("table") or "").strip()
+                _dsch, _dtab_bare = _split_sch_tbl(_dtab, sch)
+                _dmaster = (_dd.get("master") or "").strip() or "id"
+                _dsub = (_dd.get("sub_key") or _dd.get("subKey") or "id").strip() or "id"
+                if not _cust:
+                    # direct 1-to-many: sub.<detail> → main.<master>
+                    _dfk = (_dd.get("detail") or "").strip()
+                    if _dtab_bare and _dfk:
+                        fks.append(dict({"mode": "direct", "detail": _dtab_bare},
+                                        **_fk_add(_dsch, _dtab_bare, _dfk, sch, tbl, _dmaster)))
+                    continue
                 try:
-                    _jm, _jerr = _cmj.ensure_junction(tbl, _dtab, sch, conn_name, _cust)
+                    _jm, _jerr = _cmj.ensure_junction(tbl, _dtab_bare, sch, conn_name, _cust,
+                                                      refs={"master_table": tbl, "master_col": _dmaster,
+                                                            "sub_table": _dtab_bare, "sub_col": _dsub})
                 except Exception as _je:
                     _jm, _jerr = None, str(_je)
                 if _jerr or _jm is None:
-                    junctions.append({"detail": _dtab, "error": _jerr or "failed"})
+                    junctions.append({"detail": _dtab_bare, "error": _jerr or "failed"})
                     continue
                 try:
                     _jr, _jerr2 = _cmj.migrate_model(_jm["name"])
                 except Exception as _je2:
                     _jr, _jerr2 = None, str(_je2)
                 if _jerr2 or not _jr:
-                    junctions.append({"detail": _dtab, "model": _jm["name"], "table": _jm["table"],
+                    junctions.append({"detail": _dtab_bare, "model": _jm["name"], "table": _jm["table"],
                                       "error": _jerr2 or "migrate failed"})
-                else:
-                    junctions.append({"detail": _dtab, "model": _jm["name"], "table": _jr.get("table"),
-                                      "columns": len(_jr.get("columns") or []),
-                                      "added": _jr.get("added") or []})
+                    continue
+                junctions.append({"detail": _dtab_bare, "model": _jm["name"], "table": _jr.get("table"),
+                                  "columns": len(_jr.get("columns") or []),
+                                  "added": _jr.get("added") or []})
+                _jsch = (_jm.get("schema") or sch or "public").strip()
+                _jtbl = (_jm.get("table") or _jm.get("name") or "").strip()
+                if _jtbl:
+                    fks.append(dict({"mode": "junction-master", "detail": _dtab_bare},
+                                    **_fk_add(_jsch, _jtbl, "master_id", sch, tbl, _dmaster)))
+                    fks.append(dict({"mode": "junction-detail", "detail": _dtab_bare},
+                                    **_fk_add(_jsch, _jtbl, "detail_id", _dsch, _dtab_bare, _dsub)))
         except Exception as _jeall:
             junctions.append({"error": str(_jeall)})
         conn.close()
         return JsonResponse({"ok": True, "file": path.name, "schema": sch, "table": tbl,
                              "ddl": ddl, "columns": cols, "added": added,
-                             "renamed": renamed, "junctions": junctions,
+                             "renamed": renamed, "junctions": junctions, "fks": fks,
                              "primary_keys": eng.primary_key_fields()})
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
@@ -2669,7 +2749,7 @@ def _fmlk_find_detail(comp, ident):
     det = None
     try:
         det = dets[int(ident)]
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, IndexError):
         for d in dets:
             if d.get("table") == ident or d.get("alias") == ident:
                 det = d
@@ -2785,6 +2865,85 @@ def api_fmlk_action_test_connection(request):
         return JsonResponse({"error": str(e)}, status=500)
 
 
+def _query_detail_rows(comp, det, key, db):
+    """Shared branch reader for branch/master-branch endpoints.
+
+    Returns (rows, columns, is_junction). Junction mode reads the third
+    table + sub display JOIN; direct mode reads the sub table by FK.
+    Raises ValueError with Arabic message on config problems.
+    """
+    import re as _re
+    tbl = det["table"]
+    sch = comp.fml_metadata().get("schema") or "public"
+    if "." in tbl:
+        sch, tbl = tbl.split(".", 1)
+    if not _re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", tbl):
+        raise ValueError("invalid table")
+    fk = det["detail"]
+    if not _re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", fk):
+        raise ValueError("invalid link column")
+    if not getattr(db, "conn", None):
+        db.connect()
+    _jx = det.get("junction") or {}
+    _jtable = (_jx.get("table") or "").strip()
+    if _jtable:
+        from . import custom_models as _cmj
+        _jm = _cmj.get_model((_jx.get("model") or _jtable).strip())
+        if _jm is None:
+            raise ValueError("جدول الرابط غير موجود — أعد ترحيل النموذج (حفظ + ترحيل)")
+        _jsch = (_jm.get("schema") or sch or "public").strip()
+        _subkey = (det.get("sub_key") or det.get("subKey") or "id").strip() or "id"
+        if not _re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", _subkey):
+            raise ValueError("invalid sub_key")
+        _custs = [c for c in (det.get("columns") or []) if isinstance(c, dict) and c.get("junction")]
+        _cust_names = [c["name"] for c in _custs if _re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", c.get("name", ""))]
+        _subcols = [c for c in (det.get("columns") or [])
+                    if isinstance(c, dict) and not c.get("junction")
+                    and _re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", c.get("name", ""))]
+        _sel, _seen = [], {"id", "master_id", "detail_id"}
+        for _cc in ["id", "master_id", "detail_id"] + _cust_names:
+            _sel.append(f'j."{_cc}"')
+            _seen.add(_cc)
+        for _sc in _subcols:
+            if _sc["name"] not in _seen:
+                _sel.append(f's."{_sc["name"]}" AS "{_sc["name"]}"')
+                _seen.add(_sc["name"])
+        _sel_sql = ", ".join(_sel) if _sel else "j.*"
+        cur = db._exec(f'SELECT {_sel_sql} FROM "{_jsch}"."{_jtable}" j '
+                       f'LEFT JOIN "{sch}"."{tbl}" s ON s."{_subkey}" = j."detail_id" '
+                       f'WHERE j."master_id" = :key', {"key": key})
+        names = [d[0] for d in (cur.description or [])]
+        rows = [dict(zip(names, r)) for r in (cur.fetchall() or [])]
+        try:
+            cur.close()
+        except Exception:
+            pass
+        _gcols = [{"name": "detail_id", "alias": "المرجع الفرعي", "data_type": "INTEGER",
+                   "input_type": "number", "junction": True}]
+        for _c in _custs:
+            _gcols.append({"name": _c["name"], "alias": _c.get("alias") or _c["name"],
+                           "data_type": _c.get("data_type") or "VARCHAR",
+                           "input_type": _c.get("input_type") or "text",
+                           "required": bool(_c.get("required")),
+                           "default": _c.get("default") or "",
+                           "options": _c.get("options") or [], "junction": True})
+        for _c in _subcols:
+            _gcols.append({"name": _c["name"], "alias": _c.get("alias") or _c["name"],
+                           "data_type": _c.get("data_type") or "VARCHAR",
+                           "input_type": _c.get("input_type") or "text"})
+        return rows, _gcols, True
+    cols = [c["name"] for c in (det.get("columns") or []) if _re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", c.get("name", ""))]
+    sel = ", ".join(f'"{c}"' for c in cols) if cols else "*"
+    cur = db._exec(f'SELECT {sel} FROM "{sch}"."{tbl}" WHERE "{fk}" = :key', {"key": key})
+    names = [d[0] for d in (cur.description or [])]
+    rows = [dict(zip(names, r)) for r in (cur.fetchall() or [])]
+    try:
+        cur.close()
+    except Exception:
+        pass
+    return rows, (det.get("columns") or [{"name": n, "alias": n} for n in names]), False
+
+
 def api_fmlk_branch(request):
     """GET /api/fmlk/branch?fml=&app=&detail=<idx|table>&key= → branch rows for master key."""
     fml, app = request.GET.get("fml", ""), request.GET.get("app")
@@ -2800,76 +2959,255 @@ def api_fmlk_branch(request):
             return JsonResponse({"error": "detail not found"}, status=404)
         if key is None or str(key) == "":
             return JsonResponse({"detail": det, "columns": det.get("columns") or [], "rows": []})
+        eng = _fmlk_get_engine(fml, app)
+        try:
+            rows, gcols, is_jx = _query_detail_rows(comp, det, key, eng.db)
+        except ValueError as ve:
+            return JsonResponse({"error": str(ve)}, status=400)
+        return JsonResponse({"detail": det, "columns": gcols, "rows": rows,
+                             **({"junction": True} if is_jx else {})})
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+def _detail_sub_table(det):
+    """(schema_or_None, bare_table) of a detail's sub table."""
+    t = (det.get("table") or "").strip()
+    if "." in t:
+        a, b = t.split(".", 1)
+        return (a.strip() or None), b.strip()
+    return None, t
+
+
+def api_fmlk_detail_search(request):
+    """GET /api/fmlk/detail-search?fml=&app=&detail=&q=&page=&pageSize= — search sub-table rows.
+
+    Powers the «إنزال البيانات» modal + in-cell autocomplete: full-text
+    ILIKE across the sub columns, paged. Junction and direct share the
+    same sub table. Response rows always carry the sub key so the player
+    can set detail_id (junction) or the full record (direct).
+    """
+    fml, app = request.GET.get("fml", ""), request.GET.get("app")
+    ident = request.GET.get("detail", "0")
+    q = (request.GET.get("q") or "").strip()
+    try:
+        page = max(1, int(request.GET.get("page", "1") or 1))
+    except (TypeError, ValueError):
+        page = 1
+    try:
+        page_size = int(request.GET.get("pageSize", "50") or 50)
+    except (TypeError, ValueError):
+        page_size = 50
+    page_size = max(1, min(page_size, 200))
+    try:
+        from fmlk_engine.compiler import FMLKFormCompiler
         import re as _re
-        tbl = det["table"]
-        sch = comp.fml_metadata().get("schema") or "public"
-        if "." in tbl:
-            sch, tbl = tbl.split(".", 1)
-        if not _re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", tbl):
+        path = _find_fml_path(fml, app)
+        if not path or not path.exists():
+            return JsonResponse({"error": "form not found"}, status=404)
+        comp = FMLKFormCompiler(path=path)
+        det, _ = _fmlk_find_detail(comp, ident)
+        if not det:
+            return JsonResponse({"error": "detail not found"}, status=404)
+        _ssch, _stbl = _detail_sub_table(det)
+        sch = _ssch or (comp.fml_metadata().get("schema") or "public")
+        if not _re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", _stbl):
             return JsonResponse({"error": "invalid table"}, status=400)
-        fk = det["detail"]
-        if not _re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", fk):
-            return JsonResponse({"error": "invalid link column"}, status=400)
         eng = _fmlk_get_engine(fml, app)
         db = eng.db
         if not getattr(db, "conn", None):
             db.connect()
-        _jx = det.get("junction") or {}
-        _jtable = (_jx.get("table") or "").strip()
-        if _jtable:
-            # junction mode: junction rows + sub display JOIN (custom model = truth)
-            from . import custom_models as _cmj
-            _jm = _cmj.get_model((_jx.get("model") or _jtable).strip())
-            if _jm is None:
-                return JsonResponse({"error": "جدول الرابط غير موجود — أعد ترحيل النموذج (حفظ + ترحيل)"}, status=400)
-            _jsch = (_jm.get("schema") or sch or "public").strip()
-            _subkey = (det.get("sub_key") or det.get("subKey") or "id").strip() or "id"
-            if not _re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", _subkey):
-                return JsonResponse({"error": "invalid sub_key"}, status=400)
-            _custs = [c for c in (det.get("columns") or []) if isinstance(c, dict) and c.get("junction")]
-            _cust_names = [c["name"] for c in _custs if _re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", c.get("name", ""))]
-            _subcols = [c for c in (det.get("columns") or [])
-                        if isinstance(c, dict) and not c.get("junction")
-                        and _re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", c.get("name", ""))]
-            _sel, _seen = [], {"id", "master_id", "detail_id"}
-            for _cc in ["id", "master_id", "detail_id"] + _cust_names:
-                _sel.append(f'j."{_cc}"')
-                _seen.add(_cc)
-            for _sc in _subcols:
-                if _sc["name"] not in _seen:
-                    _sel.append(f's."{_sc["name"]}" AS "{_sc["name"]}"')
-                    _seen.add(_sc["name"])
-            _sel_sql = ", ".join(_sel) if _sel else "j.*"
-            cur = db._exec(f'SELECT {_sel_sql} FROM "{_jsch}"."{_jtable}" j '
-                           f'LEFT JOIN "{sch}"."{tbl}" s ON s."{_subkey}" = j."detail_id" '
-                           f'WHERE j."master_id" = :key', {"key": key})
-            names = [d[0] for d in (cur.description or [])]
-            rows = [dict(zip(names, r)) for r in (cur.fetchall() or [])]
+        try:
+            _probe = db._exec(f'SELECT * FROM "{sch}"."{_stbl}" WHERE 1=0', {})
+            _allcols = [d[0] for d in (_probe.description or [])]
             try:
-                cur.close()
+                _probe.close()
             except Exception:
                 pass
-            _gcols = [{"name": "detail_id", "alias": "المرجع الفرعي", "data_type": "INTEGER",
-                       "input_type": "number", "junction": True}]
-            for _c in _custs:
-                _gcols.append({"name": _c["name"], "alias": _c.get("alias") or _c["name"],
-                               "data_type": _c.get("data_type") or "VARCHAR",
-                               "input_type": _c.get("input_type") or "text", "junction": True})
-            for _c in _subcols:
-                _gcols.append({"name": _c["name"], "alias": _c.get("alias") or _c["name"],
-                               "data_type": _c.get("data_type") or "VARCHAR",
-                               "input_type": _c.get("input_type") or "text", "readonly": True})
-            return JsonResponse({"detail": det, "columns": _gcols, "rows": rows, "junction": True})
-        cols = [c["name"] for c in (det.get("columns") or []) if _re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", c.get("name", ""))]
-        sel = ", ".join(f'"{c}"' for c in cols) if cols else "*"
-        cur = db._exec(f'SELECT {sel} FROM "{sch}"."{tbl}" WHERE "{fk}" = :key', {"key": key})
-        names = [d[0] for d in (cur.description or [])]
-        rows = [dict(zip(names, r)) for r in (cur.fetchall() or [])]
+        except Exception:
+            return JsonResponse({"error": "جدول التفاصيل غير موجود — رحّل النموذج أولاً"}, status=400)
+        if not _allcols:
+            return JsonResponse({"columns": [], "rows": [], "total": 0, "page": page, "pageSize": page_size})
+        _subkey = (det.get("sub_key") or det.get("subKey") or "id").strip() or "id"
+        _show = [c for c in (det.get("columns") or []) if isinstance(c, dict) and not c.get("junction")]
+        _alias = {c["name"]: (c.get("alias") or c["name"]) for c in _show}
+        _cols = list(_allcols[:20])
+        if _subkey not in _cols and _subkey in _allcols:
+            _cols = [_subkey] + _cols
+        _sel = ", ".join(f'"{c}"' for c in _cols)
+        _where, _params = "", {}
+        if q:
+            _likes = []
+            for _c in _cols[:12]:
+                _likes.append(f'CAST("{_c}" AS TEXT) ILIKE :q')
+            _where = " WHERE (" + " OR ".join(_likes) + ")"
+            _params["q"] = f"%{q}%"
         try:
-            cur.close()
+            _cc = db._exec(f'SELECT COUNT(*) FROM "{sch}"."{_stbl}"{_where}', dict(_params))
+            total = (_cc.fetchone() or [0])[0]
+            try:
+                _cc.close()
+            except Exception:
+                pass
+        except Exception:
+            total = 0
+        _off = (page - 1) * page_size
+        try:
+            _cur = db._exec(f'SELECT {_sel} FROM "{sch}"."{_stbl}"{_where} '
+                            f'ORDER BY 1 OFFSET :off ROWS FETCH NEXT :lim ROWS ONLY',
+                            {**_params, "off": _off, "lim": page_size})
+        except Exception:
+            _cur = db._exec(f'SELECT {_sel} FROM "{sch}"."{_stbl}"{_where} LIMIT :lim OFFSET :off',
+                            {**_params, "off": _off, "lim": page_size})
+        names = [d[0] for d in (_cur.description or [])]
+        rows = [dict(zip(names, r)) for r in (_cur.fetchall() or [])]
+        try:
+            _cur.close()
         except Exception:
             pass
-        return JsonResponse({"detail": det, "columns": det.get("columns") or [{"name": n, "alias": n} for n in names], "rows": rows})
+        _out_cols = [{"name": c, "alias": _alias.get(c, c),
+                      "sub_key": (c == _subkey)} for c in names]
+        return JsonResponse({"columns": _out_cols, "rows": rows, "total": total,
+                             "page": page, "pageSize": page_size, "sub_key": _subkey})
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+def api_fmlk_detail_sources(request):
+    """GET /api/fmlk/detail-sources?fml=&app=&detail= — other masters linked to the same sub table.
+
+    Scans every .fmlk for a detail on the same sub table (excluding self).
+    The player renders «إضافة من <master_label>» per source.
+    """
+    fml, app = request.GET.get("fml", ""), request.GET.get("app")
+    ident = request.GET.get("detail", "0")
+    try:
+        from fmlk_engine.compiler import FMLKFormCompiler
+        path = _find_fml_path(fml, app)
+        if not path or not path.exists():
+            return JsonResponse({"error": "form not found"}, status=404)
+        comp = FMLKFormCompiler(path=path)
+        det, _ = _fmlk_find_detail(comp, ident)
+        if not det:
+            return JsonResponse({"error": "detail not found"}, status=404)
+        _, _bare = _detail_sub_table(det)
+        _bare = (_bare or "").strip().lower()
+        if not _bare:
+            return JsonResponse({"error": "detail not found"}, status=404)
+        try:
+            _self_idx = int(ident)
+        except (TypeError, ValueError):
+            _self_idx = None
+        _self_stem = (fml or "").strip()
+        if _self_stem.lower().endswith((".fmlk", ".fml")):
+            _self_stem = _self_stem.rsplit(".", 1)[0]
+        sources = []
+        try:
+            _bases = [BASE_DIR / "odex" / "system", BASE_DIR / "system"]
+        except Exception:
+            _bases = []
+        for _base in _bases:
+            try:
+                _files = list(_base.glob("*/*.fmlk")) if _base.exists() else []
+            except Exception:
+                continue
+            for _p in _files:
+                _app2 = _p.parent.name
+                try:
+                    _c2 = FMLKFormCompiler(path=_p)
+                    _m2 = _c2.fml_metadata()
+                    _dets2 = [d.to_dict() for d in _c2.details()]
+                except Exception:
+                    continue
+                for _i2, _d2 in enumerate(_dets2):
+                    _, _b2 = _detail_sub_table(_d2)
+                    if (_b2 or "").strip().lower() != _bare:
+                        continue
+                    if _app2 == (app or "") and _p.stem == _self_stem and _i2 == _self_idx:
+                        continue
+                    sources.append({
+                        "fml": _p.stem, "file": _p.name, "app": _app2,
+                        "master_table": _m2.get("table") or "",
+                        "master_label": _m2.get("displayName") or _m2.get("name") or _p.stem,
+                        "detail_idx": _i2, "alias": _d2.get("alias") or _d2.get("table") or "",
+                        "master_col": _d2.get("master") or "",
+                    })
+        sources.sort(key=lambda s: (str(s.get("app") or ""), str(s.get("fml") or "")))
+        return JsonResponse({"sub_table": _bare, "sources": sources, "total": len(sources)})
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+def api_fmlk_master_branch(request):
+    """GET /api/fmlk/master-branch?fml=&app=&detail=&src_fml=&src_app=&src_detail=&master_key=
+
+    All branch rows of ANOTHER master bound to the same sub table,
+    shaped for the CURRENT detail grid (junction customs start empty;
+    the sub table itself is never duplicated).
+    """
+    fml, app = request.GET.get("fml", ""), request.GET.get("app")
+    ident = request.GET.get("detail", "0")
+    src_fml, src_app = request.GET.get("src_fml", ""), request.GET.get("src_app")
+    src_ident = request.GET.get("src_detail", "0")
+    master_key = request.GET.get("master_key", "")
+    try:
+        from fmlk_engine.compiler import FMLKFormCompiler
+        import re as _re
+        if master_key is None or str(master_key) == "":
+            return JsonResponse({"error": "master_key required"}, status=400)
+        if not (src_fml or "").strip():
+            return JsonResponse({"error": "src_fml required"}, status=400)
+        path = _find_fml_path(fml, app)
+        spath = _find_fml_path(src_fml, src_app)
+        if not path or not path.exists() or not spath or not spath.exists():
+            return JsonResponse({"error": "form not found"}, status=404)
+        comp, scomp = FMLKFormCompiler(path=path), FMLKFormCompiler(path=spath)
+        det, _ = _fmlk_find_detail(comp, ident)
+        sdet, _ = _fmlk_find_detail(scomp, src_ident)
+        if not det or not sdet:
+            return JsonResponse({"error": "detail not found"}, status=404)
+        _, _tbare = _detail_sub_table(det)
+        _, _sbare = _detail_sub_table(sdet)
+        if (_tbare or "").strip().lower() != (_sbare or "").strip().lower() or not _tbare:
+            return JsonResponse({"error": "الجدول الفرعي غير متطابق"}, status=400)
+        seng = _fmlk_get_engine(src_fml, src_app)
+        try:
+            srows, _, src_jx = _query_detail_rows(scomp, sdet, master_key, seng.db)
+        except ValueError as ve:
+            return JsonResponse({"error": str(ve)}, status=400)
+        _t_jx = bool((det.get("junction") or {}).get("table"))
+        _t_subkey = (det.get("sub_key") or det.get("subKey") or "id").strip() or "id"
+        _s_subkey = (sdet.get("sub_key") or sdet.get("subKey") or "id").strip() or "id"
+        _t_subcols = [c["name"] for c in (det.get("columns") or [])
+                      if isinstance(c, dict) and not c.get("junction")
+                      and _re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", c.get("name", ""))]
+        _t_direct_cols = [c["name"] for c in (det.get("columns") or [])
+                          if _re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", c.get("name", ""))]
+        _t_fk = (det.get("detail") or "").strip()
+        out = []
+        for _sr in srows:
+            if not isinstance(_sr, dict):
+                continue
+            if _t_jx:
+                _did = _sr.get("detail_id", "") if src_jx else _sr.get(_s_subkey, "")
+                if _did is None or (isinstance(_did, str) and _did.strip() == ""):
+                    continue
+                _nr = {"detail_id": _did}
+                for _c in _t_subcols:
+                    if _c != _t_subkey:
+                        _nr[_c] = _sr.get(_c, "")
+                out.append(_nr)
+            else:
+                _nr = {}
+                for _c in _t_direct_cols:
+                    if _c == _t_fk:
+                        continue
+                    _nr[_c] = _sr.get(_c, "")
+                if not any((v is not None and not (isinstance(v, str) and v.strip() == "")) for v in _nr.values()):
+                    continue
+                out.append(_nr)
+        return JsonResponse({"rows": out, "total": len(out),
+                             **({"junction": True} if _t_jx else {})})
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
