@@ -25,7 +25,7 @@
                     })();
                     </script>
                     <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">الاتصال المحلي *</label><select id="fmlConnection" onchange="fwConnChanged()" class="wb-inp"></select></div>
-                    <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">الجدول الأساسي *</label><input id="fmlMainTableSearch" oninput="fwFilterMainTables(this.value)" placeholder="ابحث..." class="wb-inp font-mono mb-1" dir="ltr"><select id="fmlMainTable" onchange="fwMainTableChanged()" class="wb-inp font-mono" dir="ltr"></select></div>
+                    <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">الجدول الأساسي *</label><input id="fmlMainTableSearch" oninput="fwFilterMainTables(this.value)" placeholder="ابحث..." class="wb-inp font-mono mb-1" dir="ltr"><select id="fmlMainTable" onchange="fwMainTableChanged()" class="wb-inp font-mono" dir="ltr"></select><button type="button" onclick="fwNewTableOpen()" class="mt-1 w-full py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg text-[11px] font-bold"><i class="fa-solid fa-plus"></i> جدول جديد (غير موجود؟ أنشئه)</button><div id="fwCustomHint"></div></div>
                     <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">الفئة</label><input id="fmlCategory" list="fmlCategoryList" placeholder="عام — اكتب جديدة أو اختر" class="wb-inp" autocomplete="off"><datalist id="fmlCategoryList"></datalist></div>
                     <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">الوصف</label><input id="fmlDescription" placeholder="وصف مختصر" class="wb-inp"></div>
                 </div>

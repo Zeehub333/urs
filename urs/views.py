@@ -2009,10 +2009,20 @@ def api_models_sync(request, app_name):
                 continue
             cur = local.cursor()
             for t in tables:
-                try:
-                    cols = _table_columns_obj(obj, t["schema"], t["name"])
-                except Exception:
-                    cols = []
+                if t.get("custom"):
+                    # JSON-backed table: definition is the source of truth
+                    # (works even before migrate creates the physical table)
+                    try:
+                        from . import custom_models as _cm
+                        _cmmod = _cm.find_for_conn_table(obj, t.get("schema") or "", t.get("name") or "")
+                        cols = _cm.table_columns(_cmmod) if _cmmod else []
+                    except Exception:
+                        cols = []
+                else:
+                    try:
+                        cols = _table_columns_obj(obj, t["schema"], t["name"])
+                    except Exception:
+                        cols = []
                 definition = json.dumps({"columns": cols}, ensure_ascii=False)
                 cur.execute("SELECT id FROM public.sys_models WHERE connection=%s AND schema_name=%s AND table_name=%s",
                             (obj.name, t["schema"], t["name"]))
@@ -6732,6 +6742,11 @@ def _list_tables_obj(obj):
             cur.close()
         finally:
             conn.close()
+        try:
+            from . import custom_models as _cm
+            tables = list(tables) + _cm.tables_for_conn(obj)
+        except Exception:
+            pass
         return tables
     if obj.engine == "oracle":
         return _oracle_tables(obj)
@@ -7580,6 +7595,24 @@ def api_connection_table_columns(request, conn_id, table):
             return JsonResponse({"table": f"{sch}.{m.table_name}", "columns": cols, "total": len(cols),
                                  "mirror": True, "local_connection_id": m.local_connection_id},
                                 json_dumps_params={"ensure_ascii": False})
+        try:
+            from . import custom_models as _cm
+            _cs, _ct = (table.split(".", 1) if "." in table else ("", table))
+            _cmmod = _cm.find_for_conn_table(obj, _cs, _ct)
+        except Exception:
+            _cmmod = None
+        if _cmmod is not None:
+            # JSON-backed table: definition is the source of truth (DB or not yet migrated)
+            try:
+                _mig = _cm.table_exists(obj, _cmmod.get("schema") or "public",
+                                        _cmmod.get("table") or _cmmod.get("name"))
+            except Exception:
+                _mig = False
+            _ccols = _cm.table_columns(_cmmod)
+            return JsonResponse({"table": f"{_cmmod.get('schema') or 'public'}.{_cmmod.get('table') or _cmmod.get('name')}",
+                                 "columns": _ccols, "total": len(_ccols), "custom": True,
+                                 "migrated": bool(_mig), "model": _cmmod.get("name")},
+                                json_dumps_params={"ensure_ascii": False})
         if "." in table:
             schema, tname = table.split(".", 1)
         else:
@@ -7590,6 +7623,96 @@ def api_connection_table_columns(request, conn_id, table):
         return JsonResponse({"table": f"{schema}.{tname}" if schema else tname, "columns": cols, "total": len(cols)})
     except ValueError as e:
         return JsonResponse({"error": str(e)}, status=400)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+# ── Custom JSON table models (custom_models/<name>.json) ───────────────
+@csrf_exempt
+def api_custom_models(request):
+    """GET /api/custom-models/ → list · POST → save {name,label,table?,schema?,connection,description?,fields,overwrite?}.
+
+    The connection must exist and be postgres (migrate target). Schema
+    defaults to the connection schema.
+    """
+    try:
+        from . import custom_models as _cm
+        if request.method == "GET":
+            models = _cm.list_models()
+            return JsonResponse({"models": models, "total": len(models)},
+                                json_dumps_params={"ensure_ascii": False})
+        if request.method != "POST":
+            return JsonResponse({"error": "POST required"}, status=405)
+        try:
+            data = json.loads(request.body.decode() or "{}")
+        except Exception:
+            return JsonResponse({"error": "invalid JSON"}, status=400)
+        obj = _cm.resolve_connection(data.get("connection"))
+        if obj is None:
+            return JsonResponse({"error": "الاتصال غير موجود — اختر اتصالاً محلياً صالحاً"}, status=400)
+        if str(getattr(obj, "engine", "") or "").lower() != "postgres":
+            return JsonResponse({"error": f"الجداول المخصصة تُرحّل إلى postgres فقط (الاتصال {obj.name}: {obj.engine})"}, status=400)
+        if not (data.get("schema") or "").strip():
+            try:
+                data["schema"] = (getattr(obj, "schema", "") or "").strip() or "public"
+            except Exception:
+                data["schema"] = "public"
+        model, err, code = _cm.save_model(data, overwrite=bool(data.get("overwrite")))
+        if err:
+            return JsonResponse({"error": err}, status=code)
+        return JsonResponse({"ok": True, "model": {"name": model["name"], "label": model["label"],
+                                                   "table": model["table"], "schema": model["schema"],
+                                                   "connection": model["connection"],
+                                                   "fields": len(model.get("fields") or [])}},
+                            status=code, json_dumps_params={"ensure_ascii": False})
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@csrf_exempt
+def api_custom_model_detail(request, name):
+    """GET /api/custom-models/<name>/ → definition + columns + migrated · DELETE → remove file."""
+    try:
+        from . import custom_models as _cm
+        if request.method == "DELETE":
+            try:
+                ok = _cm.delete_model(name)
+            except ValueError as e:
+                return JsonResponse({"error": str(e)}, status=400)
+            if not ok:
+                return JsonResponse({"error": "الموديل غير موجود"}, status=404)
+            return JsonResponse({"ok": True, "deleted": name})
+        if request.method != "GET":
+            return JsonResponse({"error": "GET required"}, status=405)
+        model = _cm.get_model(name)
+        if model is None:
+            return JsonResponse({"error": "الموديل غير موجود"}, status=404)
+        migrated = False
+        try:
+            obj = _cm.resolve_connection(model.get("connection"))
+            if obj is not None:
+                migrated = _cm.table_exists(obj, model.get("schema") or "public",
+                                            model.get("table") or model.get("name"))
+        except Exception:
+            migrated = False
+        return JsonResponse({"model": model, "columns": _cm.table_columns(model),
+                             "migrated": bool(migrated)},
+                            json_dumps_params={"ensure_ascii": False})
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@csrf_exempt
+def api_custom_model_migrate(request, name):
+    """POST /api/custom-models/<name>/migrate/ → CREATE TABLE IF NOT EXISTS + missing columns."""
+    if request.method != "POST":
+        return JsonResponse({"error": "POST required"}, status=405)
+    try:
+        from . import custom_models as _cm
+        result, err = _cm.migrate_model(name)
+        if err:
+            return JsonResponse({"error": err}, status=400)
+        return JsonResponse(result, json_dumps_params={"ensure_ascii": False})
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 

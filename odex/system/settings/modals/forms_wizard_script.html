@@ -11,9 +11,10 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
         ];
         let fwLocalConns = []; // [{id,name,schema}]
         let fwConnId = '', fwConnName = '', fwSchema = '';
-        let fwTablesCache = []; // [{full,name}]
+        let fwTablesCache = []; // [{full,name,custom?}]
         let fwMainTable = '';
         let fwMainColsCache = [];
+        let fwMainColsMeta = null; // last columns response (custom/migrated flags)
         let fwInputs = []; // {key,table,name,alias,icon,inputType,dataType,destination,required,computed,expr,editable,tab,options[],options_source[],refTable,refFk,refDisplay,config{}}
         let fwBranches = []; // {table,alias,master,detail,cols:[{name,alias,data_type}],colsCache:[]}
         let fwTabs = []; // {id,name,alias,order,visibleIf}
@@ -151,7 +152,8 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             const c = fwLocalConns.find(x => String(x.id) === String(fwConnId));
             fwConnName = c ? c.name : '';
             fwSchema = (c && c.schema) || '';
-            fwTablesCache = []; fwMainColsCache = [];
+            fwTablesCache = []; fwMainColsCache = []; fwMainColsMeta = null;
+            try{ fwRenderCustomHint(); }catch(e){}
             const ms = document.getElementById('fmlMainTable');
             if(ms) ms.innerHTML = '<option value="">جاري التحميل...</option>';
             if(!fwConnId) return;
@@ -182,7 +184,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             if(!sel) return;
             const q = ((document.getElementById('fmlMainTableSearch') || {}).value || '').trim().toLowerCase();
             const list = q ? fwTablesCache.filter(t => (((t.full || t.name) || '') + ' ' + (t.name || '')).toLowerCase().includes(q)) : fwTablesCache;
-            sel.innerHTML = list.length ? '<option value="">— اختر الجدول الأساسي —</option>' + list.map(t=>`<option value="${fwEsc(t.full || t.name)}">${fwEsc(t.full || t.name)}</option>`).join('') : '<option value="">لا توجد جداول مطابقة</option>';
+            sel.innerHTML = list.length ? '<option value="">— اختر الجدول الأساسي —</option>' + list.map(t=>`<option value="${fwEsc(t.full || t.name)}">${fwEsc(t.full || t.name)}${t.custom ? ' ★' : ''}</option>`).join('') : '<option value="">لا توجد جداول مطابقة</option>';
             if(keep){ sel.value = keep; }
         }
         function fwFilterMainTables(q){ const keep = document.getElementById('fmlMainTable').value; fwRenderMainTables(''); const sel = document.getElementById('fmlMainTable'); if(keep && [...sel.options].some(o=>o.value===keep)) sel.value = keep; }
@@ -194,7 +196,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                 const res = await fetch(`/api/connections/${encodeURIComponent(fwConnId)}/tables/${encodeURIComponent(table)}/columns/`);
                 const data = await res.json();
                 const cols = data.columns || [];
-                if(table === fwMainTable) fwMainColsCache = cols;
+                if(table === fwMainTable){ fwMainColsCache = cols; try{ fwMainColsMeta = data; }catch(e){} }
                 else { const b = fwBranches.find(x=>x.table===table); if(b) b.colsCache = cols; }
                 return cols;
             }catch(e){ return []; }
@@ -208,6 +210,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                 // حدّث وجهة مدخلات الجدول القديم؟ تُترك كما هي — المستخدم يعيد الاستيراد
             }
             if(fwMainTable) await fwLoadCols(fwMainTable);
+            try{ fwRenderCustomHint(); }catch(e){}
             fwRenderSheet();
         }
         // ── الأوراق ──
@@ -281,7 +284,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                     const masterOpts = fwMainColsCache.map(c=>`<option ${b.master===c.name?'selected':''}>${fwEsc(c.name)}</option>`).join('');
                     return `<div class="bg-slate-50 border border-slate-200 rounded-xl p-2.5 space-y-2">
                         <div class="grid grid-cols-2 lg:grid-cols-5 gap-2">
-                            <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">الجدول المتفرع</label><select onchange="fwBranchChanged(${i})" data-b="table" class="wb-inp font-mono" dir="ltr"><option value="">— اختر —</option>${fwTablesCache.map(t=>`<option value="${fwEsc(t.full || t.name)}" ${b.table&&fwBareTbl(b.table)===fwBareTbl(t.full||t.name)?'selected':''}>${fwEsc(t.full || t.name)}</option>`).join('')}</select></div>
+                            <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">الجدول المتفرع</label><select onchange="fwBranchChanged(${i})" data-b="table" class="wb-inp font-mono" dir="ltr"><option value="">— اختر —</option>${fwTablesCache.map(t=>`<option value="${fwEsc(t.full || t.name)}" ${b.table&&fwBareTbl(b.table)===fwBareTbl(t.full||t.name)?'selected':''}>${fwEsc(t.full || t.name)}${t.custom ? ' ★' : ''}</option>`).join('')}</select></div>
                             <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">الاسم المعروض</label><input value="${fwEsc(b.alias || '')}" oninput="fwBranches[${i}].alias=this.value" placeholder="البنود" class="wb-inp"></div>
                             <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">عمود الأساسي (PK)</label><select onchange="fwBranches[${i}].master=this.value" class="wb-inp font-mono" dir="ltr"><option value="">—</option>${masterOpts}</select></div>
                             <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">عمود الربط (FK)</label><select onchange="fwBranches[${i}].detail=this.value" class="wb-inp font-mono" dir="ltr"><option value="">—</option>${cache.map(c=>`<option ${b.detail===c.name?'selected':''}>${fwEsc(c.name)}</option>`).join('')}</select></div>
@@ -692,6 +695,138 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             try{ notify('تم استيراد ' + n + ' جدول متفرع — حدد مفاتيح الربط', n ? 'success' : 'info'); }catch(e){}
         }
         function fwDelBranch(i){ const b = fwBranches[i]; fwBranches.splice(i,1); if(b) fwInputs = fwInputs.filter(x=>x.destination !== b.table); fwRenderSheet(); }
+        /* ── جدول جديد مخصص (custom_models/<name>.json + ترحيل) ── */
+        let fwNtFields = [];
+        let fwNtTypes = null;
+        async function fwNtEnsureTypes(){
+            if(fwNtTypes) return fwNtTypes;
+            try{
+                const res = await fetch('/api/fmlk/data-types');
+                const data = await res.json();
+                if(data.types && data.types.length) fwNtTypes = data.types;
+            }catch(e){}
+            if(!fwNtTypes) fwNtTypes = ['VARCHAR','TEXT','INTEGER','BIGINT','NUMERIC','BOOLEAN','DATE','TIME','TIMESTAMP'];
+            return fwNtTypes;
+        }
+        async function fwNewTableOpen(){
+            if(!fwConnId){ try{ notify('اختر الاتصال المحلي أولاً', 'info'); }catch(e){} return; }
+            await fwNtEnsureTypes();
+            let m = document.getElementById('fwNewTableModal');
+            if(!m){
+                m = document.createElement('div');
+                m.id = 'fwNewTableModal';
+                m.className = 'hidden fixed inset-0 z-[120] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4';
+                m.setAttribute('onclick', 'if(event.target===this)fwNewTableClose()');
+                m.innerHTML = '<div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[88vh] overflow-hidden flex flex-col">'
+                    + '<div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-emerald-50 shrink-0"><h3 class="text-sm font-bold text-slate-800"><i class="fa-solid fa-table text-emerald-600"></i> جدول جديد — يُحفظ في custom_models ويُرحّل لقاعدة البيانات</h3><button onclick="fwNewTableClose()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button></div>'
+                    + '<div class="p-4 space-y-3 overflow-y-auto custom-scroll text-xs">'
+                    + '<div class="grid grid-cols-2 gap-2"><div><label class="block font-bold text-slate-600 mb-1">الاسم البرمجي * <span class="font-mono font-normal text-slate-400" dir="ltr">latin_</span></label><input id="fwNtName" placeholder="custody" class="wb-inp font-mono" dir="ltr"></div>'
+                    + '<div><label class="block font-bold text-slate-600 mb-1">الاسم العربي *</label><input id="fwNtLabel" placeholder="العهد" class="wb-inp"></div></div>'
+                    + '<div class="text-[11px] text-slate-500">الاتصال: <b>' + fwEsc(fwConnName || fwConnId) + '</b> — السكيما: <b class="font-mono" dir="ltr">' + fwEsc(fwSchema || 'public') + '</b></div>'
+                    + '<div><div class="flex items-center justify-between mb-1"><label class="font-bold text-slate-600">الحقول</label><button onclick="fwNtAddRow()" class="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg font-bold"><i class="fa-solid fa-plus"></i> حقل</button></div>'
+                    + '<div id="fwNtRows" class="space-y-1.5"></div></div>'
+                    + '<div id="fwNtStatus" class="text-[11px]"></div>'
+                    + '</div>'
+                    + '<div class="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2 shrink-0"><button onclick="fwNewTableClose()" class="px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl">إلغاء</button><button onclick="fwNewTableSave(false)" class="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold"><i class="fa-solid fa-floppy-disk"></i> حفظ</button><button onclick="fwNewTableSave(true)" class="px-4 py-1.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl font-bold"><i class="fa-solid fa-database"></i> حفظ + ترحيل</button></div>'
+                    + '</div>';
+                document.body.appendChild(m);
+            }
+            document.getElementById('fwNtName').value = '';
+            document.getElementById('fwNtLabel').value = '';
+            document.getElementById('fwNtStatus').innerHTML = '';
+            fwNtFields = [
+                {name: 'id', label: 'م', type: 'INTEGER', length: '', nullable: false, pk: true},
+                {name: '', label: '', type: 'VARCHAR', length: '200', nullable: true, pk: false},
+            ];
+            fwNtRenderRows();
+            m.classList.remove('hidden');
+        }
+        function fwNewTableClose(){ const m = document.getElementById('fwNewTableModal'); if(m) m.classList.add('hidden'); }
+        function fwNtAddRow(){ fwNtFields.push({name: '', label: '', type: 'VARCHAR', length: '', nullable: true, pk: false}); fwNtRenderRows(); }
+        function fwNtDelRow(i){ fwNtFields.splice(i, 1); if(!fwNtFields.length) fwNtFields.push({name: '', label: '', type: 'VARCHAR', length: '', nullable: true, pk: false}); fwNtRenderRows(); }
+        function fwNtRenderRows(){
+            const box = document.getElementById('fwNtRows');
+            if(!box) return;
+            const types = fwNtTypes || ['VARCHAR'];
+            box.innerHTML = fwNtFields.map((f, i)=>{
+                return '<div class="grid grid-cols-12 gap-1 items-center bg-slate-50 border border-slate-200 rounded-xl p-1.5">'
+                    + `<div class="col-span-3"><input value="${fwEsc(f.name)}" oninput="fwNtFields[${i}].name=this.value" placeholder="field_name" class="wb-inp font-mono" dir="ltr"></div>`
+                    + `<div class="col-span-3"><input value="${fwEsc(f.label)}" oninput="fwNtFields[${i}].label=this.value" placeholder="الاسم العربي" class="wb-inp"></div>`
+                    + `<div class="col-span-2"><select onchange="fwNtFields[${i}].type=this.value" class="wb-inp font-mono" dir="ltr">` + types.map(t=>`<option value="${t}" ${f.type===t?'selected':''}>${t}</option>`).join('') + `</select></div>`
+                    + `<div class="col-span-1"><input value="${fwEsc(f.length)}" oninput="fwNtFields[${i}].length=this.value" placeholder="طول" class="wb-inp font-mono" dir="ltr"></div>`
+                    + `<label class="col-span-2 text-[10px] text-slate-500 flex items-center gap-1"><input type="checkbox" ${f.nullable?'checked':''} onchange="fwNtFields[${i}].nullable=this.checked" class="rounded"> يقبل فراغ</label>`
+                    + `<label class="col-span-1 text-[10px] text-slate-500 flex items-center gap-1" title="مفتاح أساسي"><input type="radio" name="fwNtPk" ${f.pk?'checked':''} onchange="fwNtFields.forEach((x,j)=>x.pk=(j===${i}));fwNtRenderRows();" class="rounded"> PK</label>`
+                    + `</div>`;
+            }).join('') + `<div class="text-left"><button onclick="fwNtDelRow(${fwNtFields.length - 1})" class="text-[10px] text-rose-500 hover:text-rose-700">حذف آخر صف</button></div>`;
+        }
+        function fwNtStatus(html, ok){
+            const el = document.getElementById('fwNtStatus');
+            if(el) el.innerHTML = html ? `<div class="${ok ? 'text-emerald-700 bg-emerald-50 border-emerald-200' : 'text-rose-600 bg-rose-50 border-rose-200'} border rounded-xl px-3 py-1.5">${html}</div>` : '';
+        }
+        function fwNtCollect(){
+            const name = ((document.getElementById('fwNtName') || {}).value || '').trim();
+            const label = ((document.getElementById('fwNtLabel') || {}).value || '').trim();
+            if(!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw new Error('الاسم البرمجي: لاتيني + _ فقط');
+            if(!label) throw new Error('الاسم العربي مطلوب');
+            const fields = (fwNtFields || []).filter(f=>String(f.name || '').trim() !== '').map(f=>({
+                name: String(f.name).trim(), label: String(f.label || '').trim(), type: f.type || 'VARCHAR',
+                length: String(f.length || '').trim(), nullable: !!f.nullable, pk: !!f.pk,
+            }));
+            if(!fields.length) throw new Error('حقل واحد على الأقل مطلوب');
+            return {name: name, label: label, table: name, schema: fwSchema || 'public',
+                    connection: fwConnId, fields: fields};
+        }
+        async function fwNewTableSave(migrate){
+            fwNtStatus('', true);
+            let body;
+            try{ body = fwNtCollect(); }
+            catch(e){ fwNtStatus(fwEsc(e.message), false); return; }
+            try{
+                const res = await fetch('/api/custom-models/', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({...body, overwrite: true})});
+                const data = await res.json().catch(()=>({}));
+                if(!res.ok || data.error) throw new Error((data && data.error) || ('خطأ ' + res.status));
+                let msg = 'حُفظ الموديل <b class="font-mono" dir="ltr">' + fwEsc(data.model.name) + '</b>';
+                if(migrate){
+                    const mr = await fetch('/api/custom-models/' + encodeURIComponent(data.model.name) + '/migrate/', {method: 'POST'});
+                    const md = await mr.json().catch(()=>({}));
+                    if(!mr.ok || md.error) throw new Error((md && md.error) || ('خطأ الترحيل ' + mr.status));
+                    msg += ' — تم الترحيل: ' + (md.columns || []).length + ' عمود' + (((md.added || []).length) ? ' (أُضيف ' + md.added.length + ')' : '');
+                }
+                fwNtStatus(msg, true);
+                try{ notify('تم حفظ الجدول المخصص' + (migrate ? ' وترحيله' : ''), 'success'); }catch(e){}
+                fwNewTableClose();
+                await fwConnChanged();
+                const want = (body.schema || 'public') + '.' + (body.table || body.name);
+                const hit = fwMatchTableOpt(want, body.schema);
+                const sel = document.getElementById('fmlMainTable');
+                if(sel && hit){ sel.value = hit; }
+                else if(sel){ sel.value = want; }
+                await fwMainTableChanged();
+            }catch(e){ fwNtStatus(fwEsc(e.message || e), false); }
+        }
+        async function fwMigrateCurrentCustom(){
+            const meta = fwMainColsMeta || {};
+            if(!meta.custom || !meta.model){ try{ notify('الجدول الحالي ليس مخصصاً', 'info'); }catch(e){} return; }
+            try{
+                const mr = await fetch('/api/custom-models/' + encodeURIComponent(meta.model) + '/migrate/', {method: 'POST'});
+                const md = await mr.json().catch(()=>({}));
+                if(!mr.ok || md.error) throw new Error((md && md.error) || ('خطأ ' + mr.status));
+                try{ notify('تم الترحيل: ' + (md.columns || []).length + ' عمود', 'success'); }catch(e){}
+                await fwMainTableChanged();
+            }catch(e){ try{ notify(e.message || e, 'error'); }catch(e2){} }
+        }
+        function fwRenderCustomHint(){
+            const box = document.getElementById('fwCustomHint');
+            if(!box) return;
+            const meta = fwMainColsMeta || {};
+            if(meta.custom && !meta.migrated){
+                box.innerHTML = '<div class="mt-1 text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1">جدول مخصص ★ غير مرحّل — <button onclick="fwMigrateCurrentCustom()" class="font-bold underline">ترحيل الآن</button></div>';
+            } else if(meta.custom && meta.migrated){
+                box.innerHTML = '<div class="mt-1 text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-2 py-1">جدول مخصص ★ مرحّل ✓</div>';
+            } else {
+                box.innerHTML = '';
+            }
+        }
         /* ── استيراد عرض من جدول: مدخلات عرض فقط (تُقرأ ولا تُخزن) ── */
         let fwDispColsCache = [];
         function fwOpenDispImport(){
