@@ -2973,6 +2973,117 @@ def _query_detail_rows(comp, det, key, db):
     return rows, (det.get("columns") or [{"name": n, "alias": n} for n in names]), False
 
 
+def _branch_password_cols(det, columns):
+    """Names of detail columns with input_type=password (stored HASHED)."""
+    names = set()
+    for c in (columns or []):
+        try:
+            if isinstance(c, dict) and str(c.get("input_type") or "").lower() == "password" and c.get("name"):
+                names.add(c.get("name"))
+        except Exception:
+            continue
+    return names
+
+
+def _mask_branch_rows(rows, pw_cols):
+    """Replace password values with random-length '*' runs (length leaks nothing).
+
+    Mirrors the main list endpoint: stars mean 'unchanged' and are dropped on save.
+    """
+    if not rows or not pw_cols:
+        return rows
+    import random as _rnd
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        for k in pw_cols:
+            if k in r and r[k] not in (None, ""):
+                r[k] = "*" * _rnd.randint(8, 14)
+    return rows
+
+
+def _reinject_branch_secrets(db, sch, tbl, idcol, rows, pw_cols):
+    """Re-inject stored secret values for existing rows (matched by idcol).
+
+    Branch save replaces the whole set (DELETE+INSERT), so secrets the
+    player masked as *** (unchanged) must be carried over — otherwise every
+    save would wipe stored passwords. Rows without a matching stored row
+    (new rows) are left untouched. Fail-soft: on any DB error returns rows.
+    """
+    import re as _re2
+    if not pw_cols or not idcol or not _re2.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", str(idcol)):
+        return rows
+    if not _re2.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", str(tbl or "")):
+        return rows
+    _want = [c for c in sorted(pw_cols)
+             if _re2.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", str(c))]
+    if not _want:
+        return rows
+    try:
+        _ids = []
+        for r in (rows or []):
+            if isinstance(r, dict) and r.get(idcol) not in (None, "") and r.get(idcol) not in _ids:
+                _ids.append(r.get(idcol))
+        if not _ids:
+            return rows
+        _ph = ", ".join(f":rid{j}" for j in range(len(_ids)))
+        _prm = {f"rid{j}": v for j, v in enumerate(_ids)}
+        _sel = ", ".join([f'"{idcol}"'] + [f'"{c}"' for c in _want])
+        _cur = db._exec(f'SELECT {_sel} FROM "{sch}"."{tbl}" WHERE "{idcol}" IN ({_ph})', _prm)
+        try:
+            _names = [d[0] for d in (_cur.description or [])]
+            _old = {}
+            for _rec in (_cur.fetchall() or []):
+                _rr = dict(zip(_names, _rec))
+                _old[_rr.get(idcol)] = _rr
+        finally:
+            try:
+                _cur.close()
+            except Exception:
+                pass
+        if not _old:
+            return rows
+        for r in (rows or []):
+            if not isinstance(r, dict):
+                continue
+            _o = _old.get(r.get(idcol))
+            if not _o:
+                continue
+            for c in _want:
+                if c not in r and _o.get(c) not in (None, ""):
+                    r[c] = _o.get(c)
+    except Exception:
+        pass
+    return rows
+
+
+def _prep_branch_secrets(rows, pw_cols):
+    """Drop stars-runs (unchanged) and HASH new plaintext passwords. Pure (unit-testable)."""
+    import re as _re2
+    try:
+        from fmlk_engine.engine import hash_secret as _hs
+    except Exception:
+        _hs = lambda v: v
+    if not pw_cols:
+        return [dict(r) if isinstance(r, dict) else r for r in (rows or [])]
+    out = []
+    for r in (rows or []):
+        if not isinstance(r, dict):
+            out.append(r)
+            continue
+        d = dict(r)
+        for k in pw_cols:
+            if k not in d:
+                continue
+            v = d[k]
+            if isinstance(v, str) and _re2.fullmatch(r"\*+", v or ""):
+                del d[k]  # unchanged — keep stored HASH
+            elif v is not None and (not isinstance(v, str) or v.strip() != ""):
+                d[k] = _hs(v)
+        out.append(d)
+    return out
+
+
 def api_fmlk_branch(request):
     """GET /api/fmlk/branch?fml=&app=&detail=<idx|table>&key= → branch rows for master key."""
     fml, app = request.GET.get("fml", ""), request.GET.get("app")
@@ -2993,6 +3104,7 @@ def api_fmlk_branch(request):
             rows, gcols, is_jx = _query_detail_rows(comp, det, key, eng.db)
         except ValueError as ve:
             return JsonResponse({"error": str(ve)}, status=400)
+        rows = _mask_branch_rows(rows, _branch_password_cols(det, gcols))
         return JsonResponse({"detail": det, "columns": gcols, "rows": rows,
                              **({"junction": True} if is_jx else {})})
     except Exception as e:
@@ -3062,9 +3174,15 @@ def api_fmlk_detail_search(request):
         _subkey = (det.get("sub_key") or det.get("subKey") or "id").strip() or "id"
         _show = [c for c in (det.get("columns") or []) if isinstance(c, dict) and not c.get("junction")]
         _alias = {c["name"]: (c.get("alias") or c["name"]) for c in _show}
-        _cols = list(_allcols[:20])
+        # السرية لا تُقترح ولا تُعرض — حتى الـHASH (sub_key وحده يُستثنى للربط)
+        _pw_search = {c.get("name") for c in (det.get("columns") or [])
+                      if isinstance(c, dict) and str(c.get("input_type") or "").lower() == "password"
+                      and c.get("name") and c.get("name") != _subkey}
+        _cols = [c for c in _allcols[:20] if c not in _pw_search]
         if _subkey not in _cols and _subkey in _allcols:
             _cols = [_subkey] + _cols
+        if not _cols:
+            return JsonResponse({"columns": [], "rows": [], "total": 0, "page": page, "pageSize": page_size})
         _sel = ", ".join(f'"{c}"' for c in _cols)
         _where, _params = "", {}
         if q:
@@ -3324,6 +3442,13 @@ def api_fmlk_branch_save(request):
                 return JsonResponse({"error": "الحقول (" + "، ".join(_unknown) +
                                      f") غير موجودة في جدول الرابط '{_jtable}' — أعد الترحيل "
                                      "من المصمم (حفظ + ترحيل) لإنشاء أعمدتها، وإلا ضاعت قيمها"}, status=400)
+            # أسرار type=password تُخزَّن HASH: أسقط *** (بلا تغيير) واشفِّر الجديد.
+            # وبما أن الحفظ يستبدل كاملاً (DELETE+INSERT): أعد حقن المخزَّن
+            # للصفوف القائمة — وإلا مُسحت كلمات المرور عند كل حفظ
+            _pw_jx = _branch_password_cols(det, det.get("columns") or []) & set(_allowed)
+            _pw_jx.discard("detail_id")
+            rows = _reinject_branch_secrets(db, _jsch, _jtable, "id", rows, _pw_jx)
+            rows = _prep_branch_secrets(rows, _branch_password_cols(det, det.get("columns") or []))
             n = 0
             db._exec(f'DELETE FROM "{_jsch}"."{_jtable}" WHERE "master_id" = :key', {"key": key}, commit=True)
             for r in rows:
@@ -3350,6 +3475,10 @@ def api_fmlk_branch_save(request):
         # أعمدة مرجع البحث (ref) للعرض فقط — لا تُخزَّن في المباشر
         _refnames = {c.get("name") for c in (det.get("columns") or [])
                      if isinstance(c, dict) and c.get("ref") and c.get("name")}
+        _pw_direct = _branch_password_cols(det, det.get("columns") or []) - _refnames
+        _subkey = (det.get("sub_key") or det.get("subKey") or "id").strip() or "id"
+        rows = _reinject_branch_secrets(db, sch, tbl, _subkey if _subkey != fk else "", rows, _pw_direct)
+        rows = _prep_branch_secrets(rows, _pw_direct)
         db._exec(f'DELETE FROM "{sch}"."{tbl}" WHERE "{fk}" = :key', {"key": key}, commit=True)
         for r in rows:
             if not isinstance(r, dict):

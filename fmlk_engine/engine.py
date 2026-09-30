@@ -17,6 +17,68 @@ def _valid_table_ident(name: str) -> bool:
     return bool(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name or ""))
 
 
+# ── Secret hashing (password inputs are stored HASHED, never plaintext) ──
+# Django hashers first (PBKDF2-HMAC-SHA256, verifiable via check_password);
+# stdlib PBKDF2 fallback when Django auth hashers are unavailable.
+_STD_HASH_PREFIX = "pbkdf2_sha256_std$"
+_STD_HASH_ITERS = 200_000
+
+
+def is_hashed_secret(value: Any) -> bool:
+    """True if the value already looks like a password hash (any Django
+    hasher format or our stdlib fallback) — must NOT be re-hashed."""
+    s = str(value or "")
+    if not s or "$" not in s:
+        return False
+    if s.startswith(_STD_HASH_PREFIX):
+        return True
+    try:
+        from django.contrib.auth.hashers import identify_hasher
+        identify_hasher(s)
+        return True
+    except Exception:
+        return False
+
+
+def hash_secret(value: Any) -> str:
+    """One-way hash for a new plaintext secret. Idempotent: existing
+    hashes (and empty values) pass through unchanged."""
+    s = "" if value is None else str(value)
+    if s == "" or is_hashed_secret(s):
+        return s
+    try:
+        from django.contrib.auth.hashers import make_password
+        return make_password(s)
+    except Exception:
+        pass
+    import hashlib as _hl
+    import os as _os
+    salt = _os.urandom(16).hex()
+    dk = _hl.pbkdf2_hmac("sha256", s.encode("utf-8"), bytes.fromhex(salt), _STD_HASH_ITERS)
+    return f"{_STD_HASH_PREFIX}{_STD_HASH_ITERS}${salt}${dk.hex()}"
+
+
+def verify_secret(value: Any, hashed: Any) -> bool:
+    """Check a plaintext candidate against a stored hash (Django or fallback)."""
+    s, h = str(value or ""), str(hashed or "")
+    if not s or not h:
+        return False
+    if h.startswith(_STD_HASH_PREFIX):
+        try:
+            _, iters, salt, dkhex = h.split("$")
+            import hashlib as _hl
+            dk = _hl.pbkdf2_hmac("sha256", s.encode("utf-8"), bytes.fromhex(salt), int(iters))
+            import hmac as _hm
+            return _hm.compare_digest(dk.hex(), dkhex)
+        except Exception:
+            return False
+    try:
+        from django.contrib.auth.hashers import check_password
+        return bool(check_password(s, h))
+    except Exception:
+        return False
+
+
 def get_options_source(table: str, column: str, schema: str = "", limit: int = 500, search: str | None = None, display: str | None = None, conn_params: Dict[str, Any] | None = None) -> List[Dict[str, Any]]:
     """قيم مميزة لعمود جدول (مرجع [table.column]) — قراءة فقط بمعرفات مُتحقق منها.
 
@@ -540,6 +602,17 @@ class FMLKFormEngine:
             out[k] = v
         return out
 
+    @staticmethod
+    def _hash_secrets(data: Dict[str, Any], secret_names: set) -> Dict[str, Any]:
+        """Replace new plaintext secrets with HASH (idempotent: hashes/empties pass through)."""
+        if not data or not secret_names:
+            return dict(data or {})
+        out = dict(data)
+        for k in secret_names:
+            if k in out:
+                out[k] = hash_secret(out[k])
+        return out
+
     def _mask_secrets(self, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Replace secret values with random-length '*' runs (length leaks nothing)."""
         try:
@@ -606,11 +679,13 @@ class FMLKFormEngine:
         return res["rows"][0] if res["rows"] else None
 
     def create_record(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Create record — Add button. Validates, builds INSERT, executes."""
-        data = self._drop_masked_secrets(data, self._secret_names())
+        """Create record — Add button. Validates (plaintext), then stores secrets HASHED."""
+        _secrets = self._secret_names()
+        data = self._drop_masked_secrets(data, _secrets)
         errs = self.validate(data)
         if errs:
             raise ValueError(f"Validation failed: {errs}")
+        data = self._hash_secrets(data, _secrets)
         sql, params = self._build_insert(data)
         try:
             if not self.db.conn:
@@ -654,14 +729,16 @@ class FMLKFormEngine:
             raise RuntimeError(f"Create failed: {e}\nSQL: {sql}") from e
 
     def update_record(self, pk: Dict[str, Any], data: Dict[str, Any]) -> Dict[str, Any]:
-        """Update record — Editing (stars-runs in secrets mean 'unchanged')."""
+        """Update record — Editing (stars-runs in secrets mean 'unchanged'; new secrets stored HASHED)."""
         # Validate only provided fields
-        data = self._drop_masked_secrets(data, self._secret_names())
+        _secrets = self._secret_names()
+        data = self._drop_masked_secrets(data, _secrets)
         errs = self.validate({**pk, **data})
         # Filter to only errors for data fields
         errs = {k: v for k, v in errs.items() if k in data}
         if errs:
             raise ValueError(f"Validation failed: {errs}")
+        data = self._hash_secrets(data, _secrets)
         sql, params = self._build_update(pk, data)
         try:
             if not self.db.conn:

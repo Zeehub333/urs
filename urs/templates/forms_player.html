@@ -1006,10 +1006,17 @@
                 if(it === 'textarea'){
                     return `<td class="p-1"><input type="text" data-drow="${i}" data-dcol="${escAttr(nm)}" data-didx="${ri}" value="${escAttr(val)}"${req} class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5"></td>`;
                 }
+                if(it === 'password'){
+                    return `<td class="p-1"><input type="password" data-drow="${i}" data-dcol="${escAttr(nm)}" data-didx="${ri}" value="${escAttr(val)}"${req} autocomplete="new-password" title="حقل سري — يُخزَّن HASH" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5" dir="auto"></td>`;
+                }
                 const num = /INT|NUMERIC|DECIMAL|FLOAT|DOUBLE|REAL|NUMBER/.test(dt) || it === 'number';
                 return `<td class="p-1"><input type="${num ? 'number' : 'text'}" data-drow="${i}" data-dcol="${escAttr(nm)}" data-didx="${ri}" value="${escAttr(val)}"${req} class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5"></td>`;
             }
             // أعمدة جدول الفرعي + مراجع البحث: إكمال تلقائي رأسي لقيم العمود — الاختيار يملأ السطر أفقياً
+            // (السرية type=password: بلا إكمال تلقائي أبداً حتى لا تتسرب القيم في الاقتراحات)
+            if(it === 'password'){
+                return `<td class="p-1"><input type="password" data-drow="${i}" data-dcol="${escAttr(nm)}" data-didx="${ri}" value="${escAttr(val)}"${req} autocomplete="new-password" title="حقل سري — يُخزَّن HASH" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5" dir="auto"></td>`;
+            }
             const num = /INT|NUMERIC|DECIMAL|FLOAT|DOUBLE|REAL|NUMBER/.test(dt);
             const isRef = !!c.ref;
             const _bd = isRef ? 'border-amber-300' : 'border-violet-200';
