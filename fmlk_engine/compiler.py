@@ -74,6 +74,7 @@ class FMLKMetadata:
     model_type: str = "form"  # form | rule — نوع الموديل
     description: Optional[str] = None
     icon: Optional[str] = None
+    details_tab: Optional[str] = None  # تسمية تبويبة التفاصيل في المشغل
     raw_attrs: Dict[str, str] = field(default_factory=dict)
     def to_dict(self):
         return {
@@ -90,6 +91,8 @@ class FMLKMetadata:
             "modelType": self.model_type,
             "description": self.description,
             "icon": self.icon,
+            "details_tab": self.details_tab,
+            "detailsTab": self.details_tab,
         }
 
 @dataclass
@@ -167,13 +170,18 @@ class FMLKDetail:
     table: str
     alias: str = ""
     master: str = ""  # عمود الجدول الأساسي (PK)
-    detail: str = ""  # عمود الربط في الجدول المتفرع (FK)
+    detail: str = ""  # عمود الربط في الجدول المتفرع (FK, direct mode)
     rel_type: str = "one_to_many"
-    columns: List[Dict[str, Any]] = field(default_factory=list)  # [{name, alias, data_type, input_type}]
+    sub_key: str = "id"  # مفتاح سجل الفرعي المستهدف (junction detail_id)
+    visible: bool = True  # إظهار شبكة الفرع في المشغل
+    junction: Dict[str, Any] = field(default_factory=dict)  # {table, model} رابط M2M
+    columns: List[Dict[str, Any]] = field(default_factory=list)  # [{name, alias, data_type, input_type, junction?}]
     raw_attrs: Dict[str, str] = field(default_factory=dict)
     def to_dict(self):
         return {"table": self.table, "alias": self.alias or self.table, "master": self.master,
-                "detail": self.detail, "rel_type": self.rel_type, "columns": self.columns}
+                "detail": self.detail, "rel_type": self.rel_type, "sub_key": self.sub_key,
+                "subKey": self.sub_key, "visible": bool(self.visible),
+                "junction": dict(self.junction or {}), "columns": self.columns}
 
 @dataclass
 class FMLKAction:
@@ -257,7 +265,7 @@ class FMLKFormCompiler:
         mt = (get("model_type", "modelType", "model-type", default="form") or "form").strip().lower()
         if mt not in ("form", "rule"):
             mt = "form"
-        meta = FMLKMetadata(name=name, display_name=display, category=get("category"), connection=get("connection"), schema=get("schema"), table=get("table"), model_type=mt, description=get("description","desc"), icon=get("icon"), raw_attrs=dict(el.attrib))
+        meta = FMLKMetadata(name=name, display_name=display, category=get("category"), connection=get("connection"), schema=get("schema"), table=get("table"), model_type=mt, description=get("description","desc"), icon=get("icon"), details_tab=get("details_tab","detailsTab","details-tab"), raw_attrs=dict(el.attrib))
         self._metadata = meta
         return meta.to_dict()
 
@@ -335,12 +343,19 @@ class FMLKFormCompiler:
                             continue
                         cols.append({"name": _nm, "alias": (cg("alias", "label") or _nm).strip(),
                                      "data_type": (cg("dataType", "datatype", "data_type") or "VARCHAR").strip().upper(),
-                                     "input_type": normalize_input_type(cg("inputType", "input_type", "type", default="text"))})
+                                     "input_type": normalize_input_type(cg("inputType", "input_type", "type", default="text")),
+                                     "junction": str(cg("junction") or "").strip().lower() in ("1", "true", "yes")})
+                _subk = (get("sub_key", "subKey", "sub-key") or "id").strip() or "id"
+                _vis = str(get("visible", "show", default="1") or "1").strip().lower() not in ("0", "false", "no", "hide", "hidden")
+                _jtbl = (get("junction_table", "junctionTable", "junction-table") or "").strip()
+                _jmod = (get("junction_model", "junctionModel", "junction-model") or "").strip()
                 result.append(FMLKDetail(
                     table=tbl, alias=(get("alias", "label") or tbl).strip(),
                     master=(get("master", "master_col", "masterCol") or "").strip(),
                     detail=(get("detail", "detail_col", "detailCol", "fk") or "").strip(),
                     rel_type=(get("rel_type", "relType", "rel-type") or "one_to_many").strip().lower(),
+                    sub_key=_subk, visible=_vis,
+                    junction=({"table": _jtbl, "model": _jmod} if _jtbl else {}),
                     columns=cols, raw_attrs=dict(el.attrib)))
         self._details = result
         return result

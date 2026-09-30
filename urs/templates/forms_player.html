@@ -939,27 +939,30 @@
             document.querySelectorAll('#tabsBar [data-tab="cat_details"]').forEach(b=>b.remove());
             document.querySelectorAll('[data-tab-content="cat_details"]').forEach(b=>b.remove());
             const dets = fwDetails();
-            if(!dets.length){
+            const visDets = dets.map((d, i)=>({d, i})).filter(x=>x.d.visible !== false);
+            if(!visDets.length){
                 fwDetailRows = [];
-                // بلا تفاصيل: أزل بقايا بطاقة سجل سابق (المحتوى حُذف أعلاه وبقيت القشرة)
+                // بلا تفاصيل (أو كلها مخفية): أزل بقايا بطاقة سجل سابق
                 try{ document.querySelectorAll('#formRoot [data-stcard="cat_details"]').forEach(c=>{ if(!c.querySelector('[data-tab-content]')) c.remove(); }); }catch(e){}
                 return;
             }
+            let tabLabel = 'التفاصيل';
+            try{ tabLabel = (fmlMeta && (fmlMeta.details_tab || fmlMeta.detailsTab)) || 'التفاصيل'; }catch(e){}
             const bar = document.getElementById('tabsBar');
-            if(bar) bar.insertAdjacentHTML('beforeend', `<span class="text-slate-300">›</span><button onclick="switchTab('cat_details')" data-tab="cat_details" class="tab-btn px-4 py-1.5 rounded-full text-xs font-medium border whitespace-nowrap bg-white border-slate-200 text-slate-600">التفاصيل</button>`);
+            if(bar) bar.insertAdjacentHTML('beforeend', `<span class="text-slate-300">›</span><button onclick="switchTab('cat_details')" data-tab="cat_details" class="tab-btn px-4 py-1.5 rounded-full text-xs font-medium border whitespace-nowrap bg-white border-slate-200 text-slate-600">${escHtml(tabLabel)}</button>`);
             const root = document.getElementById('formRoot');
             if(root) root.insertAdjacentHTML('beforeend', `<div data-tab-content="cat_details" style="display:none"><div id="fwDetailWrap" class="space-y-4"></div></div>`);
             try{ stackAppendDetailsCard(); }catch(e){}
             fwDetailRows = dets.map(()=>[]);
             const key = fwMasterKey();
-            for(let i = 0; i < dets.length; i++){
+            for(const {d, i} of visDets){
                 if(key === '' || key == null){
                     fwDetailRows[i] = [];
                 } else {
                     try{
                         const res = await fetch(`/api/fmlk/branch?fml=${encodeURIComponent(currentFml)}&app=${encodeURIComponent(currentApp)}&detail=${i}&key=${encodeURIComponent(key)}`);
-                        const d = await res.json();
-                        fwDetailRows[i] = Array.isArray(d.rows) ? d.rows : [];
+                        const dd = await res.json();
+                        fwDetailRows[i] = Array.isArray(dd.rows) ? dd.rows : [];
                     }catch(e){ fwDetailRows[i] = []; }
                 }
             }
@@ -969,9 +972,11 @@
             const wrap = document.getElementById('fwDetailWrap');
             if(!wrap) return;
             const dets = fwDetails();
+            const visDets = dets.map((d, i)=>({d, i})).filter(x=>x.d.visible !== false);
             let mkey = '';
             try{ mkey = fwMasterKey() || ''; }catch(e){}
-            wrap.innerHTML = dets.map((d, i)=>{
+            wrap.innerHTML = visDets.map(({d, i})=>{
+                const jx = !!(d.junction && d.junction.table);
                 const cols = (d.columns || []).filter(c=>c.name !== d.detail);
                 const rows = fwDetailRows[i] || [];
                 // عمود ID = العمود المرجعي لمطابقة one_to_many (يُختم خادمياً عند الحفظ)
@@ -995,6 +1000,8 @@
                             + cols.map(c=>{
                             const t = String(c.data_type || '').toUpperCase();
                             const inp = /INT|NUMERIC|DECIMAL|FLOAT|DOUBLE|REAL|NUMBER/.test(t) ? 'number' : 'text';
+                            const editable = (!jx) || !!c.junction;
+                            if(!editable) return `<td class="p-1"><div title="قراءة فقط من جدول الفرعي" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-slate-500">${escHtml(r[c.name] ?? '')}</div></td>`;
                             return `<td class="p-1"><input type="${inp}" data-drow="${i}" data-dcol="${escAttr(c.name)}" data-didx="${ri}" value="${escAttr(r[c.name] ?? '')}" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5"></td>`; }).join('') + `<td class="p-1 text-center"><button onclick="fwDetailDelRow(${i},${ri})" class="text-rose-400 hover:text-rose-600 px-1"><i class="fa-solid fa-trash"></i></button></td></tr>`; }).join('') || `<tr><td colspan="${cols.length + 2}" class="p-3 text-center text-slate-400">لا سطور — أضف سطراً</td></tr>`}</tbody>
                     </table></div>
                 </div>`;

@@ -344,6 +344,65 @@ def resolve_connection(ref: Any):
         return None
 
 
+def junction_name(main_table: str, sub_table: str) -> str:
+    """Third-table name [main]_[sub]: sanitized, ≤40 chars, deterministic."""
+    def _bare(t):
+        t = str(t or "").strip()
+        if "." in t:
+            t = t.split(".")[-1]
+        t = _re.sub(r"[^A-Za-z0-9_]", "_", t).strip("_")
+        return t or "tbl"
+    nm = f"{_bare(main_table)}_{_bare(sub_table)}"
+    if len(nm) > 40:
+        # keep tail uniqueness: head + trailing hash-ish slice
+        import hashlib as _hl
+        h = _hl.sha1(nm.encode("utf-8")).hexdigest()[:6]
+        nm = nm[:33] + "_" + h
+    if not _re.match(r"[A-Za-z_]", nm):
+        nm = "j_" + nm
+    return nm[:40]
+
+
+def ensure_junction(main_table: str, sub_table: str, schema: str, connection: Any,
+                    customs: List[Dict[str, Any]]) -> Tuple[Optional[Dict[str, Any]], str]:
+    """Build (+save) the junction custom model id/master_id/detail_id/[customs].
+
+    customs: [{name, alias?, data_type?/type?}] designer detail columns.
+    Returns (model, error). Caller migrates it.
+    """
+    jn = junction_name(main_table, sub_table)
+    fields: List[Dict[str, Any]] = [
+        {"name": "master_id", "label": "السجل الأساسي", "type": "INTEGER",
+         "nullable": False, "required": True},
+        {"name": "detail_id", "label": "المرجع الفرعي", "type": "INTEGER",
+         "nullable": False, "required": True},
+    ]
+    seen = {"master_id", "detail_id"}
+    for c in (customs or []):
+        if not isinstance(c, dict):
+            continue
+        nm = (c.get("name") or "").strip()
+        if not nm or not NAME_RE.fullmatch(nm):
+            continue
+        if nm.lower() in seen:
+            return None, f"الحقل '{nm}' يتعارض مع عمود رابط محجوز"
+        seen.add(nm.lower())
+        tp = str(c.get("data_type") or c.get("type") or "VARCHAR").upper()
+        if tp not in PG_TYPE_MAP:
+            tp = "VARCHAR"
+        fields.append({"name": nm, "label": (c.get("alias") or nm).strip(),
+                       "type": tp, "nullable": True})
+    model = {"name": jn, "label": f"رابط {main_table} ← {sub_table}",
+             "table": jn, "schema": (schema or "public").strip() or "public",
+             "connection": str(connection or "").strip(),
+             "description": f"جدول رابط تلقائي: {main_table} × {sub_table}",
+             "fields": fields}
+    saved, err, _code = save_model(model, overwrite=True)
+    if err:
+        return None, err
+    return saved, ""
+
+
 def table_exists(obj, schema: str, table: str) -> bool:
     try:
         import psycopg2
