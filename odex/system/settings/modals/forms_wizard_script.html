@@ -10,13 +10,16 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             {id:'tabs', name:'التبويبات', icon:'fa-folder'},
             {id:'docs', name:'المستندات', icon:'fa-file-lines'},
         ];
-        function fwDetailDests(){ const o = []; (fwBranches || []).forEach(b=>{ if(!b.table) return; o.push(b.table); o.push('junction:' + b.table); }); return o; }
-        function fwIsDetailDest(d){ return !!d && d !== 'main' && fwDetailDests().includes(d); }
+        // وجهات التفاصيل حصراً: الجدول الرابط (يُخزَّن) + مرجع بحث (لا شيء — لا يُخزَّن)
+        function fwDetailDests(b){ if(!b || !b.table) return []; return ['junction:' + b.table, 'ref:' + b.table]; }
+        function fwIsDetailDest(d){ const s = String(d || ''); return s.startsWith('junction:') || s.startsWith('ref:'); }
+        function fwRefTableOf(dest){ const s = String(dest || ''); return s.startsWith('ref:') ? s.slice(4) : s; }
         function fwDetailTypeLocked(r){
-            // المخصص (وجهة رابط) حر دائماً؛ المرتبط مقفل نوعه إن كان عموداً بالقاعدة
-            const dest = r.destination || '';
-            if(String(dest).startsWith('junction:')) return false;
-            const b = (fwBranches || []).find(x=>x.table === dest);
+            // المخصص (وجهة رابط) حر دائماً؛ المرتبط/المرجع مقفل نوعه إن كان عموداً بالقاعدة
+            const dest = String(r.destination || '');
+            if(dest.startsWith('junction:')) return false;
+            const tbl = fwRefTableOf(dest);
+            const b = (fwBranches || []).find(x=>x.table === tbl);
             if(!b) return false;
             const nm = String(r.name || '').trim().toLowerCase();
             if(!nm) return false;
@@ -131,13 +134,13 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                     config: f.config || {}
                 }));
                 // الجداول المتفرعة (ظهور + مفتاح فرعي + حقول الرابط junction)
-                fwBranches = (data.details || []).map(d=>({table: d.table, alias: d.alias || d.table, master: d.master || '', detail: d.detail || '', sub_key: d.sub_key || d.subKey || 'id', visible: d.visible !== false, cols: (d.columns || []).map(c=>({name: c.name, alias: c.alias || c.name, data_type: c.data_type || 'VARCHAR', input_type: c.input_type || 'text', required: !!c.required, default: (c.default != null ? String(c.default) : ''), options: (Array.isArray(c.options) ? c.options : []), junction: !!c.junction})), colsCache: []}));
-                // مدخلات الفروع: أعد بناء جدولها من الأعمدة (تُدمج عند الحفظ) — وحقول الرابط بوجهة junction:
+                fwBranches = (data.details || []).map(d=>({table: d.table, alias: d.alias || d.table, master: d.master || '', detail: d.detail || '', sub_key: d.sub_key || d.subKey || 'id', visible: d.visible !== false, cols: (d.columns || []).map(c=>({name: c.name, alias: c.alias || c.name, data_type: c.data_type || 'VARCHAR', input_type: c.input_type || 'text', required: !!c.required, default: (c.default != null ? String(c.default) : ''), options: (Array.isArray(c.options) ? c.options : []), junction: !!c.junction, ref: !!c.ref})), colsCache: []}));
+                // مدخلات الفروع: أعد بناء جدولها من الأعمدة (تُدمج عند الحفظ) — رابط بوجهة junction: ومرجع بحث بوجهة ref:
                 fwBranches.forEach(b=>{
                     (b.cols || []).forEach(c=>{
-                        const dest = c.junction ? ('junction:' + b.table) : b.table;
+                        const dest = c.junction ? ('junction:' + b.table) : (c.ref ? ('ref:' + b.table) : b.table);
                         if(!fwInputs.some(x=>x.destination === dest && x.name === c.name)){
-                            fwInputs.push({key: fwInputKey(dest, c.name), table: b.table, name: c.name, alias: c.alias || c.name, icon:'', inputType: c.input_type || 'text', dataType: c.data_type || 'VARCHAR', destination: dest, required: !!c.required, computed:false, expr:'', editable: (c.editable !== false), tab: c.tab || fwTabs[0].id, options: (Array.isArray(c.options) ? JSON.parse(JSON.stringify(c.options)) : []), options_source:[], refTable:'', refFk:'', refDisplay:'', visibleIf: c.visibleIf || '',config:{}});
+                            fwInputs.push({key: fwInputKey(dest, c.name), table: b.table, name: c.name, alias: c.alias || c.name, icon:'', inputType: c.input_type || 'text', dataType: c.data_type || 'VARCHAR', destination: dest, required: !!c.required, computed:false, expr:'', editable: (c.editable !== false), displayOnly: !!c.ref, tab: c.tab || fwTabs[0].id, options: (Array.isArray(c.options) ? JSON.parse(JSON.stringify(c.options)) : []), options_source:[], refTable:'', refFk:'', refDisplay:'', visibleIf: c.visibleIf || '',config:{}});
                             const _ni = fwInputs[fwInputs.length - 1];
                             if(c.default !== undefined && c.default !== null && String(c.default) !== ''){ _ni.computed = false; _ni.expr = ''; _ni.defaultValue = String(c.default); }
                         }
@@ -966,9 +969,10 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             b.table = sels[i] ? sels[i].value : b.table;
             b.colsCache = [];
             if(b.table){ b.colsCache = await fwLoadCols(b.table); if(!b.alias) b.alias = b.table.split('.').pop(); }
-            // استيراد تلقائي: أول اختيار للجدول يضيف كل حقوله (مرة واحدة فقط)
+            // استيراد تلقائي: أول اختيار للجدول يضيف كل حقوله كمراجع بحث (مرة واحدة فقط)
             try{
-                const hasAny = (fwInputs || []).some(x=>x.destination === b.table);
+                const dests = fwBranchDestSet(b);
+                const hasAny = (fwInputs || []).some(x=>dests.includes(x.destination));
                 if(b.table && (b.colsCache || []).length && !hasAny){
                     await fwImportBranchInputs(i, true);
                 }
@@ -1055,24 +1059,31 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                     + `</div>`;
             }).join('') : '<p class="text-slate-400 text-center py-4">لا حقول رابط — أضف حقلاً يدوياً أو اترك الحفظ المباشر في جدول الفرعي</p>';
         }
+        function fwBranchDestSet(b){
+            // كل الوجهات المرتبطة بفرع واحد (لمنع تكرار الاستيراد)
+            if(!b || !b.table) return [];
+            return [b.table, 'junction:' + b.table, 'ref:' + b.table];
+        }
         async function fwImportBranchInputs(i, quiet){
             const b = fwBranches[i];
             if(!b.table) return fwErr('اختر الجدول المتفرع أولاً');
+            const dests = fwBranchDestSet(b);
             const cols = b.colsCache && b.colsCache.length ? b.colsCache : await fwLoadCols(b.table);
             let n = 0;
             cols.forEach(c=>{
-                if(fwInputs.some(x=>x.destination === b.table && x.name === c.name)) return;
+                if(fwInputs.some(x=>dests.includes(x.destination) && x.name === c.name)) return;
                 const m = fwMapDbType(c.type);
-                fwInputs.push({key: fwInputKey(b.table, c.name), table: b.table, name: c.name, alias: c.name, icon:'', inputType: m.inputType, dataType: m.dataType, destination: b.table, required:false, computed:false, expr:'', editable:true, tab: (fwTabs[0]||{}).id || 'البيانات الأساسية', options:[], options_source:[], refTable:'', refFk:'', refDisplay:'', visibleIf:'',config:{}});
+                // الاستيراد ينزل تلقائياً كمرجع بحث 🔍 (لا شيء — لا يُخزَّن)
+                fwInputs.push({key: fwInputKey('ref:' + b.table, c.name), table: b.table, name: c.name, alias: c.name, icon:'', inputType: m.inputType, dataType: m.dataType, destination: 'ref:' + b.table, required:false, computed:false, expr:'', editable:true, displayOnly:true, tab: (fwTabs[0]||{}).id || 'البيانات الأساسية', options:[], options_source:[], refTable:'', refFk:'', refDisplay:'', visibleIf:'',config:{}});
                 n++;
             });
             fwErrHide();
             if(quiet){
-                if(n){ try{ notify(`أُضيفت ${n} حقلاً تلقائياً من جدول التفاصيل`, 'success'); }catch(e){} }
+                if(n){ try{ notify(`أُضيفت ${n} حقلاً تلقائياً من جدول التفاصيل كمراجع بحث 🔍`, 'success'); }catch(e){} }
                 return n;
             }
-            fwShowSheet('inputs');
-            try{ notify(`تم استيراد ${n} مدخل للجدول المتفرع`, 'success'); }catch(e){}
+            fwShowSheet('details');
+            try{ notify(`تم استيراد ${n} عموداً كمراجع بحث 🔍 (لا تُخزَّن)`, 'success'); }catch(e){}
         }
         async function fwImportMain(){
             if(!fwMainTable) return fwErr('اختر الجدول الأساسي أولاً');
@@ -1142,8 +1153,8 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                         ${r.computed ? `<tr class="border-t border-indigo-100 bg-indigo-50/40"><td class="p-1 text-[10px] text-indigo-700 font-bold" colspan="2">تعبير الحساب <span class="font-mono" dir="ltr">[col]</span></td><td class="p-1" colspan="11"><input value="${fwEsc(r.expr || '')}" oninput="fwInputs[${i}].expr=this.value" dir="ltr" placeholder="[qty] * [price]" list="fwInputNames" class="wb-inp !py-1 font-mono"></td></tr>` : ''}`;
         }
         function fwRenderInputs(body){
-            const destOpts = ['main', ...fwBranches.map(b=>b.table).filter(Boolean), ...fwBranches.map(b=>b.table ? ('junction:' + b.table) : '').filter(Boolean)];
-            const destName = (d)=> d === 'main' ? 'الأساسي' : (String(d).startsWith('junction:') ? (d.slice(9).split('.').pop() + ' ⬡ رابط') : d.split('.').pop());
+            const destOpts = ['main', ...fwBranches.map(b=>b.table).filter(Boolean), ...fwBranches.map(b=>b.table ? ('junction:' + b.table) : '').filter(Boolean), ...fwBranches.map(b=>b.table ? ('ref:' + b.table) : '').filter(Boolean)];
+            const destName = (d)=> d === 'main' ? 'الأساسي' : (String(d).startsWith('junction:') ? (d.slice(9).split('.').pop() + ' ⬡ رابط') : (String(d).startsWith('ref:') ? (d.slice(4).split('.').pop() + ' 🔍 مرجع') : d.split('.').pop()));
             body.innerHTML = `
             <div class="wb-panel !p-2">
                 <div class="flex items-center justify-between mb-1 px-1">
@@ -1169,9 +1180,13 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             </div>`;
         }
         /* ── ورقة التفاصيل: نفس واجهة المدخلات لأعمدة التفاصيل + المخصصة (مجموعة لكل فرع) ── */
+        function fwDetailDestName(d){
+            const s = String(d || '');
+            if(s.startsWith('junction:')) return 'الجدول الرابط ⬡';
+            if(s.startsWith('ref:')) return 'لا شيء - مرجع بحث 🔍';
+            return s.split('.').pop() + ' (قديم)';
+        }
         function fwRenderDetailInputs(body){
-            const destOpts = fwDetailDests();
-            const destName = (d)=> String(d).startsWith('junction:') ? (d.slice(9).split('.').pop() + ' ⬡ رابط') : String(d).split('.').pop();
             const groups = (fwBranches || []).map((b, bi)=>({b, bi})).filter(g=>g.b.table);
             const thead = `<thead class="bg-slate-50 text-slate-600"><tr>
                         <th class="p-1.5 text-right">الوجهة</th><th class="p-1.5 text-right">الحقل</th><th class="p-1.5 text-right">اسم العرض *</th>
@@ -1181,14 +1196,16 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             body.innerHTML = `
             <div class="wb-panel !p-2">
                 <div class="flex items-center justify-between mb-1 px-1">
-                    <div class="wb-panel-title !mb-0"><i class="fa-solid fa-table-list text-violet-600"></i> التفاصيل — تهيئة أعمدة كل جدول متفرع (الوجهة حصراً للتفاصيل • نوع المرتبطة مقفل)</div>
+                    <div class="wb-panel-title !mb-0"><i class="fa-solid fa-table-list text-violet-600"></i> التفاصيل — تهيئة أعمدة كل جدول متفرع (الوجهة: الجدول الرابط أو مرجع بحث فقط • نوع المرتبطة مقفل)</div>
                 </div>
                 ${groups.length ? groups.map(({b, bi})=>{
-                    const rows = (fwInputs || []).map((r, i)=>({r, i})).filter(x=>x.r.destination === b.table || x.r.destination === ('junction:' + b.table));
+                    const destOpts = fwDetailDests(b);
+                    const rows = (fwInputs || []).map((r, i)=>({r, i})).filter(x=>x.r.destination === b.table || x.r.destination === ('junction:' + b.table) || x.r.destination === ('ref:' + b.table));
                     const customs = rows.filter(x=>String(x.r.destination || '').startsWith('junction:')).length;
+                    const nrefs = rows.filter(x=>String(x.r.destination || '').startsWith('ref:')).length;
                     return `<div class="border border-violet-200 rounded-xl mb-2 overflow-hidden">
                     <div class="bg-violet-50 px-3 py-1.5 flex items-center justify-between flex-wrap gap-1">
-                        <div class="text-[11px] font-bold text-slate-700"><i class="fa-solid fa-diagram-project text-violet-600"></i> ${fwEsc(b.alias || b.table)} <span class="font-mono font-normal text-slate-400" dir="ltr">${fwEsc(b.table)}</span> <span class="text-[10px] text-slate-400 font-normal">(${rows.length} عمود${customs ? ` • ${customs} مخصص ⬡` : ' • بلا حقول رابط — يُحفظ مباشرة في جدول الفرعي'})</span></div>
+                        <div class="text-[11px] font-bold text-slate-700"><i class="fa-solid fa-diagram-project text-violet-600"></i> ${fwEsc(b.alias || b.table)} <span class="font-mono font-normal text-slate-400" dir="ltr">${fwEsc(b.table)}</span> <span class="text-[10px] text-slate-400 font-normal">(${rows.length} عمود${customs ? ` • ${customs} رابط ⬡` : ''}${nrefs ? ` • ${nrefs} مرجع بحث 🔍` : ''}${(!customs && !nrefs) ? ' • بلا حقول رابط — يُحفظ مباشرة في جدول الفرعي' : ''})</span></div>
                         <div class="flex items-center gap-1">
                             <button onclick="fwImportBranchInputs(${bi})" class="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg font-bold text-[11px]"><i class="fa-solid fa-download"></i> استيراد الأعمدة</button>
                             <button onclick="fwAddJunctionInput(${bi}, true);fwRenderSheet()" class="px-2 py-1 bg-teal-50 hover:bg-teal-100 text-teal-700 rounded-lg font-bold text-[11px]"><i class="fa-solid fa-plus"></i> حقل رابط يدوي</button>
@@ -1201,7 +1218,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                     </div>
                     <div class="overflow-x-auto"><table class="w-full text-[11px]">
                     ${thead}
-                    <tbody>${rows.length ? rows.map(x=>fwInputRowHTML(x.r, x.i, destOpts, destName, true)).join('') : '<tr><td colspan="13" class="p-4 text-center text-slate-400">لا أعمدة — استورد أعمدة الجدول أو أضف حقل رابط يدوياً</td></tr>'}
+                    <tbody>${rows.length ? rows.map(x=>fwInputRowHTML(x.r, x.i, (x.r.destination === b.table ? [...destOpts, b.table] : destOpts), fwDetailDestName, true)).join('') : '<tr><td colspan="13" class="p-4 text-center text-slate-400">لا أعمدة — استورد أعمدة الجدول أو أضف حقل رابط يدوياً</td></tr>'}
                     </tbody></table></div></div>`;
                 }).join('') : '<p class="text-slate-400 text-center py-6">لا جداول متفرعة — أضف جدول تفاصيل من ورقة الجداول لتظهر هنا</p>'}
                 <datalist id="fwInputNames">${fwInputs.map(r=>`<option value="[${fwEsc(r.name)}]">`).join('')}</datalist>
@@ -1344,6 +1361,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                 let cols = [];
                 const dest = (r && r.destination) || 'main';
                 if(dest === 'main') cols = fwMainColsCache || [];
+                else if(fwIsDetailDest(dest)){ const b = (fwBranches || []).find(x=>x.table === fwRefTableOf(dest)); cols = (b && (b.colsCache || b.cols)) || []; }
                 else { const b = (fwBranches || []).find(x=>x.table === dest); cols = (b && (b.colsCache || b.cols)) || []; }
                 return cols.some(c=>String(((c && c.name) ?? c) || '').trim().toLowerCase() === nm);
             }catch(e){ return false; }
@@ -1714,7 +1732,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             if(!mains.length) throw new Error('أضف مدخلاً واحداً على الأقل للجدول الأساسي');
             // التكرار لكل وجهة على حدة (كل جدول نطاق مستقل: id الأساسي ≠ id الفرعي)
             const _seenNames = new Set();
-            const _destAr = (d)=> (!d || d === 'main') ? 'الأساسي' : (String(d).startsWith('junction:') ? ('رابط ' + d.slice(9).split('.').pop()) : ('تفاصيل ' + String(d).split('.').pop()));
+            const _destAr = (d)=> (!d || d === 'main') ? 'الأساسي' : (String(d).startsWith('junction:') ? ('رابط ' + d.slice(9).split('.').pop()) : (String(d).startsWith('ref:') ? ('مرجع بحث ' + d.slice(4).split('.').pop()) : ('تفاصيل ' + String(d).split('.').pop())));
             for(const x of fwInputs){
                 const nm = (x.name || '').trim();
                 if(!nm) continue;
@@ -1751,9 +1769,11 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             const fwColDef = (x)=> (x.defaultValue != null ? String(x.defaultValue) : (x.default != null ? String(x.default) : ''));
             const details = fwBranches.map(b=>{
                 const fromInputs = fwInputs.filter(x=>x.destination === b.table && x.name).map(x=>({name: x.name.trim(), alias: (x.alias || x.name).trim(), data_type: x.dataType || 'VARCHAR', input_type: x.inputType || 'text', required: !!x.required, default: fwColDef(x), options: fwColOpts(x), editable: x.editable !== false, visibleIf: x.visibleIf || '', tab: x.tab || ''}));
+                const refs = fwInputs.filter(x=>x.destination === ('ref:' + b.table) && x.name).map(x=>({name: x.name.trim(), alias: (x.alias || x.name).trim(), data_type: x.dataType || 'VARCHAR', input_type: x.inputType || 'text', required: false, default: fwColDef(x), options: fwColOpts(x), editable: x.editable !== false, visibleIf: x.visibleIf || '', tab: x.tab || '', ref: true}));
                 const customs = fwInputs.filter(x=>x.destination === ('junction:' + b.table) && x.name).map(x=>({name: x.name.trim(), alias: (x.alias || x.name).trim(), data_type: x.dataType || 'VARCHAR', input_type: x.inputType || 'text', required: !!x.required, default: fwColDef(x), options: fwColOpts(x), editable: x.editable !== false, visibleIf: x.visibleIf || '', tab: x.tab || '', junction: true}));
-                const gridOnly = (b.cols || []).filter(c=>!fromInputs.some(f=>f.name===c.name)).map(c=>({name: c.name, alias: c.alias || c.name, data_type: c.data_type || 'VARCHAR', input_type: 'text'}));
-                return {table: b.table, alias: b.alias || b.table, master: b.master, detail: b.detail, sub_key: (b.sub_key || 'id'), visible: b.visible !== false, rel_type: 'one_to_many', columns: [...fromInputs, ...gridOnly, ...customs]};
+                const _known = new Set([...fromInputs, ...refs].map(f=>f.name));
+                const gridOnly = (b.cols || []).filter(c=>!_known.has(c.name)).map(c=>({name: c.name, alias: c.alias || c.name, data_type: c.data_type || 'VARCHAR', input_type: 'text'}));
+                return {table: b.table, alias: b.alias || b.table, master: b.master, detail: b.detail, sub_key: (b.sub_key || 'id'), visible: b.visible !== false, rel_type: 'one_to_many', columns: [...fromInputs, ...gridOnly, ...refs, ...customs]};
             });
             return {
                 file: (fwEditMode ? fwEditMode.file : file),

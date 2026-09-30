@@ -1677,6 +1677,8 @@ def api_models_design_save(request, app_name):
                             ce.set("options", ",".join(_copts))
                         if _c.get("junction"):
                             ce.set("junction", "1")
+                        if _c.get("ref"):
+                            ce.set("ref", "1")
         acts = data.get("actions") or []
         if acts:
             ca_el = ET.SubElement(fml, "custom_actions")
@@ -2956,7 +2958,8 @@ def _query_detail_rows(comp, det, key, db):
         for _c in _subcols:
             _gcols.append({"name": _c["name"], "alias": _c.get("alias") or _c["name"],
                            "data_type": _c.get("data_type") or "VARCHAR",
-                           "input_type": _c.get("input_type") or "text"})
+                           "input_type": _c.get("input_type") or "text",
+                           "ref": bool(_c.get("ref"))})
         return rows, _gcols, True
     cols = [c["name"] for c in (det.get("columns") or []) if _re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", c.get("name", ""))]
     sel = ", ".join(f'"{c}"' for c in cols) if cols else "*"
@@ -3006,16 +3009,18 @@ def _detail_sub_table(det):
 
 
 def api_fmlk_detail_search(request):
-    """GET /api/fmlk/detail-search?fml=&app=&detail=&q=&page=&pageSize= — search sub-table rows.
+    """GET /api/fmlk/detail-search?fml=&app=&detail=&q=&col=&page=&pageSize= — search sub-table rows.
 
     Powers the «إنزال البيانات» modal + in-cell autocomplete: full-text
-    ILIKE across the sub columns, paged. Junction and direct share the
-    same sub table. Response rows always carry the sub key so the player
+    ILIKE across the sub columns (or a single column when col= is given,
+    for per-column vertical suggestions), paged. Junction and direct share
+    the same sub table. Response rows always carry the sub key so the player
     can set detail_id (junction) or the full record (direct).
     """
     fml, app = request.GET.get("fml", ""), request.GET.get("app")
     ident = request.GET.get("detail", "0")
     q = (request.GET.get("q") or "").strip()
+    col = (request.GET.get("col") or "").strip()
     try:
         page = max(1, int(request.GET.get("page", "1") or 1))
     except (TypeError, ValueError):
@@ -3063,10 +3068,14 @@ def api_fmlk_detail_search(request):
         _sel = ", ".join(f'"{c}"' for c in _cols)
         _where, _params = "", {}
         if q:
-            _likes = []
-            for _c in _cols[:12]:
-                _likes.append(f'CAST("{_c}" AS TEXT) ILIKE :q')
-            _where = " WHERE (" + " OR ".join(_likes) + ")"
+            if col and _re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", col) and col in _allcols:
+                # إكمال رأسي لعمود واحد: اقتراحات قيم هذا العمود فقط
+                _where = f' WHERE CAST("{col}" AS TEXT) ILIKE :q'
+            else:
+                _likes = []
+                for _c in _cols[:12]:
+                    _likes.append(f'CAST("{_c}" AS TEXT) ILIKE :q')
+                _where = " WHERE (" + " OR ".join(_likes) + ")"
             _params["q"] = f"%{q}%"
         try:
             _cc = db._exec(f'SELECT COUNT(*) FROM "{sch}"."{_stbl}"{_where}', dict(_params))
@@ -3307,13 +3316,16 @@ def api_fmlk_branch_save(request):
                 n += 1
             return JsonResponse({"ok": True, "saved": n, "junction": True})
         n = 0
+        # أعمدة مرجع البحث (ref) للعرض فقط — لا تُخزَّن في المباشر
+        _refnames = {c.get("name") for c in (det.get("columns") or [])
+                     if isinstance(c, dict) and c.get("ref") and c.get("name")}
         db._exec(f'DELETE FROM "{sch}"."{tbl}" WHERE "{fk}" = :key', {"key": key}, commit=True)
         for r in rows:
             if not isinstance(r, dict):
                 continue
             cols, binds, params = [fk], [":key"], {"key": key}
             for k, v in r.items():
-                if k == fk or not _re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", str(k)):
+                if k == fk or k in _refnames or not _re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", str(k)):
                     continue
                 if v is None or (isinstance(v, str) and v.strip() == ""):
                     continue
