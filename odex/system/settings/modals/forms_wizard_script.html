@@ -698,6 +698,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
         /* ── جدول جديد مخصص (custom_models/<name>.json + ترحيل) ── */
         let fwNtFields = [];
         let fwNtTypes = null;
+        let fwNtPrefill = null; // edit mode payload consumed by fwNewTableOpen
         async function fwNtEnsureTypes(){
             if(fwNtTypes) return fwNtTypes;
             try{
@@ -718,7 +719,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                 m.className = 'hidden fixed inset-0 z-[120] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4';
                 m.setAttribute('onclick', 'if(event.target===this)fwNewTableClose()');
                 m.innerHTML = '<div class="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[88vh] overflow-hidden flex flex-col">'
-                    + '<div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-emerald-50 shrink-0"><h3 class="text-sm font-bold text-slate-800"><i class="fa-solid fa-table text-emerald-600"></i> جدول جديد — يُحفظ في custom_models ويُرحّل لقاعدة البيانات</h3><button onclick="fwNewTableClose()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button></div>'
+                    + '<div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-emerald-50 shrink-0"><h3 id="fwNtTitle" class="text-sm font-bold text-slate-800"><i class="fa-solid fa-table text-emerald-600"></i> جدول جديد — يُحفظ في custom_models ويُرحّل لقاعدة البيانات</h3><button onclick="fwNewTableClose()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button></div>'
                     + '<div class="p-4 space-y-3 overflow-y-auto custom-scroll text-xs">'
                     + '<div class="grid grid-cols-2 gap-2"><div><label class="block font-bold text-slate-600 mb-1">الاسم البرمجي * <span class="font-mono font-normal text-slate-400" dir="ltr">latin_</span></label><input id="fwNtName" placeholder="custody" class="wb-inp font-mono" dir="ltr"></div>'
                     + '<div><label class="block font-bold text-slate-600 mb-1">الاسم العربي *</label><input id="fwNtLabel" placeholder="العهد" class="wb-inp"></div></div>'
@@ -734,12 +735,48 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             document.getElementById('fwNtName').value = '';
             document.getElementById('fwNtLabel').value = '';
             document.getElementById('fwNtStatus').innerHTML = '';
+            document.getElementById('fwNtName').readOnly = false;
+            fwNtSetTitle(false);
             fwNtFields = [
                 {name: 'id', label: 'م', type: 'INTEGER', length: '', nullable: false, pk: true, def: '', uniq: false},
                 {name: '', label: '', type: 'VARCHAR', length: '200', nullable: true, pk: false, def: '', uniq: false},
             ];
+            const _pre = fwNtPrefill; fwNtPrefill = null;
+            if(_pre){
+                document.getElementById('fwNtName').value = _pre.name || '';
+                document.getElementById('fwNtName').readOnly = true;
+                document.getElementById('fwNtLabel').value = _pre.label || '';
+                if((_pre.fields || []).length) fwNtFields = _pre.fields;
+                fwNtSetTitle(true, _pre.name);
+            }
             fwNtRenderRows();
             m.classList.remove('hidden');
+        }
+        function fwNtSetTitle(edit, name){
+            const t = document.getElementById('fwNtTitle');
+            if(!t) return;
+            t.innerHTML = edit
+                ? '<i class="fa-solid fa-pen text-emerald-600"></i> تعديل جدول مخصص — <span class="font-mono" dir="ltr">' + fwEsc(name || '') + '</span> <span class="text-[10px] font-normal text-slate-500">(إعادة الترحيل تضيف الأعمدة الجديدة فقط)</span>'
+                : '<i class="fa-solid fa-table text-emerald-600"></i> جدول جديد — يُحفظ في custom_models ويُرحّل لقاعدة البيانات';
+        }
+        async function fwEditTableOpen(){
+            const meta = (typeof fwMainColsMeta !== 'undefined' && fwMainColsMeta) || {};
+            if(!meta.custom || !meta.model){ try{ notify('اختر جدولاً مخصصاً ★ أولاً', 'info'); }catch(e){} return; }
+            let md = null;
+            try{
+                const res = await fetch('/api/custom-models/' + encodeURIComponent(meta.model) + '/');
+                md = await res.json().catch(()=>null);
+                if(!res.ok || !md || md.error) throw new Error((md && md.error) || ('خطأ ' + res.status));
+            }catch(e){ try{ notify(e.message || e, 'error'); }catch(e2){} return; }
+            const model = (md && md.model) || {};
+            fwNtPrefill = {
+                name: model.name || '', label: model.label || '',
+                fields: (model.fields || []).map(f=>({name: f.name || '', label: f.label || '', type: f.type || 'VARCHAR',
+                    length: (f.length != null && String(f.length) !== '' ? String(f.length) : ''), nullable: f.nullable !== false,
+                    pk: !!f.primary_key, def: (f.default != null ? String(f.default) : ''), uniq: !!f.unique})),
+            };
+            if(!fwNtPrefill.fields.length) fwNtPrefill.fields.push({name: '', label: '', type: 'VARCHAR', length: '', nullable: true, pk: false, def: '', uniq: false});
+            fwNewTableOpen();
         }
         function fwNewTableClose(){ const m = document.getElementById('fwNewTableModal'); if(m) m.classList.add('hidden'); }
         function fwNtAddRow(){ fwNtFields.push({name: '', label: '', type: 'VARCHAR', length: '', nullable: true, pk: false, def: '', uniq: false}); fwNtRenderRows(); }
