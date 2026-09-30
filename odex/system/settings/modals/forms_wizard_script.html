@@ -6,7 +6,6 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             {id:'tables', name:'الجداول', icon:'fa-table'},
             {id:'diagram', name:'مخطط البيانات', icon:'fa-diagram-project'},
             {id:'inputs', name:'المدخلات', icon:'fa-pen-to-square'},
-            {id:'details', name:'التفاصيل', icon:'fa-table-list'},
             {id:'tabs', name:'التبويبات', icon:'fa-folder'},
             {id:'docs', name:'المستندات', icon:'fa-file-lines'},
         ];
@@ -235,7 +234,6 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
         }
         // ── الأوراق ──
         function fwShowSheet(id){
-            if(id === 'details' && !(fwBranches || []).some(b=>b.table)) id = 'inputs';
             fwSheet = id;
             fwSyncSheetTabs();
             fwRenderSheet();
@@ -245,9 +243,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
         function fwSyncSheetTabs(){
             const bar = document.getElementById('fwSheetTabs');
             if(!bar) return;
-            const hasDet = (fwBranches || []).some(b=>b.table);
-            if(!hasDet && fwSheet === 'details') fwSheet = 'inputs';
-            bar.innerHTML = FW_SHEETS.filter(s=>s.id !== 'details' || hasDet).map(s=>`<button onclick="fwShowSheet('${s.id}')" class="wb-sheet-tab ${fwSheet===s.id?'wb-sheet-on':''}"><i class="fa-solid ${s.icon}"></i> ${s.name}</button>`).join('');
+            bar.innerHTML = FW_SHEETS.map(s=>`<button onclick="fwShowSheet('${s.id}')" class="wb-sheet-tab ${fwSheet===s.id?'wb-sheet-on':''}"><i class="fa-solid ${s.icon}"></i> ${s.name}</button>`).join('');
             const num = document.getElementById('fwCompatStepNum');
             if(num) num.textContent = String(FW_SHEETS.findIndex(s=>s.id===fwSheet) + 1);
         }
@@ -278,7 +274,6 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             if(fwSheet === 'tables') fwRenderTables(body);
             else if(fwSheet === 'diagram') fwRenderDiagram(body);
             else if(fwSheet === 'inputs') fwRenderInputs(body);
-            else if(fwSheet === 'details') fwRenderDetailInputs(body);
             else if(fwSheet === 'tabs') fwRenderTabsSheet(body);
             else if(fwSheet === 'docs') fwRenderDocs(body);
             fwStat();
@@ -1126,8 +1121,8 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             const hit = (fwTypes || []).find(x=>x.key===t);
             return hit ? hit.ar : t;
         }
-        // صف مدخل واحد — مشترك بين ورقتي المدخلات والتفاصيل (نفس الواجهة).
-        // detailOnly: الوجهة حصراً لتفاصيل + قفل نوع البيانات للمرتبطة (المخصصة حرة).
+        // صف مدخل واحد في ورقة المدخلات.
+        // detailOnly: قفل نوع البيانات للعمود المرتبط بالقاعدة (المخصص ⬡ حر دائماً).
         function fwInputRowHTML(r, i, destOpts, destName, detailOnly){
             const typeLocked = !!detailOnly && fwDetailTypeLocked(r);
             return `<tr class="border-t border-slate-100 ${r.displayOnly ? 'bg-amber-50/50' : ''}">
@@ -1167,45 +1162,10 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                         <th class="p-1.5">الأيقونة</th><th class="p-1.5">نوع البيانات</th><th class="p-1.5">التبويب</th>
                         <th class="p-1.5" title="عمود رئيسي؟ — أول حقل بعرض الشاشة كاملاً وتحته البقية جريد (واحد فقط)">★ رئيسي؟</th><th class="p-1.5" title="مطلوب">مطلوب</th><th class="p-1.5" title="محسوب">محسوب</th><th class="p-1.5" title="قابل للإدخال">إدخال</th><th class="p-1.5" title="شرط الإظهار: field==قيمة ويمكن && و ||">إظهار مشروط</th><th class="p-1.5" title="تعبير عرض فقط: {col} أو حساب بنفس صياغة المحسوب — لا يُخزن">تعبير العرض ✦</th><th class="p-1.5"></th>
                     </tr></thead>
-                    <tbody>${fwInputs.map((r, i)=>fwInputRowHTML(r, i, destOpts, destName, false)).join('') || '<tr><td colspan="13" class="p-4 text-center text-slate-400">لا مدخلات — استورد أعمدة الجدول الأساسي</td></tr>'}
+                    <tbody>${fwInputs.map((r, i)=>fwInputRowHTML(r, i, destOpts, destName, fwIsDetailDest(r.destination))).join('') || '<tr><td colspan="13" class="p-4 text-center text-slate-400">لا مدخلات — استورد أعمدة الجدول الأساسي</td></tr>'}
                     </tbody>
                 </table>
                 </div>
-                <datalist id="fwInputNames">${fwInputs.map(r=>`<option value="[${fwEsc(r.name)}]">`).join('')}</datalist>
-            </div>`;
-        }
-        /* ── ورقة التفاصيل: نفس واجهة المدخلات لأعمدة التفاصيل + المخصصة (مجموعة لكل فرع) ── */
-        function fwRenderDetailInputs(body){
-            const destOpts = fwDetailDests();
-            const destName = (d)=> String(d).startsWith('junction:') ? (d.slice(9).split('.').pop() + ' ⬡ رابط') : String(d).split('.').pop();
-            const groups = (fwBranches || []).map((b, bi)=>({b, bi})).filter(g=>g.b.table);
-            const thead = `<thead class="bg-slate-50 text-slate-600"><tr>
-                        <th class="p-1.5 text-right">الوجهة</th><th class="p-1.5 text-right">الحقل</th><th class="p-1.5 text-right">اسم العرض *</th>
-                        <th class="p-1.5">الأيقونة</th><th class="p-1.5">نوع البيانات</th><th class="p-1.5">التبويب</th>
-                        <th class="p-1.5" title="عمود رئيسي؟">★ رئيسي؟</th><th class="p-1.5" title="مطلوب">مطلوب</th><th class="p-1.5" title="محسوب">محسوب</th><th class="p-1.5" title="قابل للإدخال">إدخال</th><th class="p-1.5" title="شرط الإظهار">إظهار مشروط</th><th class="p-1.5" title="تعبير عرض فقط">تعبير العرض ✦</th><th class="p-1.5"></th>
-                    </tr></thead>`;
-            body.innerHTML = `
-            <div class="wb-panel !p-2">
-                <div class="flex items-center justify-between mb-1 px-1">
-                    <div class="wb-panel-title !mb-0"><i class="fa-solid fa-table-list text-violet-600"></i> التفاصيل — تهيئة أعمدة كل جدول متفرع (الوجهة حصراً للتفاصيل • نوع المرتبطة مقفل)</div>
-                </div>
-                ${groups.length ? groups.map(({b, bi})=>{
-                    const rows = (fwInputs || []).map((r, i)=>({r, i})).filter(x=>x.r.destination === b.table || x.r.destination === ('junction:' + b.table));
-                    const customs = rows.filter(x=>String(x.r.destination || '').startsWith('junction:')).length;
-                    return `<div class="border border-violet-200 rounded-xl mb-2 overflow-hidden">
-                    <div class="bg-violet-50 px-3 py-1.5 flex items-center justify-between flex-wrap gap-1">
-                        <div class="text-[11px] font-bold text-slate-700"><i class="fa-solid fa-diagram-project text-violet-600"></i> ${fwEsc(b.alias || b.table)} <span class="font-mono font-normal text-slate-400" dir="ltr">${fwEsc(b.table)}</span> <span class="text-[10px] text-slate-400 font-normal">(${rows.length} عمود${customs ? ` • ${customs} مخصص ⬡` : ''})</span></div>
-                        <div class="flex items-center gap-1">
-                            <button onclick="fwImportBranchInputs(${bi})" class="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg font-bold text-[11px]"><i class="fa-solid fa-download"></i> استيراد الأعمدة</button>
-                            <button onclick="fwAddJunctionInput(${bi}, true);fwRenderSheet()" class="px-2 py-1 bg-teal-50 hover:bg-teal-100 text-teal-700 rounded-lg font-bold text-[11px]"><i class="fa-solid fa-plus"></i> حقل رابط يدوي</button>
-                            <button onclick="fwDetailEditOpen(${bi})" class="px-2 py-1 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded-lg font-bold text-[11px]"><i class="fa-solid fa-pen"></i> تعديل التفاصيل</button>
-                        </div>
-                    </div>
-                    <div class="overflow-x-auto"><table class="w-full text-[11px]">
-                    ${thead}
-                    <tbody>${rows.length ? rows.map(x=>fwInputRowHTML(x.r, x.i, destOpts, destName, true)).join('') : '<tr><td colspan="13" class="p-4 text-center text-slate-400">لا أعمدة — استورد أعمدة الجدول أو أضف حقل رابط يدوياً</td></tr>'}
-                    </tbody></table></div></div>`;
-                }).join('') : '<p class="text-slate-400 text-center py-6">لا جداول متفرعة — أضف جدول تفاصيل من ورقة الجداول لتظهر هنا</p>'}
                 <datalist id="fwInputNames">${fwInputs.map(r=>`<option value="[${fwEsc(r.name)}]">`).join('')}</datalist>
             </div>`;
         }
