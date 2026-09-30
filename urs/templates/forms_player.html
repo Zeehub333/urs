@@ -1075,6 +1075,7 @@
                     </table></div>
                 </div>`;
             }).join('');
+            visDets.forEach(({i})=>{ try{ fwDetailGate(i); }catch(e){} });
             visDets.forEach(({i})=>{ try{ fwSibLoad(i); }catch(e){} });
         }
         function fwDetailAddRow(i){ try{ collectDetailRows(); }catch(e){} (fwDetailRows[i] = fwDetailRows[i] || []).push({}); paintDetailGrids(); }
@@ -1088,6 +1089,64 @@
                 else fwDetailRows[i][ri][col] = el.value;
             });
         }
+        // بوابة الصف الأول: لا تحرير لأي صف قبل اكتمال الحقول المطلوبة في الصف الأول
+        function fwDetailReqCols(i){
+            try{
+                const {cols} = fwDetailGridCols(i);
+                return (cols || []).filter(c=>c && c.required && c.name);
+            }catch(e){ return []; }
+        }
+        function fwDetailCellVal(i, ri, name){
+            // قراءة حية من DOM (الأحدث) ثم النموذج — بلا جمع/كتابة للنموذج
+            try{
+                const el = document.querySelector(`[data-drow="${i}"][data-didx="${ri}"][data-dcol="${CSS.escape(name)}"]`);
+                if(el){
+                    if(el.type === 'checkbox') return el.checked ? (el.value || '1') : '';
+                    return el.value;
+                }
+            }catch(e){}
+            try{ const r = (fwDetailRows[i] || [])[ri] || {}; return r[name]; }catch(e){ return ''; }
+        }
+        function fwDetailRowComplete(i, ri){
+            try{
+                const req = fwDetailReqCols(i);
+                if(!req.length) return true; // بلا حقول مطلوبة = مكتمل دائماً
+                return req.every(c=>{ const v = fwDetailCellVal(i, ri, c.name); return v !== undefined && v !== null && String(v).trim() !== ''; });
+            }catch(e){ return true; }
+        }
+        function fwDetailGate(i){
+            try{
+                const req = fwDetailReqCols(i);
+                const firstDone = !req.length || fwDetailRowComplete(i, 0);
+                const rows = fwDetailRows[i] || [];
+                rows.forEach((r, ri)=>{
+                    if(ri === 0) return;
+                    const lock = !firstDone;
+                    document.querySelectorAll(`[data-drow="${i}"][data-didx="${ri}"]`).forEach(el=>{
+                        if(el.tagName !== 'INPUT' && el.tagName !== 'SELECT' && el.tagName !== 'TEXTAREA') return;
+                        if(el.dataset.ott === undefined) el.dataset.ott = el.title || '';
+                        el.disabled = lock;
+                        el.title = lock ? 'أكمل الحقول المطلوبة في الصف الأول أولاً ★' : el.dataset.ott;
+                        el.style.opacity = lock ? '.55' : '';
+                    });
+                });
+            }catch(e){}
+        }
+        try{
+            if(!window._fwGateBound){
+                window._fwGateBound = true;
+                const _gateEv = (e)=>{
+                    try{
+                        const t = e.target;
+                        if(t && t.dataset && t.dataset.drow !== undefined && t.closest && t.closest('#fwDetailWrap')){
+                            fwDetailGate(+t.dataset.drow);
+                        }
+                    }catch(_){}
+                };
+                document.addEventListener('input', _gateEv);
+                document.addEventListener('change', _gateEv);
+            }
+        }catch(e){}
         function fwDetailSubKey(i){
             try{
                 const d = (fwDetails() || [])[i] || {};
@@ -1226,7 +1285,29 @@
                         el = document.querySelector(`[data-drow="${i}"][data-didx="${ri}"][data-dcol="${CSS.escape(col)}"]`);
                     }
                 }
-                if(el){ el.focus(); try{ if(el.select && /text|number|password/.test(el.type)) el.select(); }catch(e){} }
+                if(el && !el.disabled){ el.focus(); try{ if(el.select && /text|number|password/.test(el.type)) el.select(); }catch(e){} }
+            }catch(e){}
+        }
+        // خطوة رأسية تتخطى الصفوف المقفلة (بوابة الصف الأول)
+        function fwGridStep(i, ri, col, dir){
+            try{
+                let n = ri + dir, guard = 0;
+                while(guard < 80){
+                    const el = document.querySelector(`[data-drow="${i}"][data-didx="${n}"][data-dcol="${CSS.escape(col)}"]`);
+                    if(el){
+                        if(!el.disabled){ el.focus(); try{ if(el.select && /text|number|password/.test(el.type)) el.select(); }catch(e){} }
+                        return;
+                    }
+                    const rows = fwDetailRows[i] || [];
+                    if(dir > 0 && n === rows.length){
+                        try{ collectDetailRows(); }catch(e){}
+                        (fwDetailRows[i] = fwDetailRows[i] || []).push({});
+                        paintDetailGrids();
+                        guard++;
+                        continue;
+                    }
+                    return;
+                }
             }catch(e){}
         }
         function fwGridKey(e, i, ri, col, el){
@@ -1253,9 +1334,9 @@
                     if(e.key === 'Escape'){ fwACHide(); e.preventDefault(); return; }
                     return;
                 }
-                if(e.key === 'ArrowDown'){ e.preventDefault(); fwGridFocus(i, ri + 1, col); }
-                else if(e.key === 'ArrowUp'){ e.preventDefault(); fwGridFocus(i, ri - 1, col); }
-                else if(e.key === 'Enter'){ e.preventDefault(); fwGridFocus(i, ri + 1, col); }
+                if(e.key === 'ArrowDown'){ e.preventDefault(); fwGridStep(i, ri, col, 1); }
+                else if(e.key === 'ArrowUp'){ e.preventDefault(); fwGridStep(i, ri, col, -1); }
+                else if(e.key === 'Enter'){ e.preventDefault(); fwGridStep(i, ri, col, 1); }
                 else if(e.key === 'ArrowLeft' || e.key === 'ArrowRight'){
                     e.preventDefault();
                     try{
