@@ -1598,8 +1598,12 @@ def api_models_design_save(request, app_name):
                     continue
                 _dt = (_d.get("table") or "").strip()
                 _dm, _dd = (_d.get("master") or "").strip(), (_d.get("detail") or "").strip()
-                if not _dt or not _dm or not _dd:
+                if not _dt or not _dm:
                     continue
+                _dcols = _d.get("columns") or []
+                _has_j = any(isinstance(c, dict) and c.get("junction") for c in _dcols)
+                if not _dd and not _has_j:
+                    return JsonResponse({"error": f"التفاصيل {_dt}: حدد عمود الربط (FK) أو أضف حقول رابط"}, status=400)
                 de = ET.SubElement(d_el, "detail")
                 de.set("table", _dt)
                 de.set("alias", str(_d.get("alias") or _dt))
@@ -1615,7 +1619,6 @@ def api_models_design_save(request, app_name):
                 if isinstance(_dvis, str):
                     _dvis = _dvis.strip().lower() not in ("0", "false", "no", "hide", "hidden")
                 de.set("visible", "1" if bool(_dvis) else "0")
-                _dcols = _d.get("columns") or []
                 _customs = [c for c in _dcols if isinstance(c, dict) and c.get("junction")]
                 if _customs:
                     # third table main_sub — single server-side source (migrate builds it)
@@ -2887,13 +2890,13 @@ def _query_detail_rows(comp, det, key, db):
         sch, tbl = tbl.split(".", 1)
     if not _re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", tbl):
         raise ValueError("invalid table")
-    fk = det["detail"]
-    if not _re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", fk):
+    fk = det.get("detail") or ""
+    _jx = det.get("junction") or {}
+    _jtable = (_jx.get("table") or "").strip()
+    if not _jtable and not _re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", fk):
         raise ValueError("invalid link column")
     if not getattr(db, "conn", None):
         db.connect()
-    _jx = det.get("junction") or {}
-    _jtable = (_jx.get("table") or "").strip()
     if _jtable:
         from . import custom_models as _cmj
         _jm = _cmj.get_model((_jx.get("model") or _jtable).strip())
@@ -3248,15 +3251,17 @@ def api_fmlk_branch_save(request):
         sch = comp.fml_metadata().get("schema") or "public"
         if "." in tbl:
             sch, tbl = tbl.split(".", 1)
-        fk = det["detail"]
-        if not _re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", tbl) or not _re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", fk):
-            return JsonResponse({"error": "invalid table/link"}, status=400)
+        fk = det.get("detail") or ""
+        if not _re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", tbl):
+            return JsonResponse({"error": "invalid table"}, status=400)
         eng = _fmlk_get_engine(fml, app)
         db = eng.db
         if not getattr(db, "conn", None):
             db.connect()
         _jx = det.get("junction") or {}
         _jtable = (_jx.get("table") or "").strip()
+        if not _jtable and not _re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", fk):
+            return JsonResponse({"error": "invalid link column"}, status=400)
         if _jtable:
             # junction mode: replace junction rows (master_id/detail_id/customs);
             # sub table untouched (shared catalog)

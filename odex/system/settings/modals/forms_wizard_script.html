@@ -315,7 +315,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                             <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">الجدول المتفرع</label><select onchange="fwBranchChanged(${i})" data-b="table" class="wb-inp font-mono" dir="ltr"><option value="">— اختر —</option>${fwTablesCache.map(t=>`<option value="${fwEsc(t.full || t.name)}" ${b.table&&fwBareTbl(b.table)===fwBareTbl(t.full||t.name)?'selected':''}>${fwEsc(t.full || t.name)}${t.custom ? ' ★' : ''}</option>`).join('')}</select></div>
                             <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">الاسم المعروض</label><input value="${fwEsc(b.alias || '')}" oninput="fwBranches[${i}].alias=this.value" placeholder="البنود" class="wb-inp"></div>
                             <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">عمود الأساسي (PK)</label><select onchange="fwBranches[${i}].master=this.value" class="wb-inp font-mono" dir="ltr"><option value="">—</option>${masterOpts}</select></div>
-                            <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">عمود الربط (FK)</label><select onchange="fwBranches[${i}].detail=this.value" class="wb-inp font-mono" dir="ltr"><option value="">—</option>${cache.map(c=>`<option ${b.detail===c.name?'selected':''}>${fwEsc(c.name)}</option>`).join('')}</select></div>
+                            <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">عمود الربط (FK)${((fwInputs || []).some(x=>x.destination === ('junction:' + b.table) && x.name)) ? ' <span class="text-teal-600">— اختياري مع حقول الرابط</span>' : ''}</label><select onchange="fwBranches[${i}].detail=this.value" class="wb-inp font-mono" dir="ltr"><option value="">—</option>${cache.map(c=>`<option ${b.detail===c.name?'selected':''}>${fwEsc(c.name)}</option>`).join('')}</select></div>
                             <div class="flex items-end gap-1">
                                 <button onclick="fwImportBranchInputs(${i})" title="استيراد أعمدة المتفرع كمدخلات" class="px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg font-bold text-[11px]"><i class="fa-solid fa-download"></i></button>
                                 <button onclick="fwBranchColsOpen(${i})" title="أعمدة شبكة التفاصيل" class="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg font-bold text-[11px]"><i class="fa-solid fa-table-columns"></i> ${(b.cols||[]).length || ''}</button>
@@ -1722,7 +1722,9 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             }
             for(const b of fwBranches){
                 if(!b.table) throw new Error('أكمل الجدول المتفرع (اختر الجدول)');
-                if(!b.master || !b.detail) throw new Error(`الجدول المتفرع ${b.alias || b.table}: حدد عمود الأساسي وعمود الربط`);
+                if(!b.master) throw new Error(`الجدول المتفرع ${b.alias || b.table}: حدد عمود الأساسي (PK)`);
+                const _hasJ = fwInputs.some(x=>x.destination === ('junction:' + b.table) && x.name);
+                if(!b.detail && !_hasJ) throw new Error(`الجدول المتفرع ${b.alias || b.table}: حدد عمود الربط (FK) — أو أضف حقول رابط ليُبنى جدول ثالث`);
             }
             const tabById = {};
             fwTabs.forEach((t, i)=>{ tabById[t.id] = t; });
