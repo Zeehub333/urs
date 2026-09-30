@@ -1638,6 +1638,14 @@ def api_models_design_save(request, app_name):
                         ce.set("input_type", str(_c.get("input_type") or _c.get("inputType") or "text"))
                         if _c.get("required"):
                             ce.set("required", "1")
+                        if _c.get("editable") is False or str(_c.get("editable", "")).strip().lower() in ("0", "false", "no"):
+                            ce.set("editable", "0")
+                        _ctab = str(_c.get("tab") or "").strip()
+                        if _ctab:
+                            ce.set("tab", _ctab)
+                        _cvis = str(_c.get("visibleIf") or _c.get("visible_if") or "").strip()
+                        if _cvis:
+                            ce.set("visibleIf", _cvis)
                         _cdef = str(_c.get("default", _c.get("defaultValue", "")) or "")
                         if _cdef:
                             ce.set("default", _cdef)
@@ -2926,7 +2934,10 @@ def _query_detail_rows(comp, det, key, db):
                            "input_type": _c.get("input_type") or "text",
                            "required": bool(_c.get("required")),
                            "default": _c.get("default") or "",
-                           "options": _c.get("options") or [], "junction": True})
+                           "options": _c.get("options") or [],
+                           "editable": False if _c.get("editable") is False else True,
+                           "tab": _c.get("tab") or "",
+                           "visibleIf": _c.get("visibleIf") or "", "junction": True})
         for _c in _subcols:
             _gcols.append({"name": _c["name"], "alias": _c.get("alias") or _c["name"],
                            "data_type": _c.get("data_type") or "VARCHAR",

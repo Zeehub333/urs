@@ -990,6 +990,7 @@
             const dt = String(c.data_type || '').toUpperCase();
             // حقول الرابط المخصصة: تُرسم حسب نوع المدخل المهيأ في «تعديل التفاصيل»
             if(c.junction){
+                if(c.editable === false) return `<td class="p-1"><div title="غير قابل للتحرير" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-slate-500">${escHtml(val)}</div></td>`;
                 if(it === 'select' || it === 'status' || it === 'radio'){
                     const opts = Array.isArray(c.options) ? c.options : [];
                     return `<td class="p-1"><select data-drow="${i}" data-dcol="${escAttr(nm)}" data-didx="${ri}"${req} class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5"><option value="">—</option>${opts.map(o=>{ const v = (o && typeof o === 'object') ? (o.value ?? o.label ?? '') : o; const l = (o && typeof o === 'object') ? (o.label ?? o.value ?? '') : o; return `<option value="${escAttr(v)}" ${String(val) === String(v) ? 'selected' : ''}>${escHtml(l)}</option>`; }).join('')}</select></td>`;
@@ -1041,7 +1042,7 @@
                         <div class="flex items-center gap-1 flex-wrap">${sibBar}${dlBtn}<button onclick="fwDetailAddRow(${i})" class="px-2.5 py-1 bg-violet-50 hover:bg-violet-100 text-violet-700 rounded-lg text-[11px] font-bold"><i class="fa-solid fa-plus"></i> إضافة سطر</button></div>
                     </div>
                     <div class="overflow-x-auto border border-slate-200 rounded-xl"><table class="w-full text-[11px]" dir="rtl">
-                        <thead class="bg-slate-100 text-slate-700"><tr><th class="p-1.5 text-right whitespace-nowrap w-28"><span class="inline-block px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 text-[10px] font-bold ml-1">ID</span>${escHtml(refAlias)}</th>${cols.map(c=>`<th class="p-1.5 text-right whitespace-nowrap">${escHtml(c.alias || c.name)}${c.junction ? ' <span class="text-[9px] text-teal-600 font-bold">⬡</span>' : ''}</th>`).join('')}<th class="w-10"></th></tr></thead>
+                        <thead class="bg-slate-100 text-slate-700"><tr><th class="p-1.5 text-right whitespace-nowrap w-28"><span class="inline-block px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 text-[10px] font-bold ml-1">ID</span>${escHtml(refAlias)}</th>${cols.map(c=>`<th class="p-1.5 text-right whitespace-nowrap">${escHtml(c.alias || c.name)}${c.required ? ' <span class="text-rose-500 font-bold">*</span>' : ''}${c.junction ? ' <span class="text-[9px] text-teal-600 font-bold">⬡</span>' : ''}</th>`).join('')}<th class="w-10"></th></tr></thead>
                         <tbody>${rows.map((r, ri)=>{
                             const refVal = jx ? (((r['detail_id'] ?? '') !== '' ? String(r['detail_id']) : '(New)')) : ((r[d.detail] ?? '') !== '' ? String(r[d.detail]) : (mkey !== '' ? String(mkey) : '(New)'));
                             const isNew = jx ? ((r['detail_id'] ?? '') === '') : ((r[d.detail] ?? '') === '');
