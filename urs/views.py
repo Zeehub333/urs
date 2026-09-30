@@ -1604,6 +1604,18 @@ def api_models_design_save(request, app_name):
                 _has_j = any(isinstance(c, dict) and c.get("junction") for c in _dcols)
                 if not _dd and not _has_j:
                     return JsonResponse({"error": f"التفاصيل {_dt}: حدد عمود الربط (FK) أو أضف حقول رابط"}, status=400)
+                _seen_c = set()
+                for _cc in _dcols:
+                    if not isinstance(_cc, dict):
+                        continue
+                    _cn = (_cc.get("name") or "").strip()
+                    if not _cn:
+                        continue
+                    if _cn.lower() in _seen_c:
+                        return JsonResponse({"error": f"عمود مكرر '{_cn}' في تفاصيل {_dt}"}, status=400)
+                    _seen_c.add(_cn.lower())
+                    if _cc.get("junction") and _cn.lower() in ("id", "master_id", "detail_id"):
+                        return JsonResponse({"error": f"الحقل '{_cn}' محجوز لجدول الرابط (id/master_id/detail_id) في {_dt}"}, status=400)
                 de = ET.SubElement(d_el, "detail")
                 de.set("table", _dt)
                 de.set("alias", str(_d.get("alias") or _dt))

@@ -1712,13 +1712,16 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             if(!fwMainTable) throw new Error('اختر الجدول الأساسي');
             const mains = fwInputs.filter(x=>!x.destination || x.destination==='main');
             if(!mains.length) throw new Error('أضف مدخلاً واحداً على الأقل للجدول الأساسي');
+            // التكرار لكل وجهة على حدة (كل جدول نطاق مستقل: id الأساسي ≠ id الفرعي)
             const _seenNames = new Set();
+            const _destAr = (d)=> (!d || d === 'main') ? 'الأساسي' : (String(d).startsWith('junction:') ? ('رابط ' + d.slice(9).split('.').pop()) : ('تفاصيل ' + String(d).split('.').pop()));
             for(const x of fwInputs){
                 const nm = (x.name || '').trim();
                 if(!nm) continue;
                 if(!/^[A-Za-z_][A-Za-z0-9_]*$/.test(nm)) throw new Error(`الاسم البرمجي '${nm}' غير صالح (لاتيني + _ فقط)`);
-                if(_seenNames.has(nm.toLowerCase())) throw new Error(`اسم برمجي مكرر: '${nm}'`);
-                _seenNames.add(nm.toLowerCase());
+                const _key = (x.destination || 'main') + '|||' + nm.toLowerCase();
+                if(_seenNames.has(_key)) throw new Error(`اسم برمجي مكرر: '${nm}' في ${_destAr(x.destination)}`);
+                _seenNames.add(_key);
             }
             for(const b of fwBranches){
                 if(!b.table) throw new Error('أكمل الجدول المتفرع (اختر الجدول)');
