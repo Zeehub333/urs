@@ -3247,6 +3247,29 @@ def api_fmlk_master_branch(request):
         return JsonResponse({"error": str(e)}, status=500)
 
 
+def _junction_unknown_keys(rows, allowed):
+    """Keys carrying data but absent from the junction table → stale model.
+
+    Pure helper (unit-testable): returns ordered unique names holding a
+    non-empty value, ignoring id/master_id/detail_id/allowed/invalid keys.
+    """
+    import re as _re
+    out = []
+    for r in (rows or []):
+        if not isinstance(r, dict):
+            continue
+        for k, v in r.items():
+            if k in ("id", "master_id", "detail_id") or k in (allowed or set()):
+                continue
+            if not _re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", str(k)):
+                continue
+            if v is None or (isinstance(v, str) and v.strip() == ""):
+                continue
+            if k not in out:
+                out.append(k)
+    return out
+
+
 @csrf_exempt
 def api_fmlk_branch_save(request):
     """POST /api/fmlk/branch/save {fml,app,detail,key,rows[]} — replace branch rows for master key."""
@@ -3293,6 +3316,14 @@ def api_fmlk_branch_save(request):
             _jsch = (_jm.get("schema") or sch or "public").strip()
             _allowed = {"detail_id"} | {(c.get("name") or "") for c in (_jm.get("fields") or [])
                                         if (c.get("name") or "") not in ("id", "master_id")}
+            # فحص مبكر قبل الحذف: قيمة لحقل ليس عموداً في جدول الرابط تعني
+            # موديل/جدول قديماً (حقل مخصص أُضيف بعد آخر ترحيل) — خطأ صريح
+            # بدل إسقاط صامت كان يُخزِّن السطر بالأيديهات فقط وتضيع بقيته
+            _unknown = _junction_unknown_keys(rows, _allowed)
+            if _unknown:
+                return JsonResponse({"error": "الحقول (" + "، ".join(_unknown) +
+                                     f") غير موجودة في جدول الرابط '{_jtable}' — أعد الترحيل "
+                                     "من المصمم (حفظ + ترحيل) لإنشاء أعمدتها، وإلا ضاعت قيمها"}, status=400)
             n = 0
             db._exec(f'DELETE FROM "{_jsch}"."{_jtable}" WHERE "master_id" = :key', {"key": key}, commit=True)
             for r in rows:

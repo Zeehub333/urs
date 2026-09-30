@@ -1815,7 +1815,10 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                     }catch(e){}
                     try{ notify(`تم الحفظ والترحيل ✓ (${(data2.columns || []).length} عمود)${jmsg}`, 'success'); }catch(e){}
                 } else {
-                    try{ notify(`تم حفظ النموذج ${data.file} ✓`, 'success'); }catch(e){}
+                    try{
+                        const _hasJ = (fwInputs || []).some(x=>String(x.destination || '').startsWith('junction:') && (x.name || '').trim());
+                        notify(`تم حفظ النموذج ${data.file} ✓` + (_hasJ ? ' — تنبيه: نفّذ (حفظ + ترحيل) حتى تُنشأ أعمدة حقول الرابط، وإلا حُفظت السطور بالأيديهات فقط' : ''), _hasJ ? 'info' : 'success');
+                    }catch(e){}
                 }
                 setTimeout(()=>location.reload(), 900);
             }catch(e){ fwErr(e.message); }
