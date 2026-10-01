@@ -1464,7 +1464,8 @@
         }
         function fwSibPaint(i){
             const bar = document.getElementById(`fwSibBar_${i}`);
-            const srcs = fwDetailSibs[i] || [];
+            // نستبعد مصدر التجربة — الاستيراد يبقى للجداول المرتبطة الحقيقية فقط
+            const srcs = (fwDetailSibs[i] || []).filter(s=>String(s.master_label || s.fml || '').trim() !== 'تجربة');
             if(!bar) return;
             bar.innerHTML = srcs.map((s, k)=>`<button onclick="fwSiblingOpen(${i},${k})" title="يجلب سجلات ${escAttr(s.master_label || '')} المتفرعة من نفس الجدول" class="px-2.5 py-1 bg-orange-500 hover:bg-orange-600 text-white rounded-lg text-[11px] font-bold"><i class="fa-solid fa-plus"></i> إضافة من ${escHtml(s.master_label || s.fml)}</button>`).join('');
         }
