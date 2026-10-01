@@ -14,6 +14,20 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
         function fwDetailDests(b){ if(!b || !b.table) return []; return ['junction:' + b.table, 'ref:' + b.table]; }
         function fwIsDetailDest(d){ const s = String(d || ''); return s.startsWith('junction:') || s.startsWith('ref:'); }
         function fwRefTableOf(dest){ const s = String(dest || ''); return s.startsWith('ref:') ? s.slice(4) : s; }
+        function fwBranchOfDest(dest){
+            // فرع الوجهة لأي صيغة: b.table (مباشر) أو junction:/ref: + الجدول
+            const s = String(dest || '');
+            const t = s.startsWith('junction:') ? s.slice(9) : (s.startsWith('ref:') ? s.slice(4) : s);
+            return (fwBranches || []).find(b=>b && b.table && (b.table === t || b.table === s)) || null;
+        }
+        function fwDropBranchCol(b, name){
+            // حذف العمود من شبكة الفرع أيضاً — وإلا بُعث عند الحفظ (دمج عمود شبكة)
+            try{
+                if(!b || !(name || '').trim()) return;
+                const nl = String(name).trim().toLowerCase();
+                b.cols = (b.cols || []).filter(c=>String((c && c.name) || '').toLowerCase() !== nl);
+            }catch(e){}
+        }
         function fwDetailTypeLocked(r){
             // المخصص (وجهة رابط) حر دائماً؛ المرتبط/المرجع مقفل نوعه إن كان عموداً بالقاعدة
             const dest = String(r.destination || '');
@@ -1035,7 +1049,10 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
         }
         function fwDetailEditDel(k){
             const ix = (fwInputs || []).findIndex(x=>x.key === k);
-            if(ix >= 0) fwInputs.splice(ix, 1);
+            if(ix >= 0){
+                try{ const x = fwInputs[ix]; if(x) fwDropBranchCol(fwBranchOfDest(x.destination), x.name); }catch(e){}
+                fwInputs.splice(ix, 1);
+            }
             fwDetailEditRender();
         }
         function fwDetailEditRender(){
@@ -1121,12 +1138,24 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             const b = fwBranches[fwBranchIdx];
             if(!b) return closeFwBranchCols();
             const checked = [...document.querySelectorAll('#fwBranchColsList [data-bcol]:checked')].map(ch=>ch.dataset.bcol);
+            const before = (b.cols || []).map(c=>String((c && c.name) || '').toLowerCase()).filter(Boolean);
+            const keep = checked.map(n=>String(n || '').toLowerCase());
             const cache = b.colsCache || [];
             b.cols = checked.map(n=>{
                 const hit = cache.find(c=>c.name===n) || {};
                 const old = (b.cols || []).find(c=>c.name===n) || {};
                 return {name: n, alias: old.alias || n, data_type: (fwMapDbType(hit.type).dataType)};
             });
+            // غير المحدد = محذوف من الشبكة: أسقط مدخلاته المباشرة/المرجعية أيضاً (الرابط يُدار من تعديل التفاصيل)
+            try{
+                const gone = before.filter(n=>n && !keep.includes(n));
+                if(gone.length) fwInputs = (fwInputs || []).filter(x=>{
+                    if(!x || !x.name) return true;
+                    if(!gone.includes(String(x.name).toLowerCase())) return true;
+                    const d = String(x.destination || '');
+                    return !(d === b.table || d === ('ref:' + b.table));
+                });
+            }catch(e){}
             closeFwBranchCols();
             fwRenderSheet();
         }
@@ -1351,7 +1380,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             fwInputs.push({key:'manual_'+Date.now(), table: fwMainTable, name:'', alias:'', icon:'', inputType:'text', dataType:'VARCHAR', destination:'main', required:false, computed:false, expr:'', editable:true, tab:(fwTabs[0]||{}).id || 'البيانات الأساسية', options:[], options_source:[], refTable:'', refFk:'', refDisplay:'', visibleIf:'',config:{}});
             fwRenderSheet();
         }
-        function fwDelInput(i){ fwInputs.splice(i,1); fwRenderSheet(); }
+        function fwDelInput(i){ try{ const x = fwInputs[i]; if(x) fwDropBranchCol(fwBranchOfDest(x.destination), x.name); }catch(e){} fwInputs.splice(i,1); fwRenderSheet(); }
         function fwInputMain(i){
             // عمود رئيسي واحد فقط: التعيين ينقل النجمة، وإعادة الضغط تلغيها
             const on = !fwInputs[i].is_main_col;
@@ -1782,7 +1811,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                 // دمج تلقائي عند تطابق الاسم بين مصادر مختلفة (الأقوى يبقى، والباقي
                 // يُحذف من الحمولة مع تنبيه) — الأولوية: حقل رابط > عمود مباشر >
                 // مرجع بحث > عمود شبكة. يمنع خطأ «مكرر» عند أي تعديل.
-                const _known = new Set([...fromInputs, ...refs].map(f=>(f.name || '').toLowerCase()));
+                const _known = new Set([...fromInputs, ...refs, ...customs].map(f=>(f.name || '').toLowerCase()));
                 const gridOnly = (b.cols || []).filter(c=>!_known.has((c.name || '').toLowerCase())).map(c=>({name: c.name, alias: c.alias || c.name, data_type: c.data_type || 'VARCHAR', input_type: 'text', _src: 'عمود شبكة'}));
                 const _prio = {'حقل رابط': 4, 'عمود مباشر': 3, 'مرجع بحث': 2, 'عمود شبكة': 1};
                 const _merged = [...fromInputs, ...gridOnly, ...refs, ...customs];
