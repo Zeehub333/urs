@@ -32,6 +32,9 @@
         body.form-view-on #formHeaderActions { display: inline-flex; }
         /* ── شبكة التفاصيل بنمط Access: ورقة بيانات متصلة بلا صناديق ── */
         .fw-acc-wrap { border: 1px solid #7f7f7f; background: #fff; }
+        /* ارتفاع ثابت بمدى ~10 صفوف + تمرير داخلي (بلا مطّ للصفحة) */
+        .fw-acc-scroll { max-height: 320px; overflow: auto; }
+        table.fw-acc thead th.fw-acc-h { position: sticky; top: 0; z-index: 3; box-shadow: 0 1px 0 #7f7f7f; }
         table.fw-acc { border-collapse: collapse; width: 100%; font-size: 12px; background: #fff; }
         table.fw-acc thead th.fw-acc-h { background: #e8e8e8; color: #1f1f1f; font-weight: 700; border: 1px solid #7f7f7f; padding: 5px 6px; text-align: right; white-space: nowrap; }
         table.fw-acc td.fw-acc-c { border: 1px solid #b5b5b5; padding: 0; background: #fff; vertical-align: middle; }
@@ -1049,6 +1052,39 @@
                 while(n < 10 && guard < 12){ fwDetailRows[i].push({}); n++; guard++; }
             }catch(e){}
         }
+        // سطر واحد بنمط Access (يُستخدم في الرسم الأولي + الزيادة الحية بلا إعادة رسم)
+        function fwDetailRowHtml(i, d, jx, cols, r, ri, mkey){
+            const refVal = jx ? (((r['detail_id'] ?? '') !== '' ? String(r['detail_id']) : '(New)')) : ((r[d.detail] ?? '') !== '' ? String(r[d.detail]) : (mkey !== '' ? String(mkey) : '(New)'));
+            // جديد = بلا هوية مخزنة (رابط: بلا id، مباشر: بلا FK) — يُعلَّم بنجمة ★ في عمود التحديد
+            const isNew = jx ? !(r['id'] ?? '') : ((r[d.detail] ?? '') === '');
+            return `<tr>`
+            + `<td class="fw-acc-c fw-acc-id"><input value="${escAttr(refVal)}" readonly tabindex="-1" title="العمود المرجعي للمطابقة one_to_many" class="fw-acc-in fw-acc-id" dir="ltr"></td>`
+            + `<td class="fw-acc-sel">${isNew ? '<span style="color:#b45309;font-weight:bold" title="سطر جديد — سيُحفظ">★</span>' : ''}</td>`
+            + cols.map(c=>fwDetailCell(i, ri, c, r)).join('') + `<td class="fw-acc-del"><button onclick="fwDetailDelRow(${i},${ri})" class="text-rose-400 hover:text-rose-600 px-1"><i class="fa-solid fa-trash"></i></button></td></tr>`;
+        }
+        // زيادة حية: عند امتلاء الصفوف العشرة يُلحق صفوفاً فارغة بلا إعادة رسم (يحفظ التركيز)
+        function fwDetailTopUp(i, minEmpty){
+            try{
+                minEmpty = (minEmpty == null ? 10 : minEmpty);
+                fwDetailRows[i] = fwDetailRows[i] || [];
+                const isEmpty = (r)=>{ if(!r) return true; return !Object.keys(r).some(k=>{ const v = r[k]; return v !== '' && v !== null && v !== undefined; }); };
+                const n = fwDetailRows[i].filter(isEmpty).length;
+                if(n >= minEmpty) return;
+                const tb = document.getElementById(`fwAccBody_${i}`);
+                if(!tb) return;
+                const gd = fwDetailGridCols(i);
+                const d = gd.d || {};
+                let mkey = '';
+                try{ mkey = fwMasterKey() || ''; }catch(e){}
+                let add = minEmpty - n, guard = 0;
+                while(add > 0 && guard < 12){
+                    fwDetailRows[i].push({});
+                    tb.insertAdjacentHTML('beforeend', fwDetailRowHtml(i, d, gd.jx, gd.cols, {}, fwDetailRows[i].length - 1, mkey));
+                    add--; guard++;
+                }
+                try{ fwDetailGate(i); }catch(e){}
+            }catch(e){}
+        }
         function paintDetailGrids(){
             const wrap = document.getElementById('fwDetailWrap');
             if(!wrap) return;
@@ -1078,16 +1114,9 @@
                         <div class="text-xs font-bold text-slate-700 flex items-center gap-2"><i class="fa-solid fa-diagram-project text-violet-600"></i> ${escHtml(d.alias || d.table)} <span class="text-[10px] text-slate-400 font-normal">(${rows.length})</span></div>
                         <div class="flex items-center gap-1 flex-wrap">${sibBar}${dlBtn}<button onclick="fwDetailAddRow(${i})" class="px-2.5 py-1 bg-violet-50 hover:bg-violet-100 text-violet-700 rounded-lg text-[11px] font-bold"><i class="fa-solid fa-plus"></i> إضافة سطر</button></div>
                     </div>
-                    <div class="overflow-x-auto fw-acc-wrap"><table class="fw-acc" dir="rtl">
+                    <div class="fw-acc-wrap fw-acc-scroll"><table class="fw-acc" dir="rtl">
                         <thead><tr><th class="fw-acc-h" style="width:90px">ID ${escHtml(refAlias)}</th><th class="fw-acc-h" style="width:26px" title="سطر جديد لم يُحفظ"></th>${cols.map(c=>`<th class="fw-acc-h" ${c.ref ? 'title="مرجع بحث — لا يُخزَّن"' : ''}>${escHtml(c.alias || c.name)}${c.required ? ' <span style="color:#c00;font-weight:bold">*</span>' : ''}${c.junction ? ' <span style="font-size:9px;color:#0f766e;font-weight:bold">⬡</span>' : ''}${c.ref ? ' <span style="font-size:9px;color:#b45309;font-weight:bold">🔍</span>' : ''}</th>`).join('')}<th class="fw-acc-h" style="width:34px"></th></tr></thead>
-                        <tbody>${rows.map((r, ri)=>{
-                            const refVal = jx ? (((r['detail_id'] ?? '') !== '' ? String(r['detail_id']) : '(New)')) : ((r[d.detail] ?? '') !== '' ? String(r[d.detail]) : (mkey !== '' ? String(mkey) : '(New)'));
-                            // جديد = بلا هوية مخزنة (رابط: بلا id، مباشر: بلا FK) — يُعلَّم بنجمة ★ في عمود التحديد
-                            const isNew = jx ? !(r['id'] ?? '') : ((r[d.detail] ?? '') === '');
-                            return `<tr>`
-                            + `<td class="fw-acc-c fw-acc-id"><input value="${escAttr(refVal)}" readonly tabindex="-1" title="العمود المرجعي للمطابقة one_to_many" class="fw-acc-in fw-acc-id" dir="ltr"></td>`
-                            + `<td class="fw-acc-sel">${isNew ? '<span style="color:#b45309;font-weight:bold" title="سطر جديد — سيُحفظ">★</span>' : ''}</td>`
-                            + cols.map(c=>fwDetailCell(i, ri, c, r)).join('') + `<td class="fw-acc-del"><button onclick="fwDetailDelRow(${i},${ri})" class="text-rose-400 hover:text-rose-600 px-1"><i class="fa-solid fa-trash"></i></button></td></tr>`; }).join('') || `<tr><td colspan="${cols.length + 3}" class="p-3 text-center text-slate-400">لا سطور — أضف سطراً أو أنزل البيانات</td></tr>`}</tbody>
+                        <tbody id="fwAccBody_${i}">${rows.map((r, ri)=>fwDetailRowHtml(i, d, jx, cols, r, ri, mkey)).join('') || `<tr><td colspan="${cols.length + 3}" class="p-3 text-center text-slate-400">لا سطور — أضف سطراً أو أنزل البيانات</td></tr>`}</tbody>
                     </table></div>
                 </div>`;
             }).join('');
@@ -1156,6 +1185,7 @@
                         const t = e.target;
                         if(t && t.dataset && t.dataset.drow !== undefined && t.closest && t.closest('#fwDetailWrap')){
                             fwDetailGate(+t.dataset.drow);
+                            fwDetailTopUp(+t.dataset.drow);
                         }
                     }catch(_){}
                 };
