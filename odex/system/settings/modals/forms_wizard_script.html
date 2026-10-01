@@ -48,6 +48,18 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
         let fwMainColsMeta = null; // last columns response (custom/migrated flags)
         let fwInputs = []; // {key,table,name,alias,icon,inputType,dataType,destination,required,computed,expr,editable,tab,options[],options_source[],refTable,refFk,refDisplay,config{}}
         let fwBranches = []; // {table,alias,master,detail,cols:[{name,alias,data_type}],colsCache:[]}
+        let fwNameLock0 = new Set(); // وجهات|||أسماء مثبتة عند فتح المعالج (ملف محفوظ) — تُقفل بعد أول إضافة
+        function fwNormDest(d){ const s = String(d || ''); return (!s || s === 'main') ? 'main' : s; }
+        function fwSnapNameLock(){
+            // لقطة الأسماء المثبتة: كل مدخلات الملف المحمل (أساسية + تفاصيل بأنواعها)
+            try{
+                fwNameLock0 = new Set();
+                (fwInputs || []).forEach(x=>{
+                    const nm = String((x && x.name) || '').trim().toLowerCase();
+                    if(nm) fwNameLock0.add(fwNormDest(x.destination) + '|||' + nm);
+                });
+            }catch(e){ fwNameLock0 = new Set(); }
+        }
         let fwTabs = []; // {id,name,alias,order,visibleIf}
         let fwDetailsTab = 'التفاصيل'; // تسمية تبويبة التفاصيل في المشغل
         let fwTypes = []; // field-types registry
@@ -77,6 +89,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             fwConnId = ''; fwConnName = ''; fwSchema = ''; fwTablesCache = [];
             fwMainTable = ''; fwMainColsCache = [];
             fwInputs = []; fwBranches = [];
+            try{ fwNameLock0 = new Set(); }catch(e){}
             fwTabs = [{id:'البيانات الأساسية', name:'البيانات الأساسية', alias:'البيانات الأساسية', order:1, visibleIf:'', is_main:true}];
             fwDetailsTab = 'التفاصيل';
             ['fmlProgName','fmlDisplayName','fmlFileName','fmlCategory','fmlDescription'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
@@ -161,6 +174,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                     });
                 });
             }catch(e){ fwErr(e.message); }
+            try{ fwSnapNameLock(); }catch(e){} // تثبيت أسماء الملف المحمل (تُقفل المخصصة بعد أول إضافة)
             fwShowSheet('tables');
         }
         // ── الاتصالات المحلية فقط ──
@@ -1070,7 +1084,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                 const opts = Array.isArray(x.options) ? x.options.map(o=>((o && typeof o === 'object') ? (o.value ?? o.label ?? '') : o)).join(', ') : '';
                 const showOpts = ['select','status','radio'].includes(x.inputType);
                 return '<div class="grid grid-cols-12 gap-1 items-center bg-slate-50 border border-slate-200 rounded-xl p-1.5">'
-                    + `<div class="col-span-2"><input value="${fwEsc(x.name || '')}" oninput="fwInputs[${ki}].name=this.value" placeholder="programmatic_name" title="الاسم البرمجي" class="wb-inp !py-1 font-mono" dir="ltr"></div>`
+                    + (fwNameLocked(x) ? `<div class="col-span-2"><span class="font-mono text-slate-500" dir="ltr" title="مثبت بعد الإضافة — مقفل">${fwEsc(x.name)} <i class="fa-solid fa-lock text-[9px]"></i></span></div>` : `<div class="col-span-2"><input value="${fwEsc(x.name || '')}" oninput="fwInputs[${ki}].name=this.value" placeholder="programmatic_name" title="الاسم البرمجي" class="wb-inp !py-1 font-mono" dir="ltr"></div>`)
                     + `<div class="col-span-2"><input value="${fwEsc(x.alias || '')}" oninput="fwInputs[${ki}].alias=this.value" placeholder="الاسم المعروض" class="wb-inp !py-1"></div>`
                     + `<div class="col-span-2"><select onchange="fwInputs[${ki}].inputType=this.value;fwDetailEditRender()" title="نوع المدخل" class="wb-inp !py-1 font-mono" dir="ltr">` + FW_DETAIL_INPUT_TYPES.map(t=>`<option value="${t}" ${x.inputType===t?'selected':''}>${t}</option>`).join('') + `</select></div>`
                     + `<div class="col-span-2"><select onchange="fwInputs[${ki}].dataType=this.value" title="نوع البيانات" class="wb-inp !py-1 font-mono" dir="ltr">` + FW_DETAIL_DATA_TYPES.map(t=>`<option value="${t}" ${x.dataType===t?'selected':''}>${t}</option>`).join('') + `</select></div>`
@@ -1388,17 +1402,21 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             try{ fwRenderSheet(); }catch(e){}
         }
         function fwNameLocked(r){
-            // الاسم البرمجي مقفل إن كان عموداً موجوداً بالقاعدة، وقابل للتحرير إن لم يوجد
+            // الاسم البرمجي مقفل إن كان: عموداً مستورداً موجوداً بالقاعدة (أساسي + تفاصيل
+            // بأنواعها الثلاث)، أو اسماً مثبتاً من ملف محفوظ (المخصصة بعد أول إضافة)
             try{
                 const nm = String((r && r.name) || '').trim().toLowerCase();
                 if(!nm) return false;
+                const dest = fwNormDest((r && r.destination) || 'main');
                 let cols = [];
-                const dest = (r && r.destination) || 'main';
                 if(dest === 'main') cols = fwMainColsCache || [];
-                else if(fwIsDetailDest(dest)){ const b = (fwBranches || []).find(x=>x.table === fwRefTableOf(dest)); cols = (b && (b.colsCache || b.cols)) || []; }
-                else { const b = (fwBranches || []).find(x=>x.table === dest); cols = (b && (b.colsCache || b.cols)) || []; }
-                return cols.some(c=>String(((c && c.name) ?? c) || '').trim().toLowerCase() === nm);
-            }catch(e){ return false; }
+                else { const b = fwBranchOfDest(dest); cols = (b && (b.colsCache || b.cols)) || []; }
+                if(cols.some(c=>String(((c && c.name) ?? c) || '').trim().toLowerCase() === nm)) return true;
+                try{
+                    if(fwNameLock0 && fwNameLock0.has(dest + '|||' + nm)) return true;
+                }catch(_){}
+            }catch(e){}
+            return false;
         }
         function fwMoveInput(i, dir){ const j = i + dir; if(j < 0 || j >= fwInputs.length) return; const t = fwInputs[i]; fwInputs[i] = fwInputs[j]; fwInputs[j] = t; fwRenderSheet(); }
         // ── مودال نوع البيانات ──
