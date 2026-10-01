@@ -1752,11 +1752,14 @@
             try{ return evalOr(c); }catch(e){ return true; }
         }
         function fmlkVisibleApply(){
+            // لا تسحب البساط أبداً: إخفاء عنصر تحت التركيز يُفقد الكتابة — يُؤجَّل حتى blur
+            const _hasFocus = (el)=>{ try{ return !!(el && el.contains && document.activeElement && el.contains(document.activeElement)); }catch(e){ return false; } };
             (fmlMeta.fields || []).forEach(f => {
                 const cond = f.visibleIf || f.visible_if;
                 if(!cond) return;
                 const show = fmlkVisibleCheck(cond);
                 document.querySelectorAll(`[data-vis-field="${CSS.escape(f.name)}"]`).forEach(el => {
+                    if(!show && _hasFocus(el)) return;
                     el.style.display = show ? '' : 'none';
                 });
             });
@@ -1773,6 +1776,7 @@
                 if(btn) btn.style.display = show ? '' : 'none';
                 if(!body) { if(show && firstVisible < 0) firstVisible = ci; return; }
                 if(!show){
+                    if(_hasFocus(body)) return; // التبويب النشط تحت التحرير — يُخفى بعد blur
                     body.dataset.visHidden = '1';
                     body.style.display = 'none';
                 } else if(body.dataset.visHidden){
