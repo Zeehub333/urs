@@ -30,6 +30,21 @@
         body.form-view-on #formPanel > div { max-width: none; margin: 0; border-radius: 0; border: 0; max-height: none; height: 100%; box-shadow: none; }
         #formHeaderActions { display: none; }
         body.form-view-on #formHeaderActions { display: inline-flex; }
+        /* ── شبكة التفاصيل بنمط Access: ورقة بيانات متصلة بلا صناديق ── */
+        .fw-acc-wrap { border: 1px solid #7f7f7f; background: #fff; }
+        table.fw-acc { border-collapse: collapse; width: 100%; font-size: 12px; background: #fff; }
+        table.fw-acc thead th.fw-acc-h { background: #e8e8e8; color: #1f1f1f; font-weight: 700; border: 1px solid #7f7f7f; padding: 5px 6px; text-align: right; white-space: nowrap; }
+        table.fw-acc td.fw-acc-c { border: 1px solid #b5b5b5; padding: 0; background: #fff; vertical-align: middle; }
+        table.fw-acc tbody tr:hover td.fw-acc-c { background: #dbe9f9; }
+        table.fw-acc tbody tr:hover td.fw-acc-c .fw-acc-in { background: transparent; }
+        .fw-acc-in { display: block; width: 100%; border: 0; border-radius: 0; outline: none; background: transparent; padding: 5px 6px; font-size: 12px; color: #111; box-shadow: none; }
+        .fw-acc-in:focus { background: #fff; box-shadow: inset 0 0 0 2px #2b579a; }
+        select.fw-acc-in { appearance: auto; }
+        .fw-acc-in:disabled { background: #efefef; color: #777; }
+        table.fw-acc td.fw-acc-sel { background: #e8e8e8; border: 1px solid #7f7f7f; text-align: center; width: 26px; }
+        table.fw-acc td.fw-acc-id { background: #efefef; }
+        table.fw-acc input.fw-acc-id { background: transparent; color: #555; font-family: monospace; }
+        table.fw-acc td.fw-acc-del { background: #fff; border: 1px solid #b5b5b5; text-align: center; width: 34px; }
 {% endblock %}
 {% block sidebar %}
     <!-- Sidebar — kept for navigation (Forms + Reports) -->
@@ -983,46 +998,47 @@
             return {d, jx: !!(d.junction && d.junction.table), cols: base};
         }
         function fwDetailCell(i, ri, c, r){
+            // نمط Access: خلية شبكية متصلة + محرر شفاف بلا حدود يملأ الخلية (كل الألوان/الحواف عبر CSS)
             const nm = c.name, al = c.alias || c.name;
             const val = (r[nm] ?? '') === '' && (c.default != null && String(c.default) !== '') && (r[nm] === undefined || r[nm] === '') ? String(c.default) : (r[nm] ?? '');
             const req = c.required ? ' required' : '';
             const it = String(c.input_type || '').toLowerCase();
             const dt = String(c.data_type || '').toUpperCase();
+            const _ds = `data-drow="${i}" data-dcol="${escAttr(nm)}" data-didx="${ri}"`;
             // حقول الرابط المخصصة: تُرسم حسب نوع المدخل المهيأ في «تعديل التفاصيل»
             if(c.junction){
-                if(c.editable === false) return `<td class="p-1"><div title="غير قابل للتحرير" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-slate-500">${escHtml(val)}</div></td>`;
+                if(c.editable === false) return `<td class="fw-acc-c"><div title="غير قابل للتحرير" class="fw-acc-in" style="color:#777;background:#efefef">${escHtml(val)}</div></td>`;
                 if(it === 'select' || it === 'status' || it === 'radio'){
                     const opts = Array.isArray(c.options) ? c.options : [];
-                    return `<td class="p-1"><select data-drow="${i}" data-dcol="${escAttr(nm)}" data-didx="${ri}"${req} class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5"><option value="">—</option>${opts.map(o=>{ const v = (o && typeof o === 'object') ? (o.value ?? o.label ?? '') : o; const l = (o && typeof o === 'object') ? (o.label ?? o.value ?? '') : o; return `<option value="${escAttr(v)}" ${String(val) === String(v) ? 'selected' : ''}>${escHtml(l)}</option>`; }).join('')}</select></td>`;
+                    return `<td class="fw-acc-c"><select ${_ds}${req} class="fw-acc-in"><option value="">—</option>${opts.map(o=>{ const v = (o && typeof o === 'object') ? (o.value ?? o.label ?? '') : o; const l = (o && typeof o === 'object') ? (o.label ?? o.value ?? '') : o; return `<option value="${escAttr(v)}" ${String(val) === String(v) ? 'selected' : ''}>${escHtml(l)}</option>`; }).join('')}</select></td>`;
                 }
                 if(it === 'boolean'){
                     const on = String(val).toLowerCase() === '1' || String(val).toLowerCase() === 'true';
-                    return `<td class="p-1 text-center"><input type="checkbox" data-drow="${i}" data-dcol="${escAttr(nm)}" data-didx="${ri}" ${on ? 'checked' : ''} class="w-4 h-4 accent-emerald-600"></td>`;
+                    return `<td class="fw-acc-c" style="text-align:center"><input type="checkbox" ${_ds} ${on ? 'checked' : ''} class="w-4 h-4 accent-emerald-600"></td>`;
                 }
                 if(it === 'date' || it === 'datetime' || it === 'time'){
                     const tp = it === 'date' ? 'date' : (it === 'time' ? 'time' : 'datetime-local');
-                    return `<td class="p-1"><input type="${tp}" data-drow="${i}" data-dcol="${escAttr(nm)}" data-didx="${ri}" value="${escAttr(val)}"${req} class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5"></td>`;
+                    return `<td class="fw-acc-c"><input type="${tp}" ${_ds} value="${escAttr(val)}"${req} class="fw-acc-in"></td>`;
                 }
                 if(it === 'textarea'){
-                    return `<td class="p-1"><input type="text" data-drow="${i}" data-dcol="${escAttr(nm)}" data-didx="${ri}" value="${escAttr(val)}"${req} class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5"></td>`;
+                    return `<td class="fw-acc-c"><input type="text" ${_ds} value="${escAttr(val)}"${req} class="fw-acc-in"></td>`;
                 }
                 if(it === 'password'){
-                    return `<td class="p-1"><input type="password" data-drow="${i}" data-dcol="${escAttr(nm)}" data-didx="${ri}" value="${escAttr(val)}"${req} autocomplete="new-password" title="حقل سري — يُخزَّن HASH" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5" dir="auto"></td>`;
+                    return `<td class="fw-acc-c"><input type="password" ${_ds} value="${escAttr(val)}"${req} autocomplete="new-password" title="حقل سري — يُخزَّن HASH" class="fw-acc-in" dir="auto"></td>`;
                 }
                 // نص/رقم مخصص: إكمال تلقائي من عمود الفرعي المطابق (إن وجد) + تنقل لوحة المفاتيح
                 const num = /INT|NUMERIC|DECIMAL|FLOAT|DOUBLE|REAL|NUMBER/.test(dt) || it === 'number';
-                return `<td class="p-1"><input type="${num ? 'number' : 'text'}" data-drow="${i}" data-dcol="${escAttr(nm)}" data-didx="${ri}" value="${escAttr(val)}"${req} oninput="fwDetailAC(${i},${ri},'${escAttr(nm)}',this,true)" onkeydown="fwGridKey(event,${i},${ri},'${escAttr(nm)}',this)" onfocus="if(this.value.trim())fwDetailAC(${i},${ri},'${escAttr(nm)}',this,true)" autocomplete="off" title="اكتب للبحث — ↑↓ للتنقل و Enter للاختيار" class="w-full bg-white border border-teal-200 rounded-lg px-2 py-1.5" dir="auto"></td>`;
+                return `<td class="fw-acc-c"><input type="${num ? 'number' : 'text'}" ${_ds} value="${escAttr(val)}"${req} oninput="fwDetailAC(${i},${ri},'${escAttr(nm)}',this,true)" onkeydown="fwGridKey(event,${i},${ri},'${escAttr(nm)}',this)" onfocus="if(this.value.trim())fwDetailAC(${i},${ri},'${escAttr(nm)}',this,true)" autocomplete="off" title="اكتب للبحث — ↑↓ للتنقل و Enter للاختيار" class="fw-acc-in" dir="auto"></td>`;
             }
             // أعمدة جدول الفرعي + مراجع البحث: إكمال تلقائي رأسي لقيم العمود — الاختيار يملأ السطر أفقياً
             // (السرية type=password: بلا إكمال تلقائي أبداً حتى لا تتسرب القيم في الاقتراحات)
             if(it === 'password'){
-                return `<td class="p-1"><input type="password" data-drow="${i}" data-dcol="${escAttr(nm)}" data-didx="${ri}" value="${escAttr(val)}"${req} autocomplete="new-password" title="حقل سري — يُخزَّن HASH" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5" dir="auto"></td>`;
+                return `<td class="fw-acc-c"><input type="password" ${_ds} value="${escAttr(val)}"${req} autocomplete="new-password" title="حقل سري — يُخزَّن HASH" class="fw-acc-in" dir="auto"></td>`;
             }
             const num = /INT|NUMERIC|DECIMAL|FLOAT|DOUBLE|REAL|NUMBER/.test(dt);
             const isRef = !!c.ref;
-            const _bd = isRef ? 'border-amber-300' : 'border-violet-200';
             const _tt = isRef ? `مرجع بحث 🔍 — اكتب للبحث في ${escAttr(al)} (لا يُخزَّن) — ↑↓ ثم Enter يملأ السطر كاملاً` : `اكتب للبحث في سجلات ${escAttr(al)} — ↑↓ ثم Enter يملأ السطر كاملاً`;
-            return `<td class="p-1"><div class="relative"><input type="${num ? 'number' : 'text'}" data-drow="${i}" data-dcol="${escAttr(nm)}" data-didx="${ri}" value="${escAttr(val)}" oninput="fwDetailAC(${i},${ri},'${escAttr(nm)}',this,false)" onkeydown="fwGridKey(event,${i},${ri},'${escAttr(nm)}',this)" onfocus="if(this.value.trim())fwDetailAC(${i},${ri},'${escAttr(nm)}',this,false)" autocomplete="off" title="${_tt}" class="w-full bg-white border ${_bd} rounded-lg px-2 ${isRef ? 'pl-7' : ''} py-1.5" dir="auto">${isRef ? '<span class="absolute left-2 top-1/2 -translate-y-1/2 text-amber-500 text-[11px] pointer-events-none">🔍</span>' : ''}</div></td>`;
+            return `<td class="fw-acc-c"><div style="position:relative"><input type="${num ? 'number' : 'text'}" ${_ds} value="${escAttr(val)}" oninput="fwDetailAC(${i},${ri},'${escAttr(nm)}',this,false)" onkeydown="fwGridKey(event,${i},${ri},'${escAttr(nm)}',this)" onfocus="if(this.value.trim())fwDetailAC(${i},${ri},'${escAttr(nm)}',this,false)" autocomplete="off" title="${_tt}" class="fw-acc-in"${isRef ? ' style="padding-left:22px"' : ''} dir="auto">${isRef ? '<span style="position:absolute;left:6px;top:50%;transform:translateY(-50%);color:#b45309;font-size:11px;pointer-events:none">🔍</span>' : ''}</div></td>`;
         }
         // مخزون 10 صفوف فارغة دائماً — ينمو مع الإدخال (لا يمس الصفوف القائمة)
         function fwDetailEnsurePool(i){
@@ -1062,16 +1078,16 @@
                         <div class="text-xs font-bold text-slate-700 flex items-center gap-2"><i class="fa-solid fa-diagram-project text-violet-600"></i> ${escHtml(d.alias || d.table)} <span class="text-[10px] text-slate-400 font-normal">(${rows.length})</span></div>
                         <div class="flex items-center gap-1 flex-wrap">${sibBar}${dlBtn}<button onclick="fwDetailAddRow(${i})" class="px-2.5 py-1 bg-violet-50 hover:bg-violet-100 text-violet-700 rounded-lg text-[11px] font-bold"><i class="fa-solid fa-plus"></i> إضافة سطر</button></div>
                     </div>
-                    <div class="overflow-x-auto border border-slate-200 rounded-xl"><table class="w-full text-[11px]" dir="rtl">
-                        <thead class="bg-slate-100 text-slate-700"><tr><th class="p-1.5 text-right whitespace-nowrap w-28"><span class="inline-block px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 text-[10px] font-bold ml-1">ID</span>${escHtml(refAlias)}</th><th class="w-6" title="سطر جديد لم يُحفظ"></th>${cols.map(c=>`<th class="p-1.5 text-right whitespace-nowrap" ${c.ref ? 'title="مرجع بحث — لا يُخزَّن"' : ''}>${escHtml(c.alias || c.name)}${c.required ? ' <span class="text-rose-500 font-bold">*</span>' : ''}${c.junction ? ' <span class="text-[9px] text-teal-600 font-bold">⬡</span>' : ''}${c.ref ? ' <span class="text-[9px] text-amber-500 font-bold">🔍</span>' : ''}</th>`).join('')}<th class="w-10"></th></tr></thead>
+                    <div class="overflow-x-auto fw-acc-wrap"><table class="fw-acc" dir="rtl">
+                        <thead><tr><th class="fw-acc-h" style="width:90px">ID ${escHtml(refAlias)}</th><th class="fw-acc-h" style="width:26px" title="سطر جديد لم يُحفظ"></th>${cols.map(c=>`<th class="fw-acc-h" ${c.ref ? 'title="مرجع بحث — لا يُخزَّن"' : ''}>${escHtml(c.alias || c.name)}${c.required ? ' <span style="color:#c00;font-weight:bold">*</span>' : ''}${c.junction ? ' <span style="font-size:9px;color:#0f766e;font-weight:bold">⬡</span>' : ''}${c.ref ? ' <span style="font-size:9px;color:#b45309;font-weight:bold">🔍</span>' : ''}</th>`).join('')}<th class="fw-acc-h" style="width:34px"></th></tr></thead>
                         <tbody>${rows.map((r, ri)=>{
                             const refVal = jx ? (((r['detail_id'] ?? '') !== '' ? String(r['detail_id']) : '(New)')) : ((r[d.detail] ?? '') !== '' ? String(r[d.detail]) : (mkey !== '' ? String(mkey) : '(New)'));
-                            // جديد = بلا هوية مخزنة (رابط: بلا id، مباشر: بلا FK) — يُعلَّم بنجمة ★
+                            // جديد = بلا هوية مخزنة (رابط: بلا id، مباشر: بلا FK) — يُعلَّم بنجمة ★ في عمود التحديد
                             const isNew = jx ? !(r['id'] ?? '') : ((r[d.detail] ?? '') === '');
-                            return `<tr class="border-t border-slate-100 ${isNew ? 'bg-indigo-50/60' : 'bg-white'}">`
-                            + `<td class="p-1"><input value="${escAttr(refVal)}" readonly tabindex="-1" title="العمود المرجعي للمطابقة one_to_many" class="w-full bg-slate-100 border border-slate-200 rounded-lg px-2 py-1.5 text-slate-500 font-mono" dir="ltr"></td>`
-                            + `<td class="p-1 text-center">${isNew ? '<span class="text-amber-500 font-bold" title="سطر جديد — سيُحفظ">★</span>' : ''}</td>`
-                            + cols.map(c=>fwDetailCell(i, ri, c, r)).join('') + `<td class="p-1 text-center"><button onclick="fwDetailDelRow(${i},${ri})" class="text-rose-400 hover:text-rose-600 px-1"><i class="fa-solid fa-trash"></i></button></td></tr>`; }).join('') || `<tr><td colspan="${cols.length + 3}" class="p-3 text-center text-slate-400">لا سطور — أضف سطراً أو أنزل البيانات</td></tr>`}</tbody>
+                            return `<tr>`
+                            + `<td class="fw-acc-c fw-acc-id"><input value="${escAttr(refVal)}" readonly tabindex="-1" title="العمود المرجعي للمطابقة one_to_many" class="fw-acc-in fw-acc-id" dir="ltr"></td>`
+                            + `<td class="fw-acc-sel">${isNew ? '<span style="color:#b45309;font-weight:bold" title="سطر جديد — سيُحفظ">★</span>' : ''}</td>`
+                            + cols.map(c=>fwDetailCell(i, ri, c, r)).join('') + `<td class="fw-acc-del"><button onclick="fwDetailDelRow(${i},${ri})" class="text-rose-400 hover:text-rose-600 px-1"><i class="fa-solid fa-trash"></i></button></td></tr>`; }).join('') || `<tr><td colspan="${cols.length + 3}" class="p-3 text-center text-slate-400">لا سطور — أضف سطراً أو أنزل البيانات</td></tr>`}</tbody>
                     </table></div>
                 </div>`;
             }).join('');
