@@ -53,6 +53,9 @@
         table.fw-acc td.fw-acc-id { background: #efefef; }
         table.fw-acc input.fw-acc-id { background: transparent; color: #555; font-family: monospace; }
         table.fw-acc td.fw-acc-del { background: #fff; border: 1px solid #b5b5b5; text-align: center; width: 34px; }
+        /* خلية محسوبة: قراءة فقط بنفسجية فاتحة (تُحسب من الصف وتُخزن ثابتة) */
+        table.fw-acc input.fw-acc-calc { background: #eef2ff; color: #3730a3; }
+        table.fw-acc tbody tr.fw-acc-locked td.fw-acc-c input.fw-acc-calc { background: #e4e4e4; color: #8a8a8a; }
 {% endblock %}
 {% block sidebar %}
     <!-- Sidebar — kept for navigation (Forms + Reports) -->
@@ -1007,6 +1010,10 @@
             // نمط Access: خلية شبكية متصلة + محرر شفاف بلا حدود يملأ الخلية (كل الألوان/الحواف عبر CSS)
             const nm = c.name, al = c.alias || c.name;
             const val = (r[nm] ?? '') === '' && (c.default != null && String(c.default) !== '') && (r[nm] === undefined || r[nm] === '') ? String(c.default) : (r[nm] ?? '');
+            // عمود محسوب (صيغة XSQL): قراءة فقط — يعرض نتيجة حساب الصف ويُخزن ثابتة
+            if(c.formula){
+                return `<td class="fw-acc-c"><input type="text" data-drow="${i}" data-dcol="${escAttr(nm)}" data-didx="${ri}" value="${escAttr(val)}" readonly tabindex="-1" title="محسوب تلقائياً — ${escAttr(String(c.formula).slice(0, 80))}" class="fw-acc-in fw-acc-calc" dir="auto"></td>`;
+            }
             const req = c.required ? ' required' : '';
             const it = String(c.input_type || '').toLowerCase();
             const dt = String(c.data_type || '').toUpperCase();
@@ -1233,6 +1240,7 @@
                     try{
                         const t = e.target;
                         if(t && t.dataset && t.dataset.drow !== undefined && t.closest && t.closest('#fwDetailWrap')){
+                            fwDetailCalc(+t.dataset.drow);
                             fwDetailGate(+t.dataset.drow);
                             fwDetailTopUp(+t.dataset.drow);
                         }
@@ -1242,6 +1250,25 @@
                 document.addEventListener('change', _gateEv);
             }
         }catch(e){}
+        // إعادة حساب الأعمدة المحسوبة لكل صف (قراءة حية — بلا إعادة رسم فتحفظ التركيز)
+        function fwDetailCalc(i){
+            try{
+                const {cols} = fwDetailGridCols(i);
+                const fcols = (cols || []).filter(c=>c && c.formula);
+                if(!fcols.length) return;
+                const rows = fwDetailRows[i] || [];
+                rows.forEach((r, ri)=>{
+                    const get = (nm)=>fwDetailCellVal(i, ri, nm);
+                    fcols.forEach(c=>{
+                        try{
+                            const v = window.fmlkCalcEval(c.formula, get);
+                            const el = document.querySelector(`[data-drow="${i}"][data-didx="${ri}"][data-dcol="${CSS.escape(c.name)}"]`);
+                            if(el) el.value = (v ?? '');
+                        }catch(e){}
+                    });
+                });
+            }catch(e){}
+        }
         function fwDetailSubKey(i){
             try{
                 const d = (fwDetails() || [])[i] || {};
@@ -1808,6 +1835,192 @@
         function escHtml(s){ return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
         function splitList(s){ return String(s || '').split(',').map(x=>x.trim()).filter(Boolean); }
         function parseJsonVal(v, fb){ if(v===undefined||v===null||v==='') return fb; if(typeof v!=='string') return v; try{ const p=JSON.parse(v); return p; }catch(e){ return fb; } }
+        // مفسّر XSQL عددي للحقول المحسوبة (مرآة fmlk_engine/calc.py) — آمن بلا eval
+        // get(name)/[name] + حساب + مقارنات + AND/OR/NOT + دوال مسموحة فقط
+        window.fmlkCalcEval = window.fmlkCalcEval || function(expr, get){
+            if(expr == null || String(expr).trim() === '') throw new Error('تعبير فارغ');
+            const s = String(expr);
+            const toks = [];
+            let i = 0;
+            const isSp = c=>/\s/.test(c);
+            while(i < s.length){
+                const c = s[i];
+                if(isSp(c)){ i++; continue; }
+                if(c === "'" || c === '"'){
+                    let j = i + 1, out = '';
+                    while(j < s.length){
+                        if(s[j] === c){ if(s[j+1] === c){ out += c; j += 2; continue; } j++; break; }
+                        out += s[j]; j++;
+                    }
+                    toks.push({t: 'str', v: out}); i = j; continue;
+                }
+                const br = s.slice(i).match(/^\[([A-Za-z_][A-Za-z0-9_.]*)\]/);
+                if(br){ toks.push({t: 'ref', v: br[1]}); i += br[0].length; continue; }
+                const nm = s.slice(i).match(/^[0-9]*\.?[0-9]+(?:[eE][+-]?[0-9]+)?/);
+                if(nm && /[0-9]/.test(nm[0])){ toks.push({t: 'num', v: parseFloat(nm[0])}); i += nm[0].length; continue; }
+                const id = s.slice(i).match(/^[A-Za-z_][A-Za-z0-9_]*/);
+                if(id){ toks.push({t: 'name', v: id[0]}); i += id[0].length; continue; }
+                const two = s.substr(i, 2);
+                if(['**', '>=', '<=', '!=', '<>', '=='].includes(two)){ toks.push({t: 'op', v: two}); i += 2; continue; }
+                if('+-*/%^(),<>=&!.'.includes(c)){ toks.push({t: 'op', v: c}); i++; continue; }
+                throw new Error('رمز غير صالح: ' + c);
+            }
+            toks.push({t: 'eof'});
+            let p = 0;
+            const peek = ()=>toks[p], next = ()=>toks[p++];
+            const expect = (v)=>{ const t = next(); if(t.v !== v) throw new Error('صيغة غير صالحة'); };
+            const KW = (v)=>{ const t = peek(); return t.t === 'name' && t.v.toUpperCase() === v; };
+            const num = (v)=>{
+                if(v == null || (typeof v === 'string' && v.trim() === '')) return 0;
+                if(typeof v === 'boolean') return v ? 1 : 0;
+                if(typeof v === 'number') return v;
+                if(v instanceof Date) return v.getTime();
+                const n = parseFloat(String(v).trim().replace(/,/g, ''));
+                if(isNaN(n)) throw new Error('ليست رقماً: ' + v);
+                return n;
+            };
+            const str = (v)=>{
+                if(v == null) return '';
+                if(typeof v === 'boolean') return v ? '1' : '0';
+                if(typeof v === 'number' && Number.isInteger(v)) return String(v);
+                if(v instanceof Date) return v.toISOString();
+                return String(v);
+            };
+            const truthy = (v)=>!(v == null || v === false || v === 0 || v === '' || (typeof v === 'number' && isNaN(v)));
+            const FNS = {
+                IF: (c, a, b)=>truthy(c) ? a : b,
+                COALESCE: (...a)=>{ for(const v of a){ if(v != null && v !== '') return v; } return null; },
+                NULLIF: (a, b)=>eq(a, b) ? null : a,
+                UPPER: (x)=>x == null ? null : str(x).toUpperCase(),
+                LOWER: (x)=>x == null ? null : str(x).toLowerCase(),
+                TRIM: (x)=>x == null ? null : str(x).trim(),
+                LTRIM: (x)=>x == null ? null : str(x).replace(/^\s+/, ''),
+                RTRIM: (x)=>x == null ? null : str(x).replace(/\s+$/, ''),
+                LENGTH: (x)=>x == null ? null : str(x).length,
+                LEN: (x)=>x == null ? null : str(x).length,
+                SUBSTRING: (x, f, l)=>{ if(x == null) return null; const t = str(x); let s = Math.max(0, Math.floor(Number(f)) - 1); return l == null ? t.slice(s) : t.slice(s, s + Math.floor(Number(l))); },
+                SUBSTR: (x, f, l)=>FNS.SUBSTRING(x, f, l),
+                CONCAT: (...a)=>a.map(v=>v == null ? '' : str(v)).join(''),
+                REPLACE: (x, a, b)=>x == null ? null : str(x).split(str(a)).join(str(b)),
+                LEFT: (x, n)=>x == null ? null : str(x).slice(0, Math.floor(Number(n))),
+                RIGHT: (x, n)=>{ if(x == null) return null; const k = Math.floor(Number(n)); return k ? str(x).slice(-k) : ''; },
+                ABS: (x)=>Math.abs(num(x)),
+                ROUND: (x, n)=>{ const k = n == null ? 0 : Math.floor(Number(n)); const m = Math.pow(10, k); return Math.round(num(x) * m) / m; },
+                CEIL: (x)=>Math.ceil(num(x)), CEILING: (x)=>Math.ceil(num(x)),
+                FLOOR: (x)=>Math.floor(num(x)),
+                POWER: (x, y)=>Math.pow(num(x), num(y)), POW: (x, y)=>Math.pow(num(x), num(y)),
+                SQRT: (x)=>{ const v = num(x); return v < 0 ? null : Math.sqrt(v); },
+                MOD: (x, y)=>{ const d = num(y); return d === 0 ? null : num(x) % d; },
+                NOW: ()=>new Date(), CURRENT_DATE: ()=>new Date(),
+                CURRENT_TIMESTAMP: ()=>new Date(),
+                REGEXMATCH: (x, pt)=>{ if(x == null) return false; try{ return new RegExp(str(pt)).test(str(x)); }catch(e){ throw new Error('نمط غير صالح'); } },
+                REGEXEXTRACT: (x, pt, g)=>{ if(x == null) return null; let m; try{ m = str(x).match(new RegExp(str(pt))); }catch(e){ throw new Error('نمط غير صالح'); } if(!m) return null; const gi = g == null ? 0 : Math.floor(Number(g)); return m[gi] !== undefined ? m[gi] : m[0]; },
+                WILDCARDMATCH: (x, wc)=>{ if(x == null) return false; const pat = '^' + str(wc).split('').map(c=>c === '*' ? '.*' : (c === '?' ? '.' : c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))).join('') + '$'; return new RegExp(pat, 's').test(str(x)); }
+            };
+            const resolve = (k)=>{
+                // مطابق تماماً → صغير → المقطع الأخير → صغيره ('' تُعامل كغياب)
+                const opts = [k];
+                const lk = String(k).toLowerCase();
+                if(lk !== k) opts.push(lk);
+                const last = String(k).split('.').pop();
+                if(last !== k) opts.push(last);
+                const ll = last.toLowerCase();
+                if(ll !== k && ll !== lk && ll !== last) opts.push(ll);
+                for(const o of opts){
+                    let v;
+                    try{ v = get(o); }catch(e){ v = undefined; }
+                    if(v !== undefined && !(typeof v === 'string' && v === '')) return v;
+                }
+                try{ const v0 = get(k); return v0 !== undefined ? v0 : null; }catch(e){ return null; }
+            };
+            function eq(a, b){
+                if(a == null || b == null) return a == null && b == null;
+                if(typeof a === 'boolean' || typeof b === 'boolean') return !!a === !!b;
+                if(typeof a === 'number' && typeof b === 'number') return a === b;
+                try{ if(String(a).trim() !== '' && String(b).trim() !== '' && !isNaN(parseFloat(String(a).replace(/,/g, ''))) && !isNaN(parseFloat(String(b).replace(/,/g, '')))) return parseFloat(String(a).replace(/,/g, '')) === parseFloat(String(b).replace(/,/g, '')); }catch(e){}
+                return str(a) === str(b);
+            }
+            function cmp(op, l, r){
+                if(l == null || r == null) return op === '!=' || op === '<>';
+                let lf, rf, numeric = true;
+                try{ lf = num(l); rf = num(r); }catch(e){ numeric = false; }
+                if(!numeric){ const a = str(l), b = str(r); return op === '<' ? a < b : (op === '<=' ? a <= b : (op === '>' ? a > b : a >= b)); }
+                return op === '<' ? lf < rf : (op === '<=' ? lf <= rf : (op === '>' ? lf > rf : lf >= rf));
+            }
+            function parseOr(){ let l = parseAnd(); while(KW('OR')){ next(); const r = parseAnd(); l = truthy(l) ? l : r; } return l; }
+            function parseAnd(){ let l = parseNot(); while(KW('AND')){ next(); const r = parseNot(); l = truthy(l) ? r : l; } return l; }
+            function parseNot(){ if(KW('NOT')){ next(); return !truthy(parseNot()); } return parseCmp(); }
+            function parseCmp(){
+                let l = parseAdd();
+                while(peek().t === 'op' && ['=', '==', '!=', '<>', '>', '>=', '<', '<='].includes(peek().v)){
+                    const op = next().v, r = parseAdd();
+                    l = (op === '=' || op === '==') ? eq(l, r) : ((op === '!=' || op === '<>') ? !eq(l, r) : cmp(op, l, r));
+                }
+                return l;
+            }
+            function parseAdd(){
+                let l = parseMul();
+                while(peek().t === 'op' && (peek().v === '+' || peek().v === '-' || peek().v === '&')){
+                    const op = next().v, r = parseMul();
+                    if(op === '&'){ l = str(l) + str(r); continue; }
+                    if(op === '+'){ try{ l = num(l) + num(r); }catch(e){ l = (l == null && r == null) ? null : str(l) + str(r); } continue; }
+                    l = num(l) - num(r);
+                }
+                return l;
+            }
+            function parseMul(){
+                let l = parseUnary();
+                while(peek().t === 'op' && ['*', '/', '%', '^', '**'].includes(peek().v)){
+                    const op = next().v, r = parseUnary();
+                    if(op === '*'){ l = num(l) * num(r); continue; }
+                    const d = num(r);
+                    if(op === '^' || op === '**'){ try{ l = Math.pow(num(l), d); }catch(e){ l = null; } continue; }
+                    if(d === 0){ l = null; continue; }
+                    l = op === '/' ? num(l) / d : (op === '%' ? num(l) % d : num(l) / d);
+                }
+                return l;
+            }
+            function parseUnary(){
+                if(peek().t === 'op' && peek().v === '-'){ next(); return -num(parseUnary()); }
+                if(peek().t === 'op' && peek().v === '+'){ next(); return +num(parseUnary()); }
+                return parsePrimary();
+            }
+            function parsePrimary(){
+                const t = peek();
+                if(t.t === 'num'){ next(); return t.v; }
+                if(t.t === 'str'){ next(); return t.v; }
+                if(t.t === 'ref'){ next(); return resolve(t.v); }
+                if(t.t === 'name'){
+                    const up = t.v.toUpperCase();
+                    if(up === 'TRUE'){ next(); return true; }
+                    if(up === 'FALSE'){ next(); return false; }
+                    if(up === 'NULL'){ next(); return null; }
+                    if(up === 'GET'){
+                        next(); expect('(');
+                        const a = peek();
+                        let key;
+                        if(a.t === 'str'){ key = a.v; next(); }
+                        else if(a.t === 'name'){ key = a.v; next(); while(peek().t === 'op' && peek().v === '.'){ next(); const seg = peek(); if(seg.t !== 'name') throw new Error('صيغة غير صالحة'); key += '.' + seg.v; next(); } }
+                        else throw new Error('صيغة غير صالحة');
+                        expect(')');
+                        return resolve(key);
+                    }
+                    if(FNS[up]){
+                        next(); expect('(');
+                        const args = [];
+                        if(!(peek().t === 'op' && peek().v === ')')){ args.push(parseOr()); while(peek().t === 'op' && peek().v === ','){ next(); args.push(parseOr()); } }
+                        expect(')');
+                        return FNS[up].apply(null, args);
+                    }
+                    throw new Error("مرجع غير معروف '" + t.v + "' — استخدم get()");
+                }
+                if(t.t === 'op' && t.v === '('){ next(); const v = parseOr(); expect(')'); return v; }
+                throw new Error('صيغة غير صالحة');
+            }
+            const out = parseOr();
+            if(peek().t !== 'eof') throw new Error('صيغة غير صالحة');
+            return out;
+        };
         // جلب JSON آمن: رد HTML (403/404/500) → خطأ عربي واضح بدل Unexpected token
         window.fwFetchJson = window.fwFetchJson || async function(url, init){
             const res = await fetch(url, init);
@@ -1859,7 +2072,10 @@
             const minAttr = validation.min !== undefined ? `min="${validation.min}"` : '';
             const maxAttr = validation.max !== undefined ? `max="${validation.max}"` : '';
             const baseCls = "fx-inp";
-            const t = field.inputType || 'text';
+            const t0 = field.inputType || 'text';
+            // حقل محسوب (صيغة XSQL): قراءة فقط + حساب حي — يُخزن قيمة ثابتة خادمياً
+            const _fx = String(field.formula || field.calc_expr || cfg(field, 'calc_expr') || '').trim();
+            const t = (_fx && t0 !== 'calculated') ? 'calculated' : t0;
             // Handle FK select: if refTable exists, we will enhance via lookup
             if(t === 'select' && field.refTable){
                 const opts = (field.options || []).map(o=>`<option ${o==val?'selected':''}>${escHtml(o)}</option>`).join('');
@@ -2023,8 +2239,8 @@
                         break;
                     }
                     case 'calculated': {
-                        const expr = cfg(field, 'calc_expr');
-                        input = `<div class="flex gap-1.5"><input data-field="${field.name}" value="${escAttr(val)}" readonly class="flex-1 fx-inp font-semibold"/><span class="px-3 py-2 bg-indigo-50 text-indigo-600 rounded-xl text-xs flex items-center" title="محسوب تلقائياً"><i class="fa-solid fa-calculator"></i></span></div><input type="hidden" data-calc="${field.name}" data-calc-expr="${escAttr(expr)}"/>`;
+                        const expr = cfg(field, 'calc_expr') || field.formula || field.calc_expr || '';
+                        input = `<div class="flex gap-1.5"><input data-field="${field.name}" value="${escAttr(val)}" readonly class="flex-1 fx-inp font-semibold"/><span class="px-3 py-2 bg-indigo-50 text-indigo-600 rounded-xl text-xs flex items-center" title="محسوب تلقائياً — ${escAttr(String(expr).slice(0, 80))}"><i class="fa-solid fa-calculator"></i></span></div><input type="hidden" data-calc="${field.name}" data-calc-expr="${escAttr(expr)}"/>`;
                         setTimeout(()=> FMLK.calcRefresh(), 0);
                         break;
                     }
@@ -2793,15 +3009,13 @@
                     const target = h.dataset.calc;
                     const expr = h.dataset.calcExpr || '';
                     if(!expr) return;
-                    const withVals = expr.replace(/\[([A-Za-z0-9_]+)\]/g, (m, k)=>{
-                        const rv = fmlkGet(k);
-                        const n = parseFloat(rv);
-                        return isNaN(n) ? '0' : String(n);
-                    });
-                    if(!/^[0-9+\-*/().\s]+$/.test(withVals)) return;
                     try{
-                        const r = Function('"use strict";return (' + withVals + ')')();
-                        const out = (typeof r === 'number' && isFinite(r)) ? Math.round(r * 100) / 100 : '';
+                        const r = window.fmlkCalcEval(expr, (k)=>fmlkGet(k));
+                        let out;
+                        if(typeof r === 'number' && isFinite(r)) out = Math.round(r * 100) / 100;
+                        else if(r instanceof Date) out = r.toISOString().slice(0, 19).replace('T', ' ');
+                        else if(typeof r === 'boolean') out = r ? '1' : '0';
+                        else out = (r ?? '');
                         h.value = out;
                         const vis = document.querySelector(`input[data-field="${CSS.escape(target)}"]`);
                         if(vis) vis.value = out;
@@ -2899,6 +3113,7 @@
             const el = e.target;
             if(el && el.matches && el.matches('[data-field]') && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')){
                 try{ fmlkVisibleApply(); }catch(err){}
+                try{ if(window.FMLK) FMLK.calcRefresh(); }catch(err){}
             }
         });
 
