@@ -3094,6 +3094,39 @@ def api_fmlk_action_test_connection(request):
         return JsonResponse({"error": str(e)}, status=500)
 
 
+def _junction_grid_cols(det):
+    """Player grid columns for junction mode: detail_id + customs + sub display columns.
+
+    Carries the required flag for customs AND display sub-columns — the
+    detail grid gate (gray-out + «هذا الحقل مطلوب») reads it. Pure.
+    """
+    import re as _re
+    _gcols = [{"name": "detail_id", "alias": "المرجع الفرعي", "data_type": "INTEGER",
+               "input_type": "number", "junction": True}]
+    _custs = [c for c in ((det or {}).get("columns") or []) if isinstance(c, dict) and c.get("junction")]
+    for _c in _custs:
+        _gcols.append({"name": _c["name"], "alias": _c.get("alias") or _c["name"],
+                       "data_type": _c.get("data_type") or "VARCHAR",
+                       "input_type": _c.get("input_type") or "text",
+                       "required": bool(_c.get("required")),
+                       "default": _c.get("default") or "",
+                       "options": _c.get("options") or [],
+                       "editable": False if _c.get("editable") is False else True,
+                       "tab": _c.get("tab") or "",
+                       "visibleIf": _c.get("visibleIf") or "", "junction": True})
+    for _c in ((det or {}).get("columns") or []):
+        if not isinstance(_c, dict) or _c.get("junction"):
+            continue
+        if not _re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", _c.get("name", "")):
+            continue
+        _gcols.append({"name": _c["name"], "alias": _c.get("alias") or _c["name"],
+                       "data_type": _c.get("data_type") or "VARCHAR",
+                       "input_type": _c.get("input_type") or "text",
+                       "required": bool(_c.get("required")),
+                       "ref": bool(_c.get("ref"))})
+    return _gcols
+
+
 def _query_detail_rows(comp, det, key, db):
     """Shared branch reader for branch/master-branch endpoints.
 
@@ -3147,24 +3180,7 @@ def _query_detail_rows(comp, det, key, db):
             cur.close()
         except Exception:
             pass
-        _gcols = [{"name": "detail_id", "alias": "المرجع الفرعي", "data_type": "INTEGER",
-                   "input_type": "number", "junction": True}]
-        for _c in _custs:
-            _gcols.append({"name": _c["name"], "alias": _c.get("alias") or _c["name"],
-                           "data_type": _c.get("data_type") or "VARCHAR",
-                           "input_type": _c.get("input_type") or "text",
-                           "required": bool(_c.get("required")),
-                           "default": _c.get("default") or "",
-                           "options": _c.get("options") or [],
-                           "editable": False if _c.get("editable") is False else True,
-                           "tab": _c.get("tab") or "",
-                           "visibleIf": _c.get("visibleIf") or "", "junction": True})
-        for _c in _subcols:
-            _gcols.append({"name": _c["name"], "alias": _c.get("alias") or _c["name"],
-                           "data_type": _c.get("data_type") or "VARCHAR",
-                           "input_type": _c.get("input_type") or "text",
-                           "ref": bool(_c.get("ref"))})
-        return rows, _gcols, True
+        return rows, _junction_grid_cols(det), True
     cols = [c["name"] for c in (det.get("columns") or []) if _re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", c.get("name", ""))]
     sel = ", ".join(f'"{c}"' for c in cols) if cols else "*"
     cur = db._exec(f'SELECT {sel} FROM "{sch}"."{tbl}" WHERE "{fk}" = :key', {"key": key})
