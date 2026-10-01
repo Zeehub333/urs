@@ -38,8 +38,13 @@
         table.fw-acc { border-collapse: collapse; width: 100%; font-size: 12px; background: #fff; }
         table.fw-acc thead th.fw-acc-h { background: #e8e8e8; color: #1f1f1f; font-weight: 700; border: 1px solid #7f7f7f; padding: 5px 6px; text-align: right; white-space: nowrap; }
         table.fw-acc td.fw-acc-c { border: 1px solid #b5b5b5; padding: 0; background: #fff; vertical-align: middle; }
-        table.fw-acc tbody tr:hover td.fw-acc-c { background: #dbe9f9; }
-        table.fw-acc tbody tr:hover td.fw-acc-c .fw-acc-in { background: transparent; }
+        table.fw-acc tbody tr:not(.fw-acc-locked):hover td.fw-acc-c { background: #dbe9f9; }
+        table.fw-acc tbody tr:not(.fw-acc-locked):hover td.fw-acc-c .fw-acc-in { background: transparent; }
+        /* صف مقفل تسلسلياً: رمادي كامل حتى اكتمال المطلوب في الصفوف السابقة */
+        table.fw-acc tbody tr.fw-acc-locked td.fw-acc-c { background: #e4e4e4; }
+        table.fw-acc tbody tr.fw-acc-locked td.fw-acc-c .fw-acc-in { color: #8a8a8a; }
+        table.fw-acc tbody tr.fw-acc-locked td.fw-acc-sel,
+        table.fw-acc tbody tr.fw-acc-locked td.fw-acc-del { background: #d3d3d3; }
         .fw-acc-in { display: block; width: 100%; border: 0; border-radius: 0; outline: none; background: transparent; padding: 5px 6px; font-size: 12px; color: #111; box-shadow: none; }
         .fw-acc-in:focus { background: #fff; box-shadow: inset 0 0 0 2px #2b579a; }
         select.fw-acc-in { appearance: auto; }
@@ -1159,21 +1164,53 @@
                 return req.every(c=>{ const v = fwDetailCellVal(i, ri, c.name); return v !== undefined && v !== null && String(v).trim() !== ''; });
             }catch(e){ return true; }
         }
-        function fwDetailGate(i){
+        function fwDetailFirstMissing(i, ri){
+            // أول حقل مطلوب فارغ في الصف — للتنبيه والتركيز عليه عند محاولة التجاوز
             try{
                 const req = fwDetailReqCols(i);
-                const firstDone = !req.length || fwDetailRowComplete(i, 0);
+                for(const c of (req || [])){
+                    const v = fwDetailCellVal(i, ri, c.name);
+                    if(v === undefined || v === null || String(v).trim() === '') return c.name;
+                }
+            }catch(e){}
+            return null;
+        }
+        function fwDetailGate(i){
+            // قفل تسلسلي صفاً صفاً: الصف ri (ri>0) مقفل ورمادي ما دام أي صف سابق غير مكتمل
+            try{
+                const req = fwDetailReqCols(i);
                 const rows = fwDetailRows[i] || [];
-                rows.forEach((r, ri)=>{
-                    if(ri === 0) return;
-                    const lock = !firstDone;
+                const unlockRow = (ri)=>{
                     document.querySelectorAll(`[data-drow="${i}"][data-didx="${ri}"]`).forEach(el=>{
                         if(el.tagName !== 'INPUT' && el.tagName !== 'SELECT' && el.tagName !== 'TEXTAREA') return;
-                        if(el.dataset.ott === undefined) el.dataset.ott = el.title || '';
-                        el.disabled = lock;
-                        el.title = lock ? 'أكمل الحقول المطلوبة في الصف الأول أولاً ★' : el.dataset.ott;
-                        el.style.opacity = lock ? '.55' : '';
+                        el.disabled = false;
+                        if(el.dataset.ott !== undefined) el.title = el.dataset.ott;
                     });
+                    try{
+                        const fc = document.querySelector(`[data-drow="${i}"][data-didx="${ri}"]`);
+                        const tr = fc && fc.closest ? fc.closest('tr') : null;
+                        if(tr) tr.classList.remove('fw-acc-locked');
+                    }catch(_){}
+                };
+                if(!req.length){ rows.forEach((r, ri)=>unlockRow(ri)); return; }
+                let blocked = false; // يُرفع بعد أول صف غير مكتمل فيُقفل كل ما بعده
+                rows.forEach((r, ri)=>{
+                    const lock = ri > 0 && blocked;
+                    if(!lock){ unlockRow(ri); }
+                    else{
+                        document.querySelectorAll(`[data-drow="${i}"][data-didx="${ri}"]`).forEach(el=>{
+                            if(el.tagName !== 'INPUT' && el.tagName !== 'SELECT' && el.tagName !== 'TEXTAREA') return;
+                            if(el.dataset.ott === undefined) el.dataset.ott = el.title || '';
+                            el.disabled = true;
+                            el.title = 'أكمل الحقول المطلوبة في الصفوف السابقة أولاً ★';
+                        });
+                        try{
+                            const fc = document.querySelector(`[data-drow="${i}"][data-didx="${ri}"]`);
+                            const tr = fc && fc.closest ? fc.closest('tr') : null;
+                            if(tr) tr.classList.add('fw-acc-locked');
+                        }catch(_){}
+                    }
+                    if(!fwDetailRowComplete(i, ri)) blocked = true;
                 });
             }catch(e){}
         }
@@ -1334,14 +1371,30 @@
                 if(el && !el.disabled){ el.focus(); try{ if(el.select && /text|number|password/.test(el.type)) el.select(); }catch(e){} }
             }catch(e){}
         }
-        // خطوة رأسية تتخطى الصفوف المقفلة (بوابة الصف الأول)
+        // خطوة رأسية: المقفل يُمنع — والنزول/Enter على صف ناقص ينبه «هذا الحقل مطلوب» ويركّز عليه
         function fwGridStep(i, ri, col, dir){
             try{
                 let n = ri + dir, guard = 0;
                 while(guard < 80){
                     const el = document.querySelector(`[data-drow="${i}"][data-didx="${n}"][data-dcol="${CSS.escape(col)}"]`);
                     if(el){
-                        if(!el.disabled){ el.focus(); try{ if(el.select && /text|number|password/.test(el.type)) el.select(); }catch(e){} }
+                        if(!el.disabled){ el.focus(); try{ if(el.select && /text|number|password/.test(el.type)) el.select(); }catch(e){} return; }
+                        if(dir > 0){
+                            try{
+                                const miss = fwDetailFirstMissing(i, ri);
+                                if(miss){
+                                    try{
+                                        const now = Date.now();
+                                        if(!window._fwReqMsgAt || now - window._fwReqMsgAt > 1200){
+                                            window._fwReqMsgAt = now;
+                                            notify('هذا الحقل مطلوب', 'error');
+                                        }
+                                    }catch(_){}
+                                    const f = document.querySelector(`[data-drow="${i}"][data-didx="${ri}"][data-dcol="${CSS.escape(miss)}"]`);
+                                    if(f && !f.disabled){ f.focus(); try{ if(f.select && /text|number|password/.test(f.type)) f.select(); }catch(_){} }
+                                }
+                            }catch(_){}
+                        }
                         return;
                     }
                     const rows = fwDetailRows[i] || [];
