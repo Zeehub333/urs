@@ -6,6 +6,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
 import re
 from .compiler import FMLKFormCompiler, FMLKField
+from .calc import eval_calc_row, calc_refs, make_row_getter, CalcError
 try:
     from rml_python.oracle_engine import OracleEngine, _q
 except ImportError:
@@ -194,6 +195,8 @@ class FMLKFormEngine:
                 continue
             val = data.get(f.name)
             if f.required and not getattr(f, "display_only", False) and (val is None or str(val).strip() == ""):
+                if (getattr(f, "formula", None) or "").strip() and str(getattr(f, "calc_mode", "default") or "default").lower() == "computed":
+                    continue  # محسوب authoritative: يُملأ حسابياً قبل/أثناء الحفظ
                 errors[f.name] = f"{f.alias} مطلوب"
                 continue  # skip further checks if empty required
             if val is None or str(val).strip() == "":
@@ -367,8 +370,61 @@ class FMLKFormEngine:
         except Exception:
             return False
 
-    def _build_insert(self, data: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
-        """Build INSERT with binds + fixed defaults + formula SQL ([refs] → binds)."""
+    def _formula_fields(self) -> List[Any]:
+        """Fields with a non-empty formula."""
+        try:
+            return [f for f in (self.fields or []) if (getattr(f, "formula", None) or "").strip()]
+        except Exception:
+            return []
+
+    def _apply_formulas(self, data: Dict[str, Any], require_refs: bool = False) -> Tuple[Dict[str, Any], set]:
+        """Recompute XSQL formulas in Python (authoritative static values).
+
+        computed-mode fields are ALWAYS recomputed (incoming values ignored);
+        default-mode (legacy) fields are untouched here (old SQL-embed path).
+        With require_refs=True (partial updates) a field is recomputed only
+        when all its refs exist in data — otherwise the stored value survives.
+        Returns (data, failed): failed ones keep the legacy SQL-embed behavior.
+        Never raises.
+        """
+        try:
+            data = self.apply_defaults(dict(data or {}))
+        except Exception:
+            data = dict(data or {})
+        failed: set = set()
+        try:
+            fields = self._formula_fields()
+        except Exception:
+            return data, failed
+        for f in fields:
+            try:
+                mode = str(getattr(f, "calc_mode", "default") or "default").lower()
+            except Exception:
+                mode = "default"
+            if mode != "computed":
+                continue
+            fx = (getattr(f, "formula", None) or "").strip()
+            if not fx:
+                continue
+            if require_refs:
+                try:
+                    refs = calc_refs(fx)
+                except Exception:
+                    continue
+                if any(r not in (data or {}) for r in refs):
+                    continue
+            try:
+                data[f.name] = eval_calc_row(fx, data)
+            except Exception:
+                failed.add(f.name)
+        return data, failed
+
+    def _build_insert(self, data: Dict[str, Any], calc_done: set | frozenset = frozenset()) -> Tuple[str, Dict[str, Any]]:
+        """Build INSERT with binds + fixed defaults + formula SQL ([refs] → binds).
+
+        calc_done: fields already evaluated in Python (even to None) — their
+        static value is stored, never re-embedded as SQL.
+        """
         data = self.apply_defaults(data)
         cols: List[str] = []
         binds: List[str] = []
@@ -377,11 +433,27 @@ class FMLKFormEngine:
             _disp_ins = {getattr(f, "name", "") for f in (self.fields or []) if getattr(f, "display_only", False)}
         except Exception:
             _disp_ins = set()
+        try:
+            _done = set(calc_done or ())
+        except Exception:
+            _done = set()
         for f in self.fields:
             if f.name in _disp_ins:
                 continue  # عرض فقط — لا يُخزن
             formula = (getattr(f, "formula", None) or "").strip()
             has_val = f.name in data and not (data[f.name] is None or (isinstance(data[f.name], str) and data[f.name].strip() == ""))
+            if f.name in _done and f.name not in _disp_ins:
+                # محسوب بايثون: يُخزن static (حتى None → NULL) بلا تضمين SQL
+                if f.name in data and data[f.name] is not None:
+                    cols.append(_q(f.name))
+                    binds.append(f":{f.name}")
+                    params[f.name] = data[f.name]
+                elif f.name in data:
+                    cols.append(_q(f.name))
+                    binds.append("NULL")
+                else:
+                    continue
+                continue
             if formula and not has_val:
                 # صيغة حسابية: تُنفذ في DB بكل دوال SQL — مراجع [f] تصبح binds
                 cols.append(_q(f.name))
@@ -679,14 +751,15 @@ class FMLKFormEngine:
         return res["rows"][0] if res["rows"] else None
 
     def create_record(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Create record — Add button. Validates (plaintext), then stores secrets HASHED."""
+        """Create record — Add button. Computes formulas (static), validates, stores secrets HASHED."""
         _secrets = self._secret_names()
         data = self._drop_masked_secrets(data, _secrets)
+        data, _calc_done = self._apply_formulas(data)
         errs = self.validate(data)
         if errs:
             raise ValueError(f"Validation failed: {errs}")
         data = self._hash_secrets(data, _secrets)
-        sql, params = self._build_insert(data)
+        sql, params = self._build_insert(data, _calc_done)
         try:
             if not self.db.conn:
                 self.db.connect()
@@ -733,6 +806,7 @@ class FMLKFormEngine:
         # Validate only provided fields
         _secrets = self._secret_names()
         data = self._drop_masked_secrets(data, _secrets)
+        data, _ = self._apply_formulas(data, require_refs=True)
         errs = self.validate({**pk, **data})
         # Filter to only errors for data fields
         errs = {k: v for k, v in errs.items() if k in data}

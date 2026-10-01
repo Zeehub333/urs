@@ -161,13 +161,13 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                     config: f.config || {}
                 }));
                 // الجداول المتفرعة (وضع ربط + ظهور + مفتاح فرعي + حقول الرابط junction)
-                fwBranches = (data.details || []).map(d=>({table: d.table, alias: d.alias || d.table, master: d.master || '', detail: d.detail || '', link_mode: (d.link_mode === 'junction' || (!d.link_mode && ((d.junction && d.junction.table) || ((d.columns || []).some(c=>c && c.junction))))) ? 'junction' : 'direct', sub_key: d.sub_key || d.subKey || 'id', visible: d.visible !== false, cols: (d.columns || []).map(c=>({name: c.name, alias: c.alias || c.name, data_type: c.data_type || 'VARCHAR', input_type: c.input_type || 'text', required: !!c.required, default: (c.default != null ? String(c.default) : ''), options: (Array.isArray(c.options) ? c.options : []), junction: !!c.junction, ref: !!c.ref})), colsCache: []}));
+                fwBranches = (data.details || []).map(d=>({table: d.table, alias: d.alias || d.table, master: d.master || '', detail: d.detail || '', link_mode: (d.link_mode === 'junction' || (!d.link_mode && ((d.junction && d.junction.table) || ((d.columns || []).some(c=>c && c.junction))))) ? 'junction' : 'direct', sub_key: d.sub_key || d.subKey || 'id', visible: d.visible !== false, cols: (d.columns || []).map(c=>({name: c.name, alias: c.alias || c.name, data_type: c.data_type || 'VARCHAR', input_type: c.input_type || 'text', required: !!c.required, default: (c.default != null ? String(c.default) : ''), options: (Array.isArray(c.options) ? c.options : []), junction: !!c.junction, ref: !!c.ref, formula: c.formula || c.calc_expr || '', calc_mode: c.calc_mode || ''})), colsCache: []}));
                 // مدخلات الفروع: أعد بناء جدولها من الأعمدة (تُدمج عند الحفظ) — رابط بوجهة junction: ومرجع بحث بوجهة ref:
                 fwBranches.forEach(b=>{
                     (b.cols || []).forEach(c=>{
                         const dest = c.junction ? ('junction:' + b.table) : (c.ref ? ('ref:' + b.table) : b.table);
                         if(!fwInputs.some(x=>x.destination === dest && x.name === c.name)){
-                            fwInputs.push({key: fwInputKey(dest, c.name), table: b.table, name: c.name, alias: c.alias || c.name, icon:'', inputType: c.input_type || 'text', dataType: c.data_type || 'VARCHAR', destination: dest, required: !!c.required, computed:false, expr:'', editable: (c.editable !== false), displayOnly: !!c.ref, tab: c.tab || fwTabs[0].id, options: (Array.isArray(c.options) ? JSON.parse(JSON.stringify(c.options)) : []), options_source:[], refTable:'', refFk:'', refDisplay:'', visibleIf: c.visibleIf || '',config:{}});
+                            fwInputs.push({key: fwInputKey(dest, c.name), table: b.table, name: c.name, alias: c.alias || c.name, icon:'', inputType: c.input_type || 'text', dataType: c.data_type || 'VARCHAR', destination: dest, required: !!c.required, computed: !!(c.formula || c.calc_expr), expr: (c.formula || c.calc_expr || ''), editable: (c.editable !== false), displayOnly: !!c.ref, tab: c.tab || fwTabs[0].id, options: (Array.isArray(c.options) ? JSON.parse(JSON.stringify(c.options)) : []), options_source:[], refTable:'', refFk:'', refDisplay:'', visibleIf: c.visibleIf || '',config:{}});
                             const _ni = fwInputs[fwInputs.length - 1];
                             if(c.default !== undefined && c.default !== null && String(c.default) !== ''){ _ni.computed = false; _ni.expr = ''; _ni.defaultValue = String(c.default); }
                         }
@@ -1198,7 +1198,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                             <td class="p-1"><input value="${fwEsc(r.displayExpr || '')}" oninput="fwInputs[${i}].displayExpr=this.value" dir="ltr" placeholder="{col} أو [a]+[b]" title="عرض فقط — مرجع {col} من جدول العرض أو حساب. يُقرأ ولا يُخزن" class="wb-inp !py-1 font-mono"></td>
                             <td class="p-1"><button onclick="fwDelInput(${i})" class="text-rose-400 hover:text-rose-600 px-1"><i class="fa-solid fa-trash"></i></button><button onclick="fwMoveInput(${i},-1)" title="لأعلى" class="text-slate-400 hover:text-indigo-600 px-1"><i class="fa-solid fa-arrow-up text-[10px]"></i></button><button onclick="fwMoveInput(${i},1)" title="لأسفل" class="text-slate-400 hover:text-indigo-600 px-1"><i class="fa-solid fa-arrow-down text-[10px]"></i></button></td>
                         </tr>
-                        ${r.computed ? `<tr class="border-t border-indigo-100 bg-indigo-50/40"><td class="p-1 text-[10px] text-indigo-700 font-bold" colspan="2">تعبير الحساب <span class="font-mono" dir="ltr">[col]</span></td><td class="p-1" colspan="11"><input value="${fwEsc(r.expr || '')}" oninput="fwInputs[${i}].expr=this.value" dir="ltr" placeholder="[qty] * [price]" list="fwInputNames" class="wb-inp !py-1 font-mono"></td></tr>` : ''}`;
+                        ${r.computed ? `<tr class="border-t border-indigo-100 bg-indigo-50/40"><td class="p-1 text-[10px] text-indigo-700 font-bold" colspan="2">تعبير الحساب <span class="font-mono" dir="ltr">XSQL</span></td><td class="p-1" colspan="11"><div class="flex items-center gap-1"><input value="${fwEsc(r.expr || '')}" oninput="fwInputs[${i}].expr=this.value" dir="ltr" placeholder="get(qty) * get(price)" list="fwInputNames" title="XSQL: get(col) أو [col] + دوال IF/COALESCE/UPPER/ROUND/REGEXMATCH/المزيد — المرجع للمشغل والقاعدة قيمة ثابتة" class="wb-inp !py-1 font-mono flex-1 min-w-0"><button onclick="fwCalcTest(${i},this)" title="تحقق من الصيغة" class="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg font-bold text-[10px] whitespace-nowrap"><i class="fa-solid fa-vial"></i> تحقق</button><span data-calcm="${i}" class="text-[10px] text-slate-400 whitespace-nowrap"></span></div></td></tr>` : ''}`;
         }
         function fwRenderInputs(body){
             const destOpts = ['main', ...fwBranches.map(b=>b.table).filter(Boolean), ...fwBranches.map(b=>b.table ? ('junction:' + b.table) : '').filter(Boolean), ...fwBranches.map(b=>b.table ? ('ref:' + b.table) : '').filter(Boolean)];
@@ -1823,9 +1823,10 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             const fwColOpts = (x)=> (Array.isArray(x.options) ? x.options.map(o=>((o && typeof o === 'object') ? (o.value ?? o.label ?? '') : o)).filter(o=>String(o).trim() !== '') : []);
             const fwColDef = (x)=> (x.defaultValue != null ? String(x.defaultValue) : (x.default != null ? String(x.default) : ''));
             const details = fwBranches.map(b=>{
-                const fromInputs = fwInputs.filter(x=>x.destination === b.table && x.name).map(x=>({name: x.name.trim(), alias: (x.alias || x.name).trim(), data_type: x.dataType || 'VARCHAR', input_type: x.inputType || 'text', required: !!x.required, default: fwColDef(x), options: fwColOpts(x), editable: x.editable !== false, visibleIf: x.visibleIf || '', tab: x.tab || '', _src: 'عمود مباشر'}));
-                const refs = fwInputs.filter(x=>x.destination === ('ref:' + b.table) && x.name).map(x=>({name: x.name.trim(), alias: (x.alias || x.name).trim(), data_type: x.dataType || 'VARCHAR', input_type: x.inputType || 'text', required: !!x.required, default: fwColDef(x), options: fwColOpts(x), editable: x.editable !== false, visibleIf: x.visibleIf || '', tab: x.tab || '', ref: true, _src: 'مرجع بحث'}));
-                const customs = fwInputs.filter(x=>x.destination === ('junction:' + b.table) && x.name).map(x=>({name: x.name.trim(), alias: (x.alias || x.name).trim(), data_type: x.dataType || 'VARCHAR', input_type: x.inputType || 'text', required: !!x.required, default: fwColDef(x), options: fwColOpts(x), editable: x.editable !== false, visibleIf: x.visibleIf || '', tab: x.tab || '', junction: true, _src: 'حقل رابط'}));
+                const _fxOf = (x)=> ((x.expr || x.formula || '').trim());
+                const fromInputs = fwInputs.filter(x=>x.destination === b.table && x.name).map(x=>({name: x.name.trim(), alias: (x.alias || x.name).trim(), data_type: x.dataType || 'VARCHAR', input_type: x.inputType || 'text', required: !!x.required, default: fwColDef(x), options: fwColOpts(x), editable: x.editable !== false, visibleIf: x.visibleIf || '', tab: x.tab || '', formula: _fxOf(x), calc_mode: _fxOf(x) ? 'computed' : 'default', _src: 'عمود مباشر'}));
+                const refs = fwInputs.filter(x=>x.destination === ('ref:' + b.table) && x.name).map(x=>({name: x.name.trim(), alias: (x.alias || x.name).trim(), data_type: x.dataType || 'VARCHAR', input_type: x.inputType || 'text', required: !!x.required, default: fwColDef(x), options: fwColOpts(x), editable: x.editable !== false, visibleIf: x.visibleIf || '', tab: x.tab || '', ref: true, formula: _fxOf(x), calc_mode: _fxOf(x) ? 'computed' : 'default', _src: 'مرجع بحث'}));
+                const customs = fwInputs.filter(x=>x.destination === ('junction:' + b.table) && x.name).map(x=>({name: x.name.trim(), alias: (x.alias || x.name).trim(), data_type: x.dataType || 'VARCHAR', input_type: x.inputType || 'text', required: !!x.required, default: fwColDef(x), options: fwColOpts(x), editable: x.editable !== false, visibleIf: x.visibleIf || '', tab: x.tab || '', junction: true, formula: _fxOf(x), calc_mode: _fxOf(x) ? 'computed' : 'default', _src: 'حقل رابط'}));
                 // دمج تلقائي عند تطابق الاسم بين مصادر مختلفة (الأقوى يبقى، والباقي
                 // يُحذف من الحمولة مع تنبيه) — الأولوية: حقل رابط > عمود مباشر >
                 // مرجع بحث > عمود شبكة. يمنع خطأ «مكرر» عند أي تعديل.
@@ -1864,6 +1865,20 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                 tabs: fwTabs.map((t, i)=>({id: t.id, name: t.alias || t.name, alias: t.alias || t.name, sort_order: i + 1, visibleIf: t.visibleIf || '', is_main: !!t.is_main})),
                 fields, details, overwrite: !!fwEditMode
             };
+        }
+        async function fwCalcTest(i, btn){
+            // تحقق فوري من تعبير محسوب عبر /api/fmlk/calc-test (بلا قاعدة)
+            try{
+                const x = (fwInputs || [])[i];
+                const expr = ((x && (x.expr || x.formula)) || '').trim();
+                const box = btn ? btn.closest('div').querySelector('[data-calcm]') : null;
+                const say = (t, ok)=>{ if(box){ box.textContent = t; box.className = 'text-[10px] whitespace-nowrap ' + (ok ? 'text-emerald-600 font-bold' : 'text-rose-600'); } };
+                if(!expr){ say('فارغ', false); return; }
+                say('…', true);
+                const {res, data} = await fwFetchJson('/api/fmlk/calc-test', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({expr})});
+                if(!res.ok || data.error) say(String(data.error || 'خطأ'), false);
+                else say('✓ = ' + String(data.value ?? ''), true);
+            }catch(e){ try{ notify(String((e && e.message) || e), 'error'); }catch(_){} }
         }
         // جلب JSON آمن: رد HTML (403/404/500) → خطأ عربي واضح بدل Unexpected token
         window.fwFetchJson = window.fwFetchJson || async function(url, init){

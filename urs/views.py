@@ -1737,6 +1737,7 @@ def api_models_design_save(request, app_name):
                 fx = (f.get("formula") or f.get("calc_expr") or "").strip()
                 fx_el = ET.SubElement(el, "formula")
                 fx_el.text = fx
+                fx_el.set("mode", "computed")
             for k in ("refTable", "refFk", "refDisplay", "placeholder",
                         "displayTable", "displayKey", "displayFk", "displayShow", "displayExpr"):
                 if f.get(k):
@@ -1877,6 +1878,10 @@ def api_models_design_save(request, app_name):
                             ce.set("junction", "1")
                         if _c.get("ref"):
                             ce.set("ref", "1")
+                        _cfx = str(_c.get("formula") or _c.get("calc_expr") or "").strip()
+                        if _cfx:
+                            ce.set("formula", _cfx)
+                            ce.set("calc_mode", "computed")
         acts = data.get("actions") or []
         if acts:
             ca_el = ET.SubElement(fml, "custom_actions")
@@ -2927,6 +2932,42 @@ def api_fmlk_delete(request):
         return _r if _r is not None else JsonResponse({"error": str(e)}, status=500)
 
 @csrf_exempt
+def api_fmlk_calc_test(request):
+    """POST /api/fmlk/calc-test {expr, row?} → {ok, value, refs} | {error}.
+
+    Pure XSQL scalar check for computed-field expressions (no DB): validates
+    syntax/functions and evaluates against the optional sample row.
+    """
+    if request.method != "POST":
+        return JsonResponse({"error": "POST required"}, status=405)
+    try:
+        data = json.loads(request.body.decode() or "{}")
+    except Exception:
+        return JsonResponse({"error": "invalid JSON"}, status=400)
+    expr = str(data.get("expr") or "")
+    row = data.get("row") or {}
+    if not isinstance(row, dict):
+        return JsonResponse({"error": "row must be an object"}, status=400)
+    try:
+        from fmlk_engine.calc import eval_calc_row, calc_refs
+        value = eval_calc_row(expr, {str(k): v for k, v in row.items()})
+        refs = calc_refs(expr)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+    try:
+        import datetime as _dt
+        if isinstance(value, (_dt.datetime, _dt.date)):
+            value = value.isoformat()
+        elif isinstance(value, bool):
+            pass
+        json.dumps({"v": value})
+    except Exception:
+        value = str(value)
+    return JsonResponse({"ok": True, "value": value, "refs": refs},
+                        json_dumps_params={"ensure_ascii": False})
+
+
+@csrf_exempt
 def api_fmlk_records(request):
     # GET (legacy): ?fml=&app=&page=&pageSize=[&filters=JSON]
     # POST (search): {fml, app, page, pageSize, filters:[{field,op,value,valFrom,valTo}]}
@@ -3105,10 +3146,13 @@ def _junction_grid_cols(det):
                "input_type": "number", "junction": True}]
     _custs = [c for c in ((det or {}).get("columns") or []) if isinstance(c, dict) and c.get("junction")]
     for _c in _custs:
+        _cfx = str(_c.get("formula") or _c.get("calc_expr") or "").strip()
         _gcols.append({"name": _c["name"], "alias": _c.get("alias") or _c["name"],
                        "data_type": _c.get("data_type") or "VARCHAR",
                        "input_type": _c.get("input_type") or "text",
                        "required": bool(_c.get("required")),
+                       "formula": _cfx, "calc_expr": _cfx,
+                       "calc_mode": "computed" if _cfx else "default",
                        "default": _c.get("default") or "",
                        "options": _c.get("options") or [],
                        "editable": False if _c.get("editable") is False else True,
@@ -3119,10 +3163,13 @@ def _junction_grid_cols(det):
             continue
         if not _re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", _c.get("name", "")):
             continue
+        _cfx2 = str(_c.get("formula") or _c.get("calc_expr") or "").strip()
         _gcols.append({"name": _c["name"], "alias": _c.get("alias") or _c["name"],
                        "data_type": _c.get("data_type") or "VARCHAR",
                        "input_type": _c.get("input_type") or "text",
                        "required": bool(_c.get("required")),
+                       "formula": _cfx2, "calc_expr": _cfx2,
+                       "calc_mode": "computed" if _cfx2 else "default",
                        "ref": bool(_c.get("ref"))})
     return _gcols
 
@@ -3615,6 +3662,36 @@ def _junction_unknown_keys(rows, allowed):
     return out
 
 
+def _apply_branch_formulas(det, rows):
+    """Recompute computed detail columns per row (authoritative static values).
+
+    Uses the row's own values as the XSQL context; a failed expression keeps
+    the player-sent value (live display already computed it). Never raises.
+    """
+    try:
+        fcols = [c for c in ((det or {}).get("columns") or [])
+                 if isinstance(c, dict) and c.get("name")
+                 and str(c.get("formula") or c.get("calc_expr") or "").strip()]
+        if not fcols or not rows:
+            return rows
+        from fmlk_engine.calc import eval_calc_row as _ev
+    except Exception:
+        return rows
+    out = []
+    for r in (rows or []):
+        if not isinstance(r, dict):
+            out.append(r)
+            continue
+        d = dict(r)
+        for c in fcols:
+            try:
+                d[c["name"]] = _ev(str(c.get("formula") or c.get("calc_expr") or ""), d)
+            except Exception:
+                pass
+        out.append(d)
+    return out
+
+
 @csrf_exempt
 def api_fmlk_branch_save(request):
     """POST /api/fmlk/branch/save {fml,app,detail,key,rows[]} — replace branch rows for master key."""
@@ -3676,6 +3753,7 @@ def api_fmlk_branch_save(request):
             _pw_jx.discard("detail_id")
             rows = _reinject_branch_secrets(db, _jsch, _jtable, "id", rows, _pw_jx)
             rows = _prep_branch_secrets(rows, _branch_password_cols(det, det.get("columns") or []))
+            rows = _apply_branch_formulas(det, rows)
             n = 0
             db._exec(f'DELETE FROM "{_jsch}"."{_jtable}" WHERE "master_id" = :key', {"key": key}, commit=True)
             for r in rows:
@@ -3706,6 +3784,7 @@ def api_fmlk_branch_save(request):
         _subkey = (det.get("sub_key") or det.get("subKey") or "id").strip() or "id"
         rows = _reinject_branch_secrets(db, sch, tbl, _subkey if _subkey != fk else "", rows, _pw_direct)
         rows = _prep_branch_secrets(rows, _pw_direct)
+        rows = _apply_branch_formulas(det, rows)
         db._exec(f'DELETE FROM "{sch}"."{tbl}" WHERE "{fk}" = :key', {"key": key}, commit=True)
         for r in rows:
             if not isinstance(r, dict):

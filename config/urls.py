@@ -108,6 +108,7 @@ urlpatterns = [
     path('api/fmlk/update', urs_views.api_fmlk_update, name='api_fmlk_update'),
     path('api/fmlk/delete', urs_views.api_fmlk_delete, name='api_fmlk_delete'),
     path('api/fmlk/records', urs_views.api_fmlk_records, name='api_fmlk_records'),
+    path('api/fmlk/calc-test', urs_views.api_fmlk_calc_test, name='api_fmlk_calc_test'),
     path('api/fmlk/record', urs_views.api_fmlk_record, name='api_fmlk_record'),
     path('api/fmlk/branch', urs_views.api_fmlk_branch, name='api_fmlk_branch'),
     path('api/fmlk/detail-search', urs_views.api_fmlk_detail_search, name='api_fmlk_detail_search'),
