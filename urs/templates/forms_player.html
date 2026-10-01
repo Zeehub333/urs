@@ -1175,10 +1175,23 @@
             }catch(e){}
             return null;
         }
-        function fwDetailGate(i){
-            // قفل تسلسلي صفاً صفاً: الصف ri (ri>0) مقفل ورمادي ما دام أي صف سابق غير مكتمل
+        function fwDetailRowEmpty(i, ri){
+            // الصف فارغ = كل خلايا بياناته فارغة (قراءة حية من DOM — بلا انتظار جمع)
             try{
-                const req = fwDetailReqCols(i);
+                let found = false, empty = true;
+                document.querySelectorAll(`[data-drow="${i}"][data-didx="${ri}"]`).forEach(el=>{
+                    if(el.tagName !== 'INPUT' && el.tagName !== 'SELECT' && el.tagName !== 'TEXTAREA') return;
+                    found = true;
+                    const v = (el.type === 'checkbox') ? (el.checked ? '1' : '') : el.value;
+                    if(v !== undefined && v !== null && String(v).trim() !== '') empty = false;
+                });
+                return found ? empty : true;
+            }catch(e){ return true; }
+        }
+        function fwDetailGate(i){
+            // قفل تسلسلي صفاً صفاً: الصف ri (ri>0) مقفل ورمادي ما دام الصف السابق
+            // فارغاً أو ناقص المطلوب — بغض النظر عن وجود حقول مطلوبة أصلاً
+            try{
                 const rows = fwDetailRows[i] || [];
                 const unlockRow = (ri)=>{
                     document.querySelectorAll(`[data-drow="${i}"][data-didx="${ri}"]`).forEach(el=>{
@@ -1192,8 +1205,7 @@
                         if(tr) tr.classList.remove('fw-acc-locked');
                     }catch(_){}
                 };
-                if(!req.length){ rows.forEach((r, ri)=>unlockRow(ri)); return; }
-                let blocked = false; // يُرفع بعد أول صف غير مكتمل فيُقفل كل ما بعده
+                let blocked = false; // يُرفع بعد أول صف فارغ/ناقص فيُقفل كل ما بعده
                 rows.forEach((r, ri)=>{
                     const lock = ri > 0 && blocked;
                     if(!lock){ unlockRow(ri); }
@@ -1202,7 +1214,7 @@
                             if(el.tagName !== 'INPUT' && el.tagName !== 'SELECT' && el.tagName !== 'TEXTAREA') return;
                             if(el.dataset.ott === undefined) el.dataset.ott = el.title || '';
                             el.disabled = true;
-                            el.title = 'أكمل الحقول المطلوبة في الصفوف السابقة أولاً ★';
+                            el.title = 'أكمل الصف السابق أولاً ★';
                         });
                         try{
                             const fc = document.querySelector(`[data-drow="${i}"][data-didx="${ri}"]`);
@@ -1210,7 +1222,7 @@
                             if(tr) tr.classList.add('fw-acc-locked');
                         }catch(_){}
                     }
-                    if(!fwDetailRowComplete(i, ri)) blocked = true;
+                    if(fwDetailRowEmpty(i, ri) || !fwDetailRowComplete(i, ri)) blocked = true;
                 });
             }catch(e){}
         }
@@ -1379,17 +1391,28 @@
                     if(el){
                         if(!el.disabled){ el.focus(); try{ if(el.select && /text|number|password/.test(el.type)) el.select(); }catch(e){} return; }
                         if(dir > 0){
+                            // الهدف مقفل: حدد أقرب صف حاجز ثم نبّه بدقة وركّز عليه
                             try{
-                                const miss = fwDetailFirstMissing(i, ri);
-                                if(miss){
+                                let bi = -1;
+                                for(let k = 0; k <= ri; k++){
+                                    if(fwDetailRowEmpty(i, k) || !fwDetailRowComplete(i, k)){ bi = k; break; }
+                                }
+                                if(bi >= 0){
+                                    const miss = fwDetailFirstMissing(i, bi);
+                                    const msg = miss ? 'هذا الحقل مطلوب' : (bi === ri ? 'أكمل الصف الحالي أولاً' : 'أكمل الصفوف السابقة أولاً');
                                     try{
                                         const now = Date.now();
                                         if(!window._fwReqMsgAt || now - window._fwReqMsgAt > 1200){
                                             window._fwReqMsgAt = now;
-                                            notify('هذا الحقل مطلوب', 'error');
+                                            notify(msg, 'error');
                                         }
                                     }catch(_){}
-                                    const f = document.querySelector(`[data-drow="${i}"][data-didx="${ri}"][data-dcol="${CSS.escape(miss)}"]`);
+                                    let f = null;
+                                    try{
+                                        f = miss
+                                            ? document.querySelector(`[data-drow="${i}"][data-didx="${bi}"][data-dcol="${CSS.escape(miss)}"]`)
+                                            : document.querySelector(`[data-drow="${i}"][data-didx="${bi}"]`);
+                                    }catch(_){}
                                     if(f && !f.disabled){ f.focus(); try{ if(f.select && /text|number|password/.test(f.type)) f.select(); }catch(_){} }
                                 }
                             }catch(_){}
@@ -1425,10 +1448,10 @@
                         return;
                     }
                     if(e.key === 'Enter'){
-                        // Enter مع قائمة مفتوحة = إدخال أول مطابق (0 إن لم يُحدد غيره)
+                        // Enter مع قائمة مفتوحة = إدخال أول مطابق (0 إن لم يُحدد غيره) مع النزول للأسفل
                         let k = fwDetailAC._sel[key];
                         if((k == null || k < 0) && items.length) k = 0;
-                        if(k != null && k >= 0){ e.preventDefault(); fwDetailACPick(i, ri, col, String(k), a.isJx ? 1 : 0); return; }
+                        if(k != null && k >= 0){ e.preventDefault(); fwDetailACPick(i, ri, col, String(k), a.isJx ? 1 : 0); try{ fwGridStep(i, ri, col, 1); }catch(_){} return; }
                         fwACHide();
                     }
                     if(e.key === 'Escape'){ fwACHide(); e.preventDefault(); return; }
