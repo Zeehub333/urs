@@ -374,6 +374,10 @@ def ensure_junction(main_table: str, sub_table: str, schema: str, connection: An
                     refs: Optional[Dict[str, Any]] = None) -> Tuple[Optional[Dict[str, Any]], str]:
     """Build (+save) the junction custom model id/master_id/detail_id/[customs].
 
+    Fixed shape in ALL cases (customs optional): "id" SERIAL PRIMARY KEY
+    (auto serial, added by build_ddl) + master_id (master PK value) +
+    detail_id (sub PK value = detail sub_key) + optional custom columns.
+
     customs: [{name, alias?, data_type?/type?}] designer detail columns.
     refs: optional {master_table, master_col, sub_table, sub_col} recorded
     on the model for FK creation/inspection.
@@ -386,7 +390,7 @@ def ensure_junction(main_table: str, sub_table: str, schema: str, connection: An
         {"name": "detail_id", "label": "المرجع الفرعي", "type": "INTEGER",
          "nullable": False, "required": True},
     ]
-    seen = {"master_id", "detail_id"}
+    seen = {"id", "master_id", "detail_id"}
     for c in (customs or []):
         if not isinstance(c, dict):
             continue
@@ -394,7 +398,7 @@ def ensure_junction(main_table: str, sub_table: str, schema: str, connection: An
         if not nm or not NAME_RE.fullmatch(nm):
             continue
         if nm.lower() in seen:
-            return None, f"الحقل '{nm}' يتعارض مع عمود رابط محجوز"
+            return None, f"الحقل '{nm}' محجوز لهيكل جدول الرابط (id/master_id/detail_id)"
         seen.add(nm.lower())
         tp = str(c.get("data_type") or c.get("type") or "VARCHAR").upper()
         if tp not in PG_TYPE_MAP:

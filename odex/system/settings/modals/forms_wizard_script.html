@@ -133,8 +133,8 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                     is_main_col: !!(f.is_main_col || f.isMainCol),
                     config: f.config || {}
                 }));
-                // الجداول المتفرعة (ظهور + مفتاح فرعي + حقول الرابط junction)
-                fwBranches = (data.details || []).map(d=>({table: d.table, alias: d.alias || d.table, master: d.master || '', detail: d.detail || '', sub_key: d.sub_key || d.subKey || 'id', visible: d.visible !== false, cols: (d.columns || []).map(c=>({name: c.name, alias: c.alias || c.name, data_type: c.data_type || 'VARCHAR', input_type: c.input_type || 'text', required: !!c.required, default: (c.default != null ? String(c.default) : ''), options: (Array.isArray(c.options) ? c.options : []), junction: !!c.junction, ref: !!c.ref})), colsCache: []}));
+                // الجداول المتفرعة (وضع ربط + ظهور + مفتاح فرعي + حقول الرابط junction)
+                fwBranches = (data.details || []).map(d=>({table: d.table, alias: d.alias || d.table, master: d.master || '', detail: d.detail || '', link_mode: (d.link_mode === 'junction' || (!d.link_mode && ((d.junction && d.junction.table) || ((d.columns || []).some(c=>c && c.junction))))) ? 'junction' : 'direct', sub_key: d.sub_key || d.subKey || 'id', visible: d.visible !== false, cols: (d.columns || []).map(c=>({name: c.name, alias: c.alias || c.name, data_type: c.data_type || 'VARCHAR', input_type: c.input_type || 'text', required: !!c.required, default: (c.default != null ? String(c.default) : ''), options: (Array.isArray(c.options) ? c.options : []), junction: !!c.junction, ref: !!c.ref})), colsCache: []}));
                 // مدخلات الفروع: أعد بناء جدولها من الأعمدة (تُدمج عند الحفظ) — رابط بوجهة junction: ومرجع بحث بوجهة ref:
                 fwBranches.forEach(b=>{
                     (b.cols || []).forEach(c=>{
@@ -318,12 +318,17 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                             <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">الجدول المتفرع</label><select onchange="fwBranchChanged(${i})" data-b="table" class="wb-inp font-mono" dir="ltr"><option value="">— اختر —</option>${fwTablesCache.map(t=>`<option value="${fwEsc(t.full || t.name)}" ${b.table&&fwBareTbl(b.table)===fwBareTbl(t.full||t.name)?'selected':''}>${fwEsc(t.full || t.name)}${t.custom ? ' ★' : ''}</option>`).join('')}</select></div>
                             <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">الاسم المعروض</label><input value="${fwEsc(b.alias || '')}" oninput="fwBranches[${i}].alias=this.value" placeholder="البنود" class="wb-inp"></div>
                             <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">عمود الأساسي (PK)</label><select onchange="fwBranches[${i}].master=this.value" class="wb-inp font-mono" dir="ltr"><option value="">—</option>${masterOpts}</select></div>
-                            <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">عمود الربط (FK)${((fwInputs || []).some(x=>x.destination === ('junction:' + b.table) && x.name)) ? ' <span class="text-teal-600">— اختياري مع حقول الرابط</span>' : ''}</label><select onchange="fwBranches[${i}].detail=this.value" class="wb-inp font-mono" dir="ltr"><option value="">—</option>${cache.map(c=>`<option ${b.detail===c.name?'selected':''}>${fwEsc(c.name)}</option>`).join('')}</select></div>
+                            <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">عمود الربط (FK)${(b.link_mode === 'junction') ? ' <span class="text-teal-600">— غير مطلوب (جدول ثالث)</span>' : ' <span class="text-rose-500">— مطلوب</span>'}</label><select onchange="fwBranches[${i}].detail=this.value" class="wb-inp font-mono" dir="ltr"><option value="">—</option>${cache.map(c=>`<option ${b.detail===c.name?'selected':''}>${fwEsc(c.name)}</option>`).join('')}</select></div>
                             <div class="flex items-end gap-1">
                                 <button onclick="fwImportBranchInputs(${i})" title="استيراد أعمدة المتفرع كمدخلات" class="px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg font-bold text-[11px]"><i class="fa-solid fa-download"></i></button>
                                 <button onclick="fwBranchColsOpen(${i})" title="أعمدة شبكة التفاصيل" class="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg font-bold text-[11px]"><i class="fa-solid fa-table-columns"></i> ${(b.cols||[]).length || ''}</button>
                                 <button onclick="fwDelBranch(${i})" title="حذف" class="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg text-[11px]"><i class="fa-solid fa-trash"></i></button>
                             </div>
+                        </div>
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <label class="text-[10px] font-bold text-slate-500">وضع الربط:</label>
+                            <select onchange="fwBranches[${i}].link_mode=this.value;fwRenderSheet()" class="wb-inp !py-1 font-bold" style="max-width:190px"><option value="direct" ${b.link_mode!=='junction'?'selected':''}>مباشر — عمود FK في الفرعي</option><option value="junction" ${b.link_mode==='junction'?'selected':''}>جدول ثالث — id/master_id/detail_id</option></select>
+                            ${(b.link_mode === 'junction') ? `<span class="text-[10px] text-teal-600">يُبنى الجدول الثالث عند (حفظ + ترحيل) في كل الأحوال — الحقول المخصصة اختيارية</span>` : `<span class="text-[10px] text-slate-400">يُحفظ مباشرة في جدول الفرعي عبر عمود الربط</span>`}
                         </div>
                         <div class="text-[10px] text-slate-400">أعمدة الشبكة: ${(b.cols||[]).map(c=>fwEsc(c.alias || c.name)).join('، ') || '— تُدمج من المدخلات ذات الوجهة لهذا الجدول —'}</div>
                     </div>`;
@@ -668,7 +673,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                 svg.innerHTML = s;
             }catch(e){}
         }
-        function fwAddBranch(){ fwBranches.push({table:'', alias:'', master:'', detail:'', sub_key:'id', visible:true, cols:[], colsCache:[]}); fwRenderSheet(); }
+        function fwAddBranch(){ fwBranches.push({table:'', alias:'', master:'', detail:'', link_mode:'direct', sub_key:'id', visible:true, cols:[], colsCache:[]}); fwRenderSheet(); }
         /* ── استيراد متعدد الجداول كمتفرعة ── */
         function fwImportTablesOpen(){
             let m = document.getElementById('fwImportTablesModal');
@@ -716,7 +721,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             let n = 0;
             for(const full of checked){
                 if((fwBranches || []).some(b=>fwBareTbl(b.table).toLowerCase() === fwBareTbl(full).toLowerCase())) continue;
-                const b = {table: full, alias: fwBareTbl(full), master: '', detail: '', sub_key: 'id', visible: true, cols: [], colsCache: []};
+                const b = {table: full, alias: fwBareTbl(full), master: '', detail: '', link_mode: 'direct', sub_key: 'id', visible: true, cols: [], colsCache: []};
                 fwBranches.push(b);
                 try{ b.colsCache = await fwLoadCols(full); }catch(e){}
                 n++;
@@ -1041,7 +1046,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             if(!b || !box) return;
             if(title) title.innerHTML = '<i class="fa-solid fa-pen text-amber-600"></i> تعديل التفاصيل — ' + fwEsc(b.alias || b.table);
             const jn = fwBareTbl(fwMainTable) + '_' + fwBareTbl(b.table);
-            if(hint) hint.innerHTML = 'تُخزن في جدول الرابط الثالث <b class="font-mono" dir="ltr">' + fwEsc(jn) + '</b> بصيغة <span class="font-mono" dir="ltr">id / master_id / detail_id / حقولك</span> — تُنشأ قيود 1-to-many عند الترحيل. بلا حقول هنا = حفظ مباشر في جدول الفرعي.';
+            if(hint) hint.innerHTML = 'تُخزن في جدول الرابط الثالث <b class="font-mono" dir="ltr">' + fwEsc(jn) + '</b> بصيغة <span class="font-mono" dir="ltr">id (تسلسلي تلقائي) / master_id / detail_id / حقولك</span> — يُبنى في كل الأحوال عند (حفظ + ترحيل) مادام وضع الربط «جدول ثالث»، والحقول المخصصة هنا اختيارية. تُنشأ قيود 1-to-many عند الترحيل.';
             const rows = fwJunctionInputs(fwDetailEditIdx);
             box.innerHTML = rows.length ? rows.map(x=>{
                 const ki = (fwInputs || []).indexOf(x);
@@ -1205,7 +1210,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                     const nrefs = rows.filter(x=>String(x.r.destination || '').startsWith('ref:')).length;
                     return `<div class="border border-violet-200 rounded-xl mb-2 overflow-hidden">
                     <div class="bg-violet-50 px-3 py-1.5 flex items-center justify-between flex-wrap gap-1">
-                        <div class="text-[11px] font-bold text-slate-700"><i class="fa-solid fa-diagram-project text-violet-600"></i> ${fwEsc(b.alias || b.table)} <span class="font-mono font-normal text-slate-400" dir="ltr">${fwEsc(b.table)}</span> <span class="text-[10px] text-slate-400 font-normal">(${rows.length} عمود${customs ? ` • ${customs} رابط ⬡` : ''}${nrefs ? ` • ${nrefs} مرجع بحث 🔍` : ''}${(!customs && !nrefs) ? ' • بلا حقول رابط — يُحفظ مباشرة في جدول الفرعي' : ''})</span></div>
+                        <div class="text-[11px] font-bold text-slate-700"><i class="fa-solid fa-diagram-project text-violet-600"></i> ${fwEsc(b.alias || b.table)} <span class="font-mono font-normal text-slate-400" dir="ltr">${fwEsc(b.table)}</span> <span class="text-[10px] text-slate-400 font-normal">(${rows.length} عمود${(b.link_mode === 'junction') ? ` • جدول ثالث ⬡ <span class="font-mono" dir="ltr">id/master_id/detail_id</span>${customs ? ` + ${customs} مخصص` : ''}` : ''}${nrefs ? ` • ${nrefs} مرجع بحث 🔍` : ''}${(b.link_mode !== 'junction' && !customs && !nrefs) ? ' • بلا حقول رابط — يُحفظ مباشرة في جدول الفرعي' : ''})</span></div>
                         <div class="flex items-center gap-1">
                             <button onclick="fwImportBranchInputs(${bi})" class="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg font-bold text-[11px]"><i class="fa-solid fa-download"></i> استيراد الأعمدة</button>
                             <button onclick="fwAddJunctionInput(${bi}, true);fwRenderSheet()" class="px-2 py-1 bg-teal-50 hover:bg-teal-100 text-teal-700 rounded-lg font-bold text-[11px]"><i class="fa-solid fa-plus"></i> حقل رابط يدوي</button>
@@ -1213,7 +1218,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                         </div>
                     </div>
                     <div class="px-3 py-1.5 flex items-center gap-3 flex-wrap bg-white border-b border-violet-100">
-                        <label class="text-[11px] text-slate-600 flex items-center gap-1.5">مفتاح الفرعي (PK للربط) <input value="${fwEsc(b.sub_key || 'id')}" oninput="fwBranches[${bi}].sub_key=this.value" placeholder="id" class="wb-inp !py-1 font-mono" dir="ltr" style="max-width:130px"></label>
+                        <label class="text-[11px] text-slate-600 flex items-center gap-1.5">مفتاح الفرعي الرئيسي (PK <span class="font-mono" dir="ltr">→ detail_id</span>) <select onchange="fwBranches[${bi}].sub_key=this.value" title="العمود الذي تُخزَّن قيمته في detail_id بجدول الرابط" class="wb-inp !py-1 font-mono" dir="ltr" style="max-width:170px">${[...new Set([(b.sub_key || 'id'), ...((b.colsCache || []).map(c=>c && c.name).filter(Boolean)), ...((b.cols || []).map(c=>c && c.name).filter(Boolean))])].map(n=>`<option value="${fwEsc(n)}" ${(b.sub_key || 'id')===n?'selected':''}>${fwEsc(n)}</option>`).join('')}</select></label>
                         <label class="text-[11px] text-slate-600 flex items-center gap-1.5 font-bold"><input type="checkbox" ${b.visible !== false ? 'checked' : ''} onchange="fwBranches[${bi}].visible=this.checked;fwRenderSheet()" class="w-4 h-4 accent-emerald-600"> إظهار تبويب التفاصيل</label>
                     </div>
                     <div class="overflow-x-auto"><table class="w-full text-[11px]">
@@ -1746,7 +1751,9 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                 if(!b.table) throw new Error('أكمل الجدول المتفرع (اختر الجدول)');
                 if(!b.master) throw new Error(`الجدول المتفرع ${b.alias || b.table}: حدد عمود الأساسي (PK)`);
                 const _hasJ = fwInputs.some(x=>x.destination === ('junction:' + b.table) && x.name);
-                if(!b.detail && !_hasJ) throw new Error(`الجدول المتفرع ${b.alias || b.table}: حدد عمود الربط (FK) — أو أضف حقول رابط ليُبنى جدول ثالث`);
+                const _mode = (b.link_mode === 'junction' || b.link_mode === 'direct') ? b.link_mode : (_hasJ ? 'junction' : 'direct');
+                b.link_mode = _mode;
+                if(_mode === 'direct' && !b.detail) throw new Error(`الجدول المتفرع ${b.alias || b.table}: حدد عمود الربط (FK) — أو بدّل وضع الربط إلى «جدول ثالث» ليُبنى تلقائياً`);
             }
             const tabById = {};
             fwTabs.forEach((t, i)=>{ tabById[t.id] = t; });
@@ -1796,7 +1803,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                     }
                 }
                 const _cols = Object.values(_best).map(x=>{ const {_src, ...rest} = x._c; return rest; });
-                return {table: b.table, alias: b.alias || b.table, master: b.master, detail: b.detail, sub_key: (b.sub_key || 'id'), visible: b.visible !== false, rel_type: 'one_to_many', columns: _cols};
+                return {table: b.table, alias: b.alias || b.table, master: b.master, detail: b.detail, link_mode: (b.link_mode === 'junction' ? 'junction' : 'direct'), sub_key: (b.sub_key || 'id'), visible: b.visible !== false, rel_type: 'one_to_many', columns: _cols};
             });
             return {
                 file: (fwEditMode ? fwEditMode.file : file),

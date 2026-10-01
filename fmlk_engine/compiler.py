@@ -174,6 +174,7 @@ class FMLKDetail:
     rel_type: str = "one_to_many"
     sub_key: str = "id"  # مفتاح سجل الفرعي المستهدف (junction detail_id)
     visible: bool = True  # إظهار شبكة الفرع في المشغل
+    link_mode: str = "direct"  # direct: FK مباشر | junction: جدول ثالث دائماً
     junction: Dict[str, Any] = field(default_factory=dict)  # {table, model} رابط M2M
     columns: List[Dict[str, Any]] = field(default_factory=list)  # [{name, alias, data_type, input_type, junction?}]
     raw_attrs: Dict[str, str] = field(default_factory=dict)
@@ -181,6 +182,7 @@ class FMLKDetail:
         return {"table": self.table, "alias": self.alias or self.table, "master": self.master,
                 "detail": self.detail, "rel_type": self.rel_type, "sub_key": self.sub_key,
                 "subKey": self.sub_key, "visible": bool(self.visible),
+                "link_mode": self.link_mode or "direct",
                 "junction": dict(self.junction or {}), "columns": self.columns}
 
 @dataclass
@@ -359,12 +361,16 @@ class FMLKFormCompiler:
                 _vis = str(get("visible", "show", default="1") or "1").strip().lower() not in ("0", "false", "no", "hide", "hidden")
                 _jtbl = (get("junction_table", "junctionTable", "junction-table") or "").strip()
                 _jmod = (get("junction_model", "junctionModel", "junction-model") or "").strip()
+                _lmode = str(get("link_mode", "linkMode", "link-mode") or "").strip().lower()
+                if _lmode not in ("direct", "junction"):
+                    # ملفات قديمة بلا خاصية: وجود جدول رابط = وضع junction
+                    _lmode = "junction" if _jtbl else "direct"
                 result.append(FMLKDetail(
                     table=tbl, alias=(get("alias", "label") or tbl).strip(),
                     master=(get("master", "master_col", "masterCol") or "").strip(),
                     detail=(get("detail", "detail_col", "detailCol", "fk") or "").strip(),
                     rel_type=(get("rel_type", "relType", "rel-type") or "one_to_many").strip().lower(),
-                    sub_key=_subk, visible=_vis,
+                    sub_key=_subk, visible=_vis, link_mode=_lmode,
                     junction=({"table": _jtbl, "model": _jmod} if _jtbl else {}),
                     columns=cols, raw_attrs=dict(el.attrib)))
         self._details = result

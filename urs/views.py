@@ -1526,6 +1526,57 @@ def _resolve_app_dir(app_name):
 
 
 @csrf_exempt
+def _detail_link_mode(d):
+    """Normalize a detail's link mode: 'direct' (sub-table FK) | 'junction' (third table, always built).
+
+    Explicit link_mode wins; legacy payloads infer junction from junction
+    customs (the old auto-rule). Pure (unit-testable).
+    """
+    try:
+        m = str((d or {}).get("link_mode") or "").strip().lower()
+    except Exception:
+        m = ""
+    if m in ("direct", "junction"):
+        return m
+    try:
+        cols = (d or {}).get("columns") or []
+        if any(isinstance(c, dict) and c.get("junction") for c in cols):
+            return "junction"
+    except Exception:
+        pass
+    return "direct"
+
+
+def _detail_search_col(det, col, allcols):
+    """Remap a detail-search column to a real sub-table column.
+
+    Junction detail_id has no counterpart in the sub table: search the
+    detail's sub_key instead and alias its value back as detail_id, so the
+    player autocomplete/pick keeps working. Returns (column, found, alias_as).
+    Pure (unit-testable).
+    """
+    import re as _re
+    col = (col or "").strip()
+    if col == "detail_id":
+        try:
+            jx = (det or {}).get("junction") or {}
+            jt = (jx.get("table") or "").strip()
+        except Exception:
+            jt = ""
+        if jt and col not in (allcols or []):
+            try:
+                sk = ((det or {}).get("sub_key") or (det or {}).get("subKey") or "id").strip() or "id"
+            except Exception:
+                sk = "id"
+            if _re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", sk) and sk in (allcols or []):
+                return sk, True, "detail_id"
+    try:
+        found = bool(col and _re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", col) and col in (allcols or []))
+    except Exception:
+        found = False
+    return col, found, ""
+
+
 def api_models_design_save(request, app_name):
     """POST /api/apps/<app>/models/design/ — حفظ مصمم الموديل كـ .fmlk.
 
@@ -1741,9 +1792,9 @@ def api_models_design_save(request, app_name):
                 if not _dt or not _dm:
                     continue
                 _dcols = _d.get("columns") or []
-                _has_j = any(isinstance(c, dict) and c.get("junction") for c in _dcols)
-                if not _dd and not _has_j:
-                    return JsonResponse({"error": f"التفاصيل {_dt}: حدد عمود الربط (FK) أو أضف حقول رابط"}, status=400)
+                _mode = _detail_link_mode(_d)
+                if _mode == "direct" and not _dd:
+                    return JsonResponse({"error": f"التفاصيل {_dt}: حدد عمود الربط (FK) — أو بدّل وضع الربط إلى «جدول ثالث» ليُبنى تلقائياً"}, status=400)
                 _seen_c = {}
                 for _cc in _dcols:
                     if not isinstance(_cc, dict):
@@ -1766,6 +1817,7 @@ def api_models_design_save(request, app_name):
                 de.set("master", _dm)
                 de.set("detail", _dd)
                 de.set("rel_type", str(_d.get("rel_type") or "one_to_many"))
+                de.set("link_mode", _mode)
                 _dsub = str(_d.get("sub_key") or _d.get("subKey") or "id").strip() or "id"
                 import re as _re_sk
                 if not _re_sk.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", _dsub):
@@ -1776,8 +1828,9 @@ def api_models_design_save(request, app_name):
                     _dvis = _dvis.strip().lower() not in ("0", "false", "no", "hide", "hidden")
                 de.set("visible", "1" if bool(_dvis) else "0")
                 _customs = [c for c in _dcols if isinstance(c, dict) and c.get("junction")]
-                if _customs:
-                    # third table main_sub — single server-side source (migrate builds it)
+                if _mode == "junction":
+                    # third table main_sub in ALL cases (customs optional) —
+                    # single server-side source (migrate builds it)
                     try:
                         from . import custom_models as _cmj
                         _jn = _cmj.junction_name(real_table or table_en, _dt)
@@ -2022,8 +2075,9 @@ def api_models_migrate(request, app_name):
                 return (_a.strip() or _dflt), _b.strip()
             return _dflt, _t
 
-        # الجداول الرابطة: لكل فرع فيه حقول مخصصة → موديل main_sub + ترحيله
-        # (بلا حقول مخصصة: لا جدول رابط — يبقى المسار المباشر FK القديم)
+        # الجداول الرابطة: وضع junction → موديل main_sub + ترحيله دائماً
+        # (الحقول المخصصة اختيارية: id تسلسلي + master_id + detail_id في كل الأحوال)
+        # وضع direct → المسار المباشر FK القديم (sub.<detail> → main.<master>)
         junctions, fks = [], []
         try:
             from . import custom_models as _cmj
@@ -2037,7 +2091,7 @@ def api_models_migrate(request, app_name):
                 _dsch, _dtab_bare = _split_sch_tbl(_dtab, sch)
                 _dmaster = (_dd.get("master") or "").strip() or "id"
                 _dsub = (_dd.get("sub_key") or _dd.get("subKey") or "id").strip() or "id"
-                if not _cust:
+                if _detail_link_mode(_dd) != "junction":
                     # direct 1-to-many: sub.<detail> → main.<master>
                     _dfk = (_dd.get("detail") or "").strip()
                     if _dtab_bare and _dfk:
@@ -3334,7 +3388,8 @@ def api_fmlk_detail_search(request):
             return JsonResponse({"columns": [], "rows": [], "total": 0, "page": page, "pageSize": page_size})
         _sel = ", ".join(f'"{c}"' for c in _cols)
         _where, _params = "", {}
-        _col_found = bool(col and _re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", col) and col in _allcols)
+        # رابط junction: detail_id بلا مقابل في الفرعي → ابحث مفتاح الفرعي وأعده كـ detail_id
+        col, _col_found, _col_alias = _detail_search_col(det, col, _allcols)
         if q:
             if _col_found:
                 # إكمال رأسي لعمود واحد: اقتراحات قيم هذا العمود فقط
@@ -3368,6 +3423,10 @@ def api_fmlk_detail_search(request):
             _cur.close()
         except Exception:
             pass
+        if _col_alias:
+            for _r in rows:
+                if isinstance(_r, dict) and _col_alias not in _r:
+                    _r[_col_alias] = _r.get(col)
         _out_cols = [{"name": c, "alias": _alias.get(c, c),
                       "sub_key": (c == _subkey)} for c in names]
         return JsonResponse({"columns": _out_cols, "rows": rows, "total": total,
