@@ -1190,6 +1190,146 @@ def _fmlk_get_engine(fml_name, app_name=None):
     # Monkey-patch Postgres bind handling for FML engine if needed (already in _exec)
     return engine
 
+
+def _err_is_missing_table(e) -> bool:
+    """PG undefined-table? (relation ... does not exist / 42P01)."""
+    try:
+        s = str(e or "").lower()
+    except Exception:
+        return False
+    return ("does not exist" in s and "relation" in s) or "undefined_table" in s or "42p01" in s
+
+
+def _fmlk_eng_table(eng):
+    """(schema, bare_table) backing a form engine."""
+    try:
+        t = str(getattr(eng, "_table", "") or "")
+    except Exception:
+        t = ""
+    try:
+        md = getattr(eng, "metadata", None)
+        md = dict(md) if isinstance(md, dict) else {}
+    except Exception:
+        md = {}
+    sch = (md.get("schema") or "").strip()
+    if "." in t:
+        try:
+            sch2, t = t.split(".", 1)
+            sch = sch or sch2
+        except Exception:
+            pass
+    return ((sch or "").strip() or "public"), (t or "").strip()
+
+
+def _fmlk_custom_model_for_eng(eng):
+    """Custom JSON model backing this engine's (conn, schema.table)? None."""
+    try:
+        from . import custom_models as _cm
+    except Exception:
+        return None
+    sch, tbl = _fmlk_eng_table(eng)
+    if not tbl:
+        return None
+    try:
+        md = getattr(getattr(eng, "compiler", None), "fml_metadata", lambda: {})() or {}
+        ref = str(md.get("connection") or "").strip()
+    except Exception:
+        ref = ""
+    cands = []
+    if ref:
+        try:
+            from . import custom_models as _cm2
+            cands.append(_cm2.resolve_connection(ref))
+        except Exception:
+            pass
+    try:
+        from . import custom_models as _cm3
+        cands.append(_cm3.resolve_connection("1"))
+    except Exception:
+        pass
+    seen = set()
+    for obj in cands:
+        if obj is None:
+            continue
+        try:
+            key = (str(getattr(obj, "id", "")), str(getattr(obj, "name", "")))
+        except Exception:
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            mod = _cm.find_for_conn_table(obj, sch, tbl)
+        except Exception:
+            mod = None
+        if mod:
+            return mod
+    return None
+
+
+def _fmlk_recover_missing_table(eng):
+    """Auto-CREATE a missing physical table from its custom JSON definition.
+
+    Returns (recovered, message): recovered True → caller retries once;
+    otherwise message is an Arabic user-facing error ('' when recovered).
+    Never raises.
+    """
+    try:
+        from . import custom_models as _cm
+    except Exception:
+        return False, "تعذر تحميل دعم الجداول المخصصة"
+    try:
+        sch, tbl = _fmlk_eng_table(eng)
+    except Exception:
+        sch, tbl = "public", ""
+    full = f"{sch}.{tbl}" if tbl else "؟"
+    try:
+        mod = _fmlk_custom_model_for_eng(eng)
+    except Exception:
+        mod = None
+    if not mod:
+        return False, (f"الجدول {full} غير موجود في قاعدة البيانات ولا يوجد له تعريف جدول مخصص — "
+                       "أنشئ جدولاً مخصصاً بنفس الاسم ثم نفّذ (ترحيل)، أو صحّح اسم جدول النموذج")
+    try:
+        _res, _err = _cm.migrate_model(mod.get("name") or "")
+    except Exception as e:
+        _res, _err = None, str(e)
+    if _err or not _res:
+        return False, (f"الجدول {full} غير موجود — فشل إنشاؤه تلقائياً من التعريف '{mod.get('name')}': "
+                       f"{_err or '؟'} — نفّذ (ترحيل) يدوياً من صفحة الجداول المخصصة")
+    return True, ""
+
+
+def _fmlk_records_err(e, eng, retry):
+    """Missing-table recovery for form endpoints: retry once after auto-migrate,
+    else (Arabic message | raw error). `retry` is a zero-arg callable rerunning
+    the failed operation. Returns a JsonResponse or None (None → return raw e).
+    Callers must pass locals().get("eng") — never a bare possibly-unbound name."""
+    _eng = eng
+    if _eng is None or not _err_is_missing_table(e):
+        return None
+    try:
+        _ok, _msg = _fmlk_recover_missing_table(_eng)
+    except Exception:
+        return None
+    if _ok:
+        try:
+            return JsonResponse(retry())
+        except Exception as e2:
+            if _err_is_missing_table(e2):
+                try:
+                    _, _msg2 = _fmlk_recover_missing_table(_eng)
+                    if _msg2:
+                        return JsonResponse({"error": _msg2}, status=400,
+                                            json_dumps_params={"ensure_ascii": False})
+                except Exception:
+                    pass
+            return None
+    if _msg:
+        return JsonResponse({"error": _msg}, status=400,
+                            json_dumps_params={"ensure_ascii": False})
+    return None
+
 def api_fmlk_metadata(request):
     fml = request.GET.get("fml", "hr_form")
     app = request.GET.get("app", None)
@@ -2697,7 +2837,8 @@ def api_fmlk_create(request):
         res = eng.create_record(payload)
         return JsonResponse(res)
     except Exception as e:
-        return JsonResponse({"error": str(e)}, status=500)
+        _r = _fmlk_records_err(e, locals().get("eng"), lambda: eng.create_record(payload))
+        return _r if _r is not None else JsonResponse({"error": str(e)}, status=500)
 
 @csrf_exempt
 def api_fmlk_update(request):
@@ -2712,7 +2853,8 @@ def api_fmlk_update(request):
         res = eng.update_record(pk, payload)
         return JsonResponse(res)
     except Exception as e:
-        return JsonResponse({"error": str(e)}, status=500)
+        _r = _fmlk_records_err(e, locals().get("eng"), lambda: eng.update_record(pk, payload))
+        return _r if _r is not None else JsonResponse({"error": str(e)}, status=500)
 
 @csrf_exempt
 def api_fmlk_delete(request):
@@ -2726,7 +2868,8 @@ def api_fmlk_delete(request):
         res = eng.delete_record(pk)
         return JsonResponse(res)
     except Exception as e:
-        return JsonResponse({"error": str(e)}, status=500)
+        _r = _fmlk_records_err(e, locals().get("eng"), lambda: eng.delete_record(pk))
+        return _r if _r is not None else JsonResponse({"error": str(e)}, status=500)
 
 @csrf_exempt
 def api_fmlk_records(request):
@@ -2770,7 +2913,9 @@ def api_fmlk_records(request):
         res = eng.list_records(filters=filters, page=page, page_size=pageSize)
         return JsonResponse(res)
     except Exception as e:
-        return JsonResponse({"error": str(e)}, status=400)
+        _r = _fmlk_records_err(e, locals().get("eng"),
+                               lambda: eng.list_records(filters=filters, page=page, page_size=pageSize))
+        return _r if _r is not None else JsonResponse({"error": str(e)}, status=400)
 
 def _fmlk_find_detail(comp, ident):
     """Branch table def by index or table name → (detail_dict, schema)."""
