@@ -1577,6 +1577,7 @@ def _detail_search_col(det, col, allcols):
     return col, found, ""
 
 
+@csrf_exempt
 def api_models_design_save(request, app_name):
     """POST /api/apps/<app>/models/design/ — حفظ مصمم الموديل كـ .fmlk.
 

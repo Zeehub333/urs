@@ -568,9 +568,8 @@
         });
         async function loadFml(name) {
             try {
-                const res = await fetch(`/api/fmlk/metadata?fml=${encodeURIComponent(name)}&app=${encodeURIComponent(currentApp)}`);
-                if(!res.ok) throw new Error('metadata fetch failed');
-                const data = await res.json();
+                const {res, data} = await fwFetchJson(`/api/fmlk/metadata?fml=${encodeURIComponent(name)}&app=${encodeURIComponent(currentApp)}`);
+                if(!res.ok) throw new Error((data && data.error) || 'metadata fetch failed');
                 fmlMeta = data;
                 customActions = Array.isArray(data.actions) ? data.actions : [];
                 renderFormActions();
@@ -990,8 +989,7 @@
                     fwDetailRows[i] = [];
                 } else {
                     try{
-                        const res = await fetch(`/api/fmlk/branch?fml=${encodeURIComponent(currentFml)}&app=${encodeURIComponent(currentApp)}&detail=${i}&key=${encodeURIComponent(key)}`);
-                        const dd = await res.json();
+                        const {data: dd} = await fwFetchJson(`/api/fmlk/branch?fml=${encodeURIComponent(currentFml)}&app=${encodeURIComponent(currentApp)}&detail=${i}&key=${encodeURIComponent(key)}`);
                         fwDetailRows[i] = Array.isArray(dd.rows) ? dd.rows : [];
                         if(dd.columns && dd.columns.length) fwDetailCols[i] = dd.columns;
                     }catch(e){ fwDetailRows[i] = []; }
@@ -1265,8 +1263,7 @@
             fwACTimers[akey] = setTimeout(async ()=>{
                 try{
                     // إكمال رأسي: اقتراحات قيم هذا العمود حصراً (col=)
-                    const res = await fetch(`/api/fmlk/detail-search?fml=${encodeURIComponent(currentFml)}&app=${encodeURIComponent(currentApp)}&detail=${i}&q=${encodeURIComponent(q)}&col=${encodeURIComponent(col)}&pageSize=8`);
-                    const d = await res.json();
+                    const {res, data: d} = await fwFetchJson(`/api/fmlk/detail-search?fml=${encodeURIComponent(currentFml)}&app=${encodeURIComponent(currentApp)}&detail=${i}&q=${encodeURIComponent(q)}&col=${encodeURIComponent(col)}&pageSize=8}`);
                     if(!res.ok || d.error) throw new Error(d.error || 'بحث');
                     let rows = d.rows || [];
                     const sk = d.sub_key || 'id';
@@ -1484,8 +1481,7 @@
             if(!st) return;
             const box = document.getElementById('fwDlList');
             try{
-                const res = await fetch(`/api/fmlk/detail-search?fml=${encodeURIComponent(currentFml)}&app=${encodeURIComponent(currentApp)}&detail=${st.i}&q=${encodeURIComponent(st.q)}&page=${st.page}&pageSize=50`);
-                const d = await res.json();
+                const {res, data: d} = await fwFetchJson(`/api/fmlk/detail-search?fml=${encodeURIComponent(currentFml)}&app=${encodeURIComponent(currentApp)}&detail=${st.i}&q=${encodeURIComponent(st.q)}&page=${st.page}&pageSize=50`);
                 if(!res.ok || d.error) throw new Error(d.error || 'بحث');
                 st.cols = (d.columns || []).filter(c=>c && c.name !== st.sub_key).slice(0, 5);
                 st.subcol = (d.columns || []).find(c=>c && c.sub_key) || {name: d.sub_key || 'id'};
@@ -1555,8 +1551,7 @@
             const bar = document.getElementById(`fwSibBar_${i}`);
             if(!bar || fwDetailSibs[i] !== null) { if(bar && fwDetailSibs[i]) fwSibPaint(i); return; }
             try{
-                const res = await fetch(`/api/fmlk/detail-sources?fml=${encodeURIComponent(currentFml)}&app=${encodeURIComponent(currentApp)}&detail=${i}`);
-                const d = await res.json();
+                const {res, data: d} = await fwFetchJson(`/api/fmlk/detail-sources?fml=${encodeURIComponent(currentFml)}&app=${encodeURIComponent(currentApp)}&detail=${i}`);
                 fwDetailSibs[i] = (res.ok && !d.error) ? (d.sources || []) : [];
             }catch(e){ fwDetailSibs[i] = []; }
             fwSibPaint(i);
@@ -1595,16 +1590,14 @@
             const box = document.getElementById('fwSibList');
             if(!st) return;
             try{
-                const mres = await fetch(`/api/fmlk/metadata?fml=${encodeURIComponent(st.src.fml)}&app=${encodeURIComponent(st.src.app)}`);
-                const md = await mres.json();
+                const {res: mres, data: md} = await fwFetchJson(`/api/fmlk/metadata?fml=${encodeURIComponent(st.src.fml)}&app=${encodeURIComponent(st.src.app)}`);
                 if(!mres.ok || md.error) throw new Error(md.error || 'تعذر وصف الماستر');
                 const fields = md.fields || [];
                 const pkf = fields.find(f=>f.primary_key || f.primaryKey) || fields.find(f=>String(f.name || '').toLowerCase() === 'id');
                 const mcol = st.src.master_col || (pkf ? pkf.name : 'id');
                 const hit = fields.find(f=>f.name === mcol);
                 st.keyAlias = (hit && (hit.alias || hit.name)) || mcol;
-                const res = await fetch('/api/fmlk/records', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({fml: st.src.fml, app: st.src.app, page: 1, pageSize: 50})});
-                const d = await res.json();
+                const {res, data: d} = await fwFetchJson('/api/fmlk/records', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({fml: st.src.fml, app: st.src.app, page: 1, pageSize: 50})});
                 if(!res.ok || d.error) throw new Error(d.error || 'تعذر سجلات الماستر');
                 st.mrows = d.rows || d.records || [];
                 st.mcols = Object.keys(st.mrows[0] || {}).filter(c=>c !== '__pk_id').slice(0, 5);
@@ -1628,8 +1621,7 @@
             const st = fwSibState;
             if(!st || st.sel === null || st.sel === undefined || String(st.sel) === ''){ try{ notify('اختر سجل ماستر أولاً', 'info'); }catch(e){} return; }
             try{
-                const res = await fetch(`/api/fmlk/master-branch?fml=${encodeURIComponent(currentFml)}&app=${encodeURIComponent(currentApp)}&detail=${st.i}&src_fml=${encodeURIComponent(st.src.fml)}&src_app=${encodeURIComponent(st.src.app)}&src_detail=${st.src.detail_idx}&master_key=${encodeURIComponent(st.sel)}`);
-                const d = await res.json();
+                const {res, data: d} = await fwFetchJson(`/api/fmlk/master-branch?fml=${encodeURIComponent(currentFml)}&app=${encodeURIComponent(currentApp)}&detail=${st.i}&src_fml=${encodeURIComponent(st.src.fml)}&src_app=${encodeURIComponent(st.src.app)}&src_detail=${st.src.detail_idx}&master_key=${encodeURIComponent(st.sel)}`);
                 if(!res.ok || d.error) throw new Error(d.error || 'تعذر الجلب');
                 const rows = d.rows || [];
                 if(!rows.length){ try{ notify('لا متفرعات لهذا السجل', 'info'); }catch(e){} return; }
@@ -1659,8 +1651,7 @@
                 if(!d || d.visible === false) return;
                 const key = fwMasterKey();
                 if(key === '' || key == null) return;
-                const res = await fetch(`/api/fmlk/branch?fml=${encodeURIComponent(currentFml)}&app=${encodeURIComponent(currentApp)}&detail=${i}&key=${encodeURIComponent(key)}`);
-                const dd = await res.json();
+                const {res, data: dd} = await fwFetchJson(`/api/fmlk/branch?fml=${encodeURIComponent(currentFml)}&app=${encodeURIComponent(currentApp)}&detail=${i}&key=${encodeURIComponent(key)}`);
                 if(res.ok && !dd.error){
                     fwDetailRows[i] = Array.isArray(dd.rows) ? dd.rows : [];
                     if(dd.columns && dd.columns.length) fwDetailCols[i] = dd.columns;
@@ -1675,9 +1666,8 @@
             for(let i = 0; i < dets.length; i++){
                 const rows = (fwDetailRows[i] || []).filter(r=>Object.values(r || {}).some(v=>v !== '' && v != null));
                 try{
-                    const res = await fetch('/api/fmlk/branch/save', {method:'POST', headers:{'Content-Type':'application/json'},
+                    const {res, data: d} = await fwFetchJson('/api/fmlk/branch/save', {method:'POST', headers:{'Content-Type':'application/json'},
                         body: JSON.stringify({fml: currentFml, app: currentApp, detail: i, key: key, rows: rows})});
-                    const d = await res.json();
                     if(!res.ok || d.error) throw new Error(d.error || 'فشل حفظ التفاصيل');
                     await fwDetailReload(i);
                 }catch(e){ showError(e, 'حفظ التفاصيل: ' + (dets[i].alias || dets[i].table)); return false; }
@@ -1790,6 +1780,13 @@
         function escHtml(s){ return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
         function splitList(s){ return String(s || '').split(',').map(x=>x.trim()).filter(Boolean); }
         function parseJsonVal(v, fb){ if(v===undefined||v===null||v==='') return fb; if(typeof v!=='string') return v; try{ const p=JSON.parse(v); return p; }catch(e){ return fb; } }
+        // جلب JSON آمن: رد HTML (403/404/500) → خطأ عربي واضح بدل Unexpected token
+        window.fwFetchJson = window.fwFetchJson || async function(url, init){
+            const res = await fetch(url, init);
+            const txt = await res.text();
+            try{ return {res, data: JSON.parse(txt)}; }
+            catch(e){ throw new Error(`خطأ ${res.status} من ${url} — الرد ليس JSON (صفحة خطأ من الخادم)`); }
+        };
         // المنافذ الشائعة لمنتقي المنفذ (datalist + تسمية الخدمة)
         const FMLK_PORTS = [[21, 'FTP'], [22, 'SSH'], [25, 'SMTP'], [53, 'DNS'], [80, 'HTTP'], [110, 'POP3'], [143, 'IMAP'], [443, 'HTTPS'], [1433, 'SQL Server'], [1521, 'Oracle'], [3306, 'MySQL'], [3389, 'RDP'], [4370, 'ZKTeco'], [5432, 'PostgreSQL'], [6379, 'Redis'], [27017, 'MongoDB']];
         function fieldVal(field){ const v = currentData[field.name]; return (v===undefined||v===null) ? (field.default ?? '') : v; }
@@ -3141,9 +3138,8 @@
         let serverFilters = []; // WHERE خادمي من محرك البحث (نص/إكسل) — يُرسل مع كل دفعة
         async function fetchRecordsPage(page, pageSize){
             // POST يحمل الفلاتر (GET القديمة بلا فلاتر ما تزال مدعومة خادمياً)
-            const res = await fetch('/api/fmlk/records', {method: 'POST', headers: {'Content-Type': 'application/json'},
+            const {data} = await fwFetchJson('/api/fmlk/records', {method: 'POST', headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({fml: currentFml, app: currentApp, page: page, pageSize: pageSize, filters: serverFilters})});
-            const data = await res.json();
             if (data.error) throw new Error(data.error);
             return data;
         }
@@ -3252,8 +3248,7 @@
             if (rid) {
                 let _recErr = '';
                 try {
-                    const res = await fetch(`/api/fmlk/record?fml=${currentFml}&id=${encodeURIComponent(rid)}&app=${encodeURIComponent(currentApp)}`);
-                    const data = await res.json();
+                    const {data} = await fwFetchJson(`/api/fmlk/record?fml=${currentFml}&id=${encodeURIComponent(rid)}&app=${encodeURIComponent(currentApp)}`);
                     if (data.row) { openEditPanel(rid, data.row); return; }
                     if (data.error) _recErr = data.error;
                 } catch(e) { _recErr = String((e && e.message) || e); }

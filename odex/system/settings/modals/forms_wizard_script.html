@@ -1818,18 +1818,23 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                 fields, details, overwrite: !!fwEditMode
             };
         }
+        // جلب JSON آمن: رد HTML (403/404/500) → خطأ عربي واضح بدل Unexpected token
+        window.fwFetchJson = window.fwFetchJson || async function(url, init){
+            const res = await fetch(url, init);
+            const txt = await res.text();
+            try{ return {res, data: JSON.parse(txt)}; }
+            catch(e){ throw new Error(`خطأ ${res.status} من ${url} — الرد ليس JSON (صفحة خطأ من الخادم)`); }
+        };
         async function fwSave(withMigrate){
             fwErrHide();
             let payload;
             try{ payload = fwCollect(); }
             catch(e){ fwErr(e.message); return; }
             try{
-                const res = await fetch(`/api/apps/${encodeURIComponent(fwApp())}/models/design/`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
-                const data = await res.json();
+                const {res, data} = await fwFetchJson(`/api/apps/${encodeURIComponent(fwApp())}/models/design/`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
                 if(!res.ok) throw new Error(data.error || 'فشل الحفظ');
                 if(withMigrate){
-                    const res2 = await fetch(`/api/apps/${encodeURIComponent(fwApp())}/models/migrate/`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({file: data.file})});
-                    const data2 = await res2.json();
+                    const {res: res2, data: data2} = await fwFetchJson(`/api/apps/${encodeURIComponent(fwApp())}/models/migrate/`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({file: data.file})});
                     if(!res2.ok) throw new Error(data2.error || 'فشل الترحيل');
                     let jmsg = '';
                     try{
