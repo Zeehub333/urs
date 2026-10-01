@@ -1046,13 +1046,12 @@
             const _tt = isRef ? `مرجع بحث 🔍 — اكتب للبحث في ${escAttr(al)} (لا يُخزَّن) — ↑↓ ثم Enter يملأ السطر كاملاً` : `اكتب للبحث في سجلات ${escAttr(al)} — ↑↓ ثم Enter يملأ السطر كاملاً`;
             return `<td class="fw-acc-c"><div style="position:relative"><input type="${num ? 'number' : 'text'}" ${_ds} value="${escAttr(val)}" oninput="fwDetailAC(${i},${ri},'${escAttr(nm)}',this,false)" onkeydown="fwGridKey(event,${i},${ri},'${escAttr(nm)}',this)" onfocus="if(this.value.trim())fwDetailAC(${i},${ri},'${escAttr(nm)}',this,false)" autocomplete="off" title="${_tt}" class="fw-acc-in"${isRef ? ' style="padding-left:22px"' : ''} dir="auto">${isRef ? '<span style="position:absolute;left:6px;top:50%;transform:translateY(-50%);color:#b45309;font-size:11px;pointer-events:none">🔍</span>' : ''}</div></td>`;
         }
-        // مخزون 10 صفوف فارغة دائماً — ينمو مع الإدخال (لا يمس الصفوف القائمة)
+        // ثبات أول 10 صفوف: يُكمل الناقص حتى 10 فقط (لا نمو مع كل إدخال)
         function fwDetailEnsurePool(i){
             try{
                 fwDetailRows[i] = fwDetailRows[i] || [];
-                const isEmpty = (r)=>{ if(!r) return true; return !Object.keys(r).some(k=>{ const v = r[k]; return v !== '' && v !== null && v !== undefined; }); };
-                let n = fwDetailRows[i].filter(isEmpty).length, guard = 0;
-                while(n < 10 && guard < 12){ fwDetailRows[i].push({}); n++; guard++; }
+                let guard = 0;
+                while(fwDetailRows[i].length < 10 && guard < 14){ fwDetailRows[i].push({}); guard++; }
             }catch(e){}
         }
         // سطر واحد بنمط Access (يُستخدم في الرسم الأولي + الزيادة الحية بلا إعادة رسم)
@@ -1065,25 +1064,28 @@
             + `<td class="fw-acc-sel">${isNew ? '<span style="color:#b45309;font-weight:bold" title="سطر جديد — سيُحفظ">★</span>' : ''}</td>`
             + cols.map(c=>fwDetailCell(i, ri, c, r)).join('') + `<td class="fw-acc-del"><button onclick="fwDetailDelRow(${i},${ri})" class="text-rose-400 hover:text-rose-600 px-1"><i class="fa-solid fa-trash"></i></button></td></tr>`;
         }
-        // زيادة حية: عند امتلاء الصفوف العشرة يُلحق صفوفاً فارغة بلا إعادة رسم (يحفظ التركيز)
-        function fwDetailTopUp(i, minEmpty){
+        // زيادة حية بلا إعادة رسم (يحفظ التركيز): ثبات 10 — ودفعة 10 جديدة عند امتلائها كلها
+        function fwDetailTopUp(i){
             try{
-                minEmpty = (minEmpty == null ? 10 : minEmpty);
                 fwDetailRows[i] = fwDetailRows[i] || [];
                 const isEmpty = (r)=>{ if(!r) return true; return !Object.keys(r).some(k=>{ const v = r[k]; return v !== '' && v !== null && v !== undefined; }); };
-                const n = fwDetailRows[i].filter(isEmpty).length;
-                if(n >= minEmpty) return;
                 const tb = document.getElementById(`fwAccBody_${i}`);
-                if(!tb) return;
                 const gd = fwDetailGridCols(i);
                 const d = gd.d || {};
                 let mkey = '';
                 try{ mkey = fwMasterKey() || ''; }catch(e){}
-                let add = minEmpty - n, guard = 0;
-                while(add > 0 && guard < 12){
+                let guard = 0;
+                const addOne = ()=>{
+                    if(guard >= 24) return false;
                     fwDetailRows[i].push({});
-                    tb.insertAdjacentHTML('beforeend', fwDetailRowHtml(i, d, gd.jx, gd.cols, {}, fwDetailRows[i].length - 1, mkey));
-                    add--; guard++;
+                    if(tb) tb.insertAdjacentHTML('beforeend', fwDetailRowHtml(i, d, gd.jx, gd.cols, {}, fwDetailRows[i].length - 1, mkey));
+                    guard++;
+                    return true;
+                };
+                while(fwDetailRows[i].length < 10){ if(!addOne()) break; }
+                if(fwDetailRows[i].length >= 10 && !fwDetailRows[i].some(isEmpty)){
+                    let add = 10;
+                    while(add > 0){ if(!addOne()) break; add--; }
                 }
                 try{ fwDetailGate(i); }catch(e){}
             }catch(e){}
@@ -1423,7 +1425,9 @@
                         return;
                     }
                     if(e.key === 'Enter'){
-                        const k = fwDetailAC._sel[key];
+                        // Enter مع قائمة مفتوحة = إدخال أول مطابق (0 إن لم يُحدد غيره)
+                        let k = fwDetailAC._sel[key];
+                        if((k == null || k < 0) && items.length) k = 0;
                         if(k != null && k >= 0){ e.preventDefault(); fwDetailACPick(i, ri, col, String(k), a.isJx ? 1 : 0); return; }
                         fwACHide();
                     }
@@ -1433,6 +1437,7 @@
                 if(e.key === 'ArrowDown'){ e.preventDefault(); fwGridStep(i, ri, col, 1); }
                 else if(e.key === 'ArrowUp'){ e.preventDefault(); fwGridStep(i, ri, col, -1); }
                 else if(e.key === 'Enter'){ e.preventDefault(); fwGridStep(i, ri, col, 1); }
+                else if(e.key === 'Tab'){ e.preventDefault(); fwGridStep(i, ri, col, e.shiftKey ? -1 : 1); }
                 else if(e.key === 'ArrowLeft' || e.key === 'ArrowRight'){
                     e.preventDefault();
                     try{
