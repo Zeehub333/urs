@@ -929,7 +929,9 @@
         // ── تبويبة التفاصيل: الجداول المتفرعة one-to-many كشبكة أسفل النموذج ──
         let fwDetailRows = []; // per-detail array of row objects
         let fwDetailCols = []; // per-detail server grid columns (types/options)
+        let fwDetailSibs = []; // per-detail sibling-master sources cache
         let fwDlState = null; // download modal state
+        let fwSibState = null; // sibling-master modal state
         let fwACTimers = {}; // autocomplete debounce timers
         function fwDetails(){ return (fmlMeta && fmlMeta.details) || []; }
         function fwMasterKey(){
@@ -958,6 +960,7 @@
             try{ stackAppendDetailsCard(); }catch(e){}
             fwDetailRows = dets.map(()=>[]);
             fwDetailCols = dets.map(()=>null);
+            fwDetailSibs = dets.map(()=>null);
             const key = fwMasterKey();
             for(const {d, i} of visDets){
                 if(key === '' || key == null){
@@ -1052,11 +1055,12 @@
                         if(rc && (rc.alias || rc.name)) refAlias = rc.alias || rc.name;
                     }
                 }catch(e){}
+                const sibBar = `<span id="fwSibBar_${i}" class="inline-flex items-center gap-1"></span>`;
                 const dlBtn = `<button onclick="fwDownloadOpen(${i})" title="إنزال سجلات جدول التفاصيل بالبحث والاختيار المتعدد" class="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[11px] font-bold"><i class="fa-solid fa-download"></i> إنزال البيانات</button>`;
                 return `<div class="fmlk-category p-4">
                     <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
                         <div class="text-xs font-bold text-slate-700 flex items-center gap-2"><i class="fa-solid fa-diagram-project text-violet-600"></i> ${escHtml(d.alias || d.table)} <span class="text-[10px] text-slate-400 font-normal">(${rows.length})</span></div>
-                        <div class="flex items-center gap-1 flex-wrap">${dlBtn}<button onclick="fwDetailAddRow(${i})" class="px-2.5 py-1 bg-violet-50 hover:bg-violet-100 text-violet-700 rounded-lg text-[11px] font-bold"><i class="fa-solid fa-plus"></i> إضافة سطر</button></div>
+                        <div class="flex items-center gap-1 flex-wrap">${sibBar}${dlBtn}<button onclick="fwDetailAddRow(${i})" class="px-2.5 py-1 bg-violet-50 hover:bg-violet-100 text-violet-700 rounded-lg text-[11px] font-bold"><i class="fa-solid fa-plus"></i> إضافة سطر</button></div>
                     </div>
                     <div class="overflow-x-auto border border-slate-200 rounded-xl"><table class="w-full text-[11px]" dir="rtl">
                         <thead class="bg-slate-100 text-slate-700"><tr><th class="p-1.5 text-right whitespace-nowrap w-28"><span class="inline-block px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 text-[10px] font-bold ml-1">ID</span>${escHtml(refAlias)}</th><th class="w-6" title="سطر جديد لم يُحفظ"></th>${cols.map(c=>`<th class="p-1.5 text-right whitespace-nowrap" ${c.ref ? 'title="مرجع بحث — لا يُخزَّن"' : ''}>${escHtml(c.alias || c.name)}${c.required ? ' <span class="text-rose-500 font-bold">*</span>' : ''}${c.junction ? ' <span class="text-[9px] text-teal-600 font-bold">⬡</span>' : ''}${c.ref ? ' <span class="text-[9px] text-amber-500 font-bold">🔍</span>' : ''}</th>`).join('')}<th class="w-10"></th></tr></thead>
@@ -1072,6 +1076,7 @@
                 </div>`;
             }).join('');
             visDets.forEach(({i})=>{ try{ fwDetailGate(i); }catch(e){} });
+            visDets.forEach(({i})=>{ try{ fwSibLoad(i); }catch(e){} });
         }
         function fwDetailAddRow(i){ try{ collectDetailRows(); }catch(e){} (fwDetailRows[i] = fwDetailRows[i] || []).push({}); paintDetailGrids(); }
         function fwDetailDelRow(i, ri){ try{ collectDetailRows(); }catch(e){} fwDetailRows[i].splice(ri, 1); paintDetailGrids(); }
@@ -1446,7 +1451,106 @@
             paintDetailGrids();
             try{ notify(`أُسقط ${added} سجلاً للجريد${dup ? ` (${dup} مكرر تُجوهل)` : ''}`, added ? 'success' : 'info'); }catch(e){}
         }
-        /* (أُزيلت ميزة «إضافة من ماستر آخر» — الزر البرتقالي — من شريط التفاصيل) */
+        /* ── إضافة من ماستر آخر: سجلاته المتفرعة من نفس الجدول الفرعي ── */
+        async function fwSibLoad(i){
+            const bar = document.getElementById(`fwSibBar_${i}`);
+            if(!bar || fwDetailSibs[i] !== null) { if(bar && fwDetailSibs[i]) fwSibPaint(i); return; }
+            try{
+                const res = await fetch(`/api/fmlk/detail-sources?fml=${encodeURIComponent(currentFml)}&app=${encodeURIComponent(currentApp)}&detail=${i}`);
+                const d = await res.json();
+                fwDetailSibs[i] = (res.ok && !d.error) ? (d.sources || []) : [];
+            }catch(e){ fwDetailSibs[i] = []; }
+            fwSibPaint(i);
+        }
+        function fwSibPaint(i){
+            const bar = document.getElementById(`fwSibBar_${i}`);
+            const srcs = fwDetailSibs[i] || [];
+            if(!bar) return;
+            bar.innerHTML = srcs.map((s, k)=>`<button onclick="fwSiblingOpen(${i},${k})" title="يجلب سجلات ${escAttr(s.master_label || '')} المتفرعة من نفس الجدول" class="px-2.5 py-1 bg-orange-500 hover:bg-orange-600 text-white rounded-lg text-[11px] font-bold"><i class="fa-solid fa-plus"></i> إضافة من ${escHtml(s.master_label || s.fml)}</button>`).join('');
+        }
+        function fwSibClose(){ const m = document.getElementById('fwSibModal'); if(m) m.remove(); fwSibState = null; }
+        async function fwSiblingOpen(i, k){
+            const src = (fwDetailSibs[i] || [])[k];
+            if(!src) return;
+            fwSibState = {i, src, q: '', mrows: [], sel: null, cols: [], keyAlias: null};
+            let m = document.getElementById('fwSibModal');
+            if(m) m.remove();
+            m = document.createElement('div');
+            m.id = 'fwSibModal';
+            m.className = 'fixed inset-0 z-[80] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4';
+            m.setAttribute('onclick', 'if(event.target===this)fwSibClose()');
+            m.innerHTML = `<div class="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[86vh] overflow-hidden flex flex-col">
+                <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-orange-50 shrink-0"><h3 class="text-sm font-bold text-slate-800"><i class="fa-solid fa-plus text-orange-500"></i> إضافة من ${escHtml(src.master_label || src.fml)} — اختر سجل الماستر لجلب متفرعاته</h3><button onclick="fwSibClose()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button></div>
+                <div class="px-5 pt-3 shrink-0"><input id="fwSibSearch" oninput="fwSibSearch(this.value)" placeholder="ابحث في سجلات الماستر..." class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs"></div>
+                <div id="fwSibList" class="flex-1 min-h-0 overflow-y-auto custom-scroll p-3"><p class="text-slate-400 text-center py-6 text-xs">جاري التحميل...</p></div>
+                <div class="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2 shrink-0"><button onclick="fwSibClose()" class="px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs">إلغاء</button><button onclick="fwSibConfirm()" class="px-4 py-1.5 bg-orange-500 hover:bg-orange-600 text-white rounded-xl text-xs font-bold">جلب المتفرعات للجريد</button></div>
+            </div>`;
+            document.body.appendChild(m);
+            await fwSibFetchMasters();
+        }
+        let fwSibDeb = null;
+        function fwSibSearch(q){ if(!fwSibState) return; fwSibState.q = q; try{ clearTimeout(fwSibDeb); }catch(e){} fwSibDeb = setTimeout(fwSibRenderMasters, 300); }
+        async function fwSibFetchMasters(){
+            const st = fwSibState;
+            const box = document.getElementById('fwSibList');
+            if(!st) return;
+            try{
+                const mres = await fetch(`/api/fmlk/metadata?fml=${encodeURIComponent(st.src.fml)}&app=${encodeURIComponent(st.src.app)}`);
+                const md = await mres.json();
+                if(!mres.ok || md.error) throw new Error(md.error || 'تعذر وصف الماستر');
+                const fields = md.fields || [];
+                const pkf = fields.find(f=>f.primary_key || f.primaryKey) || fields.find(f=>String(f.name || '').toLowerCase() === 'id');
+                const mcol = st.src.master_col || (pkf ? pkf.name : 'id');
+                const hit = fields.find(f=>f.name === mcol);
+                st.keyAlias = (hit && (hit.alias || hit.name)) || mcol;
+                const res = await fetch('/api/fmlk/records', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({fml: st.src.fml, app: st.src.app, page: 1, pageSize: 50})});
+                const d = await res.json();
+                if(!res.ok || d.error) throw new Error(d.error || 'تعذر سجلات الماستر');
+                st.mrows = d.rows || d.records || [];
+                st.mcols = Object.keys(st.mrows[0] || {}).filter(c=>c !== '__pk_id').slice(0, 5);
+            }catch(e){ if(box) box.innerHTML = `<p class="text-rose-500 text-center py-6 text-xs">${escHtml(e.message || e)}</p>`; return; }
+            fwSibRenderMasters();
+        }
+        function fwSibRenderMasters(){
+            const st = fwSibState;
+            const box = document.getElementById('fwSibList');
+            if(!st || !box) return;
+            const q = (st.q || '').trim();
+            const rows = q ? st.mrows.filter(r=>Object.values(r || {}).some(v=>String(v ?? '').includes(q))) : st.mrows;
+            box.innerHTML = rows.length ? `<table class="w-full text-[11px]" dir="rtl"><thead class="bg-slate-100 text-slate-700 sticky top-0"><tr><th class="p-1.5 w-10 text-center">اختيار</th>${(st.mcols || []).map(c=>`<th class="p-1.5 text-right whitespace-nowrap">${escHtml(c)}</th>`).join('')}</tr></thead><tbody>`
+                + rows.slice(0, 50).map((r, k)=>{
+                    const kv = r[st.keyAlias] ?? r['__pk_id'] ?? '';
+                    return `<tr class="border-t border-slate-100 ${String(st.sel) === String(kv) ? 'bg-orange-50' : 'bg-white'} hover:bg-slate-50"><td class="p-1.5 text-center"><input type="radio" name="fwSibPick" ${String(st.sel) === String(kv) ? 'checked' : ''} onchange="fwSibPick('${escAttr(String(kv ?? ''))}')" class="w-4 h-4 accent-orange-500"></td>${(st.mcols || []).map(c=>`<td class="p-1.5 whitespace-nowrap">${escHtml(r[c] ?? '')}</td>`).join('')}</tr>`;
+                }).join('') + `</tbody></table>` : '<p class="text-slate-400 text-center py-6 text-xs">لا سجلات ماستر</p>';
+        }
+        function fwSibPick(v){ if(fwSibState) fwSibState.sel = v; fwSibRenderMasters(); }
+        async function fwSibConfirm(){
+            const st = fwSibState;
+            if(!st || st.sel === null || st.sel === undefined || String(st.sel) === ''){ try{ notify('اختر سجل ماستر أولاً', 'info'); }catch(e){} return; }
+            try{
+                const res = await fetch(`/api/fmlk/master-branch?fml=${encodeURIComponent(currentFml)}&app=${encodeURIComponent(currentApp)}&detail=${st.i}&src_fml=${encodeURIComponent(st.src.fml)}&src_app=${encodeURIComponent(st.src.app)}&src_detail=${st.src.detail_idx}&master_key=${encodeURIComponent(st.sel)}`);
+                const d = await res.json();
+                if(!res.ok || d.error) throw new Error(d.error || 'تعذر الجلب');
+                const rows = d.rows || [];
+                if(!rows.length){ try{ notify('لا متفرعات لهذا السجل', 'info'); }catch(e){} return; }
+                const {jx} = fwDetailGridCols(st.i);
+                const sk = fwDetailSubKey(st.i);
+                try{ collectDetailRows(); }catch(e){}
+                fwDetailRows[st.i] = fwDetailRows[st.i] || [];
+                const have = new Set((fwDetailRows[st.i] || []).map(r=>String((jx ? r['detail_id'] : r[sk]) ?? '')));
+                let added = 0;
+                rows.forEach(r=>{
+                    const id = String((jx ? r['detail_id'] : r[sk]) ?? '');
+                    if(id && have.has(id)) return;
+                    fwDetailRows[st.i].push(r);
+                    if(id) have.add(id);
+                    added++;
+                });
+                fwSibClose();
+                paintDetailGrids();
+                try{ notify(`جُلب ${added} سجلاً للجريد`, 'success'); }catch(e){}
+            }catch(e){ try{ notify(e.message || e, 'error'); }catch(e2){} }
+        }
         async function fwDetailReload(i){
             // إعادة قراءة تفاصيل واحدة من الخادم (تُسقط ★ بعد الحفظ وتجلب الهويات)
             try{
