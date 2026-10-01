@@ -1840,7 +1840,7 @@
         window.fmlkCalcEval = window.fmlkCalcEval || function(expr, get){
             if(expr == null || String(expr).trim() === '') throw new Error('تعبير فارغ');
             const s = String(expr);
-            const toks = [];
+            let toks = [];
             let i = 0;
             const isSp = c=>/\s/.test(c);
             while(i < s.length){
@@ -1870,14 +1870,76 @@
             const peek = ()=>toks[p], next = ()=>toks[p++];
             const expect = (v)=>{ const t = next(); if(t.v !== v) throw new Error('صيغة غير صالحة'); };
             const KW = (v)=>{ const t = peek(); return t.t === 'name' && t.v.toUpperCase() === v; };
+            const EPOCH = Date.UTC(1899, 11, 30);
             const num = (v)=>{
                 if(v == null || (typeof v === 'string' && v.trim() === '')) return 0;
                 if(typeof v === 'boolean') return v ? 1 : 0;
                 if(typeof v === 'number') return v;
-                if(v instanceof Date) return v.getTime();
+                if(v instanceof Date) return (Date.UTC(v.getFullYear(), v.getMonth(), v.getDate()) - EPOCH) / 86400000 + (v.getHours() * 3600 + v.getMinutes() * 60 + v.getSeconds()) / 86400000;
                 const n = parseFloat(String(v).trim().replace(/,/g, ''));
                 if(isNaN(n)) throw new Error('ليست رقماً: ' + v);
                 return n;
+            };
+            // تواريخ Excel: كائنات Date حقيقية + تسلسل للأيام
+            const dValid = (y, m, d)=>{ const r = new Date(y, m - 1, d); return (r.getFullYear() === y && r.getMonth() === m - 1 && r.getDate() === d) ? r : null; };
+            const dFromSerial = (n)=>{ const d = new Date(EPOCH + Math.round(n) * 86400000); return new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()); };
+            const toDate = (v)=>{
+                if(v == null) return null;
+                if(v instanceof Date) return new Date(v.getFullYear(), v.getMonth(), v.getDate());
+                if(typeof v === 'number') return dFromSerial(v);
+                if(typeof v === 'boolean') return null;
+                const s = String(v).trim();
+                if(!s) return null;
+                let m;
+                if((m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/))) return dValid(+m[1], +m[2], +m[3]);
+                if((m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/))) return dValid(+m[3], +m[2], +m[1]);
+                if((m = s.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})/))) return dValid(+m[1], +m[2], +m[3]);
+                const t = Date.parse(s);
+                if(isNaN(t)) return null;
+                const d = new Date(t);
+                return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+            };
+            const toTime = (v)=>{
+                if(v == null) return null;
+                if(v instanceof Date) return new Date(1899, 11, 30, v.getHours(), v.getMinutes(), v.getSeconds());
+                if(typeof v === 'boolean') return null;
+                if(typeof v === 'number'){ const s2 = Math.floor(v * 86400) % 86400; return new Date(1899, 11, 30, Math.floor(s2 / 3600), Math.floor(s2 % 3600 / 60), s2 % 60); }
+                const s = String(v).trim();
+                if(!s) return null;
+                let m;
+                if((m = s.match(/(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?/))) return new Date(1899, 11, 30, +m[1], +m[2], +(m[3] || 0));
+                return null;
+            };
+            const isLeap = (y)=> (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+            const dim = (y, m)=> new Date(y, m, 0).getDate();
+            const addMonths = (d, k)=>{ const t = d.getMonth() + k; const r = new Date(d.getFullYear(), t, 1); r.setDate(Math.min(d.getDate(), dim(r.getFullYear(), r.getMonth() + 1))); return r; };
+            const ymd = (d)=> d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+            function sliceArgs(){
+                const args = [];
+                let cur = [], depth = 0;
+                while(true){
+                    const t = next();
+                    if(t.t === 'eof') throw new Error('صيغة غير صالحة');
+                    if(t.t === 'op' && t.v === '('){ depth++; cur.push(t); continue; }
+                    if(t.t === 'op' && t.v === ')'){ if(depth === 0) break; depth--; cur.push(t); continue; }
+                    if(t.t === 'op' && t.v === ',' && depth === 0){ args.push(cur); cur = []; continue; }
+                    cur.push(t);
+                }
+                args.push(cur);
+                return args;
+            }
+            function subEval(slice){
+                const st = toks, sp = p;
+                toks = slice.concat([{t: 'eof'}]); p = 0;
+                try{ const v = parseOr(); if(peek().t !== 'eof') throw new Error('صيغة غير صالحة'); return v; }
+                finally{ toks = st; p = sp; }
+            }
+            const LAZY = {
+                IF: (a)=>{ if(a.length !== 3) throw new Error('IF: ثلاثة وسائط'); return truthy(subEval(a[0])) ? subEval(a[1]) : subEval(a[2]); },
+                IFERROR: (a)=>{ if(a.length !== 2) throw new Error('IFERROR: وسيطان'); let v; try{ v = subEval(a[0]); }catch(e){ v = null; } return v == null ? subEval(a[1]) : v; },
+                IFNA: (a)=>{ if(a.length !== 2) throw new Error('IFNA: وسيطان'); let v; try{ v = subEval(a[0]); }catch(e){ v = null; } return v == null ? subEval(a[1]) : v; },
+                IFS: (a)=>{ if(a.length < 2 || a.length % 2) throw new Error('IFS: أزواج شرط/قيمة'); for(let k = 0; k < a.length; k += 2){ if(truthy(subEval(a[k]))) return subEval(a[k + 1]); } return null; },
+                SWITCH: (a)=>{ if(a.length < 2) throw new Error('SWITCH: تعبير + زوج'); const v = subEval(a[0]); const rest = a.slice(1); const dflt = rest.length % 2 ? rest[rest.length - 1] : null; const pairs = rest.length % 2 ? rest.slice(0, -1) : rest; for(let k = 0; k < pairs.length; k += 2){ if(eq(v, subEval(pairs[k]))) return subEval(pairs[k + 1]); } return dflt ? subEval(dflt) : null; }
             };
             const str = (v)=>{
                 if(v == null) return '';
@@ -1901,7 +1963,7 @@
                 SUBSTRING: (x, f, l)=>{ if(x == null) return null; const t = str(x); let s = Math.max(0, Math.floor(Number(f)) - 1); return l == null ? t.slice(s) : t.slice(s, s + Math.floor(Number(l))); },
                 SUBSTR: (x, f, l)=>FNS.SUBSTRING(x, f, l),
                 CONCAT: (...a)=>a.map(v=>v == null ? '' : str(v)).join(''),
-                REPLACE: (x, a, b)=>x == null ? null : str(x).split(str(a)).join(str(b)),
+                REPLACE: (x, st, k, nw)=>{ if(x == null) return null; const t = str(x); const s = Math.max(0, Math.floor(Number(st)) - 1); const n = Math.max(0, Math.floor(Number(k))); return t.slice(0, s) + str(nw) + t.slice(s + n); },
                 LEFT: (x, n)=>x == null ? null : str(x).slice(0, Math.floor(Number(n))),
                 RIGHT: (x, n)=>{ if(x == null) return null; const k = Math.floor(Number(n)); return k ? str(x).slice(-k) : ''; },
                 ABS: (x)=>Math.abs(num(x)),
@@ -1917,6 +1979,146 @@
                 REGEXEXTRACT: (x, pt, g)=>{ if(x == null) return null; let m; try{ m = str(x).match(new RegExp(str(pt))); }catch(e){ throw new Error('نمط غير صالح'); } if(!m) return null; const gi = g == null ? 0 : Math.floor(Number(g)); return m[gi] !== undefined ? m[gi] : m[0]; },
                 WILDCARDMATCH: (x, wc)=>{ if(x == null) return false; const pat = '^' + str(wc).split('').map(c=>c === '*' ? '.*' : (c === '?' ? '.' : c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))).join('') + '$'; return new RegExp(pat, 's').test(str(x)); }
             };
+            Object.assign(FNS, {
+                AND: (...a)=>a.every(truthy), OR: (...a)=>a.some(truthy),
+                XOR: (...a)=>a.filter(truthy).length % 2 === 1, NOT: (v)=>!truthy(v),
+                TRUE: ()=>true, FALSE: ()=>false,
+                MID: (x, s, l)=>FNS.SUBSTRING(x, s, l), CONCATENATE: (...a)=>FNS.CONCAT(...a),
+                REPT: (x, n)=>{ if(x == null) return null; const k = Math.floor(Number(n)); if(isNaN(k) || k < 0) return null; return str(x).repeat(Math.min(k, 10000)); },
+                EXACT: (a, b)=>{ if(a == null || b == null) return a == null && b == null; if(typeof a === 'number' && typeof b === 'number') return a === b; return str(a) === str(b); },
+                FIND: (f, w, st)=>findImpl(f, w, st, true), SEARCH: (f, w, st)=>findImpl(f, w, st, false),
+                SUBSTITUTE: (x, a, b, inst)=>{ if(x == null) return null; const t = str(x), s = str(a); if(inst == null) return t.split(s).join(str(b)); const k = Math.floor(Number(inst)); if(!(k >= 1) || s === '') return t; const parts = t.split(s); if(k >= parts.length) return t; return parts.slice(0, k).join(s) + str(b) + parts.slice(k).join(s); },
+                PROPER: (x)=>x == null ? null : str(x).replace(/[^\W\d_]+/gu, (m)=>m.slice(0, 1).toUpperCase() + m.slice(1).toLowerCase()),
+                TEXTJOIN: (d, ign, ...a)=>{ const t = a.map(v=>v == null ? '' : str(v)).filter(v=>v !== '' || !truthy(ign)); return t.join(str(d)); },
+                VALUE: (x)=>{ if(x == null || String(x).trim() === '') return null; const n = parseFloat(String(x).trim().replace(/,/g, '')); return isNaN(n) ? null : n; },
+                NUMBERVALUE: (x, dec, grp)=>{ if(x == null) return null; try{ let t = str(x).trim(); if(grp) t = t.split(str(grp)).join(''); if(dec && dec !== '.') t = t.split(str(dec)).join('.'); const n = parseFloat(t.replace(/,/g, '')); return isNaN(n) ? null : n; }catch(e){ return null; } },
+                CHAR: (n)=>{ const k = Math.floor(Number(n)); return (isNaN(k) || k < 0 || k > 0x10FFFF) ? null : String.fromCodePoint(k); },
+                UNICHAR: (n)=>FNS.CHAR(n),
+                CODE: (x)=>{ const t = x == null ? '' : str(x); return t ? t.codePointAt(0) : null; },
+                UNICODE: (x)=>FNS.CODE(x),
+                CLEAN: (x)=>x == null ? null : str(x).replace(/[\x00-\x1F]/g, ''),
+                DOLLAR: (n, dec)=>{ const d = dec == null ? 2 : Math.max(0, Math.floor(Number(dec))); return '$' + fmtNum(num(n), d, true); },
+                FIXED: (n, dec, nc)=>{ const d = dec == null ? 2 : Math.max(0, Math.floor(Number(dec))); return fmtNum(num(n), d, !truthy(nc)); },
+                TEXT: (v, f)=>{ if(v == null) return ''; const fmt = str(f); if(v instanceof Date) return v.toISOString().slice(0, 10); let x; try{ x = num(v); }catch(e){ return str(v); } const m = fmt.match(/\.(0+)/); const d = m ? m[1].length : 0; if(fmt.includes('%')) return fmtNum(x * 100, d, fmt.includes(',')) + '%'; return fmtNum(x, d, fmt.includes(',')); },
+                SUM: (...a)=>a.reduce((t, v)=>t + num(v), 0),
+                AVERAGE: (...a)=>{ const ns = a.filter(v=>v != null && !(typeof v === 'string' && v.trim() === '')).map(num); return ns.length ? ns.reduce((t, v)=>t + v, 0) / ns.length : null; },
+                AVG: (...a)=>FNS.AVERAGE(...a),
+                MIN: (...a)=>{ const ns = a.filter(v=>v != null && !(typeof v === 'string' && v.trim() === '')).map(num); return ns.length ? Math.min(...ns) : 0; },
+                MAX: (...a)=>{ const ns = a.filter(v=>v != null && !(typeof v === 'string' && v.trim() === '')).map(num); return ns.length ? Math.max(...ns) : 0; },
+                COUNT: (...a)=>a.filter(v=>{ if(v == null || typeof v === 'boolean') return false; if(typeof v === 'number') return true; if(typeof v === 'string' && v.trim() === '') return false; try{ num(v); return true; }catch(e){ return false; } }).length,
+                PRODUCT: (...a)=>{ const ns = a.filter(v=>v != null && !(typeof v === 'string' && v.trim() === '')).map(num); return ns.length ? ns.reduce((t, v)=>t * v, 1) : null; },
+                INT: (x)=>Math.floor(num(x)),
+                TRUNC: (x, n)=>{ const k = n == null ? 0 : Math.floor(Number(n)); const m = Math.pow(10, k); return Math.trunc(num(x) * m) / m; },
+                EXP: (x)=>{ try{ return Math.exp(num(x)); }catch(e){ return null; } },
+                LN: (x)=>{ const v = num(x); return v > 0 ? Math.log(v) : null; },
+                LOG: (x, b)=>{ const b2 = b == null ? 10 : num(b); const v = num(x); return (v > 0 && b2 > 0 && b2 !== 1) ? Math.log(v) / Math.log(b2) : null; },
+                PI: ()=>Math.PI,
+                TODAY: ()=>{ const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), d.getDate()); },
+                DATE: (y, m, d)=>dValid(Math.floor(Number(y)), Math.floor(Number(m)), Math.floor(Number(d))),
+                YEAR: (v)=>{ const d = toDate(v); return d ? d.getFullYear() : null; },
+                MONTH: (v)=>{ const d = toDate(v); return d ? d.getMonth() + 1 : null; },
+                DAY: (v)=>{ const d = toDate(v); return d ? d.getDate() : null; },
+                DAYS: (e, s)=>{ const a = toDate(e), b = toDate(s); return (a && b) ? Math.round((a - b) / 86400000) : null; },
+                DATEDIF: (s, e, u)=>{ const a = toDate(s), b = toDate(e); if(!a || !b) return null; const U = str(u).trim().toUpperCase(); if(U === 'D') return Math.round((b - a) / 86400000); const M = (b.getFullYear() - a.getFullYear()) * 12 + (b.getMonth() - a.getMonth()) - (b.getDate() < a.getDate() ? 1 : 0); if(U === 'M') return M; if(U === 'Y') return (b.getFullYear() - a.getFullYear()) - (((b.getMonth() + 1) * 100 + b.getDate() < (a.getMonth() + 1) * 100 + a.getDate()) ? 1 : 0); if(U === 'YM') return ((M % 12) + 12) % 12; if(U === 'MD'){ const t = addMonths(a, M); return Math.round((b - t) / 86400000); } if(U === 'YD'){ let ann = new Date(b.getFullYear(), a.getMonth(), a.getDate()); if(ann.getMonth() !== a.getMonth()) ann = new Date(b.getFullYear(), a.getMonth() + 1, 0); return Math.round((b - ann) / 86400000); } throw new Error('DATEDIF: الوحدة D/M/Y/MD/YM/YD'); },
+                DAYS360: (s, e, m)=>{ const a = toDate(s), b = toDate(e); if(!a || !b) return null; return days360(a, b, truthy(m)); },
+                EDATE: (s, m)=>{ const a = toDate(s); return a ? addMonths(a, Math.floor(Number(m))) : null; },
+                EOMONTH: (s, m)=>{ const a = toDate(s); if(!a) return null; const t = addMonths(new Date(a.getFullYear(), a.getMonth(), 1), Math.floor(Number(m))); return new Date(t.getFullYear(), t.getMonth() + 1, 0); },
+                TIME: (h, m, s)=>{ if(h == null || m == null || s == null || h === '' || m === '' || s === '') return null; const H = Number(h), M = Number(m), S = Number(s); if([H, M, S].some(isNaN)) return null; const t = Math.floor(H) * 3600 + Math.floor(M) * 60 + Math.floor(S); const k = ((t % 86400) + 86400) % 86400; return new Date(1899, 11, 30, Math.floor(k / 3600), Math.floor(k % 3600 / 60), k % 60); },
+                HOUR: (v)=>{ const t = toTime(v); return t ? t.getHours() : null; },
+                MINUTE: (v)=>{ const t = toTime(v); return t ? t.getMinutes() : null; },
+                SECOND: (v)=>{ const t = toTime(v); return t ? t.getSeconds() : null; },
+                TIMEVALUE: (v)=>toTime(v),
+                DATEVALUE: (v)=>toDate(v),
+                WEEKDAY: (v, r)=>{ const d = toDate(v); if(!d) return null; const t = r == null ? 1 : Math.floor(Number(r)); const w = (d.getDay() + 6) % 7; if(t === 1) return (w + 1) % 7 + 1; if(t === 2) return w + 1; if(t === 3) return w; throw new Error('WEEKDAY: النوع 1/2/3'); },
+                WEEKNUM: (v, r)=>{ const d = toDate(v); if(!d) return null; const t = r == null ? 1 : Math.floor(Number(r)); const j = new Date(d.getFullYear(), 0, 1); const off = t === 1 ? (j.getDay()) : ((j.getDay() + 6) % 7); return Math.floor((Math.round((d - j) / 86400000) + off) / 7) + 1; },
+                ISOWEEKNUM: (v)=>{ const d = toDate(v); if(!d) return null; const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())); const day = (t.getUTCDay() + 6) % 7; t.setUTCDate(t.getUTCDate() - day + 3); const first = new Date(Date.UTC(t.getUTCFullYear(), 0, 4)); const fday = (first.getUTCDay() + 6) % 7; first.setUTCDate(first.getUTCDate() - fday + 3); return 1 + Math.round((t - first) / 604800000); },
+                NETWORKDAYS: (s, e, ...h)=>{ const a = toDate(s), b = toDate(e); return (a && b) ? netdays(a, b, new Set([0, 6]), holSet(h)) : null; },
+                'NETWORKDAYS.INTL': (s, e, ...a)=>{ const d1 = toDate(s), d2 = toDate(e); if(!d1 || !d2) return null; const [wd, hol] = wdArgs(a); return netdays(d1, d2, wd, hol); },
+                WORKDAY: (s, n, ...h)=>{ const a = toDate(s); return a ? workday(a, Math.floor(Number(n)), new Set([0, 6]), holSet(h)) : null; },
+                'WORKDAY.INTL': (s, n, ...a)=>{ const d1 = toDate(s); if(!d1) return null; const [wd, hol] = wdArgs(a); return workday(d1, Math.floor(Number(n)), wd, hol); },
+                YEARFRAC: (s, e, bs)=>{ const a = toDate(s), b = toDate(e); if(!a || !b) return null; return yearfrac(a, b, bs == null ? 0 : Math.floor(Number(bs))); }
+            });
+            function findImpl(f, w, st, sens){
+                if(f == null || w == null) return null;
+                const s = Math.max(0, Math.floor(Number(st == null ? 1 : st)) - 1);
+                const t = str(w), p = str(f);
+                const ix = sens ? t.indexOf(p, s) : t.toLowerCase().indexOf(p.toLowerCase(), s);
+                return ix < 0 ? null : ix + 1;
+            }
+            function fmtNum(v, dec, commas){
+                const neg = v < 0;
+                const t = Math.abs(v).toFixed(Math.max(0, dec));
+                if(!commas) return (neg ? '-' : '') + t;
+                const parts = t.split('.');
+                parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+                return (neg ? '-' : '') + parts.join('.');
+            }
+            function holSet(h){ const s = new Set(); for(const v of h){ const d = toDate(v); if(d) s.add(ymd(d)); } return s; }
+            function wdSet(w){
+                const std = {1: [0, 6], 2: [0, 1], 3: [1, 2], 4: [2, 3], 5: [3, 4], 6: [4, 5], 7: [5, 6], 11: [0], 12: [1], 13: [2], 14: [3], 15: [4], 16: [5], 17: [6]};
+                if(w == null) return new Set([0, 6]);
+                if(typeof w === 'boolean') return new Set([0, 6]);
+                if(typeof w === 'number') return new Set(std[Math.floor(w)] || [0, 6]);
+                const s = String(w).trim();
+                const n = parseFloat(s);
+                if(!isNaN(n) && String(Math.floor(n)) === s) return new Set(std[Math.floor(n)] || [0, 6]);
+                if(/^[01]{7}$/.test(s)) return new Set([...s].map((c, k)=>c === '1' ? (k + 1) % 7 : -1).filter(k=>k >= 0));
+                return new Set([0, 6]);
+            }
+            function wdArgs(a){
+                // [weekend,] holidays... — weekend يُكتشف بالشكل
+                let wd = new Set([0, 6]), hol = [];
+                if(a.length){
+                    const f = a[0];
+                    const looks = (typeof f === 'number') || (typeof f === 'string' && (/^[01]{7}$/.test(f.trim()) || String(Math.floor(parseFloat(f))) === f.trim()));
+                    if(looks){ wd = wdSet(f); hol = a.slice(1); } else hol = a;
+                }
+                return [wd, holSet(hol)];
+            }
+            function netdays(a, b, wd, hol){
+                const step = b >= a ? 1 : -1;
+                let n = 0, d = new Date(a), guard = 0;
+                while((step > 0 ? d <= b : d >= b) && guard++ < 200000){
+                    if(!wd.has(d.getDay()) && !hol.has(ymd(d))) n += step;
+                    d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + step);
+                }
+                return n;
+            }
+            function workday(a, n, wd, hol){
+                let d = new Date(a), guard = 0;
+                const step = n >= 0 ? 1 : -1;
+                while(n !== 0 && guard++ < 200000){
+                    d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + step);
+                    if(!wd.has(d.getDay()) && !hol.has(ymd(d))) n -= step;
+                }
+                return d;
+            }
+            function days360(a, b, eur){
+                let d1 = a.getDate(), d2 = b.getDate();
+                if(!eur){ if(d1 === 31) d1 = 30; if(d2 === 31){ d2 = (d1 < 30) ? 31 : 30; } }
+                else { if(d1 === 31) d1 = 30; if(d2 === 31) d2 = 30; }
+                return (b.getFullYear() - a.getFullYear()) * 360 + (b.getMonth() - a.getMonth()) * 30 + (d2 - d1);
+            }
+            function yearfrac(a, b, bs){
+                let x = a, y = b;
+                if(x > y){ const t = x; x = y; y = t; }
+                const days = Math.round((y - x) / 86400000);
+                if(bs === 1){
+                    let tot = 0, yy = x.getFullYear(), cur = new Date(x);
+                    while(cur < y){
+                        const nx = new Date(Math.min(yy + 1, y.getFullYear() + 1), 0, 1);
+                        const end = nx > new Date(y.getFullYear() + 1, 0, 1) ? new Date(y.getFullYear() + 1, 0, 1) : nx;
+                        const leap = isLeap(yy) ? 366 : 365;
+                        tot += Math.max(0, Math.round((Math.min(end, new Date(y.getFullYear() + 1, 0, 1)) - cur) / 86400000)) / leap;
+                        cur = end; yy++;
+                        if(yy > y.getFullYear() + 1) break;
+                    }
+                    return tot;
+                }
+                if(bs === 2) return days / 360;
+                if(bs === 3) return days / 365;
+                return days360(x, y, bs === 4) / 360;
+            }
             const resolve = (k)=>{
                 // مطابق تماماً → صغير → المقطع الأخير → صغيره ('' تُعامل كغياب)
                 const opts = [k];
@@ -1992,9 +2194,12 @@
                 if(t.t === 'ref'){ next(); return resolve(t.v); }
                 if(t.t === 'name'){
                     const up = t.v.toUpperCase();
-                    if(up === 'TRUE'){ next(); return true; }
-                    if(up === 'FALSE'){ next(); return false; }
-                    if(up === 'NULL'){ next(); return null; }
+                    const nextIsLP = toks[p + 1] && toks[p + 1].t === 'op' && toks[p + 1].v === '(';
+                    if(!nextIsLP){
+                        if(up === 'TRUE'){ next(); return true; }
+                        if(up === 'FALSE'){ next(); return false; }
+                        if(up === 'NULL'){ next(); return null; }
+                    }
                     if(up === 'GET'){
                         next(); expect('(');
                         const a = peek();
@@ -2005,12 +2210,21 @@
                         expect(')');
                         return resolve(key);
                     }
-                    if(FNS[up]){
+                    let full = t.v;
+                    while(toks[p + 1] && toks[p + 1].t === 'op' && toks[p + 1].v === '.' && toks[p + 2] && toks[p + 2].t === 'name'){ full += '.' + toks[p + 2].v; p += 2; }
+                    const fup = full.toUpperCase();
+                    if(LAZY[fup]){
+                        next();
+                        expect('(');
+                        const args = sliceArgs();
+                        return LAZY[fup](args);
+                    }
+                    if(FNS[fup]){
                         next(); expect('(');
                         const args = [];
                         if(!(peek().t === 'op' && peek().v === ')')){ args.push(parseOr()); while(peek().t === 'op' && peek().v === ','){ next(); args.push(parseOr()); } }
                         expect(')');
-                        return FNS[up].apply(null, args);
+                        return FNS[fup].apply(null, args);
                     }
                     throw new Error("مرجع غير معروف '" + t.v + "' — استخدم get()");
                 }
