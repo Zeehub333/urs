@@ -746,6 +746,7 @@
                 card.remove();
             });
             ['stTop', 'stStripWrap', 'stBelow', 'stTopTitle', 'stBelowTitle', 'stWrapRow', 'stMain', 'stLogoCol'].forEach(id=>{ const n = document.getElementById(id); if(n) n.remove(); });
+            try{ window._stackSig = null; }catch(e){}
             const contents = Array.prototype.slice.call(root.querySelectorAll(':scope > [data-tab-content]'));
             if(!contents.length){ window._formStacked = false; return; }
             // ترتيب ثابت مستقل عن مواضع DOM (النقل بين الحاويات كان يعيد ترتيب الشريط عند كل تحديد)
@@ -816,6 +817,12 @@
                 const others = vis.filter(c=>c.getAttribute('data-tab-content') !== firstId);
                 if(!others.some(c=>c.getAttribute('data-tab-content') === window._stackActive))
                     window._stackActive = others.length ? others[0].getAttribute('data-tab-content') : null;
+                // idempotent أولاً — قبل أي كتابة DOM (الخلع/الإعادة كانا يُسقطان تركيز الكتابة)
+                const _selsnap = others.filter(c=>c.getAttribute('data-tab-content') === window._stackActive)[0] || null;
+                const _sig = 'f:' + (firstId || '') + '|s:' + (window._stackActive || '')
+                    + '|v:' + vis.map(c=>c.getAttribute('data-tab-content')).join(',');
+                if(window._stackSig === _sig) return;
+                window._stackSig = _sig;
                 // الثابت العلوي
                 if(first){
                     first.style.display = '';
@@ -836,7 +843,7 @@
                 title.style.display = first ? '' : 'none';
                 top.style.display = first ? '' : 'none';
                 // الشريط الأفقي للبقية + محتوى المحدد تحته
-                const sel = others.filter(c=>c.getAttribute('data-tab-content') === window._stackActive)[0] || null;
+                const sel = _selsnap;
                 others.forEach(c=>{
                     const on = sel && c === sel;
                     c.style.display = on ? '' : 'none';
