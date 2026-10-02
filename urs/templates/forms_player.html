@@ -2302,7 +2302,9 @@
             const t0 = field.inputType || 'text';
             // حقل محسوب (صيغة XSQL): قراءة فقط + حساب حي — يُخزن قيمة ثابتة خادمياً
             const _fx = String(field.formula || field.calc_expr || cfg(field, 'calc_expr') || '').trim();
-            const t = (_fx && t0 !== 'calculated') ? 'calculated' : t0;
+            // تسلسلي أساسي (بلا صيغة): قراءة فقط — تُرقمه القاعدة عند الإنشاء (بلا data-field فلا يُرسل)
+            const _serial = !!field.serial && !_fx;
+            const t = _serial ? 'serial' : ((_fx && t0 !== 'calculated') ? 'calculated' : t0);
             // Handle FK select: if refTable exists, we will enhance via lookup
             if(t === 'select' && field.refTable){
                 const opts = (field.options || []).map(o=>`<option ${o==val?'selected':''}>${escHtml(o)}</option>`).join('');
@@ -2463,6 +2465,10 @@
                         const src = cfg(field, 'sync_source');
                         input = `<div class="flex gap-1.5"><input data-field="${field.name}" value="${escAttr(val)}" readonly class="flex-1 fx-inp text-slate-500"/><span class="px-3 py-2 bg-slate-100 text-slate-500 rounded-xl text-xs flex items-center" title="تعبئة تلقائية"><i class="fa-solid fa-rotate"></i></span></div><input type="hidden" data-sync-target="${field.name}" data-sync-source="${escAttr(src)}" data-sync-mode="${t}"/>`;
                         setTimeout(()=> FMLK.syncFill(field.name, t === 'livesync'), 0);
+                        break;
+                    }
+                    case 'serial': {
+                        input = `<div class="flex gap-1.5"><input value="${escAttr(val)}" readonly tabindex="-1" placeholder="تلقائي" title="تسلسلي تلقائي — يُرقم عند الحفظ" class="flex-1 fx-inp text-slate-500 font-mono"/><span class="px-3 py-2 bg-teal-50 text-teal-600 rounded-xl text-xs flex items-center" title="تسلسلي تلقائي"><i class="fa-solid fa-arrow-down-1-9"></i></span></div>`;
                         break;
                     }
                     case 'calculated': {

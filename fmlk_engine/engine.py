@@ -219,6 +219,8 @@ class FMLKFormEngine:
             if f.required and not getattr(f, "display_only", False) and (val is None or str(val).strip() == ""):
                 if (getattr(f, "formula", None) or "").strip() and str(getattr(f, "calc_mode", "default") or "default").lower() == "computed":
                     continue  # محسوب authoritative: يُملأ حسابياً قبل/أثناء الحفظ
+                if bool(getattr(f, "serial", False)):
+                    continue  # تسلسلي: تملؤه القاعدة (تسلسل) عند الإنشاء
                 errors[f.name] = f"{f.alias} مطلوب"
                 continue  # skip further checks if empty required
             if val is None or str(val).strip() == "":
@@ -459,6 +461,7 @@ class FMLKFormEngine:
             _done = set(calc_done or ())
         except Exception:
             _done = set()
+        _serials = self._serial_names()
         for f in self.fields:
             if f.name in _disp_ins:
                 continue  # عرض فقط — لا يُخزن
@@ -486,6 +489,8 @@ class FMLKFormEngine:
                 continue
             if f.name not in data:
                 continue
+            if f.name in _serials:
+                continue  # تسلسلي: القاعدة تملؤه — يُحذف دائماً حتى عند البناء المباشر
             if f.name in data:
                 if data[f.name] is None:
                     continue  # يُترك لملء الأعمدة التلقائي أو NULL/الافتراضي
@@ -782,10 +787,19 @@ class FMLKFormEngine:
         res = self.list_records(filters=filters, page=1, page_size=1)
         return res["rows"][0] if res["rows"] else None
 
+    def _serial_names(self) -> set:
+        """Fields whose values come from a DB sequence (dropped from writes)."""
+        try:
+            return {f.name for f in (self.fields or []) if bool(getattr(f, "serial", False))}
+        except Exception:
+            return set()
+
     def create_record(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Create record — Add button. Computes formulas (static), validates, stores secrets HASHED."""
         _secrets = self._secret_names()
         data = self._drop_masked_secrets(data, _secrets)
+        for _sn in self._serial_names():
+            data.pop(_sn, None)  # تسلسلي: القاعدة تملؤه (تسلسل) — أي قيمة مرسلة تُتجاهل
         data, _calc_done = self._apply_formulas(data)
         errs = self.validate(data)
         if errs:
@@ -838,6 +852,8 @@ class FMLKFormEngine:
         # Validate only provided fields
         _secrets = self._secret_names()
         data = self._drop_masked_secrets(data, _secrets)
+        for _sn in self._serial_names():
+            data.pop(_sn, None)  # تسلسلي ثابت بعد الإنشاء — لا يُكتب أبداً
         data, _ = self._apply_formulas(data, require_refs=True)
         errs = self.validate({**pk, **data})
         # Filter to only errors for data fields

@@ -1707,6 +1707,8 @@ def api_models_design_save(request, app_name):
             el.set("nullable", "true" if f.get("nullable", True) else "false")
             el.set("editable", "false" if f.get("editable") is False else "true")
             el.set("primary_key", "true" if f.get("primary_key") else "false")
+            if f.get("serial") in (True, 1, "1", "true", "yes"):
+                el.set("serial", "1")
             el.set("tab", str(f.get("tab") or _first_tab))
             _vis = (f.get("visibleIf") or f.get("visible_if") or "").strip()
             if _vis:
@@ -1918,6 +1920,24 @@ def api_models_design_save(request, app_name):
 
 
 @csrf_exempt
+def _serial_statements(schema, table, column):
+    """(seq_name, [(step, sql)]) لبناء تسلسل عمود — أو (None, [], error). Pure."""
+    import re as _re2
+    for _v in (schema, table, column):
+        if not _re2.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", str(_v or "")):
+            return None, [], "اسم غير صالح"
+    seq = ("%s_%s_seq" % (table, column))[:63]
+    _q = lambda i: '"%s"' % i
+    _lit = "'%s.%s'" % (_q(schema), _q(seq))
+    _t = "%s.%s" % (_q(schema), _q(table))
+    return seq, [
+        ("sequence", "CREATE SEQUENCE IF NOT EXISTS %s" % ("%s.%s" % (_q(schema), _q(seq)),)),
+        ("owned", "ALTER SEQUENCE %s OWNED BY %s.%s" % ("%s.%s" % (_q(schema), _q(seq)), _t, _q(column))),
+        ("default", "ALTER TABLE %s ALTER COLUMN %s SET DEFAULT nextval(%s)" % (_t, _q(column), _lit)),
+        ("setval", "SELECT setval(%s, COALESCE((SELECT MAX(%s) FROM %s), 0) + 1, false)" % (_lit, _q(column), _t)),
+    ], ""
+
+
 def api_models_migrate(request, app_name):
     """POST /api/apps/<app>/models/migrate/ — ترحيل موديل .fmlk إلى جدول DB.
 
@@ -2038,6 +2058,35 @@ def api_models_migrate(request, app_name):
         cur.execute("SELECT column_name, data_type FROM information_schema.columns WHERE table_schema=%s AND table_name=%s ORDER BY ordinal_position", (sch, tbl))
         cols = [{"name": r[0], "db_type": r[1]} for r in cur.fetchall()]
 
+        # أعمدة تسلسلية: تسلسل PG + قيمة افتراضية (ترقيم تلقائي للأساسي الجديد)
+        serials = []
+        try:
+            for _sf in (comp.fields() or []):
+                if not bool(getattr(_sf, "serial", False)):
+                    continue
+                _snm = (getattr(_sf, "name", "") or "").strip()
+                _seq, _stmts, _serr = _serial_statements(sch, tbl, _snm)
+                if _serr:
+                    serials.append({"column": _snm, "status": "skipped", "note": _serr})
+                    continue
+                _snote, _sok, _swarn = "", True, ""
+                for _step, _stmt in _stmts:
+                    try:
+                        cur.execute(_stmt)
+                    except Exception as _se:
+                        if _step in ("owned", "setval"):
+                            _swarn = "%s%s%s" % (_swarn + "; " if _swarn else "",
+                                                 _step, ": %s" % str(_se)[:120])
+                            continue
+                        _sok = False
+                        _snote = "%s: %s" % (_step, str(_se)[:160])
+                        break
+                serials.append({"column": _snm, "sequence": _seq,
+                                "status": "created" if _sok else "error",
+                                "note": _snote or _swarn})
+        except Exception as _seall:
+            serials.append({"error": str(_seall)[:200]})
+
         def _fk_add(_sch, _child, _col, _psch, _ptbl, _pcol):
             """1-to-many FK best-effort: exists→skip, missing cols→skip, violation→warning."""
             import re as _re_fk
@@ -2140,6 +2189,7 @@ def api_models_migrate(request, app_name):
         return JsonResponse({"ok": True, "file": path.name, "schema": sch, "table": tbl,
                              "ddl": ddl, "columns": cols, "added": added,
                              "renamed": renamed, "junctions": junctions, "fks": fks,
+                             "serials": serials,
                              "primary_keys": eng.primary_key_fields()})
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
