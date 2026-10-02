@@ -2248,6 +2248,20 @@
             if(peek().t !== 'eof') throw new Error('صيغة غير صالحة');
             return out;
         };
+        // الرقم التسلسلي التالي COUNT(*)+1 — معاينة حية عند الإنشاء فقط
+        async function fwSerialNext(name){
+            try{
+                const {res, data} = await fwFetchJson(`/api/fmlk/serial-next?fml=${encodeURIComponent(currentFml)}&app=${encodeURIComponent(currentApp)}&field=${encodeURIComponent(name)}`);
+                if(!res.ok || data.error || data.value == null) throw new Error((data && data.error) || 'تعذر الترقيم');
+                const el = document.querySelector(`#formRoot input[data-field="${CSS.escape(name)}"]`);
+                if(el && (el.value === '' || el.value == null)) el.value = data.value;
+            }catch(e){
+                try{
+                    const el = document.querySelector(`#formRoot input[data-field="${CSS.escape(name)}"]`);
+                    if(el) el.title = 'تعذر الترقيم التلقائي (' + String((e && e.message) || e).slice(0, 80) + ') — رحّل النموذج أولاً؟';
+                }catch(_){}
+            }
+        }
         // جلب JSON آمن: رد HTML (403/404/500) → خطأ عربي واضح بدل Unexpected token
         window.fwFetchJson = window.fwFetchJson || async function(url, init){
             const res = await fetch(url, init);
@@ -2468,7 +2482,10 @@
                         break;
                     }
                     case 'serial': {
-                        input = `<div class="flex gap-1.5"><input value="${escAttr(val)}" readonly tabindex="-1" placeholder="تلقائي" title="تسلسلي تلقائي — يُرقم عند الحفظ" class="flex-1 fx-inp text-slate-500 font-mono"/><span class="px-3 py-2 bg-teal-50 text-teal-600 rounded-xl text-xs flex items-center" title="تسلسلي تلقائي"><i class="fa-solid fa-arrow-down-1-9"></i></span></div>`;
+                        input = `<div class="flex gap-1.5"><input data-field="${field.name}" value="${escAttr(val)}" readonly class="flex-1 fx-inp text-slate-700 font-mono font-semibold" placeholder="…" title="تسلسلي تلقائي COUNT(*)+1 — يُعرض قبل الحفظ ويُؤكَّد عند الحفظ"/><span class="px-3 py-2 bg-teal-50 text-teal-600 rounded-xl text-xs flex items-center" title="تسلسلي تلقائي"><i class="fa-solid fa-arrow-down-1-9"></i></span></div>`;
+                        if(!val && (!currentRecordId || String(currentRecordId).startsWith('__row'))){
+                            setTimeout(()=> fwSerialNext(field.name), 0);
+                        }
                         break;
                     }
                     case 'calculated': {

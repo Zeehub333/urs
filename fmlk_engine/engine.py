@@ -461,7 +461,6 @@ class FMLKFormEngine:
             _done = set(calc_done or ())
         except Exception:
             _done = set()
-        _serials = self._serial_names()
         for f in self.fields:
             if f.name in _disp_ins:
                 continue  # عرض فقط — لا يُخزن
@@ -489,8 +488,6 @@ class FMLKFormEngine:
                 continue
             if f.name not in data:
                 continue
-            if f.name in _serials:
-                continue  # تسلسلي: القاعدة تملؤه — يُحذف دائماً حتى عند البناء المباشر
             if f.name in data:
                 if data[f.name] is None:
                     continue  # يُترك لملء الأعمدة التلقائي أو NULL/الافتراضي
@@ -788,18 +785,76 @@ class FMLKFormEngine:
         return res["rows"][0] if res["rows"] else None
 
     def _serial_names(self) -> set:
-        """Fields whose values come from a DB sequence (dropped from writes)."""
+        """Serial main fields (auto-numbered, immutable after creation)."""
         try:
             return {f.name for f in (self.fields or []) if bool(getattr(f, "serial", False))}
         except Exception:
             return set()
 
+    def _serial_next(self, field: str) -> int:
+        """COUNT(*)+1 for this form's table. Raises (Arabic) on any problem."""
+        if not _valid_table_ident(field or ""):
+            raise ValueError("invalid field")
+        try:
+            tbl = getattr(self, "_table", "") or ""
+            md = getattr(self, "metadata", None)
+            md = dict(md) if isinstance(md, dict) else {}
+        except Exception:
+            tbl, md = "", {}
+        sch = (md.get("schema") or "public").strip() or "public"
+        if "." in tbl:
+            try:
+                sch, tbl = tbl.split(".", 1)
+            except Exception:
+                pass
+        if not tbl or not _valid_table_ident(tbl):
+            raise ValueError("invalid table")
+        db = getattr(self, "db", None)
+        if db is None:
+            raise RuntimeError("لا اتصال قاعدة")
+        try:
+            if not getattr(db, "conn", None):
+                db.connect()
+        except Exception as e:
+            raise RuntimeError("تعذر الاتصال (%s)" % (e,))
+        try:
+            cur = db._exec('SELECT COUNT(*) FROM "%s"."%s"' % (sch, tbl), {})
+            try:
+                n = cur.fetchone()[0]
+            finally:
+                try:
+                    cur.close()
+                except Exception:
+                    pass
+            return int(n or 0) + 1
+        except Exception as e:
+            try:
+                if getattr(db, "conn", None):
+                    db.conn.rollback()
+            except Exception:
+                pass
+            raise RuntimeError("تعذر حساب التسلسل — رحّل النموذج أولاً (%s)" % (e,))
+
+    def _apply_serials(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Serial mains: fresh COUNT(*)+1 each (authoritative). Never raises."""
+        try:
+            names = [f.name for f in (self.fields or []) if bool(getattr(f, "serial", False))]
+        except Exception:
+            return data
+        if not names:
+            return data
+        for _nm in names:
+            try:
+                data[_nm] = self._serial_next(_nm)
+            except Exception:
+                pass
+        return data
+
     def create_record(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Create record — Add button. Computes formulas (static), validates, stores secrets HASHED."""
+        """Create record — Add button. Computes formulas + serials (static), validates, stores secrets HASHED."""
         _secrets = self._secret_names()
         data = self._drop_masked_secrets(data, _secrets)
-        for _sn in self._serial_names():
-            data.pop(_sn, None)  # تسلسلي: القاعدة تملؤه (تسلسل) — أي قيمة مرسلة تُتجاهل
+        data = self._apply_serials(data)
         data, _calc_done = self._apply_formulas(data)
         errs = self.validate(data)
         if errs:
