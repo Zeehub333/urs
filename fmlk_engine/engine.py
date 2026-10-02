@@ -18,6 +18,28 @@ def _valid_table_ident(name: str) -> bool:
     return bool(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name or ""))
 
 
+def _blank_incompatible(field) -> bool:
+    """True when binding '' to this column would crash PG (int/date/bool/...).
+
+    Empty strings are only storable in TEXT-ish columns; for the rest the
+    builder must skip the column (→ NULL/DB default) instead of binding ''.
+    Unknown/empty types stay TEXT-ish (legacy behavior preserved).
+    """
+    try:
+        dt = str(getattr(field, "data_type", "") or "").upper().split("(")[0].strip()
+    except Exception:
+        return False
+    if not dt:
+        return False
+    for _t in ("INT", "INTEGER", "BIGINT", "SMALLINT", "SERIAL", "BIGSERIAL",
+               "NUMBER", "NUMERIC", "DECIMAL", "FLOAT", "DOUBLE", "REAL", "MONEY",
+               "BOOLEAN", "BOOL", "DATE", "TIME", "TIMESTAMP", "DATETIME",
+               "TIMETZ", "TIMESTAMPTZ", "INTERVAL"):
+        if dt == _t or dt.startswith(_t):
+            return True
+    return False
+
+
 # ── Secret hashing (password inputs are stored HASHED, never plaintext) ──
 # Django hashers first (PBKDF2-HMAC-SHA256, verifiable via check_password);
 # stdlib PBKDF2 fallback when Django auth hashers are unavailable.
@@ -467,6 +489,9 @@ class FMLKFormEngine:
             if f.name in data:
                 if data[f.name] is None:
                     continue  # يُترك لملء الأعمدة التلقائي أو NULL/الافتراضي
+                if isinstance(data[f.name], str) and data[f.name].strip() == "" \
+                        and _blank_incompatible(f):
+                    continue  # فارغ لرقمي/تاريخ/منطقي → يُحذف (NULL) بدل invalid input syntax
                 cols.append(_q(f.name))
                 binds.append(f":{f.name}")
                 params[f.name] = data[f.name]
@@ -518,11 +543,18 @@ class FMLKFormEngine:
             _disp = {getattr(f, "name", "") for f in (self.fields or []) if getattr(f, "display_only", False)}
         except Exception:
             _disp = set()
+        try:
+            _fmap = {getattr(f, "name", ""): f for f in (self.fields or [])}
+        except Exception:
+            _fmap = {}
         for k, v in data.items():
             if k in pk:
                 continue
             if k in _disp:
                 continue  # عرض فقط — لا يُكتب أبداً
+            if isinstance(v, str) and v.strip() == "" and _blank_incompatible(_fmap.get(k)):
+                sets.append(f"{_q(k)}=NULL")  # مسح رقمي/تاريخ/منطقي → NULL بدل invalid input syntax
+                continue
             sets.append(f"{_q(k)}=:{k}")
             params[k] = v
         if not sets:
