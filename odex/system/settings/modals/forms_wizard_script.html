@@ -10,7 +10,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             {id:'tabs', name:'التبويبات', icon:'fa-folder'},
             {id:'docs', name:'المستندات', icon:'fa-file-lines'},
         ];
-        // وجهات التفاصيل حصراً: الجدول الرابط (يُخزَّن) + مرجع بحث (لا شيء — لا يُخزَّن)
+        // وجهات التفاصيل حصراً: حقل مخصص (يُخزَّن) + مرجع بحث (لا شيء — لا يُخزَّن)
         function fwDetailDests(b){ if(!b || !b.table) return []; return ['junction:' + b.table, 'ref:' + b.table]; }
         function fwIsDetailDest(d){ const s = String(d || ''); return s.startsWith('junction:') || s.startsWith('ref:'); }
         function fwRefTableOf(dest){ const s = String(dest || ''); return s.startsWith('ref:') ? s.slice(4) : s; }
@@ -29,7 +29,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             }catch(e){}
         }
         function fwDetailTypeLocked(r){
-            // المخصص (وجهة رابط) حر دائماً؛ المرتبط/المرجع مقفل نوعه إن كان عموداً بالقاعدة
+            // المخصص (وجهة مخصصة) حر دائماً؛ المرتبط/المرجع مقفل نوعه إن كان عموداً بالقاعدة
             const dest = String(r.destination || '');
             if(dest.startsWith('junction:')) return false;
             const tbl = fwRefTableOf(dest);
@@ -162,9 +162,9 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                     is_main_col: !!(f.is_main_col || f.isMainCol),
                     config: f.config || {}
                 }));
-                // الجداول المتفرعة (وضع ربط + ظهور + مفتاح فرعي + حقول الرابط junction)
+                // الجداول المتفرعة (وضع ربط + ظهور + مفتاح فرعي + الحقول المخصصة junction)
                 fwBranches = (data.details || []).map(d=>({table: d.table, alias: d.alias || d.table, master: d.master || '', detail: d.detail || '', link_mode: (d.link_mode === 'junction' || (!d.link_mode && ((d.junction && d.junction.table) || ((d.columns || []).some(c=>c && c.junction))))) ? 'junction' : 'direct', sub_key: d.sub_key || d.subKey || 'id', visible: d.visible !== false, cols: (d.columns || []).map(c=>({name: c.name, alias: c.alias || c.name, data_type: c.data_type || 'VARCHAR', input_type: c.input_type || 'text', required: !!c.required, default: (c.default != null ? String(c.default) : ''), options: (Array.isArray(c.options) ? c.options : []), junction: !!c.junction, ref: !!c.ref, formula: c.formula || c.calc_expr || '', calc_mode: c.calc_mode || ''})), colsCache: []}));
-                // مدخلات الفروع: أعد بناء جدولها من الأعمدة (تُدمج عند الحفظ) — رابط بوجهة junction: ومرجع بحث بوجهة ref:
+                // مدخلات الفروع: أعد بناء جدولها من الأعمدة (تُدمج عند الحفظ) — مخصص بوجهة junction: ومرجع بحث بوجهة ref:
                 fwBranches.forEach(b=>{
                     (b.cols || []).forEach(c=>{
                         const dest = c.junction ? ('junction:' + b.table) : (c.ref ? ('ref:' + b.table) : b.table);
@@ -1020,9 +1020,9 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             fwInputs.push({key:'manual_'+Date.now(), table: b.table, name:'', alias:'', icon:'', inputType:'text', dataType:'VARCHAR', destination:'junction:'+b.table, required:false, computed:false, expr:'', editable:true, tab:(fwTabs[0]||{}).id || 'البيانات الأساسية', options:[], options_source:[], refTable:'', refFk:'', refDisplay:'', visibleIf:'',config:{}});
             if(stay){ fwRenderSheet(); return; }
             fwShowSheet('inputs');
-            try{ notify('حقل رابط يدوي — يُخزن في جدول الرابط الثالث عند الترحيل', 'info'); }catch(e){}
+                try{ notify('حقل مخصص يدوي — يُخزن في الجدول الثالث عند الترحيل', 'info'); }catch(e){}
         }
-        /* ── تعديل التفاصيل: تهيئة حقول الرابط (نوع المدخل/البيانات/المطلوب/الخيارات/الافتراضي) ── */
+        /* ── تعديل التفاصيل: تهيئة الحقول المخصصة (نوع المدخل/البيانات/المطلوب/الخيارات/الافتراضي) ── */
         let fwDetailEditIdx = -1;
         const FW_DETAIL_INPUT_TYPES = ['text','number','select','boolean','date','datetime','time','textarea'];
         const FW_DETAIL_DATA_TYPES = ['VARCHAR','TEXT','INTEGER','BIGINT','NUMERIC','BOOLEAN','DATE','TIME','TIMESTAMP'];
@@ -1046,7 +1046,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                     + '<div class="p-4 space-y-2 overflow-y-auto custom-scroll text-xs">'
                     + '<div id="fwDetailEditHint" class="text-[11px] text-slate-500"></div>'
                     + '<div id="fwDetailEditRows" class="space-y-1.5"></div>'
-                    + '<div><button onclick="fwDetailEditAdd()" class="px-3 py-1.5 bg-teal-50 hover:bg-teal-100 text-teal-700 rounded-lg font-bold"><i class="fa-solid fa-plus"></i> حقل رابط يدوي</button></div>'
+                    + '<div><button onclick="fwDetailEditAdd()" class="px-3 py-1.5 bg-teal-50 hover:bg-teal-100 text-teal-700 rounded-lg font-bold"><i class="fa-solid fa-plus"></i> حقل مخصص يدوي</button></div>'
                     + '</div>'
                     + '<div class="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2 shrink-0"><button onclick="fwDetailEditClose()" class="px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl">إغلاق</button><button onclick="fwDetailEditDone()" class="px-4 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-bold"><i class="fa-solid fa-check"></i> تم</button></div>'
                     + '</div>';
@@ -1056,7 +1056,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             m.classList.remove('hidden');
         }
         function fwDetailEditClose(){ const m = document.getElementById('fwDetailEditModal'); if(m) m.classList.add('hidden'); fwDetailEditIdx = -1; }
-        function fwDetailEditDone(){ fwDetailEditClose(); fwRenderSheet(); try{ notify('حُفظت تهيئة حقول الرابط — تُرحّل لجدول ثالث عند حفظ + ترحيل', 'success'); }catch(e){} }
+        function fwDetailEditDone(){ fwDetailEditClose(); fwRenderSheet(); try{ notify('حُفظت تهيئة الحقول المخصصة — تُرحّل لجدول ثالث عند حفظ + ترحيل', 'success'); }catch(e){} }
         function fwDetailEditAdd(){
             const b = fwBranches[fwDetailEditIdx];
             if(!b) return;
@@ -1079,7 +1079,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             if(!b || !box) return;
             if(title) title.innerHTML = '<i class="fa-solid fa-pen text-amber-600"></i> تعديل التفاصيل — ' + fwEsc(b.alias || b.table);
             const jn = fwBareTbl(fwMainTable) + '_' + fwBareTbl(b.table);
-            if(hint) hint.innerHTML = 'تُخزن في جدول الرابط الثالث <b class="font-mono" dir="ltr">' + fwEsc(jn) + '</b> بصيغة <span class="font-mono" dir="ltr">id (تسلسلي تلقائي) / master_id / detail_id / حقولك</span> — يُبنى في كل الأحوال عند (حفظ + ترحيل) مادام وضع الربط «جدول ثالث»، والحقول المخصصة هنا اختيارية. تُنشأ قيود 1-to-many عند الترحيل.';
+            if(hint) hint.innerHTML = 'تُخزن في الجدول الثالث <b class="font-mono" dir="ltr">' + fwEsc(jn) + '</b> بصيغة <span class="font-mono" dir="ltr">id (تسلسلي تلقائي) / master_id / detail_id / حقولك المخصصة</span> — يُبنى في كل الأحوال عند (حفظ + ترحيل) مادام وضع الربط «جدول ثالث»، والحقول المخصصة هنا اختيارية. تُنشأ قيود 1-to-many عند الترحيل.';
             const rows = fwJunctionInputs(fwDetailEditIdx);
             box.innerHTML = rows.length ? rows.map(x=>{
                 const ki = (fwInputs || []).indexOf(x);
@@ -1095,7 +1095,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                     + `<div class="col-span-1 text-left"><button onclick="fwDetailEditDel('${x.key}')" title="حذف" class="text-rose-400 hover:text-rose-600 px-1"><i class="fa-solid fa-trash"></i></button></div>`
                     + (showOpts ? `<div class="col-span-12"><input value="${fwEsc(opts)}" oninput="fwInputs[${ki}].options=this.value.split(',').map(s=>s.trim()).filter(Boolean)" placeholder="خيارات مفصولة بفاصلة: نشط، موقوف" title="خيارات القائمة" class="wb-inp !py-1"></div>` : '')
                     + `</div>`;
-            }).join('') : '<p class="text-slate-400 text-center py-4">لا حقول رابط — أضف حقلاً يدوياً أو اترك الحفظ المباشر في جدول الفرعي</p>';
+            }).join('') : '<p class="text-slate-400 text-center py-4">لا حقول مخصصة — أضف حقلاً يدوياً أو اترك الحفظ المباشر في جدول الفرعي</p>';
         }
         function fwBranchDestSet(b){
             // كل الوجهات المرتبطة بفرع واحد (لمنع تكرار الاستيراد)
@@ -1162,7 +1162,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                 const old = (b.cols || []).find(c=>c.name===n) || {};
                 return {name: n, alias: old.alias || n, data_type: (fwMapDbType(hit.type).dataType)};
             });
-            // غير المحدد = محذوف من الشبكة: أسقط مدخلاته المباشرة/المرجعية أيضاً (الرابط يُدار من تعديل التفاصيل)
+            // غير المحدد = محذوف من الشبكة: أسقط مدخلاته المباشرة/المرجعية أيضاً (المخصصة تُدار من تعديل التفاصيل)
             try{
                 const gone = before.filter(n=>n && !keep.includes(n));
                 if(gone.length) fwInputs = (fwInputs || []).filter(x=>{
@@ -1204,7 +1204,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
         }
         function fwRenderInputs(body){
             const destOpts = ['main', ...fwBranches.map(b=>b.table).filter(Boolean), ...fwBranches.map(b=>b.table ? ('junction:' + b.table) : '').filter(Boolean), ...fwBranches.map(b=>b.table ? ('ref:' + b.table) : '').filter(Boolean)];
-            const destName = (d)=> d === 'main' ? 'الأساسي' : (String(d).startsWith('junction:') ? (d.slice(9).split('.').pop() + ' ⬡ رابط') : (String(d).startsWith('ref:') ? (d.slice(4).split('.').pop() + ' 🔍 مرجع') : d.split('.').pop()));
+            const destName = (d)=> d === 'main' ? 'الأساسي' : (String(d).startsWith('junction:') ? (d.slice(9).split('.').pop() + ' ⬡ حقل مخصص') : (String(d).startsWith('ref:') ? (d.slice(4).split('.').pop() + ' 🔍 مرجع') : d.split('.').pop()));
             body.innerHTML = `
             <div class="wb-panel !p-2">
                 <div class="flex items-center justify-between mb-1 px-1">
@@ -1232,7 +1232,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
         /* ── ورقة التفاصيل: نفس واجهة المدخلات لأعمدة التفاصيل + المخصصة (مجموعة لكل فرع) ── */
         function fwDetailDestName(d){
             const s = String(d || '');
-            if(s.startsWith('junction:')) return 'الجدول الرابط ⬡';
+            if(s.startsWith('junction:')) return 'حقل مخصص ⬡';
             if(s.startsWith('ref:')) return 'لا شيء - مرجع بحث 🔍';
             return s.split('.').pop() + ' (قديم)';
         }
@@ -1246,7 +1246,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             body.innerHTML = `
             <div class="wb-panel !p-2">
                 <div class="flex items-center justify-between mb-1 px-1">
-                    <div class="wb-panel-title !mb-0"><i class="fa-solid fa-table-list text-violet-600"></i> التفاصيل — تهيئة أعمدة كل جدول متفرع (الوجهة: الجدول الرابط أو مرجع بحث فقط • نوع المرتبطة مقفل)</div>
+                        <div class="wb-panel-title !mb-0"><i class="fa-solid fa-table-list text-violet-600"></i> التفاصيل — تهيئة أعمدة كل جدول متفرع (الوجهة: حقل مخصص أو مرجع بحث فقط • نوع المرتبطة مقفل)</div>
                 </div>
                 ${groups.length ? groups.map(({b, bi})=>{
                     const destOpts = fwDetailDests(b);
@@ -1255,20 +1255,20 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                     const nrefs = rows.filter(x=>String(x.r.destination || '').startsWith('ref:')).length;
                     return `<div class="border border-violet-200 rounded-xl mb-2 overflow-hidden">
                     <div class="bg-violet-50 px-3 py-1.5 flex items-center justify-between flex-wrap gap-1">
-                        <div class="text-[11px] font-bold text-slate-700"><i class="fa-solid fa-diagram-project text-violet-600"></i> ${fwEsc(b.alias || b.table)} <span class="font-mono font-normal text-slate-400" dir="ltr">${fwEsc(b.table)}</span> <span class="text-[10px] text-slate-400 font-normal">(${rows.length} عمود${(b.link_mode === 'junction') ? ` • جدول ثالث ⬡ <span class="font-mono" dir="ltr">id/master_id/detail_id</span>${customs ? ` + ${customs} مخصص` : ''}` : ''}${nrefs ? ` • ${nrefs} مرجع بحث 🔍` : ''}${(b.link_mode !== 'junction' && !customs && !nrefs) ? ' • بلا حقول رابط — يُحفظ مباشرة في جدول الفرعي' : ''})</span></div>
+                        <div class="text-[11px] font-bold text-slate-700"><i class="fa-solid fa-diagram-project text-violet-600"></i> ${fwEsc(b.alias || b.table)} <span class="font-mono font-normal text-slate-400" dir="ltr">${fwEsc(b.table)}</span> <span class="text-[10px] text-slate-400 font-normal">(${rows.length} عمود${(b.link_mode === 'junction') ? ` • جدول ثالث ⬡ <span class="font-mono" dir="ltr">id/master_id/detail_id</span>${customs ? ` + ${customs} مخصص` : ''}` : ''}${nrefs ? ` • ${nrefs} مرجع بحث 🔍` : ''}${(b.link_mode !== 'junction' && !customs && !nrefs) ? ' • بلا حقول مخصصة — يُحفظ مباشرة في جدول الفرعي' : ''})</span></div>
                         <div class="flex items-center gap-1">
                             <button onclick="fwImportBranchInputs(${bi})" class="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg font-bold text-[11px]"><i class="fa-solid fa-download"></i> استيراد الأعمدة</button>
-                            <button onclick="fwAddJunctionInput(${bi}, true);fwRenderSheet()" class="px-2 py-1 bg-teal-50 hover:bg-teal-100 text-teal-700 rounded-lg font-bold text-[11px]"><i class="fa-solid fa-plus"></i> حقل رابط يدوي</button>
+                            <button onclick="fwAddJunctionInput(${bi}, true);fwRenderSheet()" class="px-2 py-1 bg-teal-50 hover:bg-teal-100 text-teal-700 rounded-lg font-bold text-[11px]"><i class="fa-solid fa-plus"></i> حقل مخصص يدوي</button>
                             <button onclick="fwDetailEditOpen(${bi})" class="px-2 py-1 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded-lg font-bold text-[11px]"><i class="fa-solid fa-pen"></i> تعديل التفاصيل</button>
                         </div>
                     </div>
                     <div class="px-3 py-1.5 flex items-center gap-3 flex-wrap bg-white border-b border-violet-100">
-                        <label class="text-[11px] text-slate-600 flex items-center gap-1.5">مفتاح الفرعي الرئيسي (PK <span class="font-mono" dir="ltr">→ detail_id</span>) <select onchange="fwBranches[${bi}].sub_key=this.value" title="العمود الذي تُخزَّن قيمته في detail_id بجدول الرابط" class="wb-inp !py-1 font-mono" dir="ltr" style="max-width:170px">${[...new Set([(b.sub_key || 'id'), ...((b.colsCache || []).map(c=>c && c.name).filter(Boolean)), ...((b.cols || []).map(c=>c && c.name).filter(Boolean))])].map(n=>`<option value="${fwEsc(n)}" ${(b.sub_key || 'id')===n?'selected':''}>${fwEsc(n)}</option>`).join('')}</select></label>
+                        <label class="text-[11px] text-slate-600 flex items-center gap-1.5">مفتاح الفرعي الرئيسي (PK <span class="font-mono" dir="ltr">→ detail_id</span>) <select onchange="fwBranches[${bi}].sub_key=this.value" title="العمود الذي تُخزَّن قيمته في detail_id بالجدول الثالث" class="wb-inp !py-1 font-mono" dir="ltr" style="max-width:170px">${[...new Set([(b.sub_key || 'id'), ...((b.colsCache || []).map(c=>c && c.name).filter(Boolean)), ...((b.cols || []).map(c=>c && c.name).filter(Boolean))])].map(n=>`<option value="${fwEsc(n)}" ${(b.sub_key || 'id')===n?'selected':''}>${fwEsc(n)}</option>`).join('')}</select></label>
                         <label class="text-[11px] text-slate-600 flex items-center gap-1.5 font-bold"><input type="checkbox" ${b.visible !== false ? 'checked' : ''} onchange="fwBranches[${bi}].visible=this.checked;fwRenderSheet()" class="w-4 h-4 accent-emerald-600"> إظهار تبويب التفاصيل</label>
                     </div>
                     <div class="overflow-x-auto"><table class="w-full text-[11px]">
                     ${thead}
-                    <tbody>${rows.length ? rows.map(x=>fwInputRowHTML(x.r, x.i, (x.r.destination === b.table ? [...destOpts, b.table] : destOpts), fwDetailDestName, true)).join('') : '<tr><td colspan="13" class="p-4 text-center text-slate-400">لا أعمدة — استورد أعمدة الجدول أو أضف حقل رابط يدوياً</td></tr>'}
+                    <tbody>${rows.length ? rows.map(x=>fwInputRowHTML(x.r, x.i, (x.r.destination === b.table ? [...destOpts, b.table] : destOpts), fwDetailDestName, true)).join('') : '<tr><td colspan="13" class="p-4 text-center text-slate-400">لا أعمدة — استورد أعمدة الجدول أو أضف حقلاً مخصصاً يدوياً</td></tr>'}
                     </tbody></table></div></div>`;
                 }).join('') : '<p class="text-slate-400 text-center py-6">لا جداول متفرعة — أضف جدول تفاصيل من ورقة الجداول لتظهر هنا</p>'}
                 <datalist id="fwInputNames">${fwInputs.map(r=>`<option value="[${fwEsc(r.name)}]">`).join('')}</datalist>
@@ -1787,7 +1787,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             if(!mains.length) throw new Error('أضف مدخلاً واحداً على الأقل للجدول الأساسي');
             // التكرار لكل وجهة على حدة (كل جدول نطاق مستقل: id الأساسي ≠ id الفرعي)
             const _seenNames = new Set();
-            const _destAr = (d)=> (!d || d === 'main') ? 'الأساسي' : (String(d).startsWith('junction:') ? ('رابط ' + d.slice(9).split('.').pop()) : (String(d).startsWith('ref:') ? ('مرجع بحث ' + d.slice(4).split('.').pop()) : ('تفاصيل ' + String(d).split('.').pop())));
+            const _destAr = (d)=> (!d || d === 'main') ? 'الأساسي' : (String(d).startsWith('junction:') ? ('حقل مخصص ' + d.slice(9).split('.').pop()) : (String(d).startsWith('ref:') ? ('مرجع بحث ' + d.slice(4).split('.').pop()) : ('تفاصيل ' + String(d).split('.').pop())));
             for(const x of fwInputs){
                 const nm = (x.name || '').trim();
                 if(!nm) continue;
@@ -1829,13 +1829,13 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                 const _fxOf = (x)=> ((x.computed && (x.expr || x.formula)) ? String(x.expr || x.formula).trim() : '');
                 const fromInputs = fwInputs.filter(x=>x.destination === b.table && x.name).map(x=>({name: x.name.trim(), alias: (x.alias || x.name).trim(), data_type: x.dataType || 'VARCHAR', input_type: x.inputType || 'text', required: !!x.required, default: fwColDef(x), options: fwColOpts(x), editable: x.editable !== false, visibleIf: x.visibleIf || '', tab: x.tab || '', formula: _fxOf(x), calc_mode: _fxOf(x) ? 'computed' : 'default', _src: 'عمود مباشر'}));
                 const refs = fwInputs.filter(x=>x.destination === ('ref:' + b.table) && x.name).map(x=>({name: x.name.trim(), alias: (x.alias || x.name).trim(), data_type: x.dataType || 'VARCHAR', input_type: x.inputType || 'text', required: !!x.required, default: fwColDef(x), options: fwColOpts(x), editable: x.editable !== false, visibleIf: x.visibleIf || '', tab: x.tab || '', ref: true, formula: _fxOf(x), calc_mode: _fxOf(x) ? 'computed' : 'default', _src: 'مرجع بحث'}));
-                const customs = fwInputs.filter(x=>x.destination === ('junction:' + b.table) && x.name).map(x=>({name: x.name.trim(), alias: (x.alias || x.name).trim(), data_type: x.dataType || 'VARCHAR', input_type: x.inputType || 'text', required: !!x.required, default: fwColDef(x), options: fwColOpts(x), editable: x.editable !== false, visibleIf: x.visibleIf || '', tab: x.tab || '', junction: true, formula: _fxOf(x), calc_mode: _fxOf(x) ? 'computed' : 'default', _src: 'حقل رابط'}));
+                const customs = fwInputs.filter(x=>x.destination === ('junction:' + b.table) && x.name).map(x=>({name: x.name.trim(), alias: (x.alias || x.name).trim(), data_type: x.dataType || 'VARCHAR', input_type: x.inputType || 'text', required: !!x.required, default: fwColDef(x), options: fwColOpts(x), editable: x.editable !== false, visibleIf: x.visibleIf || '', tab: x.tab || '', junction: true, formula: _fxOf(x), calc_mode: _fxOf(x) ? 'computed' : 'default', _src: 'حقل مخصص'}));
                 // دمج تلقائي عند تطابق الاسم بين مصادر مختلفة (الأقوى يبقى، والباقي
-                // يُحذف من الحمولة مع تنبيه) — الأولوية: حقل رابط > عمود مباشر >
+                // يُحذف من الحمولة مع تنبيه) — الأولوية: حقل مخصص > عمود مباشر >
                 // مرجع بحث > عمود شبكة. يمنع خطأ «مكرر» عند أي تعديل.
                 const _known = new Set([...fromInputs, ...refs, ...customs].map(f=>(f.name || '').toLowerCase()));
                 const gridOnly = (b.cols || []).filter(c=>!_known.has((c.name || '').toLowerCase())).map(c=>({name: c.name, alias: c.alias || c.name, data_type: c.data_type || 'VARCHAR', input_type: 'text', required: !!c.required, ref: !!c.ref, formula: (c.formula || c.calc_expr || ''), calc_mode: (c.formula || c.calc_expr) ? 'computed' : 'default', _src: 'عمود شبكة'}));
-                const _prio = {'حقل رابط': 4, 'عمود مباشر': 3, 'مرجع بحث': 2, 'عمود شبكة': 1};
+                const _prio = {'حقل مخصص': 4, 'عمود مباشر': 3, 'مرجع بحث': 2, 'عمود شبكة': 1};
                 const _merged = [...fromInputs, ...gridOnly, ...refs, ...customs];
                 const _best = {};
                 for(const _c of _merged){
@@ -1939,7 +1939,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                         const js = (data2.junctions || []).filter(j=>!j.error);
                         const je = (data2.junctions || []).filter(j=>j.error);
                         if(js.length) jmsg += ` + جداول رابطة: ${js.map(j=>j.table).join('، ')}`;
-                        if(je.length) jmsg += ` (تعذر رابط: ${je.map(j=>(j.detail || '') + ':' + (j.error || '')).join('؛ ')})`;
+                        if(je.length) jmsg += ` (تعذر بناء: ${je.map(j=>(j.detail || '') + ':' + (j.error || '')).join('؛ ')})`;
                         const fk = data2.fks || [];
                         const fkc = fk.filter(f=>f.status === 'created').length;
                         const fkw = fk.filter(f=>f.status === 'warning').length;
@@ -1952,7 +1952,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                         const _hasJ = (fwInputs || []).some(x=>String(x.destination || '').startsWith('junction:') && (x.name || '').trim());
                         const _warns = fwCollect.warnings || [];
                         const _wmsg = _warns.length ? ' — ملاحظات: ' + _warns.join('؛ ') : '';
-                        notify(`تم حفظ النموذج ${data.file} ✓` + (_hasJ ? ' — تنبيه: نفّذ (حفظ + ترحيل) حتى تُنشأ أعمدة حقول الرابط، وإلا حُفظت السطور بالأيديهات فقط' : '') + _wmsg, (_hasJ || _warns.length) ? 'info' : 'success');
+                        notify(`تم حفظ النموذج ${data.file} ✓` + (_hasJ ? ' — تنبيه: نفّذ (حفظ + ترحيل) حتى تُنشأ أعمدة الحقول المخصصة، وإلا حُفظت السطور بالأيديهات فقط' : '') + _wmsg, (_hasJ || _warns.length) ? 'info' : 'success');
                     }catch(e){}
                 }
                 setTimeout(()=>location.reload(), 900);

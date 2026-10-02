@@ -3732,6 +3732,23 @@ def _apply_branch_formulas(det, rows):
     return out
 
 
+def _strip_branch_refs(det, rows):
+    """Drop ref-search display values — never stored (like direct mode).
+
+    Only id/sub-key + explicit custom fields reach the third table.
+    Pure (unit-testable).
+    """
+    try:
+        drop = {c.get("name") for c in ((det or {}).get("columns") or [])
+                if isinstance(c, dict) and c.get("ref") and not c.get("junction") and c.get("name")}
+    except Exception:
+        return rows
+    if not drop:
+        return rows
+    return [{k: v for k, v in r.items() if k not in drop} if isinstance(r, dict) else r
+            for r in (rows or [])]
+
+
 @csrf_exempt
 def api_fmlk_branch_save(request):
     """POST /api/fmlk/branch/save {fml,app,detail,key,rows[]} — replace branch rows for master key."""
@@ -3778,6 +3795,8 @@ def api_fmlk_branch_save(request):
             _jsch = (_jm.get("schema") or sch or "public").strip()
             _allowed = {"detail_id"} | {(c.get("name") or "") for c in (_jm.get("fields") or [])
                                         if (c.get("name") or "") not in ("id", "master_id")}
+            # مراجع البحث للعرض فقط — تُسقط قبل الفحص والكتابة (لا أعمدة لها)
+            rows = _strip_branch_refs(det, rows)
             # فحص مبكر قبل الحذف: قيمة لحقل ليس عموداً في جدول الرابط تعني
             # موديل/جدول قديماً (حقل مخصص أُضيف بعد آخر ترحيل) — خطأ صريح
             # بدل إسقاط صامت كان يُخزِّن السطر بالأيديهات فقط وتضيع بقيته
