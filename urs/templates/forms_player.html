@@ -1268,7 +1268,7 @@
                     const get = (nm)=>fwDetailCellVal(i, ri, nm);
                     fcols.forEach(c=>{
                         try{
-                            const v = window.fmlkCalcEval(c.formula, get);
+                            const v = window.fmlkCalcEval(c.formula, get, ri + 1);
                             const el = document.querySelector(`[data-drow="${i}"][data-didx="${ri}"][data-dcol="${CSS.escape(c.name)}"]`);
                             if(el) el.value = (v ?? '');
                         }catch(e){}
@@ -1848,7 +1848,7 @@
         function parseJsonVal(v, fb){ if(v===undefined||v===null||v==='') return fb; if(typeof v!=='string') return v; try{ const p=JSON.parse(v); return p; }catch(e){ return fb; } }
         // مفسّر XSQL عددي للحقول المحسوبة (مرآة fmlk_engine/calc.py) — آمن بلا eval
         // get(name)/[name] + حساب + مقارنات + AND/OR/NOT + دوال مسموحة فقط
-        window.fmlkCalcEval = window.fmlkCalcEval || function(expr, get){
+        window.fmlkCalcEval = window.fmlkCalcEval || function(expr, get, rownum){
             if(expr == null || String(expr).trim() === '') throw new Error('تعبير فارغ');
             const s = String(expr);
             let toks = [];
@@ -1988,7 +1988,9 @@
                 CURRENT_TIMESTAMP: ()=>new Date(),
                 REGEXMATCH: (x, pt)=>{ if(x == null) return false; try{ return new RegExp(str(pt)).test(str(x)); }catch(e){ throw new Error('نمط غير صالح'); } },
                 REGEXEXTRACT: (x, pt, g)=>{ if(x == null) return null; let m; try{ m = str(x).match(new RegExp(str(pt))); }catch(e){ throw new Error('نمط غير صالح'); } if(!m) return null; const gi = g == null ? 0 : Math.floor(Number(g)); return m[gi] !== undefined ? m[gi] : m[0]; },
-                WILDCARDMATCH: (x, wc)=>{ if(x == null) return false; const pat = '^' + str(wc).split('').map(c=>c === '*' ? '.*' : (c === '?' ? '.' : c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))).join('') + '$'; return new RegExp(pat, 's').test(str(x)); }
+                WILDCARDMATCH: (x, wc)=>{ if(x == null) return false; const pat = '^' + str(wc).split('').map(c=>c === '*' ? '.*' : (c === '?' ? '.' : c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))).join('') + '$'; return new RegExp(pat, 's').test(str(x)); },
+                ROWNUM: (...a)=>{ if(a.length) throw new Error('ROWNUM: بلا وسائط'); return rownum == null ? '*' : rownum; },
+                ROW: (...a)=>{ if(a.length) throw new Error('ROW: بلا وسائط'); return rownum == null ? '*' : rownum; }
             };
             Object.assign(FNS, {
                 AND: (...a)=>a.every(truthy), OR: (...a)=>a.some(truthy),

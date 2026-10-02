@@ -2933,10 +2933,11 @@ def api_fmlk_delete(request):
 
 @csrf_exempt
 def api_fmlk_calc_test(request):
-    """POST /api/fmlk/calc-test {expr, row?} → {ok, value, refs} | {error}.
+    """POST /api/fmlk/calc-test {expr, row?, row_index?} → {ok, value, refs} | {error}.
 
     Pure XSQL scalar check for computed-field expressions (no DB): validates
     syntax/functions and evaluates against the optional sample row.
+    row_index (1-based) feeds ROWNUM(); omitted → ROWNUM() is '*'.
     """
     if request.method != "POST":
         return JsonResponse({"error": "POST required"}, status=405)
@@ -2949,8 +2950,13 @@ def api_fmlk_calc_test(request):
     if not isinstance(row, dict):
         return JsonResponse({"error": "row must be an object"}, status=400)
     try:
+        rn = data.get("row_index")
+        rn = int(rn) if rn is not None else None
+    except Exception:
+        return JsonResponse({"error": "row_index must be an integer"}, status=400)
+    try:
         from fmlk_engine.calc import eval_calc_row, calc_refs
-        value = eval_calc_row(expr, {str(k): v for k, v in row.items()})
+        value = eval_calc_row(expr, {str(k): v for k, v in row.items()}, rn)
         refs = calc_refs(expr)
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=400)
@@ -3665,8 +3671,9 @@ def _junction_unknown_keys(rows, allowed):
 def _apply_branch_formulas(det, rows):
     """Recompute computed detail columns per row (authoritative static values).
 
-    Uses the row's own values as the XSQL context; a failed expression keeps
-    the player-sent value (live display already computed it). Never raises.
+    Uses the row's own values as the XSQL context with ROWNUM() = 1-based
+    position; a failed expression keeps the player-sent value (live display
+    already computed it). Never raises.
     """
     try:
         fcols = [c for c in ((det or {}).get("columns") or [])
@@ -3678,14 +3685,14 @@ def _apply_branch_formulas(det, rows):
     except Exception:
         return rows
     out = []
-    for r in (rows or []):
+    for _ix, r in enumerate(rows or []):
         if not isinstance(r, dict):
             out.append(r)
             continue
         d = dict(r)
         for c in fcols:
             try:
-                d[c["name"]] = _ev(str(c.get("formula") or c.get("calc_expr") or ""), d)
+                d[c["name"]] = _ev(str(c.get("formula") or c.get("calc_expr") or ""), d, _ix + 1)
             except Exception:
                 pass
         out.append(d)

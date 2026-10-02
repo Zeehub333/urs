@@ -20,8 +20,10 @@ Supported surface:
              EXP · LN · LOG · PI · NOW · TODAY · DATE · DATEDIF · DATEVALUE ·
              DAY · DAYS · DAYS360 · EDATE · EOMONTH · HOUR · MINUTE · SECOND ·
              TIME · TIMEVALUE · WEEKDAY · WEEKNUM · ISOWEEKNUM · NETWORKDAYS ·
-             WORKDAY · YEAR · YEARFRAC · MONTH · REGEXMATCH · REGEXEXTRACT ·
+             WORKDAY · YEAR ·              YEARFRAC · MONTH · REGEXMATCH · REGEXEXTRACT ·
              WILDCARDMATCH (dates are real dates; date arithmetic is Excel-serial)
+  rows:      ROWNUM()/ROW() — رقم الصف الحالي (1-based) في الجريد/الفرع،
+             و'*' افتراضياً بلا سياق صف
   Empty/NULL numerics coerce to 0 in arithmetic (form-friendly); division or
   sqrt of invalid input yields None (stored NULL) instead of raising.
 """
@@ -62,8 +64,22 @@ def make_row_getter(row: Dict[str, Any]) -> Callable[[str], Any]:
 
 
 # ── refs declared by an expression ───────────────────────────────────────
+_AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
+
+
+def _latin_digits(s: str) -> str:
+    """Arabic-Indic/Persian digits → ASCII; Arabic separators → ./empty."""
+    try:
+        return str(s).translate(_AR_DIGITS).replace("٬", "").replace("٫", ".")
+    except Exception:
+        return str(s)
+
+
 def calc_refs(expr: str) -> List[str]:
-    """Field names referenced via get(...) or [...] (order-stable, deduped)."""
+    """Field names referenced via get(...) or [...] (order-stable, deduped).
+
+    Identifiers may be Latin or Arabic (any Unicode word chars).
+    """
     out: List[str] = []
     try:
         for m in _re.finditer(r"\bget\s*\(\s*([^)]+?)\s*\)", expr or "", flags=_re.IGNORECASE):
@@ -72,7 +88,7 @@ def calc_refs(expr: str) -> List[str]:
                 a = a[1:-1].replace(a[0] * 2, a[0])
             if a and a not in out:
                 out.append(a)
-        for m in _re.finditer(r"\[([A-Za-z_][A-Za-z0-9_.]*)\]", expr or ""):
+        for m in _re.finditer(r"\[([^\W\d][\w.]*)\]", expr or ""):
             if m.group(1) not in out:
                 out.append(m.group(1))
     except Exception:
@@ -145,7 +161,7 @@ def _normalize(expr: str) -> str:
         except Exception:
             return ""
 
-    skel = _re.sub(r"\[([A-Za-z_][A-Za-z0-9_.]*)\]", r"__get__('\1')", skel)
+    skel = _re.sub(r"\[([^\W\d][\w.]*)\]", r"__get__('\1')", skel)
     # bare AND/OR/NOT only (call forms AND()/OR()/NOT() stay functions)
     skel = _re.sub(r"\bAND\b(?!\s*\()", " and ", skel, flags=_re.IGNORECASE)
     skel = _re.sub(r"\bOR\b(?!\s*\()", " or ", skel, flags=_re.IGNORECASE)
@@ -193,6 +209,8 @@ def _serial_date(n: float) -> Optional[_dt.date]:
 def _num(v: Any) -> float:
     if v is None or (isinstance(v, str) and v.strip() == ""):
         return 0.0
+    if isinstance(v, str):
+        v = _latin_digits(v)
     if isinstance(v, bool):
         return 1.0 if v else 0.0
     if isinstance(v, _dt.datetime):
@@ -1129,6 +1147,8 @@ _FUNCTIONS = {
     "WORKDAY", "WORKDAY.INTL", "YEAR", "YEARFRAC",
     # pattern
     "REGEXMATCH", "REGEXEXTRACT", "WILDCARDMATCH",
+    # rows
+    "ROWNUM", "ROW",
 }
 
 _FN_ALIAS = {"LEN": "LENGTH", "SUBSTR": "SUBSTRING", "MID": "SUBSTRING",
@@ -1136,12 +1156,15 @@ _FN_ALIAS = {"LEN": "LENGTH", "SUBSTR": "SUBSTRING", "MID": "SUBSTRING",
              "AVG": "AVERAGE"}
 
 
+_ROWNUM_NAMES = {"ROWNUM", "ROW"}
+
+
 def _fn_table() -> Dict[str, Callable]:
     t: Dict[str, Callable] = {}
     g = globals()
     for name in _FUNCTIONS:
-        if name in _LAZY:
-            continue  # تُقيّم كسولاً ولا تحتاج إدخال بيئة
+        if name in _LAZY or name in _ROWNUM_NAMES:
+            continue  # كسول / سياقي: يُحقن عند التقييم لا من الجدول الثابت
         pyname = _re.sub(r"[^A-Za-z0-9_]", "_", _FN_ALIAS.get(name, name))
         t[_fn_env_name(name)] = g["_fn_" + pyname]
     return t
@@ -1195,22 +1218,34 @@ def _eval_lazy(name: str, args: List[ast.AST], env: Dict[str, Any]) -> Any:
 
 
 # ── evaluator ─────────────────────────────────────────────────────────────
-def eval_calc(expr: str, get: Callable[[str], Any]) -> Any:
-    """Evaluate one XSQL scalar expression against a row. Raises CalcError."""
+def eval_calc(expr: str, get: Callable[[str], Any], rownum: Any = None) -> Any:
+    """Evaluate one XSQL scalar expression against a row. Raises CalcError.
+
+    rownum: رقم الصف الحالي (1-based) لسياقات الجريد/الفروع —
+    دالة ROWNUM()‎ ترده، وبلا سياق ترد الرمز '*' افتراضياً.
+    """
     if expr is None or str(expr).strip() == "":
         raise CalcError("تعبير فارغ")
     try:
         tree = ast.parse(_normalize(str(expr)), mode="eval")
     except SyntaxError as e:
         raise CalcError("صيغة غير صالحة (%s)" % (e.msg if hasattr(e, "msg") else e,))
+
+    def _rownum_fn(*a: Any) -> Any:
+        if a:
+            raise CalcError("ROWNUM: بلا وسائط")
+        return rownum if rownum is not None else "*"
+
     env: Dict[str, Any] = {"__get__": get}
     env.update(_fn_table())
+    for _rn in _ROWNUM_NAMES:
+        env[_fn_env_name(_rn)] = _rownum_fn
     return _eval(tree.body, env)
 
 
-def eval_calc_row(expr: str, row: Dict[str, Any]) -> Any:
+def eval_calc_row(expr: str, row: Dict[str, Any], rownum: Any = None) -> Any:
     """eval_calc with a plain-dict row (case-insensitive get)."""
-    return eval_calc(expr, make_row_getter(row))
+    return eval_calc(expr, make_row_getter(row), rownum)
 
 
 def _eval(node: ast.AST, env: Dict[str, Any]) -> Any:  # noqa: C901
