@@ -984,7 +984,11 @@
                 return;
             }
             let tabLabel = 'التفاصيل';
-            try{ tabLabel = (fmlMeta && (fmlMeta.details_tab || fmlMeta.detailsTab)) || 'التفاصيل'; }catch(e){}
+            try{
+                // fmlMeta هو الرد الكامل — الاسم داخل .metadata (مع قبول المسطح للتوافق)
+                const _md = (fmlMeta && (fmlMeta.metadata || fmlMeta)) || {};
+                tabLabel = (_md.details_tab || _md.detailsTab || fmlMeta.details_tab || fmlMeta.detailsTab) || 'التفاصيل';
+            }catch(e){}
             const bar = document.getElementById('tabsBar');
             if(bar) bar.insertAdjacentHTML('beforeend', `<span class="text-slate-300">›</span><button onclick="switchTab('cat_details')" data-tab="cat_details" class="tab-btn px-4 py-1.5 rounded-full text-xs font-medium border whitespace-nowrap bg-white border-slate-200 text-slate-600">${escHtml(tabLabel)}</button>`);
             const root = document.getElementById('formRoot');
@@ -1128,9 +1132,11 @@
                 }catch(e){}
                 const sibBar = `<span id="fwSibBar_${i}" class="inline-flex items-center gap-1"></span>`;
                 const dlBtn = `<button onclick="fwDownloadOpen(${i})" title="إنزال سجلات جدول التفاصيل بالبحث والاختيار المتعدد" class="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[11px] font-bold"><i class="fa-solid fa-download"></i> إنزال البيانات</button>`;
+                // عنوان البطاقة يُعرض فقط مع تعدد التفاصيل — وإلا الأزرار وحدها لرفع الجدول
+                const _showTitle = visDets.length > 1;
                 return `<div class="fmlk-category p-4">
-                    <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
-                        <div class="text-xs font-bold text-slate-700 flex items-center gap-2"><i class="fa-solid fa-diagram-project text-violet-600"></i> ${escHtml(d.alias || d.table)} <span class="text-[10px] text-slate-400 font-normal">(${rows.length})</span></div>
+                    <div class="flex items-center ${_showTitle ? 'justify-between' : 'justify-end'} mb-2 flex-wrap gap-2">
+                        ${_showTitle ? `<div class="text-xs font-bold text-slate-700 flex items-center gap-2"><i class="fa-solid fa-diagram-project text-violet-600"></i> ${escHtml(d.alias || d.table)} <span class="text-[10px] text-slate-400 font-normal">(${rows.length})</span></div>` : ''}
                         <div class="flex items-center gap-1 flex-wrap">${sibBar}${dlBtn}<button onclick="fwDetailAddRow(${i})" class="px-2.5 py-1 bg-violet-50 hover:bg-violet-100 text-violet-700 rounded-lg text-[11px] font-bold"><i class="fa-solid fa-plus"></i> إضافة سطر</button></div>
                     </div>
                     <div class="fw-acc-wrap fw-acc-scroll"><table class="fw-acc" dir="rtl">
