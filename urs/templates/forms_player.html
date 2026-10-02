@@ -1381,8 +1381,17 @@
             fwDetailRows[i] = fwDetailRows[i] || [];
             const row = Object.assign({}, fwDetailRows[i][ri] || {});
             if(isJx){
-                // هدف رابط: يُضبط مفتاحه فقط (بقية السطر تُملأ يدوياً)
+                // هدف رابط: يُضبط مفتاحه + مفتاح الربط detail_id + أعمدة العرض فوراً (العرض يُتجاهل عند الحفظ)
                 if(rec[col] !== undefined && rec[col] !== null) row[col] = rec[col];
+                try{
+                    const _skv = rec[sk];
+                    if(_skv !== undefined && _skv !== null && String(_skv) !== '') row['detail_id'] = _skv;
+                }catch(_){}
+                (cols || []).forEach(c=>{
+                    if(!c || c.junction || c.formula) return;
+                    const _k = c.name;
+                    if(_k && _k !== col && rec[_k] !== undefined && rec[_k] !== null) row[_k] = rec[_k];
+                });
             } else {
                 if(jx) row['detail_id'] = rec[sk] ?? '';
                 // ملء أفقي: كامل السجل الواحد (بقية الأعمدة) — حقول الرابط تُملأ يدوياً

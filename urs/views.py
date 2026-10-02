@@ -3795,16 +3795,6 @@ def api_fmlk_branch_save(request):
             _jsch = (_jm.get("schema") or sch or "public").strip()
             _allowed = {"detail_id"} | {(c.get("name") or "") for c in (_jm.get("fields") or [])
                                         if (c.get("name") or "") not in ("id", "master_id")}
-            # مراجع البحث للعرض فقط — تُسقط قبل الفحص والكتابة (لا أعمدة لها)
-            rows = _strip_branch_refs(det, rows)
-            # فحص مبكر قبل الحذف: قيمة لحقل ليس عموداً في جدول الرابط تعني
-            # موديل/جدول قديماً (حقل مخصص أُضيف بعد آخر ترحيل) — خطأ صريح
-            # بدل إسقاط صامت كان يُخزِّن السطر بالأيديهات فقط وتضيع بقيته
-            _unknown = _junction_unknown_keys(rows, _allowed)
-            if _unknown:
-                return JsonResponse({"error": "الحقول (" + "، ".join(_unknown) +
-                                     f") غير موجودة في جدول الرابط '{_jtable}' — أعد الترحيل "
-                                     "من المصمم (حفظ + ترحيل) لإنشاء أعمدتها، وإلا ضاعت قيمها"}, status=400)
             # أسرار type=password تُخزَّن HASH: أسقط *** (بلا تغيير) واشفِّر الجديد.
             # وبما أن الحفظ يستبدل كاملاً (DELETE+INSERT): أعد حقن المخزَّن
             # للصفوف القائمة — وإلا مُسحت كلمات المرور عند كل حفظ
@@ -3813,6 +3803,16 @@ def api_fmlk_branch_save(request):
             rows = _reinject_branch_secrets(db, _jsch, _jtable, "id", rows, _pw_jx)
             rows = _prep_branch_secrets(rows, _branch_password_cols(det, det.get("columns") or []))
             rows = _apply_branch_formulas(det, rows)
+            # مراجع البحث للعرض فقط — تُسقط بعد الصيغ (قد تقرؤها) وقبل الفحص والكتابة
+            rows = _strip_branch_refs(det, rows)
+            # فحص قبل الحذف: قيمة لحقل ليس عموداً في جدول الرابط تعني
+            # موديل/جدول قديماً (حقل مخصص أُضيف بعد آخر ترحيل) — خطأ صريح
+            # بدل إسقاط صامت كان يُخزِّن السطر بالأيديهات فقط وتضيع بقيته
+            _unknown = _junction_unknown_keys(rows, _allowed)
+            if _unknown:
+                return JsonResponse({"error": "الحقول (" + "، ".join(_unknown) +
+                                     f") غير موجودة في جدول الرابط '{_jtable}' — أعد الترحيل "
+                                     "من المصمم (حفظ + ترحيل) لإنشاء أعمدتها، وإلا ضاعت قيمها"}, status=400)
             n = 0
             db._exec(f'DELETE FROM "{_jsch}"."{_jtable}" WHERE "master_id" = :key', {"key": key}, commit=True)
             for r in rows:
