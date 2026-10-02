@@ -145,7 +145,8 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                     key: fwInputKey(md.table || '', f.name), table: md.table || '', name: f.name, alias: f.alias || f.name,
                     icon: f.icon || '', inputType: f.inputType || 'text', dataType: f.dataType || 'VARCHAR',
                     destination: f.destination || 'main', required: !!f.required,
-                    computed: !!(f.formula || f.calc_expr), expr: f.formula || f.calc_expr || '',
+                    computed: !!(f.formula || f.calc_expr || ((f.config || {}).calc_expr || '')),
+                    expr: f.formula || f.calc_expr || ((f.config || {}).calc_expr || ''),
                     editable: f.editable !== false, tab: f.category || fwTabs[0].id,
                     options: Array.isArray(f.options) ? f.options : [],
                     options_source: f.options_source || f.optionsSource || [],
@@ -1192,13 +1193,13 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                             <td class="p-1"><select onchange="fwInputs[${i}].tab=this.value" class="wb-inp !py-1">${fwTabs.map(t=>`<option value="${fwEsc(t.id)}" ${r.tab===t.id?'selected':''}>${fwEsc(t.alias)}</option>`).join('')}</select></td>
                             <td class="p-1 text-center"><button onclick="fwInputMain(${i})" title="${r.is_main_col ? 'العمود الرئيسي — اضغط للإلغاء' : 'تعيين عموداً رئيسياً (واحد فقط)'}" class="${r.is_main_col ? 'text-amber-500' : 'text-slate-300 hover:text-amber-400'}"><i class="fa-solid fa-star"></i></button></td>
                             <td class="p-1 text-center"><input type="checkbox" ${r.required?'checked':''} onchange="fwInputs[${i}].required=this.checked" class="w-4 h-4 accent-rose-600"></td>
-                            <td class="p-1 text-center"><input type="checkbox" ${r.computed?'checked':''} onchange="fwInputs[${i}].computed=this.checked;fwRenderSheet()" class="w-4 h-4 accent-indigo-600"></td>
+                            <td class="p-1 text-center"><input type="checkbox" ${r.computed?'checked':''} onchange="fwComputedToggle(${i},this.checked)" title="محسوب" class="w-4 h-4 accent-indigo-600"></td>
                             <td class="p-1 text-center"><input type="checkbox" ${r.editable?'checked':''} onchange="fwInputs[${i}].editable=this.checked" class="w-4 h-4 accent-emerald-600"></td>
                             <td class="p-1"><input value="${fwEsc(r.visibleIf || '')}" oninput="fwInputs[${i}].visibleIf=this.value;fwVisAC(this)" onkeydown="return fwVisACKey(event,this)" onblur="fwVisHideSoon()" data-fwself="${fwEsc(r.name)}" dir="ltr" placeholder="status==active" title="إكمال تلقائي: حقل ← عملية ← قيمة ← رابط. مثال: status==active && city==جدة" class="wb-inp !py-1 font-mono"></td>
                             <td class="p-1"><input value="${fwEsc(r.displayExpr || '')}" oninput="fwInputs[${i}].displayExpr=this.value" dir="ltr" placeholder="{col} أو [a]+[b]" title="عرض فقط — مرجع {col} من جدول العرض أو حساب. يُقرأ ولا يُخزن" class="wb-inp !py-1 font-mono"></td>
                             <td class="p-1"><button onclick="fwDelInput(${i})" class="text-rose-400 hover:text-rose-600 px-1"><i class="fa-solid fa-trash"></i></button><button onclick="fwMoveInput(${i},-1)" title="لأعلى" class="text-slate-400 hover:text-indigo-600 px-1"><i class="fa-solid fa-arrow-up text-[10px]"></i></button><button onclick="fwMoveInput(${i},1)" title="لأسفل" class="text-slate-400 hover:text-indigo-600 px-1"><i class="fa-solid fa-arrow-down text-[10px]"></i></button></td>
                         </tr>
-                        ${r.computed ? `<tr class="border-t border-indigo-100 bg-indigo-50/40"><td class="p-1 text-[10px] text-indigo-700 font-bold" colspan="2">تعبير الحساب <span class="font-mono" dir="ltr">XSQL</span></td><td class="p-1" colspan="11"><div class="flex items-center gap-1"><input value="${fwEsc(r.expr || '')}" oninput="fwInputs[${i}].expr=this.value" dir="ltr" placeholder="get(qty) * get(price)" list="fwInputNames" title="XSQL: get(col) أو [col] + دوال IF/COALESCE/UPPER/ROUND/REGEXMATCH/ROWNUM()‎/المزيد — ROWNUM رقم الصف الحالي (* بلا سياق) — المرجع للمشغل والقاعدة قيمة ثابتة" class="wb-inp !py-1 font-mono flex-1 min-w-0"><button onclick="fwCalcTest(${i},this)" title="تحقق من الصيغة" class="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg font-bold text-[10px] whitespace-nowrap"><i class="fa-solid fa-vial"></i> تحقق</button><span data-calcm="${i}" class="text-[10px] text-slate-400 whitespace-nowrap"></span></div></td></tr>` : ''}`;
+                        ${r.computed ? `<tr class="border-t border-indigo-100 bg-indigo-50/40"><td class="p-1 text-[10px] text-indigo-700 font-bold" colspan="2">تعبير الحساب <span class="font-mono" dir="ltr">XSQL</span></td><td class="p-1" colspan="11"><div class="flex items-center gap-1"><input value="${fwEsc(r.expr || '')}" oninput="fwInputs[${i}].expr=this.value" dir="ltr" placeholder="get(qty) * get(price)" list="fwInputNames" title="XSQL: get(col) أو [col] + دوال IF/COALESCE/UPPER/ROUND/REGEXMATCH/ROWNUM()‎/المزيد — ROWNUM رقم الصف الحالي (* بلا سياق) — المرجع للمشغل والقاعدة قيمة ثابتة" class="wb-inp !py-1 font-mono flex-1 min-w-0"><button onclick="fwCalcTest(${i},this)" title="تحقق من الصيغة" class="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg font-bold text-[10px] whitespace-nowrap"><i class="fa-solid fa-vial"></i> تحقق</button><span data-calcm="${i}" class="text-[10px] text-slate-400 whitespace-nowrap"></span>${detailOnly ? `<label class="flex items-center gap-1 text-[10px] font-bold text-teal-700 whitespace-nowrap" title="تسلسلي: ترقيم تلقائي 1..N (يضبط الصيغة ROWNUM())"><input type="checkbox" ${fwIsSerial(r)?'checked':''} onchange="fwSerialToggle(${i},this.checked)" class="rounded"> تسلسلي؟</label>` : ''}</div></td></tr>` : ''}`;
         }
         function fwRenderInputs(body){
             const destOpts = ['main', ...fwBranches.map(b=>b.table).filter(Boolean), ...fwBranches.map(b=>b.table ? ('junction:' + b.table) : '').filter(Boolean), ...fwBranches.map(b=>b.table ? ('ref:' + b.table) : '').filter(Boolean)];
@@ -1865,6 +1866,25 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                 tabs: fwTabs.map((t, i)=>({id: t.id, name: t.alias || t.name, alias: t.alias || t.name, sort_order: i + 1, visibleIf: t.visibleIf || '', is_main: !!t.is_main})),
                 fields, details, overwrite: !!fwEditMode
             };
+        }
+        function fwComputedToggle(i, on){
+            // إلغاء المحسوب يمسح شبح config.calc_expr أيضاً — وإلا بقي للقراءة فقط
+            const x = (fwInputs || [])[i];
+            if(!x) return;
+            x.computed = !!on;
+            if(!on){ try{ if(x.config) delete x.config.calc_expr; }catch(e){} }
+            fwRenderSheet();
+        }
+        function fwIsSerial(x){
+            try{ return !!(x && x.computed && String(x.expr || '').trim().toUpperCase() === 'ROWNUM()'); }catch(e){ return false; }
+        }
+        function fwSerialToggle(i, on){
+            // تسلسلي؟ = اختصار محسوب ROWNUM() (ترقيم تلقائي 1..N يُخزن ثابتاً)
+            const x = (fwInputs || [])[i];
+            if(!x) return;
+            if(on){ x.computed = true; x.expr = 'ROWNUM()'; }
+            else { x.computed = false; try{ if(x.config) delete x.config.calc_expr; }catch(e){} }
+            fwRenderSheet();
         }
         async function fwCalcTest(i, btn){
             // تحقق فوري من تعبير محسوب عبر /api/fmlk/calc-test (بلا قاعدة)

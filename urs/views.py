@@ -1746,9 +1746,12 @@ def api_models_design_save(request, app_name):
                 el.set("displayOnly", "true")
             _cfg = f.get("config") or {}
             if isinstance(_cfg, dict):
+                _has_fx = bool((f.get("formula") or f.get("calc_expr") or "").strip())
                 for _ck in ("parent_field", "sync_source", "auto_condition", "calc_expr", "poly_types",
                             "tree_parent", "sub_fields", "grid_columns", "grid_rows",
                             "matrix_rows", "matrix_cols", "separator", "placeholder_add", "allow_new"):
+                    if _ck == "calc_expr" and not _has_fx:
+                        continue  # شبح صيغة قديمة بعد إلغاء المحسوب — لا تُحفظ
                     if _cfg.get(_ck) not in (None, ""):
                         el.set(_ck, str(_cfg.get(_ck)))
             _opts = f.get("options") or []
