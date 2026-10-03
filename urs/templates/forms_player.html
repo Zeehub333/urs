@@ -3406,7 +3406,11 @@
             return (v === undefined || v === null || v === '') ? `__row${idx}` : String(v);
         }
         function fieldDef(name) {
-            return (fmlMeta.fields || []).find(f => f.name === name) || {};
+            const hit = (fmlMeta.fields || []).find(f => f.name === name);
+            if(hit) return hit;
+            // وضع الأعضاء: تعريف العمود الفرعي (النوع/المدخل) ليعمل الفرز والبحث والخلايا
+            try{ if(typeof fwTreeMemberField === 'function'){ const m = fwTreeMemberField(name); if(m) return m; } }catch(e){}
+            return {};
         }
         // قراءة خلية مع تجاهل حالة الأحرف: الخادم يُرجع المفاتيح بحالة صغيرة
         // (d[0].lower) بينما المسميات قد تحوي حروفاً لاتينية كبيرة (IP/SID)
@@ -3632,6 +3636,7 @@
         }
         async function fmlkBoolToggle(rid, name){
             if(!rid || String(rid).startsWith('__row')) return notify('صف غير محفوظ', 'info');
+            if(typeof fwTreeMemberActive === 'function' && fwTreeMemberActive()) return notify('التبديل من نموذج العضو — هنا عرض فقط', 'info');
             try{
                 const rec = allRows.find((r, i) => String(rowId(r, i)) === String(rid));
                 const cur = rec ? String(cellVal(rec, name) ?? '').trim().toLowerCase() : '';
@@ -3644,6 +3649,15 @@
             }catch(e){ notify('تعذر التبديل: ' + String((e && e.message) || e).slice(0, 150), 'error'); }
         }
         function rowLabel(r) {
+            // وضع الأعضاء: أول عمود فرعي له قيمة
+            try{
+                if(typeof fwTreeMemberActive === 'function' && fwTreeMemberActive()){
+                    for(const f of (fwTree.memberCols || [])){
+                        const v = cellVal(r, f.name);
+                        if(String(v).trim() !== '') return String(v).slice(0, 40);
+                    }
+                }
+            }catch(e){}
             for (const f of (fmlMeta.fields || [])) {
                 try{ if(fieldMediaKind(f)) continue; }catch(e){}
                 const v = cellVal(r, f.name);
@@ -3652,6 +3666,8 @@
             return 'سجل ' + (r.__pk_id ?? r.id ?? r.ID ?? '');
         }
         function visibleFields() {
+            // وضع الأعضاء: أعمدة الفرع (الأعضاء) بدل حقول الأساسي
+            try{ if(typeof fwTreeMemberActive === 'function' && fwTreeMemberActive()) return (fwTree.memberCols || []).filter(f=>f && f.name && !hiddenCols.has(f.name)); }catch(e){}
             return (fmlMeta.fields || []).filter(f => !hiddenCols.has(f.name) && (!f.destination || f.destination === 'main'));
         }
 
@@ -3665,6 +3681,8 @@
             return data;
         }
         async function loadAllRecords() {
+            // وضع الأعضاء: التحديث من الفرع لا من الأساسي — بلا سقوط للأساسي
+            if(typeof fwTreeMemberActive === 'function' && fwTreeMemberActive()){ try{ await fwTreeMemberReload(); }catch(e){} return; }
             try {
                 const data = await fetchRecordsPage(1, FETCH_SIZE);
                 loadError = '';
@@ -3765,6 +3783,12 @@
 
         async function loadRecord(id) {
             if(!id) return;
+            // وضع الأعضاء: الصفوف أعضاء لا سجلات أساسية — معاينة فقط بلا نموذج
+            if(typeof fwTreeMemberActive === 'function' && fwTreeMemberActive()){
+                window._panelId = String(id);
+                try{ paintBlankPanel(); }catch(e){}
+                return;
+            }
             const rid = String(id).startsWith('__row') ? null : id;
             if (rid) {
                 let _recErr = '';
@@ -3859,6 +3883,9 @@
             return ((fmlMeta.metadata || {}).table === 'sys_models');
         }
         function openAddPanel() {
+            // وضع الأعضاء: زر الإضافة يفتح منتقي الأعضاء لا نموذج مجموعة جديد
+            // (التعبئة المسبقة للأب من الشجرة _treePreset تُستثنى — إضافة مجموعة فرعية)
+            if(typeof fwTreeMemberActive === 'function' && fwTreeMemberActive() && !window._treePreset){ try{ fwMemPickOpen(); }catch(e){} return; }
             if(isModelsRegistry()){ location.href = `/app/${currentApp}/forms-designer/`; return; }
             currentRecordId = null;
             currentData = {};
@@ -4122,6 +4149,7 @@
             }catch(e){ return null; }
         }
         function panelEdit(){
+            if(typeof fwTreeMemberActive === 'function' && fwTreeMemberActive()) return notify('الأعضاء يُحرَّرون من نموذجهم — هنا عرض وإدارة عضوية', 'info');
             const t = panelEditRec();
             if(!t) return;
             try{
@@ -4198,6 +4226,11 @@
             }catch(e){ showError(e, 'حفظ من اللوحة'); }
         }
         async function panelDelete(){
+            if(typeof fwTreeMemberActive === 'function' && fwTreeMemberActive()){
+                const t = panelEditRec();
+                if(t) try{ await fwTreeMemberRemove([t.id]); }catch(e){}
+                return;
+            }
             const t = panelEditRec();
             if(!t) return;
             if(!confirm('حذف هذا السجل؟')) return;
@@ -4644,11 +4677,14 @@
             return [...selectedIds].filter(id => !String(id).startsWith('__row'));
         }
         function editSelected() {
+            if(typeof fwTreeMemberActive === 'function' && fwTreeMemberActive()) return notify('الأعضاء يُحرَّرون من نموذجهم — هنا عرض وإدارة عضوية (إضافة/إزالة)', 'info');
             const ids = selectedRealIds();
             if (ids.length !== 1) return notify(ids.length === 0 ? 'حدد سجلاً واحداً للتعديل' : 'حدد سجلاً واحداً فقط للتعديل', 'info');
             loadRecord(ids[0]);
         }
         async function deleteSelected() {
+            // وضع الأعضاء: إزالة من عضوية المجموعة (لا حذف الحسابات) — بلا سقوط للأساسي
+            if(typeof fwTreeMemberActive === 'function' && fwTreeMemberActive()){ try{ await fwTreeMemberRemove(selectedRealIds()); }catch(e){} return; }
             const ids = selectedRealIds();
             if (!ids.length) return notify('حدد سجلاً واحداً على الأقل للحذف', 'info');
             if (!confirm(`هل أنت متأكد من حذف ${ids.length} سجل؟`)) return;
@@ -4908,6 +4944,15 @@
                     }catch(e){ return []; }
                 },
                 onSearch: ({column, text})=>{
+                    // وضع الأعضاء: بحث عميل على صفوف الفرع (بلا WHERE خادمي)
+                    try{
+                        if(typeof fwTreeMemberActive === 'function' && fwTreeMemberActive()){
+                            gridQuery = {column: colKey(column), text: String(text || '').trim()};
+                            currentPage = 1;
+                            fwTreeMemberReload();
+                            return;
+                        }
+                    }catch(e){}
                     // بحث خادمي: النص ← WHERE في قاعدة البيانات (لا ترشيح عميل)
                     const t = String(text || '').trim();
                     gridQuery = {column: '', text: ''};
@@ -5264,18 +5309,206 @@
             return undefined;
         }
         function fwTreeMergeFilters(base){
+            // وضع الأعضاء: بيانات الشبكة من الفرع — لا يسرّب فلتر الأب للأساسي
+            try{ if(typeof fwTreeMemberActive === 'function' && fwTreeMemberActive()) return base; }catch(e){}
             try{
                 const sel = fwTreeActiveSel();
                 if(sel == null) return base;
                 const out = Array.isArray(base) ? base.slice() : [];
                 if(fwTree.mode === 'desc'){
-                    const ids = fwTreeDescIds(sel).map(id=>fwTreeTypedVal(fwTree.cfg.pkField, id));
-                    if(!ids.length) return out.concat([{field: fwTree.cfg.parentField, op: 'equals', value: fwTreeTypedVal(fwTree.cfg.parentField, sel)}]);
+                    // المعرفات تُرسل نصاً دائماً: Postgres يحوّل النص لرقم ضمنياً
+                    // بينما الرقم على عمود نصي يفشل (character varying = integer)
+                    const ids = fwTreeDescIds(sel).map(id=>String(id));
+                    if(!ids.length) return out.concat([{field: fwTree.cfg.parentField, op: 'equals', value: String(sel)}]);
                     if(ids.length > 2000){ try{ notify('الذرية كبيرة — عُرض الأبناء المباشرون فقط', 'info'); }catch(e){} fwTree.mode = 'children'; }
                     else return out.concat([{field: fwTree.cfg.pkField, op: 'in', value: ids}]);
                 }
-                return out.concat([{field: fwTree.cfg.parentField, op: 'equals', value: fwTreeTypedVal(fwTree.cfg.parentField, sel)}]);
+                return out.concat([{field: fwTree.cfg.parentField, op: 'equals', value: String(sel)}]);
             }catch(e){ return base; }
+        }
+        // ── وضع الأعضاء: محتوى الشجرة = أعضاء المجموعة (الفرع) ─────────────
+        // الشبكة الأساسية نفسها بكل مزاياها تعرض صفوف الفرع للمفتاح المحدد.
+        function fwTreeMemberDetail(){
+            try{
+                const dets = (typeof fwDetails === 'function' ? fwDetails() : []) || [];
+                for(let i = 0; i < dets.length; i++){ if(dets[i] && dets[i].visible !== false) return {d: dets[i], i}; }
+            }catch(e){}
+            return null;
+        }
+        function fwTreeMemberActive(){
+            try{ return !!(fwTreeActive() && fwTree.view === 'members' && fwTreeActiveSel() && fwTreeMemberDetail()); }catch(e){ return false; }
+        }
+        function fwTreeMemberField(name){
+            try{
+                if(!fwTree || !fwTree.memberFields) return undefined;
+                return fwTree.memberFields.find(f=>f && f.name === name);
+            }catch(e){ return undefined; }
+        }
+        // خالص: أعمدة العرض + أسماء المخصصات من أعمدة الفرع
+        function fwTreeBuildMemberCols(gcols, det, isJx){
+            const list = (gcols || []).filter(c=>c && c.name);
+            const skip = new Set(isJx ? ['id', 'master_id'] : [String((det && det.detail) || '')]);
+            const cols = list.filter(c=>{
+                if(skip.has(c.name)) return false;
+                if(String(c.input_type || '').toLowerCase() === 'password') return false;
+                return true;
+            }).map(c=>({name: c.name, alias: c.alias || c.name,
+                dataType: c.data_type || 'VARCHAR', data_type: c.data_type || 'VARCHAR',
+                inputType: c.input_type || 'text', input_type: c.input_type || 'text',
+                required: !!c.required, destination: 'member', memberCol: true}));
+            const customs = list.filter(c=>c && c.junction && c.name !== 'detail_id').map(c=>c.name);
+            return {cols, customs};
+        }
+        // خالص: صفوف حفظ الرابط (detail_id + مخصصات فقط — الفرعي المشترك لا يُمس)
+        function fwTreeMapSaveRows(rows, customs){
+            return (rows || []).filter(r=>r && typeof r === 'object').map(r=>{
+                const o = {detail_id: (r['detail_id'] ?? '')};
+                (customs || []).forEach(k=>{ if(r[k] !== undefined) o[k] = r[k]; });
+                return o;
+            });
+        }
+        function fwTreeMatchFilters(r, filters){
+            const list = Array.isArray(filters) ? filters : [];
+            return list.every(f=>{
+                if(!f || typeof f !== 'object') return true;
+                if(Array.isArray(f.any)) return f.any.some(s=>fwTreeMatchFilters(r, [s]));
+                if(Array.isArray(f.all)) return f.all.every(s=>fwTreeMatchFilters(r, [s]));
+                try{ return matchAdv(r, f); }catch(e){ return true; }
+            });
+        }
+        async function fwTreeMemberReload(){
+            if(!fwTreeActive()) return;
+            const md = fwTreeMemberDetail();
+            if(!md || !fwTreeActiveSel()){ await loadAllRecords(); return; }
+            const key = fwTreeActiveSel();
+            try{
+                const {data: d} = await fwFetchJson(`/api/fmlk/branch?fml=${encodeURIComponent(currentFml)}&app=${encodeURIComponent(currentApp)}&detail=${md.i}&key=${encodeURIComponent(key)}`);
+                if(!d || d.error) throw new Error((d && d.error) || 'branch fetch failed');
+                const gcols = d.columns || md.d.columns || [];
+                const isJx = !!((md.d.junction || {}).table);
+                const built = fwTreeBuildMemberCols(gcols, md.d, isJx);
+                fwTree.memIdx = md.i; fwTree.memDet = md.d; fwTree.memJx = isJx;
+                fwTree.memCustoms = built.customs;
+                fwTree.memberFields = gcols.filter(c=>c && c.name).map(c=>({name: c.name, alias: c.alias || c.name,
+                    dataType: c.data_type || 'VARCHAR', data_type: c.data_type || 'VARCHAR',
+                    inputType: c.input_type || 'text', input_type: c.input_type || 'text',
+                    destination: 'member', memberCol: true}));
+                fwTree.memberCols = built.cols;
+                let rows = Array.isArray(d.rows) ? d.rows : [];
+                // فلاتر الخادم (إكسل IN وغيره) تُطبق عميلاً على صفوف الفرع
+                try{
+                    const sf = (typeof serverFilters !== 'undefined' ? serverFilters : []) || [];
+                    if(sf.length) rows = rows.filter(r=>fwTreeMatchFilters(r, sf));
+                }catch(e){}
+                fwTree.memberRows = rows;
+                allRows = rows;
+                serverTotal = rows.length; serverPage = 1;
+                formKindCache = {};
+                selectedIds = new Set([...selectedIds].filter(id=>rows.some((r, i)=>rowId(r, i) === id)));
+                currentPage = 1;
+                refreshNav(); renderGrid(); updateLoadMore();
+                fwTreePaintSelBar();
+            }catch(e){ showError(e, 'تحميل أعضاء المجموعة'); }
+        }
+        function fwTreeSetView(v){
+            if(!fwTreeActive()) return;
+            fwTree.view = (v === 'groups') ? 'groups' : 'members';
+            fwTreePaintSelBar();
+            if(fwTree.view === 'members'){ fwTreeMemberReload(); } else { loadAllRecords(); }
+        }
+        function fwTreeEditGroup(){
+            if(!fwTreeActiveSel()) return;
+            const n = (fwTree.byId || {})[fwTreeActiveSel()];
+            try{ openEditPanel(String(fwTreeActiveSel()), {...((n && n.row) || {})}); }catch(e){}
+        }
+        async function fwTreeMemberRemove(ids){
+            ids = (ids || []).map(x=>String(x)).filter(Boolean);
+            if(!ids.length) return notify('حدد عضواً واحداً على الأقل', 'info');
+            if(!fwTreeMemberActive()) return;
+            if(!fwTree.memJx) return notify('إزالة الأعضاء للمباشر من نموذج الجدول الفرعي', 'info');
+            if(!confirm(`إزالة ${ids.length} من أعضاء المجموعة؟ (لا يحذف حساباتهم)`)) return;
+            const keep = (fwTree.memberRows || []).filter((r, i)=>!ids.includes(String(rowId(r, i))));
+            const save = fwTreeMapSaveRows(keep, fwTree.memCustoms);
+            try{
+                const {data: j} = await fwFetchJson('/api/fmlk/branch/save', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({fml: currentFml, app: currentApp, detail: fwTree.memIdx, key: fwTreeActiveSel(), rows: save})});
+                if(!j || j.error) throw new Error((j && j.error) || 'branch save failed');
+                notify('تمت الإزالة من المجموعة', 'success');
+                await fwTreeMemberReload();
+            }catch(e){ showError(e, 'إزالة عضو'); }
+        }
+        // منتقي إضافة أعضاء: بحث في الفرعي + اختيار متعدد → حفظ رابط
+        function fwMemPickOpen(){
+            const md = fwTreeMemberDetail();
+            if(!md) return notify('لا تفاصيل أعضاء في هذا النموذج', 'info');
+            if(!fwTreeActiveSel()) return notify('حدد المجموعة أولاً', 'info');
+            try{ if(!((md.d.junction || {}).table)) return notify('إضافة الأعضاء للمباشر من نموذج الجدول الفرعي', 'info'); }catch(e){}
+            fwTree.memPick = {i: md.i, q: '', page: 1, rows: [], total: 0, sel: new Set(),
+                subkey: (md.d.sub_key || md.d.subKey || 'id'), cols: [],
+                have: new Set((fwTree.memberRows || []).map(r=>String(r['detail_id'] ?? '')))};
+            let m = document.getElementById('fwMemModal');
+            if(m) m.remove();
+            m = document.createElement('div');
+            m.id = 'fwMemModal';
+            m.className = 'fixed inset-0 z-[80] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4';
+            m.setAttribute('onclick', 'if(event.target===this)fwMemPickClose()');
+            m.innerHTML = `<div class="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[86vh] overflow-hidden flex flex-col">
+                <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-emerald-50 shrink-0"><h3 class="text-sm font-bold text-slate-800"><i class="fa-solid fa-user-plus text-emerald-600"></i> إضافة أعضاء للمجموعة</h3><button onclick="fwMemPickClose()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button></div>
+                <div class="px-5 pt-3 shrink-0"><input id="fwMemSearch" oninput="fwMemPickSearch(this.value)" placeholder="ابحث برقم أو اسم..." class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs"></div>
+                <div id="fwMemList" class="flex-1 min-h-0 overflow-y-auto custom-scroll p-3"><p class="text-slate-400 text-center py-6 text-xs">جاري التحميل...</p></div>
+                <div class="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between shrink-0"><span id="fwMemCount" class="text-[11px] text-slate-500"></span><div class="flex gap-2"><button onclick="fwMemPickClose()" class="px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs">إلغاء</button><button onclick="fwMemPickConfirm()" class="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold">تأكيد الإضافة</button></div></div>
+            </div>`;
+            document.body.appendChild(m);
+            fwMemPickFetch();
+            setTimeout(()=>{ const s = document.getElementById('fwMemSearch'); if(s) s.focus(); }, 100);
+        }
+        function fwMemPickClose(){ const m = document.getElementById('fwMemModal'); if(m) m.remove(); if(fwTree) fwTree.memPick = null; }
+        let fwMemPickDeb = null;
+        function fwMemPickSearch(q){ if(!fwTree || !fwTree.memPick) return; fwTree.memPick.q = q; fwTree.memPick.page = 1; try{ clearTimeout(fwMemPickDeb); }catch(e){} fwMemPickDeb = setTimeout(fwMemPickFetch, 350); }
+        async function fwMemPickFetch(){
+            const st = fwTree ? fwTree.memPick : null;
+            if(!st) return;
+            const box = document.getElementById('fwMemList');
+            try{
+                const {data: d} = await fwFetchJson(`/api/fmlk/detail-search?fml=${encodeURIComponent(currentFml)}&app=${encodeURIComponent(currentApp)}&detail=${st.i}&q=${encodeURIComponent(st.q)}&page=${st.page}&pageSize=50`);
+                if(!d || d.error) throw new Error((d && d.error) || 'search failed');
+                st.subkey = d.sub_key || st.subkey;
+                st.cols = (d.columns || []).filter(c=>c && c.name !== st.subkey).slice(0, 5);
+                st.rows = d.rows || [];
+                st.total = d.total || 0;
+            }catch(e){ if(box) box.innerHTML = `<p class="text-rose-500 text-center py-6 text-xs">${escHtml(String((e && e.message) || e))}</p>`; return; }
+            fwMemPickRender();
+        }
+        function fwMemPickKey(r){ const st = fwTree.memPick; return String(r[st.subkey] ?? ''); }
+        function fwMemPickRender(){
+            const st = fwTree.memPick;
+            const box = document.getElementById('fwMemList');
+            const cnt = document.getElementById('fwMemCount');
+            if(!box || !st) return;
+            const head = st.cols;
+            box.innerHTML = `<table class="w-full text-[11px]" dir="rtl"><thead class="bg-slate-100 text-slate-700 sticky top-0"><tr><th class="p-1.5 w-10 text-center">✓</th>${head.map(c=>`<th class="p-1.5 text-right whitespace-nowrap">${escHtml(c.alias || c.name)}</th>`).join('')}</tr></thead><tbody>`
+                + ((st.rows || []).map(r=>{
+                    const id = fwMemPickKey(r);
+                    const isHave = st.have.has(id);
+                    const on = st.sel.has(id);
+                    return `<tr class="border-t border-slate-100 ${isHave ? 'bg-slate-50' : (on ? 'bg-emerald-50/60' : 'bg-white')} hover:bg-slate-50"><td class="p-1.5 text-center">${isHave ? '<span class="text-[10px] text-slate-400 font-bold">عضو</span>' : `<input type="checkbox" ${on ? 'checked' : ''} onchange="fwMemPickToggle('${escAttr(id)}',this.checked)" class="w-4 h-4 accent-emerald-600">`}</td>${head.map(c=>`<td class="p-1.5 whitespace-nowrap">${escHtml(r[c.name] ?? '')}</td>`).join('')}</tr>`;
+                }).join('') || `<tr><td colspan="${head.length + 1}" class="p-4 text-center text-slate-400">لا سجلات مطابقة</td></tr>`) + `</tbody></table>`;
+            if(cnt) cnt.textContent = `${st.sel.size} محدد • ${st.total} سجل`;
+        }
+        function fwMemPickToggle(id, on){ const st = fwTree ? fwTree.memPick : null; if(!st) return; if(on) st.sel.add(id); else st.sel.delete(id); fwMemPickRender(); }
+        async function fwMemPickConfirm(){
+            const st = fwTree ? fwTree.memPick : null;
+            if(!st) return;
+            const fresh = [...st.sel].filter(id=>id && !st.have.has(String(id)));
+            if(!fresh.length){ fwMemPickClose(); return notify('لا جديد — المحدد أعضاء بالفعل', 'info'); }
+            const save = fwTreeMapSaveRows(fwTree.memberRows || [], fwTree.memCustoms);
+            fresh.forEach(id=>save.push({detail_id: id}));
+            try{
+                const {data: j} = await fwFetchJson('/api/fmlk/branch/save', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({fml: currentFml, app: currentApp, detail: st.i, key: fwTreeActiveSel(), rows: save})});
+                if(!j || j.error) throw new Error((j && j.error) || 'branch save failed');
+                fwMemPickClose();
+                notify(`أُضيف ${fresh.length} عضواً`, 'success');
+                await fwTreeMemberReload();
+            }catch(e){ showError(e, 'إضافة أعضاء'); }
         }
         // بناء الغابة من الصفوف: {roots, byId} — خالص وقابل للاختبار
         function fwTreeBuildForest(rows, cfg){
@@ -5359,11 +5592,14 @@
             const cfg = fwTreeDetectFields(fmlMeta.fields);
             if(!cfg){ fwTreeTeardown(); return; }
             const same = fwTreeSameForm();
-            const keep = (same && fwTree) ? {selId: fwTree.selId, mode: fwTree.mode, expanded: fwTree.expanded} : null;
+            const keep = (same && fwTree) ? {selId: fwTree.selId, mode: fwTree.mode, view: fwTree.view, expanded: fwTree.expanded} : null;
             fwTree = {enabled: true, fmlKey: currentFml, cfg, rows: [], roots: [], byId: {},
                 selId: keep ? keep.selId : null, mode: (keep && keep.mode) || 'children',
+                view: (keep && (keep.view === 'groups' || keep.view === 'members')) ? keep.view : null,
                 expanded: (keep && keep.expanded) || new Set(), search: '', loading: false,
-                addingUnder: null, renaming: null, rootParentVal: null, rootLevel: 1};
+                addingUnder: null, renaming: null, rootParentVal: null, rootLevel: 1,
+                memIdx: 0, memDet: null, memJx: false, memCustoms: [],
+                memberFields: [], memberCols: [], memberRows: [], memPick: null};
             const bar = document.getElementById('groupSidebar');
             const head = document.getElementById('groupSidebarHead');
             if(head && !fwTree.headHtml) fwTree.headHtml = head.innerHTML;
@@ -5516,30 +5752,45 @@
             const sel = fwTreeActiveSel();
             if(sel == null){ bar.classList.add('hidden'); bar.classList.remove('flex'); bar.innerHTML = ''; return; }
             const path = fwTreePathTo(sel);
-            const kids = ((fwTree.byId[sel] || {}).children || []).length;
+            const md = fwTreeMemberDetail();
+            const isMem = fwTreeMemberActive();
+            const kids = (((fwTree.byId || {})[sel] || {}).children || []).length;
+            const memN = (fwTree.memberRows || []).length;
             bar.classList.remove('hidden'); bar.classList.add('flex');
-            bar.innerHTML = `<span class="text-emerald-700 font-bold whitespace-nowrap"><i class="fa-solid fa-sitemap"></i> الشجرة:</span>`
+            let h = `<span class="text-emerald-700 font-bold whitespace-nowrap"><i class="fa-solid fa-sitemap"></i> الشجرة:</span>`
                 + `<button onclick="fwTreeClearSel()" class="text-emerald-700 hover:text-emerald-900 font-bold whitespace-nowrap">الكل</button>`
                 + path.map((n, i)=>`${i ? '<span class="text-slate-300">›</span>' : ''}<button onclick="fwTreeSelect('${String(n.id).replace(/'/g, "\\'")}')" class="hover:text-emerald-800 whitespace-nowrap ${i === path.length - 1 ? 'font-bold text-emerald-800' : 'text-slate-500'}">${escHtml(n.label)}</button>`).join('')
-                + `<span class="text-slate-400 whitespace-nowrap">(${kids} فرع مباشر)</span>`
-                + `<button onclick="fwTreeToggleMode()" title="التبديل بين الأبناء المباشرين وكل الذرية" class="px-2 py-0.5 rounded-full font-bold whitespace-nowrap ${fwTree.mode === 'desc' ? 'bg-emerald-600 text-white' : 'bg-white border border-emerald-200 text-emerald-700'}">${fwTree.mode === 'desc' ? 'الذرية كلها' : 'المباشر فقط'}</button>`
-                + `<span class="mr-auto inline-flex items-center gap-1">`
-                + `<button onclick="fwTreeInlineAdd('${String(sel).replace(/'/g, "\\'")}')" class="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold whitespace-nowrap"><i class="fa-solid fa-plus"></i> فرع</button>`
-                + `<button onclick="loadRecord('${String(sel).replace(/'/g, "\\'")}')" class="px-2 py-0.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-lg font-bold whitespace-nowrap"><i class="fa-solid fa-pen"></i> تحرير</button>`
-                + `<button onclick="fwTreeClearSel()" class="px-2 py-0.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-500 rounded-lg font-bold whitespace-nowrap"><i class="fa-solid fa-xmark"></i></button>`
+                + (isMem ? `<span class="text-slate-400 whitespace-nowrap">(${memN} عضو)</span>` : `<span class="text-slate-400 whitespace-nowrap">(${kids} فرع مباشر)</span>`);
+            // المحتوى: الأعضاء (الفرع) أو الفروع (المجموعات)
+            if(md) h += `<span class="inline-flex rounded-lg overflow-hidden border border-emerald-300 text-[11px] font-bold whitespace-nowrap" title="ماذا يعرض الجدول للمجموعة المحددة؟">`
+                + `<button onclick="fwTreeSetView('members')" class="${isMem ? 'bg-emerald-600 text-white' : 'bg-white text-emerald-700'} px-2.5 py-0.5">الأعضاء</button>`
+                + `<button onclick="fwTreeSetView('groups')" class="${!isMem ? 'bg-emerald-600 text-white' : 'bg-white text-emerald-700'} px-2.5 py-0.5">الفروع</button></span>`;
+            if(!isMem) h += `<button onclick="fwTreeToggleMode()" title="التبديل بين الأبناء المباشرين وكل الذرية" class="px-2 py-0.5 rounded-full font-bold whitespace-nowrap ${fwTree.mode === 'desc' ? 'bg-emerald-600 text-white' : 'bg-white border border-emerald-200 text-emerald-700'}">${fwTree.mode === 'desc' ? 'الذرية كلها' : 'المباشر فقط'}</button>`;
+            h += `<span class="mr-auto inline-flex items-center gap-1">`;
+            if(isMem) h += `<button onclick="fwMemPickOpen()" class="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold whitespace-nowrap"><i class="fa-solid fa-user-plus"></i> عضو</button>`;
+            else h += `<button onclick="fwTreeInlineAdd('${String(sel).replace(/'/g, "\\'")}')" class="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold whitespace-nowrap"><i class="fa-solid fa-plus"></i> فرع</button>`;
+            // تحرير المجموعة نفسها يفتح نموذجها (صف الشجرة لا صف العضو)
+            h += isMem
+                ? `<button onclick="fwTreeEditGroup()" class="px-2 py-0.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-lg font-bold whitespace-nowrap"><i class="fa-solid fa-pen"></i> تحرير المجموعة</button>`
+                : `<button onclick="loadRecord('${String(sel).replace(/'/g, "\\'")}')" class="px-2 py-0.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-lg font-bold whitespace-nowrap"><i class="fa-solid fa-pen"></i> تحرير</button>`;
+            h += `<button onclick="fwTreeClearSel()" class="px-2 py-0.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-500 rounded-lg font-bold whitespace-nowrap"><i class="fa-solid fa-xmark"></i></button>`
                 + `</span>`;
+            bar.innerHTML = h;
         }
         function fwTreeSelect(id){
             if(!fwTreeActive()) return;
             fwTree.selId = String(id);
             fwTree.addingUnder = null; fwTree.renaming = null;
             fwTree.expanded.add(String(id));
+            // الافتراضي: الأعضاء عند وجود فرع، وإلا الفروع
+            if(fwTree.view !== 'groups' && fwTree.view !== 'members') fwTree.view = fwTreeMemberDetail() ? 'members' : 'groups';
+            if(!fwTreeMemberDetail()) fwTree.view = 'groups';
             fwTreePaintList(); fwTreePaintSelBar();
-            try{ loadAllRecords(); }catch(e){}
+            try{ if(fwTreeMemberActive()) fwTreeMemberReload(); else loadAllRecords(); }catch(e){}
         }
         function fwTreeClearSel(){
             if(!fwTreeActive()) return;
-            fwTree.selId = null; fwTree.addingUnder = null; fwTree.renaming = null;
+            fwTree.selId = null; fwTree.view = null; fwTree.addingUnder = null; fwTree.renaming = null;
             fwTreePaintList(); fwTreePaintSelBar();
             try{ loadAllRecords(); }catch(e){}
         }
@@ -5616,7 +5867,7 @@
             }
             const data = {};
             data[fwTree.cfg.labelField] = name;
-            data[fwTree.cfg.parentField] = isRoot ? fwTree.rootParentVal : fwTreeTypedVal(fwTree.cfg.parentField, parentId);
+            data[fwTree.cfg.parentField] = isRoot ? fwTree.rootParentVal : String(parentId);
             data[fwTree.cfg.levelField] = fwTreeTypedVal(fwTree.cfg.levelField, fwTreeNewLevel(isRoot ? null : parentId));
             try{
                 (fmlMeta.fields || []).forEach(f=>{
@@ -5724,7 +5975,7 @@
             const newLevel = fwTreeNewLevel(newParentId);
             try{
                 const data = {};
-                data[fwTree.cfg.parentField] = fwTreeTypedVal(fwTree.cfg.parentField, newParentId);
+                data[fwTree.cfg.parentField] = String(newParentId);
                 data[fwTree.cfg.levelField] = fwTreeTypedVal(fwTree.cfg.levelField, newLevel);
                 await fwTreeApiUpdate(String(id), data);
                 // مستويات الذرية تتبع الأب الجديد
@@ -6395,7 +6646,7 @@
         }
         function openGridSettings() {
             const box = document.getElementById('colsVisibilityList');
-            box.innerHTML = (fmlMeta.fields || []).map(f => `
+            box.innerHTML = (typeof visibleFields === 'function' ? visibleFields() : (fmlMeta.fields || [])).map(f => `
                 <label class="flex items-center gap-2 px-2 py-1.5 hover:bg-slate-50 rounded-lg cursor-pointer text-xs">
                     <input type="checkbox" ${hiddenCols.has(f.name) ? '' : 'checked'} onchange="toggleColVisibility('${f.name}', this.checked)" class="rounded text-indigo-600">
                     <span class="text-slate-700">${f.alias}</span>
