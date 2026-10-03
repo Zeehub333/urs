@@ -1674,7 +1674,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             }catch(e){}
             if(!kind) return;
             fwNameSt = {kind, idx, q: '', rows: [], locales: ['ar'], sel: null, loc: 'ar',
-                edit: {default_name: '', single_name: '', plural_name: ''}, newKey: '', newLoc: ''};
+                edit: {default_name: '', single_name: '', plural_name: '', gender: 'm'}, newKey: '', newLoc: ''};
             let m = document.getElementById('fwNameModal');
             if(m) m.remove();
             m = document.createElement('div');
@@ -1727,7 +1727,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             fwNameSt.loc = v;
             // مزامنة المحرر مع صف اللغة الجديدة (فارغ = ترجمة جديدة ستُضاف)
             const row = fwNameRowFor(fwNameSt.sel, v) || {};
-            fwNameSt.edit = {default_name: row.default_name || '', single_name: row.single_name || '', plural_name: row.plural_name || ''};
+            fwNameSt.edit = {default_name: row.default_name || '', single_name: row.single_name || '', plural_name: row.plural_name || '', gender: (row.gender === 'f' ? 'f' : 'm')};
             fwNamePaint();
         }
         async function fwNameFetch(){
@@ -1771,7 +1771,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             if(!fwNameSt) return;
             fwNameSt.sel = k;
             const row = fwNameRowFor(k, fwNameSt.loc) || {};
-            fwNameSt.edit = {default_name: row.default_name || '', single_name: row.single_name || '', plural_name: row.plural_name || ''};
+            fwNameSt.edit = {default_name: row.default_name || '', single_name: row.single_name || '', plural_name: row.plural_name || '', gender: (row.gender === 'f' ? 'f' : 'm')};
             fwNamePaint();
             setTimeout(()=>{ const el = document.getElementById('fwNameSingle'); if(el){ el.focus(); el.select(); } }, 50);
         }
@@ -1790,6 +1790,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                 <div><label class="block text-[10px] font-bold text-slate-500 mb-0.5">الاسم المفرد</label><input id="fwNameSingle" value="${fwEsc(e.single_name)}" oninput="fwNameSt.edit.single_name=this.value" placeholder="عضو" class="wb-inp"></div>
                 <div><label class="block text-[10px] font-bold text-slate-500 mb-0.5">الاسم الجمع</label><input value="${fwEsc(e.plural_name)}" oninput="fwNameSt.edit.plural_name=this.value" placeholder="الأعضاء" class="wb-inp"></div>
                 <div><label class="block text-[10px] font-bold text-slate-500 mb-0.5">الاسم الافتراضي</label><input value="${fwEsc(e.default_name)}" oninput="fwNameSt.edit.default_name=this.value" placeholder="يُعرض عند غياب المفرد/الجمع" class="wb-inp"></div>
+                <div><label class="block text-[10px] font-bold text-slate-500 mb-0.5">الجنس (لـ جديد/جديدة)</label><select onchange="fwNameSt.edit.gender=this.value" class="wb-inp"><option value="m" ${e.gender !== 'f' ? 'selected' : ''}>ذكر (جديد)</option><option value="f" ${e.gender === 'f' ? 'selected' : ''}>أنثى (جديدة)</option></select></div>
                 <div class="rounded-xl bg-slate-50 border border-slate-100 p-2 text-[11px] text-slate-500">المعاينة — المعتمد «<b>${fwEsc(e.default_name || e.single_name || '—')}</b>» • مفرد «<b>${fwEsc(e.single_name || '—')}</b>» • جمع «<b>${fwEsc(e.plural_name || '—')}</b>»</div>
                 <div class="flex gap-2">
                     <button onclick="fwNameSaveRow()" class="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold"><i class="fa-solid ${isNew ? 'fa-plus' : 'fa-floppy-disk'}"></i> ${isNew ? 'إضافة الترجمة' : 'حفظ اللغة'}</button>
@@ -1806,7 +1807,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                 const d = await fwNameApi('/api/display-names/save/', {name: k, locale_id: fwNameSt.loc, default_name: '', single_name: '', plural_name: ''});
                 if(d.error) throw new Error(d.error);
                 fwNameSt.sel = k;
-                fwNameSt.edit = {default_name: '', single_name: '', plural_name: ''};
+                fwNameSt.edit = {default_name: '', single_name: '', plural_name: '', gender: 'm'};
                 if(inp) inp.value = '';
                 await fwNameFetch();
                 fwNameSelect(k);
@@ -1844,7 +1845,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                 await fwNameFetch();
                 // محرر فارغ للغة الجديدة حتى لا تُنسخ قيم اللغة السابقة
                 const row = fwNameRowFor(fwNameSt.sel, l) || {};
-                fwNameSt.edit = {default_name: row.default_name || '', single_name: row.single_name || '', plural_name: row.plural_name || ''};
+                fwNameSt.edit = {default_name: row.default_name || '', single_name: row.single_name || '', plural_name: row.plural_name || '', gender: (row.gender === 'f' ? 'f' : 'm')};
                 fwNamePaint();
             }catch(e){ fwNameErr(String((e && e.message) || e)); }
         }

@@ -4389,7 +4389,7 @@ def _suggest_columns(schema: str, missing: str, db_engine=None):
 
 
 # ── Display names (i18n label registry, file `odex/system/settings/display_names.json`) ──
-# حقل الاسم: name (مفتاح @key) + default_name + single_name + plural_name + locale_id.
+# حقل الاسم: name (مفتاح @key) + default_name + single_name + plural_name + gender(m/f) + locale_id.
 # يُستخدم عند تسمية الجداول والأعمدة والتبويبات: الحقل يحمل @key والمشغل يحل العرض حسب اللغة.
 _NAMES_FILE = BASE_DIR / "odex" / "system" / "settings" / "display_names.json"
 _NAMES_KEY_RE = None
@@ -4476,10 +4476,14 @@ def api_display_names_save(request):
         reg = _names_load()
         if loc not in reg["locales"]:
             reg["locales"].append(loc)
+        _g = str(data.get("gender") or "").strip().lower()
+        if _g not in ("m", "f"):
+            _g = "m"
         row = {"name": name, "locale_id": loc,
                "default_name": str(data.get("default_name") or "").strip(),
                "single_name": str(data.get("single_name") or "").strip(),
-               "plural_name": str(data.get("plural_name") or "").strip()}
+               "plural_name": str(data.get("plural_name") or "").strip(),
+               "gender": _g}
         hit = next((n for n in reg["names"]
                     if n.get("name") == name and n.get("locale_id") == loc), None)
         if hit is None:
@@ -4557,7 +4561,8 @@ def api_display_names_resolve(request):
                 hit = next((n for n in reg["names"] if n.get("name") == k), None)
             out[k] = {"default": (hit or {}).get("default_name") or "",
                       "single": (hit or {}).get("single_name") or "",
-                      "plural": (hit or {}).get("plural_name") or ""} if hit else {}
+                      "plural": (hit or {}).get("plural_name") or "",
+                      "gender": (hit or {}).get("gender") or "m"} if hit else {}
         return JsonResponse({"locale": loc, "names": out})
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
