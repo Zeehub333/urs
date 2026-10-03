@@ -1722,7 +1722,14 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             fwNameErr._t = setTimeout(()=>{ try{ el.classList.add('hidden'); }catch(e){} }, 6000);
         }
         function fwNameSearch(q){ if(!fwNameSt) return; fwNameSt.q = q; fwNameFetch(); }
-        function fwNameSetLoc(v){ if(!fwNameSt) return; fwNameSt.loc = v; fwNamePaintEdit(); }
+        function fwNameSetLoc(v){
+            if(!fwNameSt) return;
+            fwNameSt.loc = v;
+            // مزامنة المحرر مع صف اللغة الجديدة (فارغ = ترجمة جديدة ستُضاف)
+            const row = fwNameRowFor(fwNameSt.sel, v) || {};
+            fwNameSt.edit = {default_name: row.default_name || '', single_name: row.single_name || '', plural_name: row.plural_name || ''};
+            fwNamePaint();
+        }
         async function fwNameFetch(){
             if(!fwNameSt) return;
             try{
@@ -1777,14 +1784,15 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                 return;
             }
             const e = st.edit;
+            const isNew = !fwNameRowFor(st.sel, st.loc);
             box.innerHTML = `<div class="space-y-2">
-                <div class="text-xs font-bold text-slate-700">المفتاح <span class="font-mono text-violet-700" dir="ltr">@${fwEsc(st.sel)}</span> <span class="text-slate-400 font-normal">— ${fwEsc(st.loc)}</span></div>
+                <div class="text-xs font-bold text-slate-700">المفتاح <span class="font-mono text-violet-700" dir="ltr">@${fwEsc(st.sel)}</span> <span class="text-slate-400 font-normal">— ${fwEsc(st.loc)}</span>${isNew ? ' <span class="text-[10px] font-bold bg-emerald-100 text-emerald-700 rounded px-1.5 py-0.5">جديدة — ستُضاف عند الحفظ</span>' : ''}</div>
                 <div><label class="block text-[10px] font-bold text-slate-500 mb-0.5">الاسم المفرد</label><input id="fwNameSingle" value="${fwEsc(e.single_name)}" oninput="fwNameSt.edit.single_name=this.value" placeholder="عضو" class="wb-inp"></div>
                 <div><label class="block text-[10px] font-bold text-slate-500 mb-0.5">الاسم الجمع</label><input value="${fwEsc(e.plural_name)}" oninput="fwNameSt.edit.plural_name=this.value" placeholder="الأعضاء" class="wb-inp"></div>
                 <div><label class="block text-[10px] font-bold text-slate-500 mb-0.5">الاسم الافتراضي</label><input value="${fwEsc(e.default_name)}" oninput="fwNameSt.edit.default_name=this.value" placeholder="يُعرض عند غياب المفرد/الجمع" class="wb-inp"></div>
                 <div class="rounded-xl bg-slate-50 border border-slate-100 p-2 text-[11px] text-slate-500">المعاينة: مفرد «<b>${fwEsc(e.single_name || e.default_name || '—')}</b>» • جمع «<b>${fwEsc(e.plural_name || e.default_name || '—')}</b>»</div>
                 <div class="flex gap-2">
-                    <button onclick="fwNameSaveRow()" class="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold"><i class="fa-solid fa-floppy-disk"></i> حفظ اللغة</button>
+                    <button onclick="fwNameSaveRow()" class="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold"><i class="fa-solid ${isNew ? 'fa-plus' : 'fa-floppy-disk'}"></i> ${isNew ? 'إضافة الترجمة' : 'حفظ اللغة'}</button>
                     <button onclick="fwNameDel()" class="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl text-xs font-bold"><i class="fa-solid fa-trash"></i></button>
                 </div>
             </div>`;
@@ -1834,6 +1842,10 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                 fwNameSt.loc = l;
                 if(inp) inp.value = '';
                 await fwNameFetch();
+                // محرر فارغ للغة الجديدة حتى لا تُنسخ قيم اللغة السابقة
+                const row = fwNameRowFor(fwNameSt.sel, l) || {};
+                fwNameSt.edit = {default_name: row.default_name || '', single_name: row.single_name || '', plural_name: row.plural_name || ''};
+                fwNamePaint();
             }catch(e){ fwNameErr(String((e && e.message) || e)); }
         }
         function fwNameUse(){
