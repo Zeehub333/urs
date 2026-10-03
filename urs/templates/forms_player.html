@@ -56,6 +56,19 @@
         /* خلية محسوبة: قراءة فقط بنفسجية فاتحة (تُحسب من الصف وتُخزن ثابتة) */
         table.fw-acc input.fw-acc-calc { background: #eef2ff; color: #3730a3; }
         table.fw-acc tbody tr.fw-acc-locked td.fw-acc-c input.fw-acc-calc { background: #e4e4e4; color: #8a8a8a; }
+        /* ── الشجرة الهرمية: سايدبار يمين + شبكة الأبناء بنفس نسق الأساسي ── */
+        .fw-tree-node { display: flex; align-items: center; gap: 4px; padding: 4px 6px; border-radius: 10px; cursor: pointer; border: 1px solid transparent; }
+        .fw-tree-node:hover { background: #f1f5f9; }
+        .fw-tree-node.sel { background: #eef2ff; border-color: #c7d2fe; }
+        .fw-tree-node.dragover { background: #e0e7ff; border-color: #6366f1; border-style: dashed; }
+        .fw-tree-node .acts { opacity: 0; transition: opacity .12s; }
+        .fw-tree-node:hover .acts { opacity: 1; }
+        .fw-tree-tgl { width: 20px; height: 20px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; color: #64748b; font-size: 10px; flex-shrink: 0; }
+        .fw-tree-tgl:hover { background: #e2e8f0; color: #334155; }
+        .fw-tree-act { width: 22px; height: 22px; border-radius: 7px; display: inline-flex; align-items: center; justify-content: center; color: #94a3b8; font-size: 10px; flex-shrink: 0; }
+        .fw-tree-act:hover { background: #e0e7ff; color: #4f46e5; }
+        .fw-tree-act.danger:hover { background: #fee2e2; color: #dc2626; }
+        .fw-tree-inp { width: 100%; background: #fff; border: 1px solid #6366f1; border-radius: 8px; padding: 3px 8px; font-size: 12px; outline: none; }
 {% endblock %}
 {% block sidebar %}
     <!-- Sidebar — kept for navigation (Forms + Reports) -->
@@ -246,7 +259,7 @@
             <!-- Body: grouping sidebar + table/cards -->
             <div id="gridBodyRow" class="flex-1 flex overflow-hidden min-h-0">
                 <aside id="groupSidebar" class="w-56 bg-white border-l border-slate-200 flex-col transition-all duration-300 hidden shrink-0 overflow-y-auto custom-scroll">
-                    <div class="p-3 border-b border-slate-100 flex items-center justify-between">
+                    <div id="groupSidebarHead" class="p-3 border-b border-slate-100 flex items-center justify-between">
                         <h3 class="text-xs font-bold text-slate-700 flex items-center gap-2"><i class="fa-solid fa-layer-group text-indigo-600"></i> المجموعات</h3>
                         <button onclick="toggleGroupSidebar()" class="text-slate-400 hover:text-slate-600 text-xs"><i class="fa-solid fa-xmark"></i></button>
                     </div>
@@ -589,6 +602,7 @@
                 renderTabs(fmlMeta.cats.map((c, i) => ({id: 'cat' + i, alias: c})));
                 renderForm(data);
                 await loadAllRecords();
+                try{ if(typeof fwTreeInit === 'function') fwTreeInit(); }catch(e){}
                 try{ checkMigrateChanges(); }catch(e){}
                 // فتح سجل محدد من رابط ?record= (زر تحرير المرجع بتبويب جديد)
                 try{
@@ -856,10 +870,9 @@
                     btitle.className = 'flex items-center gap-2 px-1 mb-2';
                     below.parentNode.insertBefore(btitle, below);
                 }
-                btitle.innerHTML = sel
-                    ? '<span class="font-bold text-sm text-slate-700">' + escHtml(stackAlias(window._stackActive)) + '</span>'
-                    : '';
-                btitle.style.display = sel ? '' : 'none';
+                // اسم المحدد يظهر بزر الشريط المظلل نفسه — بلا عنوان مكرر تحته
+                btitle.innerHTML = '';
+                btitle.style.display = 'none';
                 below.style.display = sel ? '' : 'none';
                 // تبويبات المتصفح: مستطيلات عريضة مدورة من فوق فقط، والنشط متصل بالمحتوى
                 strip.innerHTML = others.map(c=>{
@@ -3647,7 +3660,7 @@
         async function fetchRecordsPage(page, pageSize){
             // POST يحمل الفلاتر (GET القديمة بلا فلاتر ما تزال مدعومة خادمياً)
             const {data} = await fwFetchJson('/api/fmlk/records', {method: 'POST', headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({fml: currentFml, app: currentApp, page: page, pageSize: pageSize, filters: serverFilters})});
+                body: JSON.stringify({fml: currentFml, app: currentApp, page: page, pageSize: pageSize, filters: (typeof fwTreeMergeFilters === 'function' ? fwTreeMergeFilters(serverFilters) : serverFilters)})});
             if (data.error) throw new Error(data.error);
             return data;
         }
@@ -3852,6 +3865,7 @@
             try{ window._panelId = null; }catch(e){}
             renderForm(fmlMeta);
             document.querySelectorAll('#formRoot [data-field]').forEach(el => { el.value = ''; });
+            try{ if(typeof fwTreeApplyPreset === 'function') fwTreeApplyPreset(); }catch(e){}
             document.getElementById('formPanelTitle').textContent = 'سجل جديد';
             try{             document.getElementById('formPanelSub').textContent = 'إدخال بيانات جديدة — التبويب الأول فوق وبقيتها تحته'; }catch(e){}
             enterFormView();
@@ -5178,7 +5192,620 @@
             if(!append){ try{ document.getElementById('cardsView').innerHTML = ''; }catch(e){} }
             try{ document.getElementById('cardsView').insertAdjacentHTML('beforeend', cardsHtml(cols, paged, start)); }catch(e){}
         }
+        // ── الشجرة الهرمية: parent_id + leve/level ──────────────────────────
+        // التفعيل تلقائي عند وجود العمودين في حقول النموذج.
+        // السايدبار الأيمن = شجرة الأسماء حسب المستوى والأب، والمحتوى = شبكة
+        // الأساسي نفسها بكل مزاياها مُرشحة على أبناء العقدة (مباشر/ذرية).
+        let fwTree = null;
+        function fwTreeDetectFields(fields){
+            try{
+                const list = (fields || []).filter(f=>f && f.name && (!f.destination || f.destination === 'main'));
+                const low = {};
+                list.forEach(f=>{ low[String(f.name).toLowerCase()] = f; });
+                const pick = (cands)=>{ for(const c of cands){ if(low[c]) return low[c]; } return null; };
+                const parent = pick(['parent_id', 'parentid', 'parent', 'father_id']);
+                const level = pick(['leve', 'level', 'lvl', 'depth', 'hlevel', 'lvl_no', 'level_no']);
+                if(!parent || !level) return null;
+                const order = pick(['sort_order', 'sort_no', 'order_no', 'order_num', 'ord', 'seq', 'sequence', 'position', 'rank', 'sort', 'sorder']);
+                let pk = null;
+                try{ pk = list.find(f=>f.primary_key || f.primaryKey) || null; }catch(e){}
+                const skip = new Set([parent.name.toLowerCase(), level.name.toLowerCase(), (pk ? String(pk.name).toLowerCase() : 'id')]);
+                if(order) skip.add(order.name.toLowerCase());
+                const NOIT = new Set(['image', 'media', 'file', 'password']);
+                let label = null;
+                try{ label = list.find(f=>((f.is_main_col || f.isMainCol)) && !skip.has(String(f.name).toLowerCase())) || null; }catch(e){}
+                if(!label){
+                    const texts = list.filter(f=>!skip.has(String(f.name).toLowerCase()) && !NOIT.has(String(f.inputType || '').toLowerCase()));
+                    label = texts[0] || list.find(f=>!skip.has(String(f.name).toLowerCase())) || list[0] || null;
+                }
+                if(!label) return null;
+                return {parentField: parent.name, levelField: level.name, labelField: label.name,
+                    labelAlias: label.alias || label.name, orderField: order ? order.name : null,
+                    pkField: pk ? pk.name : 'id'};
+            }catch(e){ return null; }
+        }
+        function fwTreeSameForm(){ try{ return !!(fwTree && fwTree.fmlKey === currentFml); }catch(e){ return false; } }
+        function fwTreeActive(){ return !!(fwTree && fwTree.enabled && fwTreeSameForm()); }
+        function fwTreeActiveSel(){ try{ return (fwTreeActive() && fwTree.selId != null && fwTree.selId !== '') ? String(fwTree.selId) : null; }catch(e){ return null; } }
+        function fwTreeNum(v){ return (/^-?\d+$/.test(String(v))) ? parseInt(v, 10) : v; }
+        // ترميز القيمة حسب نوع العمود (VARCHAR مقابل INTEGER) — Postgres يرفض
+        // character varying = integer بلا cast صريح (users_groups.parent_id نموذجاً)
+        function fwTreeIsNumeric(fieldName){
+            try{
+                const f = (fmlMeta.fields || []).find(x=>x && x.name === fieldName) || {};
+                const dt = String(f.dataType || f.data_type || f.type || '').toUpperCase();
+                return /INT|NUMERIC|DECIMAL|FLOAT|DOUBLE|REAL|NUMBER|SERIAL/.test(dt);
+            }catch(e){ return false; }
+        }
+        function fwTreeTypedVal(fieldName, v){
+            if(v === null || v === undefined) return v;
+            if(fwTreeIsNumeric(fieldName)){
+                const s = String(v).trim();
+                if(/^-?\d+$/.test(s)) return parseInt(s, 10);
+                if(/^-?\d+\.\d+$/.test(s)) return parseFloat(s);
+            }
+            return String(v);
+        }
+        // قراءة خام بمفتاح الاسم أو المسمى (الصفوف تُرجع بالمسميات العربية) —
+        // بلا ترجمة القيم (cellVal يترجم خيارات select لعربية، فنحتاج الخام للربط)
+        function fwTreeRaw(r, fieldName){
+            try{
+                const f = (fmlMeta.fields || []).find(x=>x && x.name === fieldName) || {};
+                const keys = [];
+                if(f.alias) keys.push(f.alias);
+                keys.push(fieldName);
+                for(const k of keys){
+                    if(r[k] !== undefined) return r[k];
+                    const lk = String(k).toLowerCase();
+                    const ks = Object.keys(r || {});
+                    for(const rk of ks){ if(String(rk).toLowerCase() === lk) return r[rk]; }
+                }
+            }catch(e){}
+            return undefined;
+        }
+        function fwTreeMergeFilters(base){
+            try{
+                const sel = fwTreeActiveSel();
+                if(sel == null) return base;
+                const out = Array.isArray(base) ? base.slice() : [];
+                if(fwTree.mode === 'desc'){
+                    const ids = fwTreeDescIds(sel).map(id=>fwTreeTypedVal(fwTree.cfg.pkField, id));
+                    if(!ids.length) return out.concat([{field: fwTree.cfg.parentField, op: 'equals', value: fwTreeTypedVal(fwTree.cfg.parentField, sel)}]);
+                    if(ids.length > 2000){ try{ notify('الذرية كبيرة — عُرض الأبناء المباشرون فقط', 'info'); }catch(e){} fwTree.mode = 'children'; }
+                    else return out.concat([{field: fwTree.cfg.pkField, op: 'in', value: ids}]);
+                }
+                return out.concat([{field: fwTree.cfg.parentField, op: 'equals', value: fwTreeTypedVal(fwTree.cfg.parentField, sel)}]);
+            }catch(e){ return base; }
+        }
+        // بناء الغابة من الصفوف: {roots, byId} — خالص وقابل للاختبار
+        function fwTreeBuildForest(rows, cfg){
+            const byId = {}, roots = [];
+            const normPid = (v)=>{
+                if(v === undefined || v === null) return null;
+                const s = String(v).trim();
+                if(s === '' || s.toLowerCase() === 'null' || s === '0') return null;
+                return s;
+            };
+            (rows || []).forEach((r, i)=>{
+                let id = '';
+                try{ id = String(rowId(r, i)); }catch(e){ id = '__row' + i; }
+                if(id.startsWith('__row')) return;
+                let label = '';
+                try{ label = String(cellVal(r, cfg.labelField) ?? '').trim(); }catch(e){}
+                let ord = null;
+                try{
+                    const rv = fwTreeRaw(r, cfg.orderField || '__no_order__');
+                    if(rv !== undefined && rv !== null && String(rv).trim() !== '') ord = parseFloat(rv);
+                }catch(e){}
+                let lv = 1;
+                try{
+                    const rv = fwTreeRaw(r, cfg.levelField);
+                    const n = parseInt(rv, 10);
+                    if(!isNaN(n) && n > 0) lv = n;
+                }catch(e){}
+                byId[id] = {id, row: r, idx: i, label: label || ('#' + id), pid: normPid(fwTreeRaw(r, cfg.parentField)), level: lv, ord, children: []};
+            });
+            Object.values(byId).forEach(n=>{
+                if(n.pid && byId[n.pid] && n.pid !== n.id) byId[n.pid].children.push(n);
+                else { if(n.pid && (n.pid === n.id || !byId[n.pid])) n.pid = null; roots.push(n); }
+            });
+            // حماية الدورات: DFS مع مجموعة المسار — أي حافة خلفية تُقطع
+            // (بلا هذا يتكدس sortDeep والرسم بـ stack overflow على بيانات دورية)
+            const seen = new Set();
+            const clean = (n, path)=>{
+                if(path.has(n.id)) return false;
+                if(seen.has(n.id)) return true;
+                seen.add(n.id);
+                path.add(n.id);
+                n.children = n.children.filter(c=>clean(c, path));
+                path.delete(n.id);
+                return true;
+            };
+            roots.forEach(n=>clean(n, new Set()));
+            Object.values(byId).forEach(n=>{ if(!seen.has(n.id)){ n.pid = null; roots.push(n); clean(n, new Set()); } });
+            const cmp = cfg.orderField
+                ? ((a, b)=>((a.ord == null ? 1e18 : a.ord) - (b.ord == null ? 1e18 : b.ord)) || a.label.localeCompare(b.label, 'ar'))
+                : ((a, b)=>a.label.localeCompare(b.label, 'ar'));
+            const sortDeep = (n)=>{ n.children.sort(cmp); n.children.forEach(sortDeep); };
+            roots.sort(cmp); roots.forEach(sortDeep);
+            return {roots, byId};
+        }
+        function fwTreeDescIds(id){
+            const out = [];
+            try{
+                const start = fwTree.byId[String(id)];
+                if(!start) return out;
+                const st = start.children.slice();
+                const seen = new Set([String(id)]);
+                while(st.length){
+                    const n = st.pop();
+                    if(seen.has(n.id)) continue;
+                    seen.add(n.id); out.push(n.id);
+                    n.children.forEach(c=>st.push(c));
+                }
+            }catch(e){}
+            return out;
+        }
+        function fwTreePathTo(id){
+            const path = [];
+            try{
+                let n = fwTree.byId[String(id)] || null;
+                const seen = new Set();
+                while(n && !seen.has(n.id)){ seen.add(n.id); path.unshift(n); n = (n.pid && fwTree.byId[n.pid]) || null; }
+            }catch(e){}
+            return path;
+        }
+        function fwTreeInit(){
+            const cfg = fwTreeDetectFields(fmlMeta.fields);
+            if(!cfg){ fwTreeTeardown(); return; }
+            const same = fwTreeSameForm();
+            const keep = (same && fwTree) ? {selId: fwTree.selId, mode: fwTree.mode, expanded: fwTree.expanded} : null;
+            fwTree = {enabled: true, fmlKey: currentFml, cfg, rows: [], roots: [], byId: {},
+                selId: keep ? keep.selId : null, mode: (keep && keep.mode) || 'children',
+                expanded: (keep && keep.expanded) || new Set(), search: '', loading: false,
+                addingUnder: null, renaming: null, rootParentVal: null, rootLevel: 1};
+            const bar = document.getElementById('groupSidebar');
+            const head = document.getElementById('groupSidebarHead');
+            if(head && !fwTree.headHtml) fwTree.headHtml = head.innerHTML;
+            fwTreeEnsureChrome();
+            if(bar){ bar.classList.remove('hidden'); bar.classList.add('flex'); }
+            fwTreeReload();
+        }
+        function fwTreeTeardown(){
+            try{
+                if(fwTree && fwTree.headHtml){
+                    const head = document.getElementById('groupSidebarHead');
+                    if(head) head.innerHTML = fwTree.headHtml;
+                }
+            }catch(e){}
+            fwTree = null;
+            try{ const b = document.getElementById('treeToggleBtn'); if(b) b.remove(); }catch(e){}
+            try{ const s = document.getElementById('treeSelBar'); if(s) s.remove(); }catch(e){}
+        }
+        function fwTreeEnsureChrome(){
+            try{
+                const tb = document.getElementById('gridToolbar');
+                if(tb && !document.getElementById('treeToggleBtn')){
+                    tb.insertAdjacentHTML('afterbegin', `<button id="treeToggleBtn" onclick="fwTreeToggleSidebar()" title="إظهار/إخفاء الشجرة" class="inline-flex items-center gap-1 px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg font-bold whitespace-nowrap"><i class="fa-solid fa-sitemap"></i> الشجرة</button>`);
+                }
+                if(tb && !document.getElementById('treeSelBar')){
+                    tb.insertAdjacentHTML('beforebegin', `<div id="treeSelBar" class="hidden px-3 py-1.5 items-center gap-2 text-xs shrink-0 bg-emerald-50/60 border-b border-emerald-100 flex-wrap"></div>`);
+                }
+            }catch(e){}
+        }
+        async function fwTreeReload(quiet){
+            if(!fwTreeActive()) return;
+            if(fwTree.loading) return;
+            fwTree.loading = true;
+            try{
+                const {data} = await fwFetchJson('/api/fmlk/records', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({fml: currentFml, app: currentApp, page: 1, pageSize: 'all', filters: (typeof serverFilters !== 'undefined' ? serverFilters : [])})});
+                if(data.error) throw new Error(data.error);
+                let rows = data.rows || [];
+                if(rows.length > 20000){ rows = rows.slice(0, 20000); if(!quiet) notify('الشجرة: أول 20000 سجل فقط (الجدول ضخم)', 'info'); }
+                fwTree.rows = rows;
+                const {roots, byId} = fwTreeBuildForest(rows, fwTree.cfg);
+                fwTree.roots = roots; fwTree.byId = byId;
+                // قيمة الأب للجذور (null مقابل 0) + مستوى الجذر السائد
+                try{
+                    const r0 = roots[0];
+                    fwTree.rootParentVal = r0 ? (fwTreeRaw(r0.row, fwTree.cfg.parentField) ?? null) : null;
+                    if(fwTree.rootParentVal !== null && String(fwTree.rootParentVal).trim() !== '' && String(fwTree.rootParentVal) !== '0') fwTree.rootParentVal = null;
+                    const lvCount = {};
+                    roots.forEach(n=>{ lvCount[n.level] = (lvCount[n.level] || 0) + 1; });
+                    let best = 1, bn = -1;
+                    Object.entries(lvCount).forEach(([k, v])=>{ if(v > bn){ bn = v; best = parseInt(k, 10) || 1; } });
+                    fwTree.rootLevel = best;
+                }catch(e){}
+                if(!fwTree.expanded.size) roots.forEach(n=>fwTree.expanded.add(n.id));
+                if(fwTree.selId != null && !byId[String(fwTree.selId)]) fwTree.selId = null;
+                fwTreePaint();
+            }catch(e){ if(!quiet) showError(e, 'تحميل الشجرة'); }
+            fwTree.loading = false;
+        }
+        function fwTreePaint(){
+            if(!fwTreeActive()) return;
+            try{
+                const head = document.getElementById('groupSidebarHead');
+                if(head) head.innerHTML = `<h3 class="text-xs font-bold text-slate-700 flex items-center gap-2"><i class="fa-solid fa-sitemap text-emerald-600"></i> شجرة ${escHtml(fwTree.cfg.labelAlias)} <span class="text-[10px] text-slate-400 font-normal">(${fwTree.rows.length})</span></h3><button onclick="fwTreeToggleSidebar(false)" class="text-slate-400 hover:text-slate-600 text-xs"><i class="fa-solid fa-xmark"></i></button>`;
+                const box = document.getElementById('groupSidebarContent');
+                if(box && !document.getElementById('fwTreeTools')){
+                    box.innerHTML = `<div id="fwTreeTools" class="space-y-2"></div><div id="fwTreeList" class="mt-2 space-y-0.5"></div>`;
+                }
+                const tools = document.getElementById('fwTreeTools');
+                if(tools) tools.innerHTML = `
+                    <div class="relative"><i class="fa-solid fa-search absolute right-2.5 top-2.5 text-slate-400 text-[10px]"></i>
+                    <input value="${escAttr(fwTree.search)}" oninput="fwTreeSearch(this.value)" placeholder="بحث في الشجرة..." class="w-full bg-slate-50 border border-slate-200 rounded-lg pr-7 pl-2 py-1.5 text-xs focus:outline-none focus:border-emerald-500"></div>
+                    <div class="flex items-center gap-1 flex-wrap">
+                        <button onclick="fwTreeInlineAdd('ROOT')" title="إضافة جذر جديد" class="flex-1 px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[11px] font-bold"><i class="fa-solid fa-plus"></i> جذر</button>
+                        <button onclick="fwTreeExpandAll(true)" title="توسيع الكل" class="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-[11px] font-bold">توسيع</button>
+                        <button onclick="fwTreeExpandAll(false)" title="طي الكل" class="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-[11px] font-bold">طي</button>
+                        <button onclick="fwTreeReload()" title="تحديث الشجرة" class="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-[11px] font-bold"><i class="fa-solid fa-rotate"></i></button>
+                    </div>`;
+                fwTreePaintList();
+                fwTreePaintSelBar();
+            }catch(e){}
+        }
+        function fwTreeMatchSet(){
+            const q = String(fwTree.search || '').trim();
+            if(!q) return null;
+            const set = new Set();
+            Object.values(fwTree.byId).forEach(n=>{
+                if(String(n.label).includes(q)){
+                    set.add(n.id);
+                    n.children.forEach(function addD(x){ set.add(x.id); x.children.forEach(addD); });
+                    let p = (n.pid && fwTree.byId[n.pid]) || null, g = 0;
+                    while(p && g++ < 500){ set.add(p.id); p = (p.pid && fwTree.byId[p.pid]) || null; }
+                }
+            });
+            return set;
+        }
+        function fwTreePaintList(){
+            if(!fwTreeActive()) return;
+            const el = document.getElementById('fwTreeList');
+            if(!el) return;
+            if(!fwTree.roots.length){
+                el.innerHTML = '<p class="text-slate-400 text-center py-4">لا توجد عناصر — أضف جذراً <i class="fa-solid fa-arrow-up"></i></p>';
+                return;
+            }
+            const ms = fwTreeMatchSet();
+            let html = '';
+            if(fwTree.addingUnder === 'ROOT') html += fwTreeAddRowHtml('ROOT');
+            fwTree.roots.forEach(n=>{ html += fwTreeNodeHtml(n, 0, ms); });
+            el.innerHTML = html;
+            try{
+                const inp = document.getElementById('fwTreeAddInp');
+                if(inp){ inp.focus(); inp.select(); }
+                const rnm = document.getElementById('fwTreeRenameInp');
+                if(rnm){ rnm.focus(); rnm.select(); }
+            }catch(e){}
+        }
+        function fwTreeNodeHtml(n, depth, ms){
+            if(ms && !ms.has(n.id)) return '';
+            const open = ms ? true : fwTree.expanded.has(n.id);
+            const sel = String(fwTree.selId) === String(n.id);
+            const hasCh = n.children.length > 0;
+            const pad = (depth * 14);
+            let h = `<div class="fw-tree-node${sel ? ' sel' : ''}" style="padding-right:${pad}px" data-tid="${escAttr(n.id)}" draggable="true" ondragstart="fwTreeDragStart(event,'${String(n.id).replace(/'/g, "\\'")}')" ondragover="fwTreeDragOver(event)" ondrop="fwTreeDrop(event,'${String(n.id).replace(/'/g, "\\'")}')" onclick="fwTreeSelect('${String(n.id).replace(/'/g, "\\'")}')" ondblclick="event.stopPropagation();loadRecord('${String(n.id).replace(/'/g, "\\'")}')" title="تحديد — نقرة مزدوجة للتحرير">`;
+            h += hasCh
+                ? `<button class="fw-tree-tgl" onclick="event.stopPropagation();fwTreeSetExpand('${String(n.id).replace(/'/g, "\\'")}',${open ? 'false' : 'true'})"><i class="fa-solid ${open ? 'fa-chevron-down' : 'fa-chevron-left'}"></i></button>`
+                : `<span class="fw-tree-tgl text-slate-300">•</span>`;
+            if(String(fwTree.renaming) === String(n.id)){
+                h += `<input id="fwTreeRenameInp" class="fw-tree-inp" value="${escAttr(n.label)}" onclick="event.stopPropagation()" onkeydown="if(event.key==='Enter')fwTreeCommitRename('${String(n.id).replace(/'/g, "\\'")}');if(event.key==='Escape'){fwTree.renaming=null;fwTreePaintList();}" onblur="fwTreeCommitRename('${String(n.id).replace(/'/g, "\\'")}')">`;
+            } else {
+                h += `<span class="flex-1 min-w-0 truncate text-slate-700 font-semibold">${escHtml(n.label)}</span>`;
+                if(hasCh) h += `<span class="text-[10px] text-slate-400 bg-slate-100 rounded-full px-1.5">${n.children.length}</span>`;
+            }
+            h += `<span class="acts inline-flex items-center gap-0.5" onclick="event.stopPropagation()">`;
+            h += `<button class="fw-tree-act" title="إضافة فرع" onclick="fwTreeInlineAdd('${String(n.id).replace(/'/g, "\\'")}')"><i class="fa-solid fa-plus"></i></button>`;
+            if(String(fwTree.renaming) !== String(n.id)) h += `<button class="fw-tree-act" title="تعديل الاسم" onclick="fwTreeRenameUI('${String(n.id).replace(/'/g, "\\'")}')"><i class="fa-solid fa-pen"></i></button>`;
+            if(fwTree.cfg.orderField) h += `<button class="fw-tree-act" title="تحريك لأعلى" onclick="fwTreeMoveUpDown('${String(n.id).replace(/'/g, "\\'")}',-1)"><i class="fa-solid fa-chevron-up"></i></button><button class="fw-tree-act" title="تحريك لأسفل" onclick="fwTreeMoveUpDown('${String(n.id).replace(/'/g, "\\'")}',1)"><i class="fa-solid fa-chevron-down"></i></button>`;
+            if(n.pid) h += `<button class="fw-tree-act" title="نقل للجذر" onclick="fwTreeMoveToRoot('${String(n.id).replace(/'/g, "\\'")}')"><i class="fa-solid fa-arrow-up-from-bracket"></i></button>`;
+            h += `<button class="fw-tree-act danger" title="حذف" onclick="fwTreeDelete('${String(n.id).replace(/'/g, "\\'")}')"><i class="fa-solid fa-trash"></i></button>`;
+            h += `</span></div>`;
+            if(fwTree.addingUnder === n.id) h += `<div style="padding-right:${pad + 14}px">${fwTreeAddRowHtml(n.id)}</div>`;
+            if(open) n.children.forEach(c=>{ h += fwTreeNodeHtml(c, depth + 1, ms); });
+            return h;
+        }
+        function fwTreeAddRowHtml(pid){
+            return `<div class="flex items-center gap-1 py-1"><input id="fwTreeAddInp" class="fw-tree-inp" placeholder="اسم جديد — Enter للحفظ" onkeydown="if(event.key==='Enter')fwTreeCommitAdd('${String(pid).replace(/'/g, "\\'")}');if(event.key==='Escape'){fwTree.addingUnder=null;fwTreePaintList();}"><button class="fw-tree-act" title="إلغاء" onclick="fwTree.addingUnder=null;fwTreePaintList()"><i class="fa-solid fa-xmark"></i></button></div>`;
+        }
+        function fwTreePaintSelBar(){
+            const bar = document.getElementById('treeSelBar');
+            if(!bar) return;
+            const sel = fwTreeActiveSel();
+            if(sel == null){ bar.classList.add('hidden'); bar.classList.remove('flex'); bar.innerHTML = ''; return; }
+            const path = fwTreePathTo(sel);
+            const kids = ((fwTree.byId[sel] || {}).children || []).length;
+            bar.classList.remove('hidden'); bar.classList.add('flex');
+            bar.innerHTML = `<span class="text-emerald-700 font-bold whitespace-nowrap"><i class="fa-solid fa-sitemap"></i> الشجرة:</span>`
+                + `<button onclick="fwTreeClearSel()" class="text-emerald-700 hover:text-emerald-900 font-bold whitespace-nowrap">الكل</button>`
+                + path.map((n, i)=>`${i ? '<span class="text-slate-300">›</span>' : ''}<button onclick="fwTreeSelect('${String(n.id).replace(/'/g, "\\'")}')" class="hover:text-emerald-800 whitespace-nowrap ${i === path.length - 1 ? 'font-bold text-emerald-800' : 'text-slate-500'}">${escHtml(n.label)}</button>`).join('')
+                + `<span class="text-slate-400 whitespace-nowrap">(${kids} فرع مباشر)</span>`
+                + `<button onclick="fwTreeToggleMode()" title="التبديل بين الأبناء المباشرين وكل الذرية" class="px-2 py-0.5 rounded-full font-bold whitespace-nowrap ${fwTree.mode === 'desc' ? 'bg-emerald-600 text-white' : 'bg-white border border-emerald-200 text-emerald-700'}">${fwTree.mode === 'desc' ? 'الذرية كلها' : 'المباشر فقط'}</button>`
+                + `<span class="mr-auto inline-flex items-center gap-1">`
+                + `<button onclick="fwTreeInlineAdd('${String(sel).replace(/'/g, "\\'")}')" class="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold whitespace-nowrap"><i class="fa-solid fa-plus"></i> فرع</button>`
+                + `<button onclick="loadRecord('${String(sel).replace(/'/g, "\\'")}')" class="px-2 py-0.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-lg font-bold whitespace-nowrap"><i class="fa-solid fa-pen"></i> تحرير</button>`
+                + `<button onclick="fwTreeClearSel()" class="px-2 py-0.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-500 rounded-lg font-bold whitespace-nowrap"><i class="fa-solid fa-xmark"></i></button>`
+                + `</span>`;
+        }
+        function fwTreeSelect(id){
+            if(!fwTreeActive()) return;
+            fwTree.selId = String(id);
+            fwTree.addingUnder = null; fwTree.renaming = null;
+            fwTree.expanded.add(String(id));
+            fwTreePaintList(); fwTreePaintSelBar();
+            try{ loadAllRecords(); }catch(e){}
+        }
+        function fwTreeClearSel(){
+            if(!fwTreeActive()) return;
+            fwTree.selId = null; fwTree.addingUnder = null; fwTree.renaming = null;
+            fwTreePaintList(); fwTreePaintSelBar();
+            try{ loadAllRecords(); }catch(e){}
+        }
+        function fwTreeToggleMode(){
+            if(!fwTreeActive()) return;
+            fwTree.mode = (fwTree.mode === 'desc') ? 'children' : 'desc';
+            fwTreePaintSelBar();
+            try{ loadAllRecords(); }catch(e){}
+        }
+        function fwTreeToggleSidebar(force){
+            if(!fwTreeActive()) return;
+            const bar = document.getElementById('groupSidebar');
+            if(!bar) return;
+            const show = (force === undefined) ? bar.classList.contains('hidden') : !!force;
+            bar.classList.toggle('hidden', !show);
+            bar.classList.toggle('flex', show);
+        }
+        function fwTreeSetExpand(id, open){
+            if(!fwTreeActive()) return;
+            id = String(id);
+            if(open) fwTree.expanded.add(id); else fwTree.expanded.delete(id);
+            try{ window._stackSig = null; }catch(e){}
+            fwTreePaintList();
+        }
+        function fwTreeExpandAll(on){
+            if(!fwTreeActive()) return;
+            if(on) Object.keys(fwTree.byId).forEach(id=>fwTree.expanded.add(id));
+            else fwTree.expanded.clear();
+            fwTreePaintList();
+        }
+        function fwTreeSearch(v){
+            if(!fwTreeActive()) return;
+            fwTree.search = String(v || '');
+            fwTreePaintList();
+        }
+        function fwTreeInlineAdd(pid){
+            if(!fwTreeActive()) return;
+            fwTree.addingUnder = String(pid); fwTree.renaming = null;
+            if(pid !== 'ROOT') fwTree.expanded.add(String(pid));
+            fwTreePaintList();
+        }
+        function fwTreeBlockingRequireds(){
+            try{
+                return (fmlMeta.fields || []).filter(f=>(!f.destination || f.destination === 'main') && f.required
+                    && (f.default === undefined || f.default === null || String(f.default) === '')
+                    && ![fwTree.cfg.parentField, fwTree.cfg.levelField, fwTree.cfg.labelField].includes(f.name)
+                    && !(f.primary_key || f.primaryKey));
+            }catch(e){ return []; }
+        }
+        function fwTreeNewLevel(parentId){
+            try{
+                if(parentId === 'ROOT' || parentId == null) return fwTree.rootLevel;
+                const p = fwTree.byId[String(parentId)];
+                return p ? (p.level + 1) : fwTree.rootLevel;
+            }catch(e){ return 1; }
+        }
+        async function fwTreeCommitAdd(pid){
+            if(!fwTreeActive()) return;
+            const inp = document.getElementById('fwTreeAddInp');
+            const name = inp ? String(inp.value || '').trim() : '';
+            if(!name){ fwTree.addingUnder = null; fwTreePaintList(); return; }
+            const isRoot = (pid === 'ROOT');
+            const parentId = isRoot ? null : String(pid);
+            // حقول مطلوبة أخرى بلا افتراضي → النموذج الكامل مع تعبئة الأب والمستوى
+            if(fwTreeBlockingRequireds().length){
+                const preset = {};
+                preset[fwTree.cfg.labelField] = name;
+                preset[fwTree.cfg.parentField] = isRoot ? (fwTree.rootParentVal ?? '') : parentId;
+                preset[fwTree.cfg.levelField] = fwTreeNewLevel(isRoot ? null : parentId);
+                window._treePreset = {fml: currentFml, values: preset};
+                fwTree.addingUnder = null; fwTreePaintList();
+                try{ openAddPanel(); }catch(e){}
+                return;
+            }
+            const data = {};
+            data[fwTree.cfg.labelField] = name;
+            data[fwTree.cfg.parentField] = isRoot ? fwTree.rootParentVal : fwTreeTypedVal(fwTree.cfg.parentField, parentId);
+            data[fwTree.cfg.levelField] = fwTreeTypedVal(fwTree.cfg.levelField, fwTreeNewLevel(isRoot ? null : parentId));
+            try{
+                (fmlMeta.fields || []).forEach(f=>{
+                    if(f && f.default !== undefined && f.default !== null && String(f.default) !== '' && data[f.name] === undefined) data[f.name] = f.default;
+                });
+            }catch(e){}
+            if(data[fwTree.cfg.parentField] === null) delete data[fwTree.cfg.parentField];
+            try{
+                const {data: j} = await fwFetchJson('/api/fmlk/create', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({fml: currentFml, app: currentApp, data})});
+                if(j.error) throw new Error(j.error);
+                notify('تمت الإضافة', 'success');
+                fwTree.addingUnder = null;
+                if(parentId) fwTree.expanded.add(parentId);
+                await fwTreeReload(true);
+                await loadAllRecords();
+            }catch(e){ showError(e, 'إضافة عقدة للشجرة'); }
+        }
+        function fwTreeApplyPreset(){
+            try{
+                const p = window._treePreset;
+                if(!p || p.fml !== currentFml || !p.values) return;
+                currentData = currentData || {};
+                Object.entries(p.values).forEach(([k, v])=>{
+                    if(v === undefined || v === null) return;
+                    currentData[k] = v;
+                    document.querySelectorAll(`#formRoot [data-field="${CSS.escape(k)}"]`).forEach(el=>{
+                        try{
+                            if(el.type === 'checkbox') el.checked = (String(v).toLowerCase() === 'true' || v === '1' || v === 1 || v === true);
+                            else el.value = v;
+                        }catch(e){}
+                    });
+                });
+            }catch(e){}
+            try{ window._treePreset = null; }catch(e){}
+        }
+        function fwTreeRenameUI(id){
+            if(!fwTreeActive()) return;
+            fwTree.renaming = String(id); fwTree.addingUnder = null;
+            fwTreePaintList();
+        }
+        async function fwTreeCommitRename(id){
+            if(!fwTreeActive()) return;
+            if(fwTree._committing) return;
+            const inp = document.getElementById('fwTreeRenameInp');
+            if(!inp){ fwTree.renaming = null; return; }
+            const name = String(inp.value || '').trim();
+            const n = fwTree.byId[String(id)];
+            fwTree._committing = true;
+            try{
+                if(n && name && name !== n.label){
+                    const data = {};
+                    data[fwTree.cfg.labelField] = name;
+                    await fwTreeApiUpdate(String(id), data);
+                    notify('تم تعديل الاسم', 'success');
+                }
+            }catch(e){ showError(e, 'تعديل اسم العقدة'); }
+            fwTree._committing = false;
+            fwTree.renaming = null;
+            await fwTreeReload(true);
+            await loadAllRecords();
+        }
+        async function fwTreeApiUpdate(id, data){
+            const {data: j} = await fwFetchJson('/api/fmlk/update', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({fml: currentFml, app: currentApp, id, data})});
+            if(!j.ok && !j.rowcount) throw new Error((j && j.error) || 'فشل الحفظ');
+            return j;
+        }
+        async function fwTreeDelete(id){
+            if(!fwTreeActive()) return;
+            id = String(id);
+            const n = fwTree.byId[id];
+            if(!n) return;
+            if(n.children.length) return notify('له فروع — احذف الفروع أولاً أو انقلها', 'error');
+            if(!confirm(`حذف «${n.label}»؟`)) return;
+            try{
+                const {data: j} = await fwFetchJson('/api/fmlk/delete', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({fml: currentFml, app: currentApp, id})});
+                if(!j.ok) throw new Error((j && j.error) || 'فشل الحذف');
+                notify('تم الحذف', 'success');
+                if(String(fwTree.selId) === id) fwTree.selId = null;
+                await fwTreeReload(true);
+                await loadAllRecords();
+            }catch(e){ showError(e, 'حذف العقدة'); }
+        }
+        function fwTreeDragStart(ev, id){
+            try{ ev.dataTransfer.setData('text/fw-tree-id', String(id)); ev.dataTransfer.effectAllowed = 'move'; }catch(e){}
+        }
+        function fwTreeDragOver(ev){
+            try{
+                if(ev.dataTransfer && Array.from(ev.dataTransfer.types || []).includes('text/fw-tree-id')){ ev.preventDefault(); ev.currentTarget.classList.add('dragover'); }
+            }catch(e){}
+        }
+        async function fwTreeDrop(ev, id){
+            try{ ev.preventDefault(); ev.currentTarget.classList.remove('dragover'); }catch(e){}
+            let src = null;
+            try{ src = ev.dataTransfer.getData('text/fw-tree-id'); }catch(e){}
+            if(!src || String(src) === String(id)) return;
+            // منع الإسقاط على النفس أو الذرية
+            const desc = fwTreeDescIds(src).map(String);
+            if(desc.includes(String(id))) return notify('لا يمكن النقل تحت فرع منها', 'error');
+            fwTreeDoMove(String(src), String(id));
+        }
+        async function fwTreeDoMove(id, newParentId){
+            if(!fwTreeActive()) return;
+            const n = fwTree.byId[String(id)];
+            if(!n) return;
+            const newLevel = fwTreeNewLevel(newParentId);
+            try{
+                const data = {};
+                data[fwTree.cfg.parentField] = fwTreeTypedVal(fwTree.cfg.parentField, newParentId);
+                data[fwTree.cfg.levelField] = fwTreeTypedVal(fwTree.cfg.levelField, newLevel);
+                await fwTreeApiUpdate(String(id), data);
+                // مستويات الذرية تتبع الأب الجديد
+                const st = (n.children || []).map(c=>({n: c, d: 1}));
+                const seen = new Set([String(id)]);
+                while(st.length){
+                    const {n: c, d} = st.pop();
+                    if(seen.has(c.id)) continue;
+                    seen.add(c.id);
+                    const dd = {};
+                    dd[fwTree.cfg.levelField] = fwTreeTypedVal(fwTree.cfg.levelField, newLevel + d);
+                    try{ await fwTreeApiUpdate(c.id, dd); }catch(e){}
+                    (c.children || []).forEach(g=>st.push({n: g, d: d + 1}));
+                }
+                notify('تم النقل وإعادة ترتيب المستويات', 'success');
+                fwTree.expanded.add(String(newParentId));
+                await fwTreeReload(true);
+                await loadAllRecords();
+            }catch(e){ showError(e, 'نقل العقدة'); }
+        }
+        async function fwTreeMoveToRoot(id){
+            if(!fwTreeActive()) return;
+            const n = fwTree.byId[String(id)];
+            if(!n || !n.pid) return;
+            try{
+                const data = {};
+                if(fwTree.rootParentVal === null) data[fwTree.cfg.parentField] = null;
+                else data[fwTree.cfg.parentField] = fwTree.rootParentVal;
+                data[fwTree.cfg.levelField] = fwTreeTypedVal(fwTree.cfg.levelField, fwTree.rootLevel);
+                if(data[fwTree.cfg.parentField] === null) delete data[fwTree.cfg.parentField];
+                await fwTreeApiUpdate(String(id), data);
+                const st = (n.children || []).map(c=>({n: c, d: 1}));
+                const seen = new Set([String(id)]);
+                while(st.length){
+                    const {n: c, d} = st.pop();
+                    if(seen.has(c.id)) continue;
+                    seen.add(c.id);
+                    const dd = {};
+                    dd[fwTree.cfg.levelField] = fwTreeTypedVal(fwTree.cfg.levelField, fwTree.rootLevel + d);
+                    try{ await fwTreeApiUpdate(c.id, dd); }catch(e){}
+                    (c.children || []).forEach(g=>st.push({n: g, d: d + 1}));
+                }
+                notify('نُقل للجذر', 'success');
+                await fwTreeReload(true);
+                await loadAllRecords();
+            }catch(e){ showError(e, 'النقل للجذر'); }
+        }
+        async function fwTreeMoveUpDown(id, dir){
+            if(!fwTreeActive() || !fwTree.cfg.orderField) return;
+            id = String(id);
+            const n = fwTree.byId[id];
+            if(!n) return;
+            const sibs = (n.pid && fwTree.byId[n.pid] ? fwTree.byId[n.pid].children : fwTree.roots).slice();
+            const ix = sibs.findIndex(s=>s.id === id);
+            const jx = ix + dir;
+            if(ix < 0 || jx < 0 || jx >= sibs.length) return;
+            const a = sibs[ix], b = sibs[jx];
+            try{
+                const ao = (a.ord == null ? ix : a.ord), bo = (b.ord == null ? jx : b.ord);
+                if(ao === bo){
+                    const dd = {};
+                    dd[fwTree.cfg.orderField] = (ix + dir);
+                    await fwTreeApiUpdate(a.id, dd);
+                    const dd2 = {};
+                    dd2[fwTree.cfg.orderField] = ix;
+                    await fwTreeApiUpdate(b.id, dd2);
+                } else {
+                    const dd = {};
+                    dd[fwTree.cfg.orderField] = bo;
+                    await fwTreeApiUpdate(a.id, dd);
+                    const dd2 = {};
+                    dd2[fwTree.cfg.orderField] = ao;
+                    await fwTreeApiUpdate(b.id, dd2);
+                }
+                await fwTreeReload(true);
+                await loadAllRecords();
+            }catch(e){ showError(e, 'إعادة الترتيب'); }
+        }
         function renderGroupSidebar(rows) {
+            // وضع الشجرة يملك السايدبار — لا يخفيه ولا يرسم المجموعات
+            try{ if(typeof fwTreeActive === 'function' && fwTreeActive()) return; }catch(e){}
             const bar = document.getElementById('groupSidebar');
             const box = document.getElementById('groupSidebarContent');
             if (!groupCol) { bar.classList.add('hidden'); bar.classList.remove('flex'); return; }
