@@ -311,6 +311,126 @@ def workspace_home(request):
     })
 
 
+@csrf_exempt
+def api_workspace_save(request, ws_id):
+    """POST /api/workspaces/<id>/save/ — edit workspace props (session required).
+
+    Body (all optional, validated):
+      settings.py WORKSPACE: name, brand, company, domain, logo, country,
+        currency, brand_colors{primary,accent}, fiscal_year (empty → current year)
+      workspace.conf: primary_connection, users_table, status
+    Display props live ONLY in settings.py (overlapping conf keys are dropped).
+    """
+    if request.method != "POST":
+        return JsonResponse({"error": "POST required"}, status=405)
+    try:
+        from . import workspace as _wsm
+        import ast as _ast
+        import datetime as _dt
+        known = {w.get("id") for w in _wsm.workspaces_info() if w.get("id")}
+        ws_id = (ws_id or "").strip()
+        if ws_id not in known:
+            return JsonResponse({"error": "unknown workspace"}, status=404)
+        try:
+            data = json.loads(request.body.decode() or "{}")
+        except Exception:
+            return JsonResponse({"error": "invalid JSON"}, status=400)
+        if not isinstance(data, dict):
+            return JsonResponse({"error": "invalid JSON"}, status=400)
+        ws = next(w for w in _wsm.workspace_dirs() if w.name == ws_id)
+
+        def _s(v, n=120):
+            return str(v if v is not None else "").strip()[:n]
+
+        import re as _re_hex
+        def _color(v, fb):
+            v = _s(v, 16)
+            return v if _re_hex.fullmatch(r"#[0-9a-fA-F]{6}", v or "") else fb
+
+        cur = _wsm.load_workspace_settings(ws)
+        bc = data.get("brand_colors") if isinstance(data.get("brand_colors"), dict) else {}
+        new_ws = {
+            "name": _s(data.get("name"), 80) or cur.get("name") or ws_id,
+            "brand": _s(data.get("brand"), 80) or cur.get("brand") or "Odex",
+            "company": _s(data.get("company"), 120),
+            "domain": _s(data.get("domain"), 120),
+            "logo": _s(data.get("logo"), 500),
+            "country": _s(data.get("country"), 80),
+            "currency": _s(data.get("currency"), 40),
+            "brand_colors": {
+                "primary": _color(bc.get("primary"), (cur.get("brand_colors") or {}).get("primary") or "#4f46e5"),
+                "accent": _color(bc.get("accent"), (cur.get("brand_colors") or {}).get("accent") or "#10b981"),
+            },
+            "fiscal_year": _s(data.get("fiscal_year"), 16) or str(_dt.date.today().year),
+        }
+        # merge into settings.py WORKSPACE dict (surgical: keep header/comments)
+        sp = ws / "settings.py"
+        try:
+            src = sp.read_text(encoding="utf-8")
+        except Exception:
+            src = '"""Workspace settings (auto-created)."""\nWORKSPACE = {}\n'
+        try:
+            tree = _ast.parse(src)
+            node = next(n for n in _ast.walk(tree)
+                        if isinstance(n, _ast.Assign)
+                        and any(isinstance(t, _ast.Name) and t.id == "WORKSPACE" for t in n.targets))
+            old = _ast.literal_eval(node.value)
+            if not isinstance(old, dict):
+                old = {}
+        except Exception:
+            old, node = {}, None
+        merged = dict(old)
+        merged.update(new_ws)
+        import io as _io
+        buf = _io.StringIO()
+        buf.write("{\n")
+        for k, v in merged.items():
+            buf.write("    %r: %r,\n" % (k, v))
+        buf.write("}")
+        new_block = "WORKSPACE = " + buf.getvalue()
+        if node is not None:
+            lines = src.splitlines(keepends=True)
+            lines[node.lineno - 1:node.end_lineno] = [new_block + "\n"]
+            src = "".join(lines)
+        else:
+            src = src.rstrip("\n") + "\n\n" + new_block + "\n"
+        sp.write_text(src, encoding="utf-8")
+
+        # workspace.conf: update bindings, drop display keys (settings.py is the source)
+        cp = ws / "workspace.conf"
+        try:
+            conf_lines = cp.read_text(encoding="utf-8").splitlines()
+        except Exception:
+            conf_lines = ["# Workspace runtime bindings."]
+        _old_conf = _wsm.read_conf(cp) if cp.is_file() else {}
+        _pc = _s(data.get("primary_connection"), 80) or _old_conf.get("PRIMARY_CONNECTION", "")
+        _ut = _s(data.get("users_table"), 160) or _old_conf.get("USERS_TABLE", "")
+        _st = _s(data.get("status"), 16).lower()
+        if _st not in ("active", "archived", "disabled"):
+            _st = _old_conf.get("STATUS", "active").strip().lower() or "active"
+        drop = {"WORKSPACE_NAME", "BRAND", "COMPANY", "DOMAIN"}
+        out = []
+        for ln in conf_lines:
+            s = ln.strip()
+            if s and not s.startswith("#") and "=" in s:
+                k = s.split("=", 1)[0].strip()
+                if k in drop:
+                    continue
+                if k in ("PRIMARY_CONNECTION", "USERS_TABLE", "STATUS"):
+                    continue
+            out.append(ln)
+        if _pc:
+            out.append("PRIMARY_CONNECTION=%s" % _pc)
+        if _ut:
+            out.append("USERS_TABLE=%s" % _ut)
+        out.append("STATUS=%s" % _st)
+        cp.write_text("\n".join(out).rstrip("\n") + "\n", encoding="utf-8")
+        return JsonResponse({"ok": True, "workspace": _wsm.workspace_info(ws)},
+                            json_dumps_params={"ensure_ascii": False})
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
 def api_workspaces_list(request):
     """GET /api/workspaces/ → workspaces + primary connection/users table."""
     try:
@@ -334,7 +454,9 @@ def home(request):
     try:
         _ws = (request.GET.get("workspace") or "").strip()
         if _ws:
-            request.session["workspace"] = _ws
+            from . import workspace as _wsm_home
+            if _ws in {_w.get("id") for _w in _wsm_home.workspaces_info() if _w.get("id")}:
+                request.session["workspace"] = _ws
     except Exception:
         pass
     # Dynamic apps: FOLDER-DRIVEN (workspace apps first, DB-only leftovers last)
@@ -925,6 +1047,44 @@ def wizard_flags_cp(request):
         return {"has_rml_wizard": False, "has_fml_wizard": False}
 
 
+def _ws_mode(request):
+    """Session mode: 'edit' (full engines) else 'view' (no design tools). Default view."""
+    try:
+        m = (request.session.get("ws_mode") or "").strip().lower()
+    except Exception:
+        m = ""
+    return m if m in ("edit", "view") else "view"
+
+
+def _ws_can_design(request):
+    """True only in تعديل (edit) mode."""
+    try:
+        return _ws_mode(request) == "edit"
+    except Exception:
+        return False
+
+
+def _ws_require_design(request):
+    """None when design allowed, else 403 JSON (for design APIs)."""
+    try:
+        if _ws_can_design(request):
+            return None
+    except Exception:
+        pass
+    return JsonResponse({"error": "design tools are disabled in enter mode — use تعديل",
+                         "design_forbidden": True}, status=403)
+
+
+def _ws_require_design_page(request):
+    """None when design allowed, else redirect to /apps/ (for designer pages)."""
+    try:
+        if _ws_can_design(request):
+            return None
+    except Exception:
+        pass
+    return redirect("/apps/")
+
+
 def workspace_cp(request):
     """Context processor — current_workspace (session choice else primary) in every template."""
     try:
@@ -939,7 +1099,9 @@ def workspace_cp(request):
         cur = next((w for w in infos if w.get("id") == wid), None)
         if cur is None:
             cur = infos[0] if infos else None
-        return {"current_workspace": cur or {}}
+        return {"current_workspace": cur or {},
+                "ws_mode": _ws_mode(request),
+                "ws_can_design": _ws_can_design(request)}
     except Exception:
         return {"current_workspace": {}}
 
@@ -1079,6 +1241,9 @@ def app_report_designer(request, app_name):
     _g = _gate_redirect(request)
     if _g is not None:
         return _g
+    _d = _ws_require_design_page(request)
+    if _d is not None:
+        return _d
     app_meta, fml_files, rml_files = _load_app_context(app_name)
     return render(request, "report_designer.html", {
         "app": app_meta,
@@ -1092,6 +1257,9 @@ def app_forms_designer(request, app_name):
     _g = _gate_redirect(request)
     if _g is not None:
         return _g
+    _d = _ws_require_design_page(request)
+    if _d is not None:
+        return _d
     app_meta, fml_files, rml_files = _load_app_context(app_name)
     return render(request, "forms_designer.html", {
         "app": app_meta,
@@ -1664,6 +1832,9 @@ def api_models_design_save(request, app_name):
     """
     if request.method != "POST":
         return JsonResponse({"error": "POST required"}, status=405)
+    _wd = _ws_require_design(request)
+    if _wd is not None:
+        return _wd
     try:
         data = json.loads(request.body.decode() or "{}")
         table_en = (data.get("table_en") or "").strip()
@@ -6136,6 +6307,9 @@ def api_monitor_get(request):
 def api_create_fml(request, app_name):
     if request.method != "POST":
         return JsonResponse({"error": "POST required"}, status=405)
+    _wd = _ws_require_design(request)
+    if _wd is not None:
+        return _wd
     try:
         data = json.loads(request.body.decode() or "{}")
         file = data.get("file", "").strip()
@@ -6820,6 +6994,9 @@ def _resolve_rml_target(app_name, file):
 def api_create_rml(request, app_name):
     if request.method != "POST":
         return JsonResponse({"error": "POST required"}, status=405)
+    _wd = _ws_require_design(request)
+    if _wd is not None:
+        return _wd
     try:
         data = json.loads(request.body.decode() or "{}")
         file = data.get("file", "").strip()
@@ -7229,6 +7406,9 @@ def api_update_rml(request, app_name):
     """POST /api/apps/<app>/rml/update/ — overwrite an existing .rml file (report edit flow)."""
     if request.method != "POST":
         return JsonResponse({"error": "POST required"}, status=405)
+    _wd = _ws_require_design(request)
+    if _wd is not None:
+        return _wd
     try:
         data = json.loads(request.body.decode() or "{}")
         file = data.get("file", "").strip()
@@ -10311,6 +10491,9 @@ def app_dml_designer(request, app_name):
     _g = _gate_redirect(request)
     if _g is not None:
         return _g
+    _d = _ws_require_design_page(request)
+    if _d is not None:
+        return _d
     app_meta, fml_files, rml_files = _load_app_context(app_name)
     docs = []
     try:
@@ -10406,6 +10589,9 @@ def api_dml_create(request, app_name):
     """POST /api/apps/<app>/dml/create/ — write a new *.dml (naming rule enforced)."""
     if request.method != "POST":
         return JsonResponse({"error": "POST required"}, status=405)
+    _wd = _ws_require_design(request)
+    if _wd is not None:
+        return _wd
     try:
         data = json.loads(request.body.decode() or "{}")
         _, target, err = _resolve_dml_target(app_name, data.get("file", ""))
@@ -10427,6 +10613,9 @@ def api_dml_update(request, app_name):
     """POST /api/apps/<app>/dml/update/ — overwrite an existing *.dml."""
     if request.method != "POST":
         return JsonResponse({"error": "POST required"}, status=405)
+    _wd = _ws_require_design(request)
+    if _wd is not None:
+        return _wd
     try:
         data = json.loads(request.body.decode() or "{}")
         _, target, err = _resolve_dml_target(app_name, data.get("file", ""))

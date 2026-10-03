@@ -84,10 +84,10 @@
                     {% endfor %}
                     {% if not fml_files and not rml_files %}<p class="text-xs text-gray-400">لا توجد عناصر</p>{% endif %}
                 </div>
-                <div class="flex gap-2 mt-2">
+                {% if ws_can_design %}<div class="flex gap-2 mt-2">
                     <button onclick="location.href='/app/{{ app_name }}/forms-designer/'" class="flex-1 justify-center fx-btn fx-btn-ind"><i class="fa-solid fa-plus text-[10px]"></i> مصمم النماذج</button>
                     {% if app_name != 'settings' %}<a href="/app/{{ app_name }}/report-designer/" class="flex-1 justify-center fx-btn fx-btn-em"><i class="fa-solid fa-plus text-[10px]"></i> إضافة تقرير</a>{% endif %}
-                </div>
+                </div>{% endif %}
             </div>
 
             {% if app_rules %}
@@ -246,8 +246,8 @@
                         <a href="/app/{{ app_name }}/report/{{ f.file }}/" class="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold"><i class="fa-solid fa-eye text-[10px]"></i> عرض التقرير</a>
                         <button onclick="toggleMyReport('{{ app_name|escapejs }}','{{ f.file|escapejs }}','{{ f.metadata.displayName|escapejs }}')" data-myrepp data-app="{{ app_name }}" data-file="{{ f.file }}" class="myrep-btn inline-flex items-center gap-1 px-3 py-1.5 bg-white border border-slate-200 hover:bg-amber-50 text-slate-600 hover:text-amber-600 rounded-lg text-xs font-semibold" title="أضف إلى تقاريري"><i class="fa-regular fa-star text-[10px]"></i> <span>تقاريري</span></button>
                         <a href="/app/{{ app_name }}/report/{{ f.file }}/?setup=1" class="inline-flex items-center gap-1 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold"><i class="fa-solid fa-sliders text-[10px]"></i> إعداد التقرير</a>
-                        {% if has_rml_wizard %}<button onclick="openEditRmlModal('{{ f.file|escapejs }}')" class="inline-flex items-center gap-1 px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-semibold"><i class="fa-solid fa-pen text-[10px]"></i> تعديل</button>{% endif %}
-                        <a href="/app/{{ app_name }}/report-designer/?file={{ f.file }}" class="inline-flex items-center gap-1 px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-semibold"><i class="fa-solid fa-pen-ruler text-[10px]"></i> المصمم</a>
+                        {% if has_rml_wizard and ws_can_design %}<button onclick="openEditRmlModal('{{ f.file|escapejs }}')" class="inline-flex items-center gap-1 px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-semibold"><i class="fa-solid fa-pen text-[10px]"></i> تعديل</button>{% endif %}
+                        {% if ws_can_design %}<a href="/app/{{ app_name }}/report-designer/?file={{ f.file }}" class="inline-flex items-center gap-1 px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-semibold"><i class="fa-solid fa-pen-ruler text-[10px]"></i> المصمم</a>{% endif %}
                     </div>
                 </div>
                 {% endfor %}
@@ -621,7 +621,10 @@
             filterOverview();
             // مصمم النماذج الجديد (صفحة مستقلة): /app/<app>/forms-designer/?file=<file>
             const dq = new URLSearchParams(location.search).get('design');
-            if(dq){ try{ history.replaceState(null, '', location.pathname); }catch(e){} location.href = `/app/${APP_NAME}/forms-designer/` + (dq !== '__new__' ? ('?file=' + encodeURIComponent(dq)) : ''); }
+            if(dq){
+                {% if not ws_can_design %}try{ history.replaceState(null, '', location.pathname); }catch(e){}
+                {% else %}try{ history.replaceState(null, '', location.pathname); }catch(e){} location.href = `/app/${APP_NAME}/forms-designer/` + (dq !== '__new__' ? ('?file=' + encodeURIComponent(dq)) : '');{% endif %}
+            }
         })();
     </script>
     <!-- مودال سياسات قاعدة الأعمال -->

@@ -172,7 +172,7 @@
                     <select onchange="playerModelGo(this)" title="الموديلات" class="hidden md:block bg-slate-50 border border-slate-200 rounded-full px-3 py-1.5 text-xs font-bold text-slate-600 max-w-[170px]">
                         <option value="">الموديلات ({{ fml_files|length }})</option>
                         {% for f in fml_files %}<option value="{{ f.file }}" data-url="{% if f.virtual %}{{ f.url }}{% endif %}" {% if f.file == fml_file %}selected{% endif %}>{{ f.metadata.displayName }}</option>{% endfor %}
-                        <option value="__designer__">+ مصمم موديل جديد</option>
+                        {% if ws_can_design %}<option value="__designer__">+ مصمم موديل جديد</option>{% endif %}
                     </select>
                     <button id="migrateToolbarBtn" onclick="migrateCurrentModel()" title="ترحيل الجدول" class="w-8 h-8 rounded-full hidden md:flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-emerald-600 transition"><i class="fa-solid fa-database"></i></button>
                     <span class="w-px h-6 bg-slate-200 mx-1 hidden md:block"></span>
@@ -202,7 +202,7 @@
                     <button onclick="exportGrid()" title="تصدير" class="w-8 h-8 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-emerald-600 transition"><i class="fa-solid fa-file-excel"></i></button>
                     <button onclick="toggleDocPanel()" title="معاينة الطباعة (مستندات DML)" class="w-8 h-8 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-indigo-600 transition"><i class="fa-solid fa-print text-sm"></i></button>
                     <button onclick="shareGrid()" title="مشاركة" class="w-8 h-8 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-violet-600 transition"><i class="fa-solid fa-share-nodes"></i></button>
-                    <button onclick="openDesigner()" id="viewListGoBtn" title="مصمم النماذج" class="w-8 h-8 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-indigo-600 transition"><i class="fa-solid fa-gear"></i></button>
+                    {% if ws_can_design %}<button onclick="openDesigner()" id="viewListGoBtn" title="مصمم النماذج" class="w-8 h-8 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-indigo-600 transition"><i class="fa-solid fa-gear"></i></button>{% endif %}
                 </div>
             </div>
         </header>
@@ -470,6 +470,7 @@
     <script src="{% static 'components/excel_import_modal.js' %}"></script>
     <script>
         // Injected by Django
+        const WS_CAN_DESIGN = {% if ws_can_design %}true{% else %}false{% endif %};
         let currentFml = "{{ fml_file|escapejs }}";
         let currentApp = "{{ app_name|escapejs }}";
         let currentRecordId = null;
@@ -4083,7 +4084,10 @@
             // وضع الأعضاء: زر الإضافة يفتح منتقي الأعضاء لا نموذج مجموعة جديد
             // (التعبئة المسبقة للأب من الشجرة _treePreset تُستثنى — إضافة مجموعة فرعية)
             if(typeof fwTreeMemberActive === 'function' && fwTreeMemberActive() && !window._treePreset){ try{ fwMemPickOpen(); }catch(e){} return; }
-            if(isModelsRegistry()){ location.href = `/app/${currentApp}/forms-designer/`; return; }
+            if(isModelsRegistry()){
+                if(typeof WS_CAN_DESIGN !== 'undefined' && !WS_CAN_DESIGN){ try{ notify('وضع الدخول: تصميم الموديلات معطل — استخدم تعديل', 'info'); }catch(e){} return; }
+                location.href = `/app/${currentApp}/forms-designer/`; return;
+            }
             currentRecordId = null;
             currentData = {};
             try{ window._panelId = null; }catch(e){}
@@ -4099,6 +4103,7 @@
         }
         function openEditPanel(id, row) {
             if(isModelsRegistry()){
+                if(typeof WS_CAN_DESIGN !== 'undefined' && !WS_CAN_DESIGN){ try{ notify('وضع الدخول: تصميم الموديلات معطل — استخدم تعديل', 'info'); }catch(e){} return; }
                 const _app = row['التطبيق'] || row['app'] || currentApp;
                 const _file = row['الملف'] || row['file'] || '';
                 location.href = `/app/${_app}/forms-designer/` + (_file ? ('?file=' + encodeURIComponent(_file)) : '');
@@ -4505,7 +4510,7 @@
         function playerModelGo(sel) {
             const opt = sel.options[sel.selectedIndex];
             if(!opt || !opt.value){ return; }
-            if(opt.value === '__designer__'){ sel.value = ''; location.href = `/app/${currentApp}/forms-designer/?file=` + encodeURIComponent(currentFml); return; }
+            if(opt.value === '__designer__'){ sel.value = ''; if(typeof WS_CAN_DESIGN !== 'undefined' && !WS_CAN_DESIGN){ try{ notify('وضع الدخول: أدوات التصميم مخفية — استخدم تعديل', 'info'); }catch(e){} return; } location.href = `/app/${currentApp}/forms-designer/?file=` + encodeURIComponent(currentFml); return; }
             if(opt.dataset.url){ location.href = opt.dataset.url; return; }
             location.href = `/app/${currentApp}/form/${encodeURIComponent(opt.value)}/`;
         }
@@ -4867,7 +4872,10 @@
         });
         (function(){
             const dq = new URLSearchParams(location.search).get('design');
-            if(dq){ try{ history.replaceState(null, '', location.pathname); }catch(e){} location.href = `/app/${currentApp}/forms-designer/` + (dq !== '__new__' ? ('?file=' + encodeURIComponent(dq)) : ''); }
+            if(dq){
+                if(typeof WS_CAN_DESIGN !== 'undefined' && !WS_CAN_DESIGN){ try{ history.replaceState(null, '', location.pathname); }catch(e){} return; }
+                try{ history.replaceState(null, '', location.pathname); }catch(e){} location.href = `/app/${currentApp}/forms-designer/` + (dq !== '__new__' ? ('?file=' + encodeURIComponent(dq)) : '');
+            }
         })();
 
         function selectedRealIds() {
@@ -5185,6 +5193,7 @@
             });
         }
         function openDesigner(){
+            if(typeof WS_CAN_DESIGN !== 'undefined' && !WS_CAN_DESIGN){ try{ notify('وضع الدخول: أدوات التصميم مخفية — استخدم تعديل', 'info'); }catch(e){} return; }
             location.href = `/app/${currentApp}/forms-designer/?file=` + encodeURIComponent(currentFml || '');
         }
         function toggleView(mode) {
@@ -6837,7 +6846,7 @@
                     if(!docs.length){
                         sel.innerHTML = '<option value="">لا توجد مستندات مرتبطة</option>';
                         const fr = document.getElementById('printPreviewFrame');
-                        if(fr) fr.srcdoc = '<div style="padding:30px;text-align:center;color:#64748b;font-size:12px">لا توجد مستندات طباعة مرتبطة بهذا النموذج — أنشئها من تبويبة «المستندات» في مصمم النماذج<br><br><a href="/app/' + encodeURIComponent(currentApp) + '/forms-designer/?file=' + encodeURIComponent(currentFml || '') + '" style="color:#4f46e5;font-weight:bold">فتح مصمم النماذج</a></div>';
+                        if(fr) fr.srcdoc = '<div style="padding:30px;text-align:center;color:#64748b;font-size:12px">لا توجد مستندات طباعة مرتبطة بهذا النموذج' + (((typeof WS_CAN_DESIGN === 'undefined') || WS_CAN_DESIGN) ? ' — أنشئها من تبويبة «المستندات» في مصمم النماذج<br><br><a href="/app/' + encodeURIComponent(currentApp) + '/forms-designer/?file=' + encodeURIComponent(currentFml || '') + '" style="color:#4f46e5;font-weight:bold">فتح مصمم النماذج</a>' : '') + '</div>';
                         document.getElementById('printPageCount').textContent = '—';
                         return;
                     }

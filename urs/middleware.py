@@ -42,7 +42,7 @@ class WorkspaceGateMiddleware:
             known = {w.get("id") for w in workspaces_info() if w.get("id")}
         except Exception:
             known = set()
-        # Entry with explicit workspace choice (?workspace=<id>)
+        # Entry with explicit workspace choice (?workspace=<id>[&mode=..][&settings=..])
         try:
             asked = (request.GET.get("workspace") or "").strip()
         except Exception:
@@ -50,6 +50,12 @@ class WorkspaceGateMiddleware:
         if asked and asked in known:
             try:
                 request.session["workspace"] = asked
+            except Exception:
+                pass
+            try:
+                _m = (request.GET.get("mode") or "").strip().lower()
+                if _m in ("edit", "view"):
+                    request.session["ws_mode"] = _m
             except Exception:
                 pass
             return self.get_response(request)

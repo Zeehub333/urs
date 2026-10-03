@@ -136,9 +136,9 @@
             <button onclick="openColsManager()" title="إظهار / إخفاء الأعمدة" class="w-8 h-8 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-indigo-600 transition">
                 <i class="fa-solid fa-table-columns text-sm"></i>
             </button>
-            <button onclick="location.href='/app/'+currentApp+'/report-designer/?file='+encodeURIComponent(currentRml)" title="تخصيص التقرير (المصمم)" class="w-8 h-8 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-indigo-600 transition">
+            {% if ws_can_design %}<button onclick="location.href='/app/'+currentApp+'/report-designer/?file='+encodeURIComponent(currentRml)" title="تخصيص التقرير (المصمم)" class="w-8 h-8 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-indigo-600 transition">
                 <i class="fa-solid fa-gear text-sm"></i>
-            </button>
+            </button>{% endif %}
             <button onclick="toggleBlankPanel()" title="معاينة الطباعة" class="w-8 h-8 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-indigo-600 transition">
                 <i class="fa-solid fa-print text-sm"></i>
             </button>
@@ -548,6 +548,7 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
         const DJANGO_RML_LAYOUT = "{{ rml_metadata.doc_layout|default:''|escapejs }}";
         let currentRml = DJANGO_RML;
         let currentApp = DJANGO_APP;
+        const WS_CAN_DESIGN = {% if ws_can_design %}true{% else %}false{% endif %};
 
         // Mock Databases & Tables (feature parity with provided HTML)
         const dbSchemas = {
@@ -4007,7 +4008,7 @@ try{
                     if(!docs.length){
                         sel.innerHTML = '<option value="">لا توجد مستندات مرتبطة</option>';
                         const fr = document.getElementById('printPreviewFrame');
-                        if(fr) fr.srcdoc = '<div style="padding:30px;text-align:center;color:#64748b;font-size:12px">لا توجد مستندات طباعة مرتبطة بهذا التقرير<br><br><a href="/app/' + encodeURIComponent(currentApp) + '/dml-designer/?source=' + encodeURIComponent(currentRml || '') + '" style="color:#4f46e5;font-weight:bold">فتح مصمم المستندات</a></div>';
+                        if(fr) fr.srcdoc = '<div style="padding:30px;text-align:center;color:#64748b;font-size:12px">لا توجد مستندات طباعة مرتبطة بهذا التقرير' + (((typeof WS_CAN_DESIGN === 'undefined') || WS_CAN_DESIGN) ? '<br><br><a href="/app/' + encodeURIComponent(currentApp) + '/dml-designer/?source=' + encodeURIComponent(currentRml || '') + '" style="color:#4f46e5;font-weight:bold">فتح مصمم المستندات</a>' : '') + '</div>';
                         document.getElementById('printPageCount').textContent = '—';
                         return;
                     }

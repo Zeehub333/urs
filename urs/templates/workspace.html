@@ -52,7 +52,11 @@
                                     {% if w.primary_connection %}conn={{ w.primary_connection }}{% endif %}{% if w.primary_connection and w.users_table %} • {% endif %}{% if w.users_table %}users={{ w.users_table }}{% endif %}
                                 </div>
                                 {% endif %}
-                                <a href="/apps/?workspace={{ w.id }}" class="block text-center w-full py-2.5 text-white rounded-xl text-xs font-bold hover:opacity-90" style="background: {{ w.brand_colors.primary|default:'#4f46e5' }}">دخول مساحة العمل ←</a>
+                                <div class="grid grid-cols-3 gap-2">
+                                    <a href="/apps/?workspace={{ w.id }}&mode=edit" class="block text-center py-2.5 text-white rounded-xl text-xs font-bold hover:opacity-90" style="background: {{ w.brand_colors.primary|default:'#4f46e5' }}" title="دخول كامل — المحركات والمصممون وأدوات التصميم"><i class="fa-solid fa-pen-ruler"></i> تعديل</a>
+                                    <a href="/apps/?workspace={{ w.id }}&mode=view" class="block text-center py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold" title="دخول للعرض — بلا أدوات المطور والمصممين"><i class="fa-solid fa-eye"></i> دخول</a>
+                                    <a href="/apps/?workspace={{ w.id }}&settings={{ w.id }}" class="block text-center py-2.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-xl text-xs font-bold" title="تعديل خصائص المساحة (الاسم، الشركة، السنة المالية، الدومين...)"><i class="fa-solid fa-gear"></i> إعدادات</a>
+                                </div>
                             </div>
                         </article>
                         {% empty %}
