@@ -161,7 +161,7 @@
                         <button onclick="closePanel()" title="إلغاء" class="w-8 h-8 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-rose-600 transition"><i class="fa-solid fa-xmark"></i></button>
                         <span class="w-px h-6 bg-slate-200 mx-1"></span>
                     </span>
-                    <span class="text-xs bg-indigo-50 text-indigo-700 px-3 py-1 rounded-full font-bold hidden sm:inline">{{ fml_metadata.displayName }}</span>
+                    <span id="formTitleName" class="text-xs bg-indigo-50 text-indigo-700 px-3 py-1 rounded-full font-bold hidden sm:inline">{{ fml_metadata.displayName }}</span>
                     <select onchange="playerModelGo(this)" title="الموديلات" class="hidden md:block bg-slate-50 border border-slate-200 rounded-full px-3 py-1.5 text-xs font-bold text-slate-600 max-w-[170px]">
                         <option value="">الموديلات ({{ fml_files|length }})</option>
                         {% for f in fml_files %}<option value="{{ f.file }}" data-url="{% if f.virtual %}{{ f.url }}{% endif %}" {% if f.file == fml_file %}selected{% endif %}>{{ f.metadata.displayName }}</option>{% endfor %}
@@ -601,8 +601,14 @@
                 if(metaEl) metaEl.textContent = `${fmlMeta.cats.length} تبويب`;
                 renderTabs(fmlMeta.cats.map((c, i) => ({id: 'cat' + i, alias: c})));
                 renderForm(data);
+                try{ if(typeof fwNameEnsure === 'function') await fwNameEnsure(); }catch(e){}
                 await loadAllRecords();
                 try{ if(typeof fwTreeInit === 'function') fwTreeInit(); }catch(e){}
+                try{
+                    const dn = (data.metadata && data.metadata.displayName) || '';
+                    const el = document.getElementById('formTitleName');
+                    if(el && String(dn).charAt(0) === '@') el.textContent = fwNameDisp(dn, 'single');
+                }catch(e){}
                 try{ checkMigrateChanges(); }catch(e){}
                 // فتح سجل محدد من رابط ?record= (زر تحرير المرجع بتبويب جديد)
                 try{
@@ -985,11 +991,43 @@
             if(pkf){ try{ const v = fmlkGet(pkf.name); if(v !== '' && v != null) return v; }catch(e){} }
             return '';
         }
-        // اسم تبويب المتفرع: الخاص به أولاً ثم العام details_tab ثم الافتراضي
+        // ── حقل الاسم: @key يُحل عرضاً (مفرد/جمع/افتراضي) حسب اللغة ──
+        let fwNameCache = null;
+        function fwNameLocale(){ try{ return localStorage.getItem('nameLocale') || 'ar'; }catch(e){ return 'ar'; } }
+        async function fwNameEnsure(){
+            if(fwNameCache) return fwNameCache;
+            fwNameCache = {locale: fwNameLocale(), map: {}};
+            try{
+                const {data} = await fwFetchJson('/api/display-names/?q=');
+                const loc = fwNameLocale();
+                fwNameCache.locale = loc;
+                (data.names || []).forEach(n=>{
+                    if(n.locale_id !== loc) return;
+                    fwNameCache.map[n.name] = {d: n.default_name || '', s: n.single_name || '', p: n.plural_name || ''};
+                });
+            }catch(e){}
+            return fwNameCache;
+        }
+        // form: single|plural|default — غير @key يُعاد كما هو، والمفقود يُعاد خاماً
+        function fwNameDisp(v, form){
+            try{
+                if(v === undefined || v === null) return v;
+                const s = String(v);
+                if(s.charAt(0) !== '@') return v;
+                const k = s.slice(1);
+                const e = (fwNameCache && fwNameCache.map[k]) || null;
+                if(!e) return v;
+                if(form === 'single' && e.s) return e.s;
+                if(form === 'plural' && e.p) return e.p;
+                if(e.d) return e.d;
+                return e.s || e.p || v;
+            }catch(e){ return v; }
+        }
+        // اسم تبويب المتفرع: الخاص به أولاً ثم العام details_tab ثم الافتراضي (@key → الجمع)
         function fwDetailTabLabel(d){
             try{
                 const t = String((d && (d.tab || d.tabLabel)) || '').trim();
-                if(t) return t;
+                if(t) return fwNameDisp(t, 'plural');
                 // fmlMeta هو الرد الكامل — العام داخل .metadata (مع قبول المسطح للتوافق)
                 const _md = (fmlMeta && (fmlMeta.metadata || fmlMeta)) || {};
                 const g = String(_md.details_tab || _md.detailsTab || fmlMeta.details_tab || fmlMeta.detailsTab || '').trim();
@@ -1164,7 +1202,7 @@
                         <div class="flex items-center gap-1 flex-wrap">${sibBar}${dlBtn}<button onclick="fwDetailAddRow(${i})" class="px-2.5 py-1 bg-violet-50 hover:bg-violet-100 text-violet-700 rounded-lg text-[11px] font-bold"><i class="fa-solid fa-plus"></i> إضافة سطر</button></div>
                     </div>
                     <div class="fw-acc-wrap fw-acc-scroll"><table class="fw-acc" dir="rtl">
-                        <thead><tr><th class="fw-acc-h" style="width:90px">ID ${escHtml(refAlias)}</th><th class="fw-acc-h" style="width:26px" title="سطر جديد لم يُحفظ"></th>${cols.map(c=>`<th class="fw-acc-h" ${c.ref ? 'title="مرجع بحث — لا يُخزَّن"' : ''}>${escHtml(c.alias || c.name)}${c.required ? ' <span style="color:#c00;font-weight:bold">*</span>' : ''}${c.junction ? ' <span style="font-size:9px;color:#0f766e;font-weight:bold">⬡</span>' : ''}${c.ref ? ' <span style="font-size:9px;color:#b45309;font-weight:bold">🔍</span>' : ''}</th>`).join('')}<th class="fw-acc-h" style="width:34px"></th></tr></thead>
+                        <thead><tr><th class="fw-acc-h" style="width:90px">ID ${escHtml(typeof fwNameDisp === 'function' ? fwNameDisp(refAlias, 'single') : refAlias)}</th><th class="fw-acc-h" style="width:26px" title="سطر جديد لم يُحفظ"></th>${cols.map(c=>`<th class="fw-acc-h" ${c.ref ? 'title="مرجع بحث — لا يُخزَّن"' : ''}>${escHtml(typeof fwNameDisp === 'function' ? fwNameDisp(c.alias || c.name, 'single') : (c.alias || c.name))}${c.required ? ' <span style="color:#c00;font-weight:bold">*</span>' : ''}${c.junction ? ' <span style="font-size:9px;color:#0f766e;font-weight:bold">⬡</span>' : ''}${c.ref ? ' <span style="font-size:9px;color:#b45309;font-weight:bold">🔍</span>' : ''}</th>`).join('')}<th class="fw-acc-h" style="width:34px"></th></tr></thead>
                         <tbody id="fwAccBody_${i}">${rows.map((r, ri)=>fwDetailRowHtml(i, d, jx, cols, r, ri, mkey)).join('') || `<tr><td colspan="${cols.length + 3}" class="p-3 text-center text-slate-400">لا سطور — أضف سطراً أو أنزل البيانات</td></tr>`}</tbody>
                     </table></div>
                 </div>`;
@@ -5167,7 +5205,7 @@
             let head = `<tr><th class="freeze-col-head w-10 px-2 py-1 text-center border-b border-slate-200"><input type="checkbox" title="تحديد الكل" onchange="toggleSelectAll(this.checked)" class="rounded text-indigo-600"></th><th class="w-12 px-2 py-1 text-center border-b border-slate-200 bg-slate-100 font-bold">#</th>`;
             cols.forEach(f => {
                 const hasF = columnFilters[f.name] && columnFilters[f.name].length;
-                head += `<th class="px-2 py-1 font-bold border-b border-slate-200 ${hasF ? '!bg-indigo-50' : 'bg-slate-50'} text-slate-700 cursor-pointer hover:bg-slate-100 select-none" onclick="openColMenu(event, '${f.name}')"><div class="flex items-center justify-between gap-1"><span class="truncate">${f.alias}</span><span class="text-slate-400 text-[10px]">${activeSort.column === f.name ? (activeSort.direction === 'asc' ? '▲' : '▼') : ''}<i class="fa-solid fa-chevron-down"></i>${hasF ? '<i class="fa-solid fa-filter text-indigo-600" title="مصفّى"></i>' : ''}</span></div></th>`;
+                head += `<th class="px-2 py-1 font-bold border-b border-slate-200 ${hasF ? '!bg-indigo-50' : 'bg-slate-50'} text-slate-700 cursor-pointer hover:bg-slate-100 select-none" onclick="openColMenu(event, '${f.name}')"><div class="flex items-center justify-between gap-1"><span class="truncate">${typeof fwNameDisp === 'function' ? fwNameDisp(f.alias, 'single') : f.alias}</span><span class="text-slate-400 text-[10px]">${activeSort.column === f.name ? (activeSort.direction === 'asc' ? '▲' : '▼') : ''}<i class="fa-solid fa-chevron-down"></i>${hasF ? '<i class="fa-solid fa-filter text-indigo-600" title="مصفّى"></i>' : ''}</span></div></th>`;
             });
             const recordActions = (customActions || []).filter(a => (a.level || 'record') === 'record');
             if(recordActions.length) head += `<th class="px-2 py-1 font-bold border-b border-slate-200 bg-slate-50 text-slate-700 text-center">إجراءات</th>`;

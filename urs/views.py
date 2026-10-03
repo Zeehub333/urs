@@ -4388,6 +4388,181 @@ def _suggest_columns(schema: str, missing: str, db_engine=None):
         return [], {}, [], schema
 
 
+# ── Display names (i18n label registry, file `odex/system/settings/display_names.json`) ──
+# حقل الاسم: name (مفتاح @key) + default_name + single_name + plural_name + locale_id.
+# يُستخدم عند تسمية الجداول والأعمدة والتبويبات: الحقل يحمل @key والمشغل يحل العرض حسب اللغة.
+_NAMES_FILE = BASE_DIR / "odex" / "system" / "settings" / "display_names.json"
+_NAMES_KEY_RE = None
+try:
+    import re as _re_names
+    _NAMES_KEY_RE = _re_names.compile(r"[A-Za-z0-9_][A-Za-z0-9_.\-]*")
+    _NAMES_LOCALE_RE = _re_names.compile(r"[A-Za-z]{2,8}(?:[-_][A-Za-z0-9]{2,8})?")
+except Exception:
+    _NAMES_KEY_RE = None
+
+
+def _names_load():
+    """Read registry → {"locales": [...], "names": [{name, locale_id, default_name, single_name, plural_name}]}."""
+    data = {"locales": ["ar"], "names": []}
+    try:
+        if _NAMES_FILE.exists():
+            raw = json.loads(_NAMES_FILE.read_text(encoding="utf-8") or "{}")
+            if isinstance(raw.get("locales"), list) and raw["locales"]:
+                data["locales"] = [str(x) for x in raw["locales"] if str(x).strip()][:24]
+            if isinstance(raw.get("names"), list):
+                data["names"] = [n for n in raw["names"] if isinstance(n, dict) and n.get("name")]
+    except Exception:
+        pass
+    if not data["locales"]:
+        data["locales"] = ["ar"]
+    return data
+
+
+def _names_write(data):
+    _NAMES_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = _NAMES_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(_NAMES_FILE)
+    return data
+
+
+def _names_valid_key(name):
+    try:
+        return bool(name) and _NAMES_KEY_RE.fullmatch(str(name) or "") is not None
+    except Exception:
+        return bool(name)
+
+
+def _names_valid_locale(loc):
+    try:
+        import re as _re_loc
+        return bool(_re_loc.fullmatch(r"[A-Za-z]{2,8}(?:[-_][A-Za-z0-9]{2,8})?", str(loc or "").strip() or ""))
+    except Exception:
+        return bool(str(loc or "").strip())
+
+
+def api_display_names(request):
+    """GET /api/display-names/?q= — list registry {locales, names} (q filters substring)."""
+    try:
+        data = _names_load()
+        q = (request.GET.get("q") or "").strip().lower()
+        names = data["names"]
+        if q:
+            names = [n for n in names if q in str(n.get("name") or "").lower()
+                     or q in str(n.get("default_name") or "").lower()
+                     or q in str(n.get("single_name") or "").lower()
+                     or q in str(n.get("plural_name") or "").lower()]
+        return JsonResponse({"locales": data["locales"], "names": names, "total": len(names)})
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@csrf_exempt
+def api_display_names_save(request):
+    """POST /api/display-names/save/ {name, locale_id, default_name?, single_name?, plural_name?} — upsert one row."""
+    if request.method != "POST":
+        return JsonResponse({"error": "POST required"}, status=405)
+    try:
+        data = json.loads(request.body.decode() or "{}")
+    except Exception:
+        return JsonResponse({"error": "invalid JSON"}, status=400)
+    try:
+        name = str(data.get("name") or "").strip()
+        loc = str(data.get("locale_id") or data.get("locale") or "").strip()
+        if not _names_valid_key(name):
+            return JsonResponse({"error": "name must match [A-Za-z0-9_.\\-] (key after @)"}, status=400)
+        if not _names_valid_locale(loc):
+            return JsonResponse({"error": "locale_id required (e.g. ar, en)"}, status=400)
+        reg = _names_load()
+        if loc not in reg["locales"]:
+            reg["locales"].append(loc)
+        row = {"name": name, "locale_id": loc,
+               "default_name": str(data.get("default_name") or "").strip(),
+               "single_name": str(data.get("single_name") or "").strip(),
+               "plural_name": str(data.get("plural_name") or "").strip()}
+        hit = next((n for n in reg["names"]
+                    if n.get("name") == name and n.get("locale_id") == loc), None)
+        if hit is None:
+            reg["names"].append(row)
+            created = True
+        else:
+            hit.update(row)
+            created = False
+        _names_write(reg)
+        return JsonResponse({"ok": True, "created": created, "row": row, "locales": reg["locales"]})
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@csrf_exempt
+def api_display_names_delete(request):
+    """POST /api/display-names/delete/ {name, locale_id?} — delete one locale row or all rows of a key."""
+    if request.method != "POST":
+        return JsonResponse({"error": "POST required"}, status=405)
+    try:
+        data = json.loads(request.body.decode() or "{}")
+    except Exception:
+        return JsonResponse({"error": "invalid JSON"}, status=400)
+    try:
+        name = str(data.get("name") or "").strip()
+        loc = str(data.get("locale_id") or data.get("locale") or "").strip() or None
+        if not name:
+            return JsonResponse({"error": "name required"}, status=400)
+        reg = _names_load()
+        before = len(reg["names"])
+        reg["names"] = [n for n in reg["names"]
+                        if not (n.get("name") == name and (loc is None or n.get("locale_id") == loc))]
+        _names_write(reg)
+        return JsonResponse({"ok": True, "deleted": before - len(reg["names"])})
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@csrf_exempt
+def api_display_names_add_locale(request):
+    """POST /api/display-names/add-locale/ {locale_id} — register a language (rows added on save)."""
+    if request.method != "POST":
+        return JsonResponse({"error": "POST required"}, status=405)
+    try:
+        data = json.loads(request.body.decode() or "{}")
+    except Exception:
+        return JsonResponse({"error": "invalid JSON"}, status=400)
+    try:
+        loc = str(data.get("locale_id") or data.get("locale") or "").strip()
+        if not _names_valid_locale(loc):
+            return JsonResponse({"error": "locale_id required (e.g. ar, en)"}, status=400)
+        reg = _names_load()
+        if loc not in reg["locales"]:
+            reg["locales"].append(loc)
+            _names_write(reg)
+            created = True
+        else:
+            created = False
+        return JsonResponse({"ok": True, "created": created, "locales": reg["locales"]})
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+def api_display_names_resolve(request):
+    """GET /api/display-names/resolve/?locale=ar&keys=a,b — {key: {default, single, plural}} (missing → {})."""
+    try:
+        loc = (request.GET.get("locale") or "ar").strip() or "ar"
+        keys = [k.strip().lstrip("@") for k in (request.GET.get("keys") or "").split(",")]
+        keys = [k for k in keys if k]
+        reg = _names_load()
+        out = {}
+        for k in keys[:200]:
+            hit = next((n for n in reg["names"] if n.get("name") == k and n.get("locale_id") == loc), None)
+            if hit is None:
+                hit = next((n for n in reg["names"] if n.get("name") == k), None)
+            out[k] = {"default": (hit or {}).get("default_name") or "",
+                      "single": (hit or {}).get("single_name") or "",
+                      "plural": (hit or {}).get("plural_name") or ""} if hit else {}
+        return JsonResponse({"locale": loc, "names": out})
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
 # ── Presets (saved filters, table `presets`) ───────────────────────────────
 def api_presets_list(request):
     """GET /api/presets/?app=&type=filter — list saved presets."""

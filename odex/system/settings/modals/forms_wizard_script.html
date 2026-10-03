@@ -343,8 +343,8 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                     return `<div class="bg-slate-50 border border-slate-200 rounded-xl p-2.5 space-y-2">
                         <div class="grid grid-cols-2 lg:grid-cols-6 gap-2">
                             <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">الجدول المتفرع</label><select onchange="fwBranchChanged(${i})" data-b="table" class="wb-inp font-mono" dir="ltr"><option value="">— اختر —</option>${fwTablesCache.map(t=>`<option value="${fwEsc(t.full || t.name)}" ${b.table&&fwBareTbl(b.table)===fwBareTbl(t.full||t.name)?'selected':''}>${fwEsc(t.full || t.name)}${t.custom ? ' ★' : ''}</option>`).join('')}</select></div>
-                            <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">الاسم المعروض</label><input value="${fwEsc(b.alias || '')}" oninput="fwBranches[${i}].alias=this.value" placeholder="البنود" class="wb-inp"></div>
-                            <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">اسم التبويب</label><input value="${fwEsc(b.tab || '')}" oninput="fwBranches[${i}].tab=this.value" placeholder="= المعروض" class="wb-inp"></div>
+                            <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">الاسم المعروض</label><div class="flex items-center gap-1"><input value="${fwEsc(b.alias || '')}" oninput="fwBranches[${i}].alias=this.value" placeholder="البنود" class="wb-inp flex-1 min-w-0"><button onclick="fwNameOpen(this)" data-nk-kind="branch-alias" data-nk-i="${i}" title="حقل الاسم" class="px-2 py-1.5 bg-violet-50 hover:bg-violet-100 text-violet-700 rounded-lg font-bold shrink-0"><i class="fa-solid fa-language text-[11px]"></i></button></div></div>
+                            <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">اسم التبويب</label><div class="flex items-center gap-1"><input value="${fwEsc(b.tab || '')}" oninput="fwBranches[${i}].tab=this.value" placeholder="= المعروض" class="wb-inp flex-1 min-w-0"><button onclick="fwNameOpen(this)" data-nk-kind="branch-tab" data-nk-i="${i}" title="حقل الاسم" class="px-2 py-1.5 bg-violet-50 hover:bg-violet-100 text-violet-700 rounded-lg font-bold shrink-0"><i class="fa-solid fa-language text-[11px]"></i></button></div></div>
                             <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">عمود الأساسي (PK)</label><select onchange="fwBranches[${i}].master=this.value" class="wb-inp font-mono" dir="ltr"><option value="">—</option>${masterOpts}</select></div>
                             <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">عمود الربط (FK)${(b.link_mode === 'junction') ? ' <span class="text-teal-600">— غير مطلوب (جدول ثالث)</span>' : ' <span class="text-rose-500">— مطلوب</span>'}</label><select onchange="fwBranches[${i}].detail=this.value" class="wb-inp font-mono" dir="ltr"><option value="">—</option>${cache.map(c=>`<option ${b.detail===c.name?'selected':''}>${fwEsc(c.name)}</option>`).join('')}</select></div>
                             <div class="flex items-end gap-1">
@@ -1085,7 +1085,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                 const showOpts = ['select','status','radio'].includes(x.inputType);
                 return '<div class="grid grid-cols-12 gap-1 items-center bg-slate-50 border border-slate-200 rounded-xl p-1.5">'
                     + (fwNameLocked(x) ? `<div class="col-span-2"><span class="font-mono text-slate-500" dir="ltr" title="مثبت بعد الإضافة — مقفل">${fwEsc(x.name)} <i class="fa-solid fa-lock text-[9px]"></i></span></div>` : `<div class="col-span-2"><input value="${fwEsc(x.name || '')}" oninput="fwInputs[${ki}].name=this.value" placeholder="programmatic_name" title="الاسم البرمجي" class="wb-inp !py-1 font-mono" dir="ltr"></div>`)
-                    + `<div class="col-span-2"><input value="${fwEsc(x.alias || '')}" oninput="fwInputs[${ki}].alias=this.value" placeholder="الاسم المعروض" class="wb-inp !py-1"></div>`
+                    + `<div class="col-span-2"><div class="flex items-center gap-1"><input value="${fwEsc(x.alias || '')}" oninput="fwInputs[${ki}].alias=this.value" placeholder="الاسم المعروض" class="wb-inp !py-1 flex-1 min-w-0"><button onclick="fwNameOpen(this)" data-nk-kind="input-alias" data-nk-i="${ki}" title="حقل الاسم" class="px-1.5 py-1 bg-violet-50 hover:bg-violet-100 text-violet-700 rounded-lg font-bold shrink-0"><i class="fa-solid fa-language text-[10px]"></i></button></div></div>`
                     + `<div class="col-span-2"><select onchange="fwInputs[${ki}].inputType=this.value;fwDetailEditRender()" title="نوع المدخل" class="wb-inp !py-1 font-mono" dir="ltr">` + FW_DETAIL_INPUT_TYPES.map(t=>`<option value="${t}" ${x.inputType===t?'selected':''}>${t}</option>`).join('') + `</select></div>`
                     + `<div class="col-span-2"><select onchange="fwInputs[${ki}].dataType=this.value" title="نوع البيانات" class="wb-inp !py-1 font-mono" dir="ltr">` + FW_DETAIL_DATA_TYPES.map(t=>`<option value="${t}" ${x.dataType===t?'selected':''}>${t}</option>`).join('') + `</select></div>`
                     + `<div class="col-span-2"><input value="${fwEsc(x.defaultValue != null ? x.defaultValue : (x.default || ''))}" oninput="fwInputs[${ki}].defaultValue=this.value" placeholder="افتراضي" title="القيمة الافتراضية" class="wb-inp !py-1 font-mono" dir="ltr"></div>`
@@ -1186,7 +1186,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             return `<tr class="border-t border-slate-100 ${r.displayOnly ? 'bg-amber-50/50' : ''}">
                             <td class="p-1"><select onchange="fwInputs[${i}].destination=this.value;fwRenderSheet()" class="wb-inp !py-1 font-mono" dir="ltr">${destOpts.map(d=>`<option value="${fwEsc(d)}" ${r.destination===d?'selected':''}>${fwEsc(destName(d))}</option>`).join('') || '<option value="main">الأساسي</option>'}</select></td>
                             <td class="p-1">${r.displayOnly ? `<span class="inline-block text-[9px] font-bold bg-amber-100 text-amber-700 rounded px-1 mb-0.5" title="عرض فقط — يُقرأ ولا يُخزن">✦ عرض</span><br>` : ''}${fwNameLocked(r) ? `<span class="font-mono text-slate-500" dir="ltr" title="عمود موجود بالقاعدة — مقفل">${fwEsc(r.name)} <i class="fa-solid fa-lock text-[9px]"></i></span>` : `<input value="${fwEsc(r.name || '')}" oninput="fwInputs[${i}].name=this.value" placeholder="programmatic_name" class="wb-inp !py-1 font-mono" dir="ltr">`}<div class="text-[9px] text-slate-400">${fwEsc((r.table||'').split('.').pop())}</div></td>
-                            <td class="p-1"><input value="${fwEsc(r.alias || '')}" oninput="fwInputs[${i}].alias=this.value" class="wb-inp !py-1"></td>
+                            <td class="p-1"><div class="flex items-center gap-1"><input value="${fwEsc(r.alias || '')}" oninput="fwInputs[${i}].alias=this.value" class="wb-inp !py-1 flex-1 min-w-0"><button onclick="fwNameOpen(this)" data-nk-kind="input-alias" data-nk-i="${i}" title="حقل الاسم" class="px-1.5 py-1 bg-violet-50 hover:bg-violet-100 text-violet-700 rounded-lg font-bold shrink-0"><i class="fa-solid fa-language text-[10px]"></i></button></div></td>
                             <td class="p-1"><select onchange="fwInputs[${i}].icon=this.value" class="wb-inp !py-1 font-mono" dir="ltr"><option value="">—</option>${FW_ICONS.map(ic=>`<option value="${ic}" ${r.icon===ic?'selected':''}>${ic}</option>`).join('')}</select></td>
                             <td class="p-1 whitespace-nowrap">${typeLocked ? `<span class="inline-block px-2 py-1 bg-slate-100 text-slate-500 rounded-lg font-bold" title="عمود مرتبط بالقاعدة — نوع البيانات مقفل (عدّله من قاعدة البيانات ثم أعد الاستيراد)">${fwEsc(fwTypeLabel(r.inputType))} <i class="fa-solid fa-lock text-[9px]"></i></span><div class="text-[9px] text-slate-400">${fwEsc(r.dataType || '')}</div>` : `<button onclick="fwOpenType(${i})" class="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg font-bold">${fwEsc(fwTypeLabel(r.inputType))}${(r.options||[]).length || (r.options_source||[]).length || r.refTable ? ' •' : ''}</button><div class="text-[9px] text-slate-400">${fwEsc(r.dataType || '')}</div>`}</td>
                             <td class="p-1"><select onchange="fwInputs[${i}].tab=this.value" class="wb-inp !py-1">${fwTabs.map(t=>`<option value="${fwEsc(t.id)}" ${r.tab===t.id?'selected':''}>${fwEsc(t.alias)}</option>`).join('')}</select></td>
@@ -1623,7 +1623,8 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                     <div class="flex items-center gap-2 bg-slate-50 border ${t.is_main ? '!border-amber-300' : 'border-slate-200'} rounded-xl px-3 py-2">
                         <span class="w-6 h-6 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center text-[11px] font-bold">${t.order || (i+1)}</span>
                         <button onclick="fwTabMain(${i})" title="${t.is_main ? 'التبويب الرئيسي المثبت فوق — اضغط للإلغاء' : 'تثبيت فوق كتبويب رئيسي (واحد فقط)'}" class="${t.is_main ? 'text-amber-500' : 'text-slate-300 hover:text-amber-400'} px-1"><i class="fa-solid fa-star text-sm"></i></button>
-                        <input value="${fwEsc(t.alias || '')}" oninput="fwTabRename(${i},this.value)" placeholder="اسم التبويب" class="wb-inp !py-1 flex-1">
+                        <input value="${fwEsc(t.alias || '')}" oninput="fwTabRename(${i},this.value)" placeholder="اسم التبويب" class="wb-inp !py-1 flex-1 min-w-0">
+                        <button onclick="fwNameOpen(this)" data-nk-kind="tab-alias" data-nk-i="${i}" title="حقل الاسم" class="px-2 py-1 bg-violet-50 hover:bg-violet-100 text-violet-700 rounded-lg font-bold shrink-0"><i class="fa-solid fa-language text-[11px]"></i></button>
                         <input value="${fwEsc(t.visibleIf || '')}" oninput="fwTabs[${i}].visibleIf=this.value;fwVisAC(this)" onkeydown="return fwVisACKey(event,this)" onblur="fwVisHideSoon()" placeholder="شرط الإظهار field==v" class="wb-inp !py-1 flex-1 font-mono" dir="ltr">
                         <span class="text-[10px] text-slate-400 whitespace-nowrap">${fwInputs.filter(x=>x.tab===t.id).length} مدخل</span>
                         <button onclick="fwTabMove(${i},-1)" class="text-slate-400 hover:text-slate-600 px-1">▲</button>
@@ -1650,6 +1651,211 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             fwTabs.forEach((x, k)=>x.order = k+1);
             fwInputs.forEach(x=>{ if(x.tab === gone) x.tab = fwTabs[0].id; });
             fwRenderSheet();
+        }
+        // ── حقل الاسم: name (مفتاح @) + default/single/plural لكل locale ──
+        // يظهر في مودال عند تسمية الجداول والأعمدة والتبويبات؛ الحقل يحمل @key
+        // والمشغل يحل العرض (مفرد/جمع/افتراضي) حسب اللغة.
+        let fwNameSt = null;
+        async function fwNameApi(url, body){
+            const init = body === undefined
+                ? {}
+                : {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)};
+            const res = await fetch(url, init);
+            const txt = await res.text();
+            try{ return JSON.parse(txt); }
+            catch(e){ throw new Error('خطأ ' + res.status + ' من ' + url); }
+        }
+        function fwNameOpen(btn){
+            let kind = '', idx = -1;
+            try{
+                const ds = (btn && btn.dataset) || {};
+                kind = ds.nkKind || '';
+                idx = (ds.nkI !== undefined && ds.nkI !== '') ? parseInt(ds.nkI, 10) : -1;
+            }catch(e){}
+            if(!kind) return;
+            fwNameSt = {kind, idx, q: '', rows: [], locales: ['ar'], sel: null, loc: 'ar',
+                edit: {default_name: '', single_name: '', plural_name: ''}, newKey: '', newLoc: ''};
+            let m = document.getElementById('fwNameModal');
+            if(m) m.remove();
+            m = document.createElement('div');
+            m.id = 'fwNameModal';
+            m.className = 'fixed inset-0 z-[80] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4';
+            m.setAttribute('onclick', 'if(event.target===this)fwNameClose()');
+            m.innerHTML = `<div class="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[86vh] overflow-hidden flex flex-col">
+                <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-violet-50 shrink-0">
+                    <h3 class="text-sm font-bold text-slate-800"><i class="fa-solid fa-language text-violet-600"></i> حقل الاسم — <span id="fwNameKind" class="text-violet-700"></span></h3>
+                    <button onclick="fwNameClose()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div class="px-5 pt-3 shrink-0 flex items-center gap-2 flex-wrap">
+                    <div id="fwNameErr" class="hidden w-full text-[11px] font-bold text-rose-600 bg-rose-50 border border-rose-200 rounded-xl px-3 py-1.5"></div>
+                    <input id="fwNameSearch" oninput="fwNameSearch(this.value)" placeholder="بحث بمفتاح أو اسم..." class="flex-1 min-w-[140px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+                    <select id="fwNameLoc" onchange="fwNameSetLoc(this.value)" title="لغة التحرير" class="bg-slate-50 border border-slate-200 rounded-xl px-2 py-2 text-xs font-bold"></select>
+                    <span class="inline-flex items-center gap-1"><input id="fwNameNewLoc" placeholder="لغة: en" class="w-20 bg-slate-50 border border-slate-200 rounded-xl px-2 py-2 text-xs font-mono" dir="ltr"><button onclick="fwNameAddLocale()" title="إضافة لغة" class="px-2.5 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl text-xs font-bold"><i class="fa-solid fa-plus"></i> لغة</button></span>
+                </div>
+                <div class="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-2 gap-0 overflow-hidden">
+                    <div class="overflow-y-auto custom-scroll p-3 border-l border-slate-100">
+                        <div class="flex items-center gap-1 mb-2"><input id="fwNameNewKey" placeholder="مفتاح جديد: members" class="flex-1 min-w-0 bg-slate-50 border border-slate-200 rounded-xl px-2 py-1.5 text-xs font-mono" dir="ltr"><button onclick="fwNameNew()" title="اسم جديد" class="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-xl text-xs font-bold"><i class="fa-solid fa-plus"></i></button></div>
+                        <div id="fwNameList" class="space-y-1"></div>
+                    </div>
+                    <div class="overflow-y-auto custom-scroll p-3" id="fwNameEdit"></div>
+                </div>
+                <div class="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between shrink-0">
+                    <span id="fwNameCount" class="text-[11px] text-slate-500"></span>
+                    <div class="flex gap-2">
+                        <button onclick="fwNameClose()" class="px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs">إغلاق</button>
+                        <button onclick="fwNameUse()" class="px-4 py-1.5 bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-xs font-bold">استخدام @المفتاح</button>
+                    </div>
+                </div>
+            </div>`;
+            document.body.appendChild(m);
+            fwNameFetch();
+            setTimeout(()=>{ const s = document.getElementById('fwNameSearch'); if(s) s.focus(); }, 100);
+        }
+        function fwNameClose(){ const m = document.getElementById('fwNameModal'); if(m) m.remove(); fwNameSt = null; }
+        // خطأ داخل المودال نفسه (لا شريط المصمم خلفه)
+        function fwNameErr(msg){
+            const el = document.getElementById('fwNameErr');
+            if(!el) return;
+            el.textContent = String(msg || '');
+            el.classList.remove('hidden');
+            try{ clearTimeout(fwNameErr._t); }catch(e){}
+            fwNameErr._t = setTimeout(()=>{ try{ el.classList.add('hidden'); }catch(e){} }, 6000);
+        }
+        function fwNameSearch(q){ if(!fwNameSt) return; fwNameSt.q = q; fwNameFetch(); }
+        function fwNameSetLoc(v){ if(!fwNameSt) return; fwNameSt.loc = v; fwNamePaintEdit(); }
+        async function fwNameFetch(){
+            if(!fwNameSt) return;
+            try{
+                const d = await fwNameApi('/api/display-names/?q=' + encodeURIComponent(fwNameSt.q || ''));
+                if(d.error) throw new Error(d.error);
+                fwNameSt.rows = d.names || [];
+                fwNameSt.locales = (d.locales && d.locales.length) ? d.locales : ['ar'];
+                if(!fwNameSt.locales.includes(fwNameSt.loc)) fwNameSt.loc = fwNameSt.locales[0];
+            }catch(e){
+                const box = document.getElementById('fwNameList');
+                if(box) box.innerHTML = `<p class="text-rose-500 text-center py-6 text-xs">${fwEsc(String((e && e.message) || e))}</p>`;
+                return;
+            }
+            fwNamePaint();
+        }
+        function fwNameRowFor(key, loc){
+            return (fwNameSt.rows || []).find(r=>r.name === key && r.locale_id === loc) || null;
+        }
+        function fwNamePaint(){
+            const st = fwNameSt;
+            if(!st) return;
+            const kindNames = {'form-name': 'اسم النموذج', 'branch-alias': 'الاسم المعروض للجدول', 'branch-tab': 'اسم تبويب الجدول', 'input-alias': 'الاسم المعروض للعمود', 'tab-alias': 'اسم التبويب'};
+            const kn = document.getElementById('fwNameKind');
+            if(kn) kn.textContent = kindNames[st.kind] || st.kind;
+            const loc = document.getElementById('fwNameLoc');
+            if(loc) loc.innerHTML = st.locales.map(l=>`<option value="${fwEsc(l)}" ${l === st.loc ? 'selected' : ''}>${fwEsc(l)}</option>`).join('');
+            const keys = [...new Set((st.rows || []).map(r=>r.name))];
+            const box = document.getElementById('fwNameList');
+            if(box) box.innerHTML = keys.map(k=>{
+                const row = fwNameRowFor(k, st.loc) || (st.rows || []).find(r=>r.name === k);
+                const prev = (row && (row.single_name || row.default_name)) || '';
+                return `<div onclick="fwNameSelect('${fwEsc(k).replace(/'/g, "\\'")}')" class="px-2.5 py-2 rounded-xl cursor-pointer border transition text-right ${st.sel === k ? 'bg-violet-600 text-white border-violet-600' : 'bg-slate-50 hover:bg-slate-100 border-transparent text-slate-700'}"><div class="text-xs font-bold font-mono" dir="ltr">@${fwEsc(k)}</div><div class="text-[11px] ${st.sel === k ? 'text-violet-100' : 'text-slate-400'} truncate">${fwEsc(prev)}</div></div>`;
+            }).join('') || '<p class="text-slate-400 text-center py-4 text-xs">لا أسماء — أنشئ مفتاحاً جديداً بالأعلى</p>';
+            const cnt = document.getElementById('fwNameCount');
+            if(cnt) cnt.textContent = keys.length + ' اسم • ' + st.locales.length + ' لغة';
+            fwNamePaintEdit();
+        }
+        function fwNameSelect(k){
+            if(!fwNameSt) return;
+            fwNameSt.sel = k;
+            const row = fwNameRowFor(k, fwNameSt.loc) || {};
+            fwNameSt.edit = {default_name: row.default_name || '', single_name: row.single_name || '', plural_name: row.plural_name || ''};
+            fwNamePaint();
+            setTimeout(()=>{ const el = document.getElementById('fwNameSingle'); if(el){ el.focus(); el.select(); } }, 50);
+        }
+        function fwNamePaintEdit(){
+            const st = fwNameSt;
+            const box = document.getElementById('fwNameEdit');
+            if(!box || !st) return;
+            if(!st.sel){
+                box.innerHTML = '<p class="text-slate-400 text-center py-8 text-xs">اختر اسماً من القائمة أو أنشئ جديداً</p>';
+                return;
+            }
+            const e = st.edit;
+            box.innerHTML = `<div class="space-y-2">
+                <div class="text-xs font-bold text-slate-700">المفتاح <span class="font-mono text-violet-700" dir="ltr">@${fwEsc(st.sel)}</span> <span class="text-slate-400 font-normal">— ${fwEsc(st.loc)}</span></div>
+                <div><label class="block text-[10px] font-bold text-slate-500 mb-0.5">الاسم المفرد</label><input id="fwNameSingle" value="${fwEsc(e.single_name)}" oninput="fwNameSt.edit.single_name=this.value" placeholder="عضو" class="wb-inp"></div>
+                <div><label class="block text-[10px] font-bold text-slate-500 mb-0.5">الاسم الجمع</label><input value="${fwEsc(e.plural_name)}" oninput="fwNameSt.edit.plural_name=this.value" placeholder="الأعضاء" class="wb-inp"></div>
+                <div><label class="block text-[10px] font-bold text-slate-500 mb-0.5">الاسم الافتراضي</label><input value="${fwEsc(e.default_name)}" oninput="fwNameSt.edit.default_name=this.value" placeholder="يُعرض عند غياب المفرد/الجمع" class="wb-inp"></div>
+                <div class="rounded-xl bg-slate-50 border border-slate-100 p-2 text-[11px] text-slate-500">المعاينة: مفرد «<b>${fwEsc(e.single_name || e.default_name || '—')}</b>» • جمع «<b>${fwEsc(e.plural_name || e.default_name || '—')}</b>»</div>
+                <div class="flex gap-2">
+                    <button onclick="fwNameSaveRow()" class="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold"><i class="fa-solid fa-floppy-disk"></i> حفظ اللغة</button>
+                    <button onclick="fwNameDel()" class="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl text-xs font-bold"><i class="fa-solid fa-trash"></i></button>
+                </div>
+            </div>`;
+        }
+        async function fwNameNew(){
+            if(!fwNameSt) return;
+            const inp = document.getElementById('fwNameNewKey');
+            const k = String((inp && inp.value) || '').trim();
+            if(!/^[A-Za-z0-9_][A-Za-z0-9_.\-]*$/.test(k)) return fwNameErr('المفتاح لاتيني: حروف/أرقام/._- (مثال members)');
+            try{
+                const d = await fwNameApi('/api/display-names/save/', {name: k, locale_id: fwNameSt.loc, default_name: '', single_name: '', plural_name: ''});
+                if(d.error) throw new Error(d.error);
+                fwNameSt.sel = k;
+                fwNameSt.edit = {default_name: '', single_name: '', plural_name: ''};
+                if(inp) inp.value = '';
+                await fwNameFetch();
+                fwNameSelect(k);
+            }catch(e){ fwNameErr(String((e && e.message) || e)); }
+        }
+        async function fwNameSaveRow(){
+            if(!fwNameSt || !fwNameSt.sel) return;
+            try{
+                const d = await fwNameApi('/api/display-names/save/', Object.assign({name: fwNameSt.sel, locale_id: fwNameSt.loc}, fwNameSt.edit));
+                if(d.error) throw new Error(d.error);
+                try{ notify('حُفظ الاسم', 'success'); }catch(e){}
+                await fwNameFetch();
+            }catch(e){ fwNameErr(String((e && e.message) || e)); }
+        }
+        async function fwNameDel(){
+            if(!fwNameSt || !fwNameSt.sel) return;
+            if(!confirm('حذف الاسم @' + fwNameSt.sel + ' (' + fwNameSt.loc + ')؟')) return;
+            try{
+                const d = await fwNameApi('/api/display-names/delete/', {name: fwNameSt.sel, locale_id: fwNameSt.loc});
+                if(d.error) throw new Error(d.error);
+                fwNameSt.sel = null;
+                await fwNameFetch();
+            }catch(e){ fwNameErr(String((e && e.message) || e)); }
+        }
+        async function fwNameAddLocale(){
+            if(!fwNameSt) return;
+            const inp = document.getElementById('fwNameNewLoc');
+            const l = String((inp && inp.value) || '').trim();
+            if(!l) return;
+            try{
+                const d = await fwNameApi('/api/display-names/add-locale/', {locale_id: l});
+                if(d.error) throw new Error(d.error);
+                fwNameSt.loc = l;
+                if(inp) inp.value = '';
+                await fwNameFetch();
+            }catch(e){ fwNameErr(String((e && e.message) || e)); }
+        }
+        function fwNameUse(){
+            const st = fwNameSt;
+            if(!st || !st.sel) return fwNameErr('اختر اسماً أولاً');
+            const v = '@' + st.sel;
+            try{
+                if(st.kind === 'form-name'){
+                    const el = document.getElementById('fmlDisplayName');
+                    if(el) el.value = v;
+                } else if(st.kind === 'branch-alias' && fwBranches[st.idx]){
+                    fwBranches[st.idx].alias = v; fwRenderSheet();
+                } else if(st.kind === 'branch-tab' && fwBranches[st.idx]){
+                    fwBranches[st.idx].tab = v; fwRenderSheet();
+                } else if(st.kind === 'input-alias' && fwInputs[st.idx]){
+                    fwInputs[st.idx].alias = v; fwRenderSheet();
+                    try{ const eb = document.getElementById('fwDetailEditRows'); if(eb && eb.children.length) fwDetailEditRender(); }catch(e){}
+                } else if(st.kind === 'tab-alias' && fwTabs[st.idx]){
+                    fwTabRename(st.idx, v); fwRenderSheet();
+                } else return fwNameErr('تعذر التطبيق على الحقل');
+            }catch(e){ return fwNameErr(String((e && e.message) || e)); }
+            fwNameClose();
         }
         // ── ورقة المستندات (مربوطة بـ DML) ──
         function fwDocBase(){
