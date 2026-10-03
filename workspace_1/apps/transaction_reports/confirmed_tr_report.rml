@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rml>
+  <rpt_metadata name="confirmed_tr_report" displayName="تقرير تأكيدات الحوالات" category="نظام شبكات المحافظ" schema="main_hq_2026" icon="fa-chart-bar" connection="ORCL_PROD" namespace="tr_c" stage_max_rows="1000000"/>
+  <rml_connections>
+    <connection id="1" connection_id="2"/>
+    <connection id="2" connection_id="1"/>
+    <connection id="3" connection_id="6"/>
+  </rml_connections>
+  <rules>
+    <rule id="1" name="rule1" display="rule1">
+      <sources>
+        <source field="الرقم العام"/>
+      </sources>
+    </rule>
+  </rules>
+  <fields>
+    <field id="1" name="الرقم العام" type="VARCHAR" conn_id="2" table_source="vewOutgoingTransfersDeliveringReport"/>
+    <field id="2" name="رقم الحوالة" type="VARCHAR" conn_id="2" table_source="vewOutgoingTransfersDeliveringReport"/>
+    <field id="3" name="المصدر" type="VARCHAR" conn_id="2" table_source="vewOutgoingTransfersDeliveringReport"/>
+    <field id="4" name="المنطقة" type="VARCHAR" conn_id="2" table_source="vewOutgoingTransfersDeliveringReport"/>
+    <field id="5" name="الجهة" type="VARCHAR" conn_id="2" table_source="vewOutgoingTransfersDeliveringReport"/>
+    <field id="6" name="مبلغ الحوالة" type="VARCHAR" conn_id="2" table_source="vewOutgoingTransfersDeliveringReport"/>
+    <field id="7" name="عملة الحوالة" type="VARCHAR" conn_id="2" table_source="vewOutgoingTransfersDeliveringReport"/>
+    <field id="8" name="المستلم" type="VARCHAR" conn_id="2" table_source="vewOutgoingTransfersDeliveringReport"/>
+    <field id="9" name="هاتف المستلم" type="VARCHAR" conn_id="2" table_source="vewOutgoingTransfersDeliveringReport"/>
+    <field id="10" name="المرسل" type="VARCHAR" conn_id="2" table_source="vewOutgoingTransfersDeliveringReport"/>
+    <field id="11" name="هاتف المرسل" type="VARCHAR" conn_id="2" table_source="vewOutgoingTransfersDeliveringReport"/>
+    <field id="12" name="عمولة الوكيل" type="VARCHAR" conn_id="2" table_source="vewOutgoingTransfersDeliveringReport"/>
+    <field id="13" name="تاريخ الحوالة" type="VARCHAR" conn_id="2" table_source="vewOutgoingTransfersDeliveringReport"/>
+    <field id="14" name="وقت الإدخال" type="VARCHAR" conn_id="2" table_source="vewOutgoingTransfersDeliveringReport"/>
+    <field id="15" name="الفرع" type="VARCHAR" conn_id="2" table_source="vewOutgoingTransfersDeliveringReport"/>
+    <field id="16" name="الوكيل" type="VARCHAR" conn_id="2" table_source="vewOutgoingTransfersDeliveringReport"/>
+    <field id="17" name="ملاحظات" type="VARCHAR" conn_id="2" table_source="vewOutgoingTransfersDeliveringReport"/>
+    <field id="21" name="DebitingMethod" type="VARCHAR" conn_id="2" table_source="vewOutgoingTransfersDeliveringReport"/>
+    <field id="22" name="معتمدة" type="VARCHAR" conn_id="2" table_source="vewOutgoingTransfersDeliveringReport"/>
+    <field id="23" name="الحالة" type="VARCHAR" conn_id="2" table_source="vewOutgoingTransfersDeliveringReport"/>
+    <field id="24" name="النوع" type="VARCHAR" conn_id="2" table_source="vewOutgoingTransfersDeliveringReport"/>
+    <field id="25" name="ID" type="INTEGER" conn_id="2" table_source="vewOutgoingTransfersDeliveringReport"/>
+    <field id="26" name="RowVersion" type="INTEGER" conn_id="2" table_source="vewOutgoingTransfersDeliveringReport"/>
+    <field id="27" name="TransferID" type="INTEGER" conn_id="2" table_source="vewOutgoingTransfersDeliveringReport"/>
+    <field id="28" name="الدولة" type="VARCHAR" conn_id="2" table_source="vewOutgoingTransfersDeliveringReport"/>
+    <field id="29" name="المحافظة" type="VARCHAR" conn_id="2" table_source="vewOutgoingTransfersDeliveringReport"/>
+    <field id="30" name="التاريخ" type="DATE" conn_id="2" table_source="vewOutgoingTransfersDeliveringReport"/>
+    <field id="31" name="ملاحظات الحوالة" type="VARCHAR" conn_id="2" table_source="vewOutgoingTransfersDeliveringReport"/>
+    <field id="32" name="غرض التحويل" type="VARCHAR" conn_id="2" table_source="vewOutgoingTransfersDeliveringReport"/>
+    <field id="33" name="مبلغ الحساب" type="NUMERIC" conn_id="2" table_source="vewOutgoingTransfersDeliveringReport"/>
+    <field id="34" name="عملة الحساب" type="VARCHAR" conn_id="2" table_source="vewOutgoingTransfersDeliveringReport"/>
+    <field id="35" name="جهة التصدير" type="VARCHAR" conn_id="2" table_source="vewOutgoingTransfersDeliveringReport"/>
+    <field id="36" name="عملة العمولة" type="VARCHAR" conn_id="2" table_source="vewOutgoingTransfersDeliveringReport"/>
+    <field id="37" name="CommissionMethod" type="INTEGER" conn_id="2" table_source="vewOutgoingTransfersDeliveringReport"/>
+    <field id="38" name="CommissionTotalID" type="INTEGER" conn_id="2" table_source="vewOutgoingTransfersDeliveringReport"/>
+    <field id="39" name="معلومات الشيك" type="INTEGER" conn_id="2" table_source="vewOutgoingTransfersDeliveringReport"/>
+    <field id="40" name="المستخدم" type="VARCHAR" conn_id="2" table_source="vewOutgoingTransfersDeliveringReport"/>
+    <field id="41" name="وكيل الشبكة" type="VARCHAR" conn_id="2" table_source="vewOutgoingTransfersDeliveringReport"/>
+    <field id="42" name="الطبعات" type="INTEGER" conn_id="2" table_source="vewOutgoingTransfersDeliveringReport"/>
+    <field id="43" name="DespatchID" type="INTEGER" conn_id="2" table_source="vewOutgoingTransfersDeliveringReport"/>
+    <field id="44" name="TotalID" type="INTEGER" conn_id="2" table_source="vewOutgoingTransfersDeliveringReport"/>
+    <field id="45" name="TransferDelivering" type="INTEGER" conn_id="2" table_source="vewOutgoingTransfersDeliveringReport"/>
+    <field id="46" name="UserID" type="INTEGER" conn_id="2" table_source="vewOutgoingTransfersDeliveringReport"/>
+    <field id="47" name="BranchID" type="INTEGER" conn_id="2" table_source="vewOutgoingTransfersDeliveringReport"/>
+    <field id="48" name="AgentID" type="INTEGER" conn_id="2" table_source="vewOutgoingTransfersDeliveringReport"/>
+    <field id="49" name="وصل الاشعار" type="BOOLEAN" conn_id="2" table_source="vewOutgoingTransfersDeliveringReport"/>
+    <field id="50" name="منشأ الحوالة" type="VARCHAR" conn_id="2" table_source="vewOutgoingTransfersDeliveringReport"/>
+    <field id="51" name="النظام" type="VARCHAR" conn_id="2" table_source="vewOutgoingTransfersDeliveringReport"/>
+    <field id="52" name="SourceSystemID" type="INTEGER" conn_id="2" table_source="vewOutgoingTransfersDeliveringReport"/>
+    <field id="53" name="OutgoingTransferID" type="INTEGER" conn_id="2" table_source="vewOutgoingTransfersDeliveringReport"/>
+    <field id="51" name="id" type="INTEGER" conn_id="6" table_source="confirmed_transfers_copy"/>
+    <field id="52" name="express_number" type="VARCHAR" conn_id="6" table_source="confirmed_transfers_copy"/>
+    <field id="53" name="disbursement_destination" type="VARCHAR" conn_id="6" table_source="confirmed_transfers_copy"/>
+    <field id="54" name="disbursement_time" type="VARCHAR" conn_id="6" table_source="confirmed_transfers_copy"/>
+    <field id="55" name="additional_fields" type="VARCHAR" conn_id="6" table_source="confirmed_transfers_copy"/>
+    <field id="56" name="network_id" type="INTEGER" conn_id="6" table_source="confirmed_transfers_copy"/>
+    <field id="57" name="created_at" type="TIMESTAMP" conn_id="6" table_source="confirmed_transfers_copy"/>
+  </fields>
+  <columns>
+    <column id="1" name="col_الرقم العام" alias="الرقم العام" expr="=get(vewOutgoingTransfersDeliveringReport.الرقم العام)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="2" name="col_رقم الحوالة" alias="رقم الحوالة" expr="=get(vewOutgoingTransfersDeliveringReport.رقم الحوالة)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="3" name="col_المصدر" alias="المصدر" expr="=get(vewOutgoingTransfersDeliveringReport.المصدر)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="4" name="col_المنطقة" alias="المنطقة" expr="=get(vewOutgoingTransfersDeliveringReport.المنطقة)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="5" name="col_الجهة" alias="الجهة" expr="=get(vewOutgoingTransfersDeliveringReport.الجهة)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="6" name="col_مبلغ الحوالة" alias="مبلغ الحوالة" expr="=get(vewOutgoingTransfersDeliveringReport.مبلغ الحوالة)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="7" name="col_عملة الحوالة" alias="عملة الحوالة" expr="=get(vewOutgoingTransfersDeliveringReport.عملة الحوالة)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="8" name="col_المستلم" alias="المستلم" expr="=get(vewOutgoingTransfersDeliveringReport.المستلم)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="9" name="col_هاتف المستلم" alias="هاتف المستلم" expr="=get(vewOutgoingTransfersDeliveringReport.هاتف المستلم)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="10" name="col_المرسل" alias="المرسل" expr="=get(vewOutgoingTransfersDeliveringReport.المرسل)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="11" name="col_هاتف المرسل" alias="هاتف المرسل" expr="=get(vewOutgoingTransfersDeliveringReport.هاتف المرسل)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="12" name="col_عمولة الوكيل" alias="عمولة الوكيل" expr="=get(vewOutgoingTransfersDeliveringReport.عمولة الوكيل)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="13" name="col_تاريخ الحوالة" alias="تاريخ الحوالة" expr="=get(vewOutgoingTransfersDeliveringReport.تاريخ الحوالة)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="14" name="col_وقت الإدخال" alias="وقت الإدخال" expr="=get(vewOutgoingTransfersDeliveringReport.وقت الإدخال)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="15" name="col_الفرع" alias="الفرع" expr="=get(vewOutgoingTransfersDeliveringReport.الفرع)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="16" name="col_الوكيل" alias="الوكيل" expr="=get(vewOutgoingTransfersDeliveringReport.الوكيل)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="17" name="col_ملاحظات" alias="ملاحظات" expr="=get(vewOutgoingTransfersDeliveringReport.ملاحظات)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="18" name="col_ReferenceExpress" alias="الرقم المرجعي" expr="=get(6.confirmed_transfers_copy.express_number)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="19" name="col_OutgoingTargetNetwork" alias="جهة الصرف" expr="=get(3.confirmed_transfers_copy.disbursement_destination)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="20" name="col_EnterTimeNetwork" alias="وقت الصرف" expr="=get(3.confirmed_transfers_copy.disbursement_time)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="21" name="col_DebitingMethod" alias="حساب الصرف" expr="=get(vewOutgoingTransfersDeliveringReport.DebitingMethod)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="22" name="col_معتمدة" alias="معتمدة" expr="=get(vewOutgoingTransfersDeliveringReport.معتمدة)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="23" name="col_الحالة" alias="الحالة" expr="=get(vewOutgoingTransfersDeliveringReport.الحالة)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag" is_status="1"/>
+    <column id="24" name="col_النوع" alias="النوع" expr="=get(vewOutgoingTransfersDeliveringReport.النوع)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+  </columns>
+  <links>
+    <link id="1" from_table="vewOutgoingTransfersDeliveringReport" from_col="ملاحظات" to_table="confirmed_transfers_copy" to_col="express_number" rel_type="one_to_one" match="regex" pattern="(\d+)(?!.*\d)"/>
+  </links>
+  <table_opts>
+    <table name="vewOutgoingTransfersDeliveringReport" conn="2" is_default="1"/>
+    <table name="confirmed_transfers_copy" conn="6"/>
+  </table_opts>
+</rml>

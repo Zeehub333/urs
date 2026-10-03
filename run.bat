@@ -54,14 +54,14 @@ echo [ok] python: %PY%  /  settings: %APP_SETTINGS%  /  bind: %APP_HOST%:%APP_PO
 "%PY%" -c "import django; print('     django', django.__version__)"
 
 echo.
-echo [1/4] migrate + sync 20 apps from odex/system
+echo [1/4] migrate + sync apps from workspace apps (fallback odex/system)
 "%PY%" "%ROOT%manage.py" migrate --settings=%APP_SETTINGS%
 if errorlevel 1 (
   echo [X] migrate failed.
   pause >nul
   exit /b 1
 )
-"%PY%" "%ROOT%manage.py" shell --settings=%APP_SETTINGS% -c "import json,pathlib; from urs.models import App; [App.objects.update_or_create(name=d.get('name'),defaults={'name_ar':d.get('ar',d.get('name')),'icon':d.get('icon','fa-cube'),'version':d.get('version','1.0.0'),'description':d.get('description',''),'category':d.get('category','General')}) for p in sorted(pathlib.Path('odex/system').glob('*/metadata.json')) for d in [json.loads(p.read_text(encoding='utf-8'))]]; print('apps =',App.objects.count())"
+"%PY%" "%ROOT%manage.py" shell --settings=%APP_SETTINGS% -c "import json,pathlib; from urs.models import App; from urs.workspace import system_roots; seen=set(); [App.objects.update_or_create(name=d.get('name'),defaults={'name_ar':d.get('ar',d.get('name')),'icon':d.get('icon','fa-cube'),'version':d.get('version','1.0.0'),'description':d.get('description',''),'category':d.get('category','General')}) for root in system_roots() for p in sorted(root.glob('*/metadata.json')) for d in [json.loads(p.read_text(encoding='utf-8'))] if d.get('name') not in seen and not seen.add(d.get('name'))]; print('apps =',App.objects.count())"
 
 echo.
 echo [2/4] Starting Django Home - http://%APP_HOST%:%APP_PORT%/  [autoreload ON]

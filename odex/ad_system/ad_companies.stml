@@ -1,0 +1,12 @@
+<tree name="ad_companies" label="دليل الشركات" maxLevels="3" serial="1" separator="">
+  <child name="root" label="جذر" level="1" digits="1"/>
+  <child name="unit" label="وحدة مؤسسية" level="2" digits="2"/>
+  <child name="branch" label="فرع" level="3" digits="3"/>
+  <node label="الشركات" code="3" model_source="ad_companies.Company">
+    <node label="الوحدة الرئيسية" code="01" model_source="ad_companies.Unit">
+      <node label="الفرع الرئيسي" code="001" model_source="ad_companies.Branch"/>
+      <node label="فرع الشمال" code="002" model_source="ad_companies.Branch"/>
+    </node>
+    <node label="وحدة الجنوب" code="02" model_source="ad_companies.Unit"/>
+  </node>
+</tree>

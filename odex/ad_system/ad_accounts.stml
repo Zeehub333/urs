@@ -1,0 +1,18 @@
+<tree name="ad_accounts" label="دليل الحسابات" maxLevels="4" serial="1" separator="">
+  <child name="root" label="جذر" level="1" digits="1"/>
+  <child name="branch" label="تفرع" level="2" digits="1"/>
+  <child name="leaf" label="ورقة" level="3" digits="3"/>
+  <node label="الحسابات العامة" code="2" model_source="acc.Account">
+    <node label="الالتزامات" code="2">
+      <node label="الدائنون - المدير العام" code="001" model_source="acc.Account" fmlk="acc/voucher.fmlk" dist_fmlks="purchases/invoice.fmlk,purchases/return.fmlk"/>
+    </node>
+    <node label="الأصول" code="1">
+      <node label="الصندوق" code="001" model_source="acc.Account" fmlk="treasury/voucher.fmlk" dist_fmlks="treasury/receipt.fmlk,treasury/payment.fmlk"/>
+    </node>
+  </node>
+  <node label="المصاريف" code="3" model_source="acc.Account">
+    <node label="الحسابات المدينة" code="001" digits="3">
+      <node label="مصروف تشغيلي" code="001" digits="3" model_source="acc.Account"/>
+    </node>
+  </node>
+</tree>

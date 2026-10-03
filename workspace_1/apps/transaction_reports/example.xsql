@@ -1,0 +1,23 @@
+-- example.xsql — XSQL: Extended SQL for URS2
+-- Supports namespaces, multi-connection JOIN, linear (spreadsheet-style)
+-- functions compiled to SQL CASE WHEN aggregates.
+
+-- SELECT with SUMIF / COUNTIF against a single MSSQL connection.
+SELECT
+    SUMIF(amount, status, 1) AS delivered_total,
+    COUNTIF(amount, status, 1) AS delivered_count,
+    SUMIFS(amount, currency, 'USD', status, 1) AS usd_delivered_total,
+    IF(SUM(amount) > 1000000, 'high', 'normal') AS volume_band
+FROM ies2026.dbo.tblIncomingTransfers;
+
+-- Multi-connection JOIN: MSSQL transfers + PG confirmations.
+-- The compiler fetches each connection independently and merges in Python.
+SELECT
+    t.PublicNumber,
+    t.Amount,
+    c.express_number AS confirmation_ref
+FROM ies2026.dbo.tblIncomingTransfers AS t
+INNER JOIN rex_local.ies202601.confirmed_transfers AS c
+    ON t.PublicNumber = c.express_number
+WHERE t.Delivered = 1
+LIMIT 1000;

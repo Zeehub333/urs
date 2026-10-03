@@ -9,6 +9,20 @@ from django.http import JsonResponse, HttpResponse
 from django.conf import settings
 from django.views.decorators.csrf import csrf_exempt
 from .models import App
+from .workspace import (
+    system_roots as ws_system_roots,
+    app_roots as ws_app_roots,
+    first_app_dir as ws_first_app_dir,
+    ensure_app_dir as ws_ensure_app_dir,
+    modals_dir as ws_modals_dir,
+    pending_icons_dir as ws_pending_icons_dir,
+    names_file as ws_names_file,
+    documents_dir as ws_documents_dir,
+    settings_app_candidates as ws_settings_apps,
+    workspaces_info as ws_workspaces_info,
+    primary_connection_name as ws_primary_connection,
+    primary_users_table as ws_primary_users_table,
+)
 
 
 def _needs_onboarding() -> bool:
@@ -108,8 +122,8 @@ class PostgresEngine:
             raise
 
 def _load_system_apps():
-    """Scan odex/system/*/metadata.json — 20 ERP apps (image) + fallback to system/"""
-    candidates = [BASE_DIR / "odex" / "system", BASE_DIR / "system"]
+    """Scan workspace apps/*/metadata.json — fallback odex/system, system/"""
+    candidates = ws_system_roots()
     apps = []
     seen = set()
     for system in candidates:
@@ -135,7 +149,7 @@ def _load_db_apps():
         return []
 
 def _load_apps_folder_driven():
-    """Pure folder-driven catalog: ONLY odex/system folders (by sort_order).
+    """Pure folder-driven catalog: ONLY workspace/legacy app folders (by sort_order).
 
     Empty folders → empty list (no DB backfill). DB rows without folders are hidden.
     """
@@ -143,7 +157,7 @@ def _load_apps_folder_driven():
 
 def _load_app_context(app_name):
     """Helper: load app_meta + fml_files + rml_files for any view"""
-    candidates = [BASE_DIR / "odex" / "system" / app_name, BASE_DIR / "system" / app_name]
+    candidates = ws_app_roots(app_name)
     app_meta = None
     rml_files = []
     fml_files = []
@@ -215,15 +229,12 @@ def _find_fml_path(fml_name: str, app_name: str | None = None):
     from fmlk_engine.compiler import FMLKFormCompiler
     # If app_name given, search inside that app first
     if app_name:
-        for cand in [BASE_DIR / "odex" / "system" / app_name / fml_name,
-                     BASE_DIR / "odex" / "system" / app_name / f"{fml_name}.fmlk",
-                     BASE_DIR / "odex" / "system" / app_name / f"{fml_name}.fml",
-                     BASE_DIR / "system" / app_name / fml_name,
-                     BASE_DIR / "system" / app_name / f"{fml_name}.fmlk"]:
-            if cand.is_file():
-                return cand
+        for base in ws_app_roots(app_name):
+            for cand in [base / fml_name, base / f"{fml_name}.fmlk", base / f"{fml_name}.fml"]:
+                if cand.is_file():
+                    return cand
         # also glob search inside app folder for partial match
-        for base in [BASE_DIR / "odex" / "system" / app_name, BASE_DIR / "system" / app_name]:
+        for base in ws_app_roots(app_name):
             if base.exists():
                 for p in list(base.glob("*.fmlk")) + list(base.glob("*.fml")):
                     if p.name == fml_name or p.stem == fml_name:
@@ -234,7 +245,7 @@ def _find_fml_path(fml_name: str, app_name: str | None = None):
             if cand.is_file():
                 return cand
     # Search all system apps
-    for system in [BASE_DIR / "odex" / "system", BASE_DIR / "system"]:
+    for system in ws_system_roots():
         if system.exists():
             for p in system.glob("*/*.fmlk"):
                 if p.name == fml_name or p.stem == fml_name:
@@ -251,13 +262,11 @@ def _find_fml_path(fml_name: str, app_name: str | None = None):
 def _find_rml_path(rml_name: str, app_name: str | None = None):
     from rml_python.compiler import RMLReportCompiler
     if app_name:
-        for cand in [BASE_DIR / "odex" / "system" / app_name / rml_name,
-                     BASE_DIR / "odex" / "system" / app_name / f"{rml_name}.rml",
-                     BASE_DIR / "system" / app_name / rml_name,
-                     BASE_DIR / "system" / app_name / f"{rml_name}.rml"]:
-            if cand.exists():
-                return cand
-        for base in [BASE_DIR / "odex" / "system" / app_name, BASE_DIR / "system" / app_name]:
+        for base in ws_app_roots(app_name):
+            for cand in [base / rml_name, base / f"{rml_name}.rml"]:
+                if cand.exists():
+                    return cand
+        for base in ws_app_roots(app_name):
             if base.exists():
                 for p in base.glob("*.rml"):
                     if p.name == rml_name or p.stem == rml_name:
@@ -266,7 +275,7 @@ def _find_rml_path(rml_name: str, app_name: str | None = None):
         for cand in [rml_dir / rml_name, rml_dir / f"{rml_name}.rml"]:
             if cand.exists():
                 return cand
-    for system in [BASE_DIR / "odex" / "system", BASE_DIR / "system"]:
+    for system in ws_system_roots():
         if system.exists():
             for p in system.glob("*/*.rml"):
                 if p.name == rml_name or p.stem == rml_name:
@@ -276,6 +285,44 @@ def _find_rml_path(rml_name: str, app_name: str | None = None):
         return default
     return None
 
+def workspace_home(request):
+    """Workspace manager — FIRST page: kanban boards (brand + workspace name).
+
+    Cards link into /apps/ (existing app grid). Selected workspace id is kept
+    in the session for future multi-workspace scoping.
+    """
+    _g = _gate_redirect(request)
+    if _g is not None:
+        return _g
+    try:
+        current = (request.GET.get("workspace") or "").strip()
+        if current:
+            request.session["workspace"] = current
+    except Exception:
+        pass
+    try:
+        workspaces = ws_workspaces_info()
+    except Exception:
+        workspaces = []
+    return render(request, "workspace.html", {
+        "workspaces": workspaces,
+        "active_ws": [w for w in workspaces if (w.get("status") or "active") == "active"],
+        "other_ws": [w for w in workspaces if (w.get("status") or "active") != "active"],
+    })
+
+
+def api_workspaces_list(request):
+    """GET /api/workspaces/ → workspaces + primary connection/users table."""
+    try:
+        return JsonResponse({
+            "workspaces": ws_workspaces_info(),
+            "primary_connection": ws_primary_connection(),
+            "users_table": ws_primary_users_table(),
+        }, json_dumps_params={"ensure_ascii": False})
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
 def home(request):
     """
     Home UI — style from provided RAW-EXS template, without company name,
@@ -284,14 +331,14 @@ def home(request):
     _g = _gate_redirect(request)
     if _g is not None:
         return _g
-    # Dynamic apps: FOLDER-DRIVEN (odex/system folders first, DB-only leftovers last)
+    # Dynamic apps: FOLDER-DRIVEN (workspace apps first, DB-only leftovers last)
     apps = _load_apps_folder_driven()
 
     # Real stats for home cards (no static numbers)
     total_reports = 0
     total_forms = 0
     reports_with_charts = 0
-    for system in [BASE_DIR / "odex" / "system", BASE_DIR / "system"]:
+    for system in ws_system_roots():
         if not system.exists():
             continue
         rml_paths = list(system.glob("*/*.rml"))
@@ -696,9 +743,7 @@ APP_ICON_UPLOAD_MAX = 512 * 1024
 
 
 def _app_icon_pending_dir():
-    d = BASE_DIR / "odex" / "system" / ".pending_icons"
-    d.mkdir(parents=True, exist_ok=True)
-    return d
+    return ws_pending_icons_dir()
 
 
 @csrf_exempt
@@ -755,9 +800,9 @@ def api_apps_icon_file(request, app_name):
         import mimetypes as _mt
         if not _re_in.fullmatch(r"[a-z][a-z0-9_]*", (app_name or "").lower()):
             return JsonResponse({"error": "invalid app"}, status=400)
-        app_dir = BASE_DIR / "odex" / "system" / app_name.lower()
+        app_dir = ws_first_app_dir(app_name.lower())
         found = None
-        if app_dir.exists():
+        if app_dir is not None:
             for ext in ("svg", "png", "jpg", "jpeg", "webp"):
                 p = app_dir / f"icon.{ext}"
                 if p.is_file():
@@ -774,7 +819,7 @@ def api_apps_icon_file(request, app_name):
 
 @csrf_exempt
 def api_apps_create(request):
-    """POST /api/apps/create/ — create an app (folder odex/system/<name>/ + metadata.json + App row).
+    """POST /api/apps/create/ — create an app (folder <workspace>/apps/<name>/ + metadata.json + App row).
 
     Body: {name (latin id), ar*, en?, icon?, category?, description?, version?}
     sort_order = max+1 so the app lands at the END of home/API lists.
@@ -794,9 +839,9 @@ def api_apps_create(request):
             return JsonResponse({"error": "ar (الاسم العربي) مطلوب"}, status=400)
         from .models import App
         from django.db.models import Max
-        app_dir = BASE_DIR / "odex" / "system" / name
-        if app_dir.exists() or App.objects.filter(name=name).exists():
+        if ws_first_app_dir(name) is not None or App.objects.filter(name=name).exists():
             return JsonResponse({"error": f"التطبيق موجود بالفعل: {name}"}, status=400)
+        app_dir = None
         icon = (data.get("icon") or "fa-cube").strip()
         icon_file = None
         if icon.startswith("upload:"):
@@ -830,7 +875,7 @@ def api_apps_create(request):
             "sort_order": int(max_order) + 1,
             "is_new": True,
         }
-        app_dir.mkdir(parents=True, exist_ok=False)
+        app_dir = ws_ensure_app_dir(name)
         if icon_file:
             import shutil as _sh
             _sh.move(str(_app_icon_pending_dir() / token), str(app_dir / icon_file))
@@ -858,7 +903,7 @@ def _wizard_flags():
     Also exposed as a template context processor (see config/settings.py).
     """
     try:
-        d = BASE_DIR / "odex" / "system" / "settings" / "modals"
+        d = ws_modals_dir()
         rml = (d / "rml_wizard_modal.html").is_file() and (d / "rml_wizard_script.html").is_file()
         fml = (d / "forms_wizard_modal.html").is_file() and (d / "forms_wizard_script.html").is_file()
     except Exception:
@@ -1045,7 +1090,7 @@ def app_data_diagram(request, app_name):
 
 def api_app_files(request, app_name):
     """API: GET /api/apps/<app_name>/files/ → {rml: [...], fml: [...]}"""
-    candidates = [BASE_DIR / "odex" / "system" / app_name, BASE_DIR / "system" / app_name]
+    candidates = ws_app_roots(app_name)
     rml_files = []
     fml_files = []
     for cand in candidates:
@@ -1068,15 +1113,19 @@ def api_apps_sync(request):
     """POST /api/apps/sync/ — re-sync system folders → DB (for UI editable)"""
     if request.method != "POST":
         return JsonResponse({"error": "POST required"}, status=405)
-    # Re-run sync logic (same as db_init) — now from odex/system
+    # Re-run sync logic (same as db_init) — workspace apps first, legacy fallback
     from django.db import transaction
     synced = 0
-    for cand in [BASE_DIR / "odex" / "system", BASE_DIR / "system"]:
+    _seen_sync = set()
+    for cand in ws_system_roots():
         if not cand.exists():
             continue
         for meta_path in sorted(cand.glob("*/metadata.json")):
             try:
                 data = json.loads(meta_path.read_text(encoding="utf-8"))
+                if data.get("name") in _seen_sync:
+                    continue
+                _seen_sync.add(data.get("name"))
                 App.objects.update_or_create(
                     name=data["name"],
                     defaults={
@@ -1354,7 +1403,7 @@ def api_app_modal(request, app_name, file):
     f = (file or "").strip()
     if not f or not f.endswith(".html") or ".." in f or f.startswith("/") or ":" in f:
         return HttpResponse("invalid modal file", status=400, content_type="text/plain; charset=utf-8")
-    for base in [BASE_DIR / "odex" / "system" / app_name, BASE_DIR / "system" / app_name]:
+    for base in ws_app_roots(app_name):
         cand = base / f
         try:
             if cand.exists() and cand.is_file() and str(cand.resolve()).startswith(str(base.resolve())):
@@ -1467,7 +1516,7 @@ def api_meta_categories(request):
     try:
         from rml_python.compiler import RMLReportCompiler
         from fmlk_engine.compiler import FMLKFormCompiler
-        for _root in [BASE_DIR / "odex" / "system", BASE_DIR / "system"]:
+        for _root in ws_system_roots():
             if not _root.exists():
                 continue
             for _app in sorted([d for d in _root.iterdir() if d.is_dir()]):
@@ -1515,14 +1564,8 @@ def api_fmlk_data_types(request):
 
 
 def _resolve_app_dir(app_name):
-    """مجلد التطبيق (odex/system أولاً) مع إنشائه عند الحاجة."""
-    app_dir = BASE_DIR / "odex" / "system" / app_name
-    if not app_dir.exists():
-        alt = BASE_DIR / "system" / app_name
-        if alt.exists():
-            return alt
-        app_dir.mkdir(parents=True, exist_ok=True)
-    return app_dir
+    """مجلد التطبيق (مساحات العمل أولاً) مع إنشائه عند الحاجة."""
+    return ws_first_app_dir(app_name) or ws_ensure_app_dir(app_name)
 
 
 @csrf_exempt
@@ -3572,7 +3615,7 @@ def api_fmlk_detail_sources(request):
             _self_stem = _self_stem.rsplit(".", 1)[0]
         sources = []
         try:
-            _bases = [BASE_DIR / "odex" / "system", BASE_DIR / "system"]
+            _bases = ws_system_roots()
         except Exception:
             _bases = []
         for _base in _bases:
@@ -4388,10 +4431,10 @@ def _suggest_columns(schema: str, missing: str, db_engine=None):
         return [], {}, [], schema
 
 
-# ── Display names (i18n label registry, file `odex/system/settings/display_names.json`) ──
+# ── Display names (i18n label registry, file `<workspace>/apps/settings/display_names.json`) ──
 # حقل الاسم: name (مفتاح @key) + default_name + single_name + plural_name + gender(m/f) + locale_id.
 # يُستخدم عند تسمية الجداول والأعمدة والتبويبات: الحقل يحمل @key والمشغل يحل العرض حسب اللغة.
-_NAMES_FILE = BASE_DIR / "odex" / "system" / "settings" / "display_names.json"
+_NAMES_FILE = None  # legacy constant retired — use ws_names_file() (workspace-aware)
 _NAMES_KEY_RE = None
 try:
     import re as _re_names
@@ -4405,8 +4448,9 @@ def _names_load():
     """Read registry → {"locales": [...], "names": [{name, locale_id, default_name, single_name, plural_name}]}."""
     data = {"locales": ["ar"], "names": []}
     try:
-        if _NAMES_FILE.exists():
-            raw = json.loads(_NAMES_FILE.read_text(encoding="utf-8") or "{}")
+        _nf = ws_names_file()
+        if _nf.exists():
+            raw = json.loads(_nf.read_text(encoding="utf-8") or "{}")
             if isinstance(raw.get("locales"), list) and raw["locales"]:
                 data["locales"] = [str(x) for x in raw["locales"] if str(x).strip()][:24]
             if isinstance(raw.get("names"), list):
@@ -4419,10 +4463,11 @@ def _names_load():
 
 
 def _names_write(data):
-    _NAMES_FILE.parent.mkdir(parents=True, exist_ok=True)
-    tmp = _NAMES_FILE.with_suffix(".tmp")
+    _nf = ws_names_file(read_only=False)
+    _nf.parent.mkdir(parents=True, exist_ok=True)
+    tmp = _nf.with_suffix(".tmp")
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.replace(_NAMES_FILE)
+    tmp.replace(_nf)
     return data
 
 
@@ -4906,7 +4951,7 @@ def api_rml_groups(request):
 def _scan_app_rules(app_name):
     """قواعد الأعمال في كل تقارير التطبيق: [{file, rule{...}}]."""
     out = []
-    for cand in [BASE_DIR / "odex" / "system" / app_name, BASE_DIR / "system" / app_name]:
+    for cand in ws_app_roots(app_name):
         if not cand.exists():
             continue
         for p in sorted(cand.glob("*.rml")):
@@ -6079,15 +6124,10 @@ def api_create_fml(request, app_name):
             file += ".fmlk"
         if "/" in file or "\\" in file or ".." in file:
             return JsonResponse({"error": "invalid file name"}, status=400)
-        # Resolve app dir (prefer odex/system)
-        app_dir = BASE_DIR / "odex" / "system" / app_name
-        if not app_dir.exists():
-            # try system fallback
-            alt = BASE_DIR / "system" / app_name
-            if alt.exists():
-                app_dir = alt
-            else:
-                app_dir.mkdir(parents=True, exist_ok=True)
+        # Resolve app dir (workspace apps first, legacy fallback)
+        app_dir = ws_first_app_dir(app_name)
+        if app_dir is None:
+            app_dir = ws_ensure_app_dir(app_name)
         target = app_dir / file
         if target.exists():
             return JsonResponse({"error": "file already exists"}, status=400)
@@ -6745,13 +6785,9 @@ def _resolve_rml_target(app_name, file):
         file += ".rml"
     if "/" in file or "\\" in file or ".." in file:
         return None, None, "invalid file name"
-    app_dir = BASE_DIR / "odex" / "system" / app_name
-    if not app_dir.exists():
-        alt = BASE_DIR / "system" / app_name
-        if alt.exists():
-            app_dir = alt
-        else:
-            app_dir.mkdir(parents=True, exist_ok=True)
+    app_dir = ws_first_app_dir(app_name)
+    if app_dir is None:
+        app_dir = ws_ensure_app_dir(app_name)
     return app_dir, app_dir / file, None
 
 
@@ -6797,13 +6833,9 @@ def api_create_rml(request, app_name):
             file += ".rml"
         if "/" in file or "\\" in file or ".." in file:
             return JsonResponse({"error": "invalid file name"}, status=400)
-        app_dir = BASE_DIR / "odex" / "system" / app_name
-        if not app_dir.exists():
-            alt = BASE_DIR / "system" / app_name
-            if alt.exists():
-                app_dir = alt
-            else:
-                app_dir.mkdir(parents=True, exist_ok=True)
+        app_dir = ws_first_app_dir(app_name)
+        if app_dir is None:
+            app_dir = ws_ensure_app_dir(app_name)
         target = app_dir / file
         if target.exists():
             return JsonResponse({"error": "file already exists"}, status=400)
@@ -8951,7 +8983,7 @@ def _cml_scan():
     from cml_engine.compiler import CMLCompiler
     items = []
     # System settings
-    for cand in [BASE_DIR / "odex" / "system" / "settings", BASE_DIR / "system" / "settings"]:
+    for cand in ws_settings_apps():
         if cand.exists():
             for p in sorted(cand.glob("*.cml")):
                 if p.name in FORMS_PLAYER_CML:
@@ -8970,7 +9002,7 @@ def _cml_scan():
                                   "metadata": {"displayName": p.stem}, "controls": 0, "rules": 0, "rules_list": [], "error": str(e)})
             break
     # App-level cml files
-    for system in [BASE_DIR / "odex" / "system", BASE_DIR / "system"]:
+    for system in ws_system_roots():
         if not system.exists():
             continue
         for app_dir in sorted([d for d in system.iterdir() if d.is_dir()]):
@@ -9004,11 +9036,12 @@ def _cml_resolve(scope, app, file):
     if not file.endswith(".cml"):
         file += ".cml"
     if scope == "system":
-        for cand in [BASE_DIR / "odex" / "system" / "settings" / file, BASE_DIR / "system" / "settings" / file]:
+        for _sd in ws_settings_apps():
+            cand = _sd / file
             if cand.exists():
                 return cand
         return None
-    for base in [BASE_DIR / "odex" / "system" / app, BASE_DIR / "system" / app]:
+    for base in ws_app_roots(app):
         cand = base / file
         if cand.exists():
             return cand
@@ -9037,7 +9070,7 @@ def _settings_fmlk_scan():
     """نماذج الإعدادات: كل .fmlk في مجلد settings بالبنية الجديدة."""
     from fmlk_engine.compiler import FMLKFormCompiler
     out = []
-    for cand in [BASE_DIR / "odex" / "system" / "settings", BASE_DIR / "system" / "settings"]:
+    for cand in ws_settings_apps():
         if not cand.exists():
             continue
         for p in sorted(cand.glob("*.fmlk")):
@@ -9102,7 +9135,7 @@ def _scan_fml_models():
     """سجل الموديلات: كل .fmlk في النظام مع الجدول والسكима وعدد الحقول و PK."""
     from fmlk_engine.compiler import FMLKFormCompiler
     out = []
-    for system in [BASE_DIR / "odex" / "system", BASE_DIR / "system"]:
+    for system in ws_system_roots():
         if not system.exists():
             continue
         for app_dir in sorted([d for d in system.iterdir() if d.is_dir()]):
@@ -9896,23 +9929,30 @@ def api_setup_wizard_connection_from_appconf(request):
 
 
 def _wizard_scan_fmlk_connections():
-    """Every odex/system app .fmlk with its current `connection` attr."""
+    """Every workspace app .fmlk with its current `connection` attr."""
     from fmlk_engine.compiler import FMLKFormCompiler
     out = []
-    base = BASE_DIR / "odex" / "system"
-    if not base.exists():
-        return out
-    for path in sorted(base.rglob("*.fmlk")):
-        try:
-            rel = path.relative_to(base)
-            app = rel.parts[0] if len(rel.parts) > 1 else ""
-            comp = FMLKFormCompiler(path=path)
-            meta = comp.fml_metadata()
-            out.append({"app": app, "file": path.name,
-                        "connection": (meta.get("connection") or "").strip(),
-                        "table": meta.get("table") or meta.get("name")})
-        except Exception as e:
-            out.append({"app": "", "file": path.name, "connection": "", "error": str(e)})
+    seen = set()
+    for base in ws_system_roots():
+        if not base.exists():
+            continue
+        for path in sorted(base.rglob("*.fmlk")):
+            try:
+                rel = path.relative_to(base)
+                app = rel.parts[0] if len(rel.parts) > 1 else ""
+            except Exception:
+                app = ""
+            if (app, path.name) in seen:
+                continue
+            seen.add((app, path.name))
+            try:
+                comp = FMLKFormCompiler(path=path)
+                meta = comp.fml_metadata()
+                out.append({"app": app, "file": path.name,
+                            "connection": (meta.get("connection") or "").strip(),
+                            "table": meta.get("table") or meta.get("name")})
+            except Exception as e:
+                out.append({"app": "", "file": path.name, "connection": "", "error": str(e)})
     return out
 
 
@@ -9941,7 +9981,7 @@ def api_setup_wizard_retarget(request):
     """POST /api/setup/wizard/retarget/ — rewrite `connection` attr of given FMLK files.
 
     Body: {files: [{app, file}], connection="urs_local"} — validates names, resolves under
-    odex/system/<app>/, rewrites only the <fml_metadata> tag, re-parses to verify.
+    workspace app dirs, rewrites only the <fml_metadata> tag, re-parses to verify.
     """
     if request.method != "POST":
         return JsonResponse({"error": "POST required"}, status=405)
@@ -9952,7 +9992,6 @@ def api_setup_wizard_retarget(request):
         new_conn = (data.get("connection") or "urs_local").strip()
         if not new_conn:
             return JsonResponse({"error": "connection required"}, status=400)
-        base = BASE_DIR / "odex" / "system"
         results = []
         for item in (data.get("files") or []):
             app = (item.get("app") or "").strip()
@@ -9961,11 +10000,16 @@ def api_setup_wizard_retarget(request):
                     or ("/" in fname) or ("\\" in fname) or (".." in fname):
                 results.append({"app": app, "file": fname, "ok": False, "error": "invalid app/file"})
                 continue
-            path = base / app / fname
+            path = None
+            for _b in ws_app_roots(app):
+                _c = _b / fname
+                if _c.is_file():
+                    path = _c
+                    break
+            if path is None:
+                results.append({"app": app, "file": fname, "ok": False, "error": "file not found"})
+                continue
             try:
-                if not path.exists():
-                    results.append({"app": app, "file": fname, "ok": False, "error": "file not found"})
-                    continue
                 raw = path.read_text(encoding="utf-8")
                 try:
                     prev = _ET.fromstring(raw).find("fml_metadata").get("connection", "")
@@ -10140,7 +10184,7 @@ def api_cml_values(request):
 
 # ── DML Document Engine (printable document templates, *.dml) ─────────────
 # Naming rule: <source>_<N>.dml  (source = parent RML/FMLK base name, N = doc number)
-# Storage: odex/system/<app>/documents/  (auto-created)
+# Storage: <workspace>/apps/<app>/documents/  (auto-created)
 
 import re as _re_dml
 
@@ -10148,15 +10192,8 @@ _DML_NAME_RE = _re_dml.compile(r"^([A-Za-z0-9_\-]+)_(\d+)\.dml$")
 
 
 def _dml_documents_dir(app_name):
-    """Resolve (and auto-create) odex/system/<app>/documents/."""
-    base = BASE_DIR / "odex" / "system" / app_name
-    if not base.exists():
-        alt = BASE_DIR / "system" / app_name
-        if alt.exists():
-            base = alt
-    docs = base / "documents"
-    docs.mkdir(parents=True, exist_ok=True)
-    return docs
+    """Resolve (and auto-create) <app>/documents/ across workspace roots."""
+    return ws_documents_dir(app_name)
 
 
 def _resolve_dml_target(app_name, file):

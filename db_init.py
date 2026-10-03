@@ -77,9 +77,10 @@ def run_migrations(port=None):
     call_command("migrate", verbosity=1)
     print("[db_init] migrate done")
 
-    # Sync 20 apps from odex/system/*/metadata.json → DB (fallback to system/)
+    # Sync apps from workspace_1/apps/*/metadata.json → DB (fallback odex/system, system/)
     from urs.models import App
-    candidates = [BASE_DIR / "odex" / "system", BASE_DIR / "system"]
+    from urs.workspace import system_roots
+    candidates = system_roots()
     synced = 0
     seen = set()
     for system in candidates:

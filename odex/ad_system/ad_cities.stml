@@ -1,0 +1,9 @@
+<tree name="ad_cities" label="دليل المدن" maxLevels="2" serial="1" separator="">
+  <child name="root" label="جذر" level="1" digits="1"/>
+  <child name="leaf" label="ورقة" level="2" digits="3"/>
+  <node label="المدن" code="6" model_source="core.City">
+    <node label="صنعاء" code="001" model_source="core.City"/>
+    <node label="عدن" code="002" model_source="core.City"/>
+    <node label="تعز" code="003" model_source="core.City"/>
+  </node>
+</tree>

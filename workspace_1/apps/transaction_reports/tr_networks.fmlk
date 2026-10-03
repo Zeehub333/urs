@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<fml>
+  <fml_metadata name="tr_networks" displayName="الشبكات" table="networks" model_type="form" schema="ies202601" connection="rex_local" category="نظام شبكات المحافظ" icon="fa-pen-to-square"/>
+  <tabs>
+    <tab id="البيانات الأساسية" name="البيانات الأساسية" alias="البيانات الأساسية" sort_order="1"/>
+  </tabs>
+  <fields>
+    <field id="1" name="icon" alias="الشعار" dataType="TEXT" inputType="image" required="false" nullable="true" editable="true" primary_key="false" tab="البيانات الأساسية" destination="main" category="البيانات الأساسية"/>
+    <field id="2" name="id" alias="رقم الشبكة" dataType="INTEGER" inputType="number" required="false" nullable="true" editable="true" primary_key="false" tab="البيانات الأساسية" destination="main" category="البيانات الأساسية"/>
+    <field id="3" name="name" alias="الاسم" dataType="VARCHAR" inputType="text" required="false" nullable="true" editable="true" primary_key="false" tab="البيانات الأساسية" destination="main" category="البيانات الأساسية" is_main_col="1"/>
+    <field id="4" name="classification" alias="الفئة" dataType="VARCHAR" inputType="select" required="false" nullable="true" editable="true" primary_key="false" tab="البيانات الأساسية" destination="main" category="البيانات الأساسية">
+      <options>
+        <option value="0">داخلية</option>
+        <option value="1">خارجية</option>
+      </options>
+    </field>
+    <field id="5" name="is_regular" alias="بادئة معيارية ؟" dataType="VARCHAR" inputType="boolean" required="false" nullable="true" editable="true" primary_key="false" tab="البيانات الأساسية" destination="main" category="البيانات الأساسية"/>
+    <field id="6" name="target_id" alias="رقم الجهة" dataType="INTEGER" inputType="number" required="false" nullable="true" editable="true" primary_key="false" tab="البيانات الأساسية" destination="main" category="البيانات الأساسية"/>
+  </fields>
+</fml>

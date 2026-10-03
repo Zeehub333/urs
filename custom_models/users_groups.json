@@ -1,0 +1,67 @@
+{
+  "name": "users_groups",
+  "label": "مجموعات المستخدمين",
+  "table": "users_groups",
+  "schema": "ies202601",
+  "connection": "6",
+  "description": "",
+  "fields": [
+    {
+      "name": "id",
+      "label": "م",
+      "type": "INTEGER",
+      "length": 0,
+      "nullable": false,
+      "required": false,
+      "default": "",
+      "primary_key": false,
+      "unique": false
+    },
+    {
+      "name": "group_name",
+      "label": "اسم المجموعة",
+      "type": "VARCHAR",
+      "length": 200,
+      "nullable": false,
+      "required": false,
+      "default": "",
+      "primary_key": false,
+      "unique": false
+    },
+    {
+      "name": "group_discription",
+      "label": "وصف المجموعة",
+      "type": "VARCHAR",
+      "length": 500,
+      "nullable": true,
+      "required": false,
+      "default": "",
+      "primary_key": false,
+      "unique": false
+    },
+    {
+      "name": "level",
+      "label": "مستوى المجموعة",
+      "type": "INTEGER",
+      "length": 0,
+      "nullable": false,
+      "required": false,
+      "default": "1",
+      "primary_key": false,
+      "unique": false
+    },
+    {
+      "name": "parent_id",
+      "label": "المجموعة الأم",
+      "type": "VARCHAR",
+      "length": 0,
+      "nullable": false,
+      "required": false,
+      "default": "1",
+      "primary_key": false,
+      "unique": false
+    }
+  ],
+  "updated_at": "2026-09-30T09:57:33",
+  "created_at": "2026-09-30T09:49:20"
+}

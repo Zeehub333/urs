@@ -56,11 +56,25 @@ MIDDLEWARE = [
 
 ROOT_URLCONF = 'config.urls'
 
+def _workspace_modals_dirs():
+    """Designer fragments: workspace settings modals first, legacy fallback."""
+    out = []
+    try:
+        for _ws in sorted(BASE_DIR.glob("workspace_*")):
+            _d = _ws / "apps" / "settings" / "modals"
+            if _d.is_dir():
+                out.append(_d)
+    except Exception:
+        pass
+    out.append(BASE_DIR / "odex" / "system" / "settings" / "modals")
+    return out
+
+
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
         'DIRS': [BASE_DIR / "urs" / "templates", BASE_DIR / "templates",
-                 BASE_DIR / "odex" / "system" / "settings" / "modals"],
+                 *_workspace_modals_dirs()],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [

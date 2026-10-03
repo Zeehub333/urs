@@ -1,0 +1,40 @@
+{
+  "name": "users_groups_users",
+  "label": "رابط users_groups ← users",
+  "table": "users_groups_users",
+  "schema": "ies202601",
+  "connection": "rex_local",
+  "description": "جدول رابط تلقائي: users_groups × users",
+  "fields": [
+    {
+      "name": "master_id",
+      "label": "السجل الأساسي",
+      "type": "INTEGER",
+      "length": 0,
+      "nullable": false,
+      "required": true,
+      "default": "",
+      "primary_key": false,
+      "unique": false
+    },
+    {
+      "name": "detail_id",
+      "label": "المرجع الفرعي",
+      "type": "INTEGER",
+      "length": 0,
+      "nullable": false,
+      "required": true,
+      "default": "",
+      "primary_key": false,
+      "unique": false
+    }
+  ],
+  "updated_at": "2026-10-02T18:14:37",
+  "refs": {
+    "master_table": "users_groups",
+    "master_col": "id",
+    "sub_table": "users",
+    "sub_col": "id"
+  },
+  "created_at": "2026-10-01T09:53:08"
+}

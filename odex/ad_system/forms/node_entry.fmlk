@@ -1,0 +1,10 @@
+<fml>
+  <fml_metadata name="node_entry" displayName="إدخال تفرع" category="ad_system" table=""/>
+  <tabs>
+    <tab id="main" name="Main" alias="البيانات" sort_order="1"/>
+  </tabs>
+  <fields>
+    <field id="1" name="code" alias="الرقم التسلسلي" inputType="text" tab="main" category="التفرع" position="left" required="true" readonly="true"/>
+    <field id="2" name="label" alias="اسم التفرع" inputType="text" tab="main" category="التفرع" position="right" required="true"/>
+  </fields>
+</fml>

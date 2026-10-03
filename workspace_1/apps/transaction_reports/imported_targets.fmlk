@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<fml>
+  <fml_metadata name="imported_targets" displayName="الجهات المستوردة" table="confirmed_transfers_copy" model_type="form" schema="ies202601" connection="rex_local" category="عام" icon="fa-pen-to-square" description="يتم استيراد وتعديل الجهات"/>
+  <tabs>
+    <tab id="البيانات الأساسية" name="البيانات الأساسية" alias="البيانات الأساسية" sort_order="1"/>
+  </tabs>
+  <fields>
+    <field id="1" name="id" alias="المعرف" dataType="INTEGER" inputType="number" required="false" nullable="true" editable="true" primary_key="true" tab="البيانات الأساسية" destination="main" category="البيانات الأساسية"/>
+    <field id="2" name="express_number" alias="الرقم المرجعي" dataType="VARCHAR" inputType="text" required="false" nullable="true" editable="true" primary_key="false" tab="البيانات الأساسية" destination="main" category="البيانات الأساسية"/>
+    <field id="3" name="disbursement_destination" alias="جهة الصرف" dataType="VARCHAR" inputType="text" required="false" nullable="true" editable="true" primary_key="false" tab="البيانات الأساسية" destination="main" category="البيانات الأساسية"/>
+    <field id="4" name="disbursement_time" alias="وقت الصرف" dataType="VARCHAR" inputType="text" required="false" nullable="true" editable="true" primary_key="false" tab="البيانات الأساسية" destination="main" category="البيانات الأساسية"/>
+    <field id="5" name="network_id" alias="الشبكة" dataType="INTEGER" inputType="select" required="false" nullable="true" editable="true" primary_key="false" tab="البيانات الأساسية" destination="main" category="البيانات الأساسية" refTable="ies202601.networks" refFk="id" refDisplay="name">
+      <options>
+        <option>[ies202601.networks.name]</option>
+      </options>
+    </field>
+  </fields>
+</fml>

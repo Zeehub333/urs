@@ -1,0 +1,8 @@
+<tree name="ad_languages" label="دليل اللغات" maxLevels="2" serial="1" separator="">
+  <child name="root" label="جذر" level="1" digits="1"/>
+  <child name="leaf" label="ورقة" level="2" digits="3"/>
+  <node label="اللغات" code="4" model_source="core.Language">
+    <node label="العربية" code="001" model_source="core.Language"/>
+    <node label="English" code="002" model_source="core.Language"/>
+  </node>
+</tree>

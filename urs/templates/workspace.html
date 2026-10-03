@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}مساحات العمل — Odex ERP{% endblock %}
+{% block sidebar %}
+    <aside class="w-64 bg-white border-l border-gray-200 flex flex-col justify-between hidden md:flex z-20">
+        <div>
+            {% include "partials/main_nav.html" with active="workspace" %}
+        </div>
+        {% include "partials/sidebar_footer.html" %}
+    </aside>
+{% endblock %}
+{% block main %}
+    <div class="flex-1 flex flex-col min-h-0">
+        <main class="p-6 space-y-6 max-w-7xl mx-auto w-full">
+            <div class="bg-gradient-to-l from-blue-900 via-indigo-900 to-blue-800 rounded-3xl p-8 text-white relative overflow-hidden shadow-lg">
+                <div class="absolute -left-20 -bottom-20 w-80 h-80 bg-blue-600/20 rounded-full blur-3xl pointer-events-none"></div>
+                <div class="absolute right-10 top-0 w-60 h-60 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none"></div>
+                <div class="relative z-10 text-center max-w-2xl mx-auto space-y-3">
+                    <h1 class="text-2xl md:text-3xl font-extrabold tracking-wide">مدير مساحات العمل</h1>
+                    <p class="text-xs md:text-sm text-blue-200 leading-relaxed">اختر مساحة العمل للدخول إلى تطبيقاتها — البراند واسم المساحة على كل بطاقة</p>
+                </div>
+            </div>
+
+            <div class="flex gap-4 overflow-x-auto pb-2 items-start">
+                <section class="flex-1 min-w-[300px] bg-slate-100/70 border border-slate-200 rounded-2xl p-3">
+                    <h2 class="text-sm font-bold text-slate-700 flex items-center gap-2 mb-3">
+                        <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block"></span>
+                        مساحات نشطة ({{ active_ws|length }})
+                    </h2>
+                    <div class="space-y-3">
+                        {% for w in active_ws %}
+                        <article class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                            <div class="h-2" style="background: {{ w.brand_colors.primary|default:'#4f46e5' }}"></div>
+                            <div class="p-4 space-y-3">
+                                <div class="flex items-center gap-3">
+                                    {% if w.logo %}
+                                    <img src="{{ w.logo }}" alt="" class="w-12 h-12 rounded-2xl object-cover border border-slate-200" loading="lazy">
+                                    {% else %}
+                                    <div class="w-12 h-12 rounded-2xl flex items-center justify-center text-xl text-white" style="background: {{ w.brand_colors.primary|default:'#4f46e5' }}">
+                                        <i class="fa-solid fa-cube"></i>
+                                    </div>
+                                    {% endif %}
+                                    <div class="min-w-0">
+                                        <div class="text-[11px] font-bold" style="color: {{ w.brand_colors.primary|default:'#4f46e5' }}">{{ w.brand }}</div>
+                                        <h3 class="font-bold text-gray-800 truncate">{{ w.name }}</h3>
+                                        {% if w.company %}<p class="text-[11px] text-gray-500 truncate">{{ w.company }}{% if w.domain %} • <span class="font-mono" dir="ltr">{{ w.domain }}</span>{% endif %}</p>{% endif %}
+                                    </div>
+                                </div>
+                                <div class="flex flex-wrap gap-1.5 text-[10px]">
+                                    {% if w.country %}<span class="px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full font-bold">{{ w.country }}</span>{% endif %}
+                                    {% if w.currency %}<span class="px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full font-bold">{{ w.currency }}</span>{% endif %}
+                                    {% if w.fiscal_year %}<span class="px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full font-bold">مالية {{ w.fiscal_year }}</span>{% endif %}
+                                    <span class="px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded-full font-bold">{{ w.counts.apps }} تطبيق</span>
+                                    <span class="px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded-full font-bold">{{ w.counts.forms }} نموذج</span>
+                                    <span class="px-2 py-0.5 bg-amber-50 text-amber-700 rounded-full font-bold">{{ w.counts.reports }} تقرير</span>
+                                </div>
+                                {% if w.primary_connection or w.users_table %}
+                                <div class="text-[10px] text-slate-400 font-mono" dir="ltr">
+                                    {% if w.primary_connection %}conn={{ w.primary_connection }}{% endif %}{% if w.primary_connection and w.users_table %} • {% endif %}{% if w.users_table %}users={{ w.users_table }}{% endif %}
+                                </div>
+                                {% endif %}
+                                <a href="/apps/?workspace={{ w.id }}" class="block text-center w-full py-2.5 text-white rounded-xl text-xs font-bold hover:opacity-90" style="background: {{ w.brand_colors.primary|default:'#4f46e5' }}">دخول مساحة العمل ←</a>
+                            </div>
+                        </article>
+                        {% empty %}
+                        <p class="text-xs text-gray-400 text-center py-6">لا توجد مساحات — أنشئ مجلد <span class="font-mono" dir="ltr">workspace_1/</span> بملفي <span class="font-mono" dir="ltr">workspace.conf</span> و<span class="font-mono" dir="ltr">settings.py</span></p>
+                        {% endfor %}
+                    </div>
+                </section>
+                {% if other_ws %}
+                <section class="flex-1 min-w-[300px] bg-slate-100/70 border border-slate-200 rounded-2xl p-3">
+                    <h2 class="text-sm font-bold text-slate-700 flex items-center gap-2 mb-3">
+                        <span class="w-2.5 h-2.5 rounded-full bg-slate-400 inline-block"></span>
+                        أخرى ({{ other_ws|length }})
+                    </h2>
+                    <div class="space-y-3">
+                        {% for w in other_ws %}
+                        <article class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden opacity-80">
+                            <div class="p-4 space-y-2">
+                                <div class="flex items-center gap-3">
+                                    <div class="w-12 h-12 rounded-2xl bg-slate-200 text-slate-500 flex items-center justify-center text-xl"><i class="fa-solid fa-cube"></i></div>
+                                    <div class="min-w-0">
+                                        <div class="text-[11px] font-bold text-slate-500">{{ w.brand }}</div>
+                                        <h3 class="font-bold text-gray-800 truncate">{{ w.name }}</h3>
+                                    </div>
+                                    <span class="mr-auto text-[10px] bg-slate-100 text-slate-500 rounded-full px-2 py-0.5 font-bold">{{ w.status }}</span>
+                                </div>
+                                <a href="/apps/?workspace={{ w.id }}" class="block text-center w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs font-bold">دخول ←</a>
+                            </div>
+                        </article>
+                        {% endfor %}
+                    </div>
+                </section>
+                {% endif %}
+            </div>
+        </main>
+    </div>
+{% endblock %}

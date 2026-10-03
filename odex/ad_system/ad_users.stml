@@ -1,0 +1,12 @@
+<tree name="ad_users" label="دليل المستخدمين" maxLevels="4" serial="1" separator="">
+  <child name="root" label="جذر" level="1" digits="1"/>
+  <child name="branch" label="تفرع" level="2" digits="3"/>
+  <child name="leaf" label="ورقة" level="3" digits="3"/>
+  <node label="المستخدمون" code="1" model_source="ad_users.Group">
+    <node label="مدير النظام" code="001" model_source="ad_users.User" fmlk="*all" gpm_model="ad_users.UserPerm"/>
+    <node label="المحاسبون" code="002" model_source="ad_users.Group">
+      <node label="محاسب رئيسي" code="001" model_source="ad_users.User" fmlk="acc/voucher.fmlk"/>
+    </node>
+    <node label="أمناء المخازن" code="003" model_source="ad_users.Group"/>
+  </node>
+</tree>

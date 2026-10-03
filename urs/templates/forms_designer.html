@@ -133,7 +133,7 @@
                 <a id="designerBackHead" href="/app/{{ app_name }}/" class="inline-flex items-center gap-1.5 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold"><i class="fa-solid fa-arrow-right"></i> <span>عودة للتطبيق</span></a>
             </div>
         </header>
-        {% if not has_fml_wizard %}<div class="mx-3 mt-3 p-3 bg-amber-50 border border-amber-200 text-amber-800 rounded-xl text-xs">ملفات المصمم (forms_wizard_*) غير موجودة — أعد مجلد <span class="font-mono" dir="ltr">odex/system/settings/modals/</span> ليعمل المصمم.</div>{% endif %}
+        {% if not has_fml_wizard %}<div class="mx-3 mt-3 p-3 bg-amber-50 border border-amber-200 text-amber-800 rounded-xl text-xs">ملفات المصمم (forms_wizard_*) غير موجودة — أعد مجلد <span class="font-mono" dir="ltr">workspace_1/apps/settings/modals/</span> ليعمل المصمم.</div>{% endif %}
         <div class="flex-1 flex overflow-hidden min-h-0 p-3">
                 <div class="flex-1 min-w-0 flex flex-col min-h-0" id="designerHost">
                     {% if has_fml_wizard %}{% include "forms_wizard_modal.html" %}{% endif %}

@@ -19,7 +19,9 @@ from urs import views as urs_views
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('', urs_views.home, name='home'),
+    path('', urs_views.workspace_home, name='workspace'),
+    path('apps/', urs_views.home, name='apps'),
+    path('api/workspaces/', urs_views.api_workspaces_list, name='api_workspaces_list'),
     path('my-reports/', urs_views.my_reports, name='my_reports'),
     path('dashboards/', urs_views.dashboards, name='dashboards'),
     path('my-docs/', urs_views.my_docs, name='my_docs'),
