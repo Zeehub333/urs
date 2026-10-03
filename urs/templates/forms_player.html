@@ -443,7 +443,7 @@
             </div>
             <div class="p-5 space-y-3 text-xs overflow-y-auto custom-scroll">
                 <div>
-                    <div class="font-bold text-slate-800 text-sm">{{ fml_metadata.displayName }}</div>
+                    <div id="gridSettingsName" class="font-bold text-slate-800 text-sm">{{ fml_metadata.displayName }}</div>
                     {% if fml_metadata.description %}<div class="text-slate-500 mt-1">{{ fml_metadata.description }}</div>{% endif %}
                 </div>
                 <div>
@@ -608,6 +608,7 @@
                     const dn = (data.metadata && data.metadata.displayName) || '';
                     const el = document.getElementById('formTitleName');
                     if(el && String(dn).charAt(0) === '@') el.textContent = fwNameDisp(dn, 'single');
+                    if(typeof fwNameApplyStatic === 'function') fwNameApplyStatic();
                 }catch(e){}
                 try{ checkMigrateChanges(); }catch(e){}
                 // فتح سجل محدد من رابط ?record= (زر تحرير المرجع بتبويب جديد)
@@ -1008,6 +1009,12 @@
             }catch(e){}
             return fwNameCache;
         }
+        // حل الرموز داخل نص حر (@key واحد أو أكثر — لا يمس الإيميلات)
+        function fwNameDispText(s, form){
+            try{
+                return String(s ?? '').replace(/(^|\s)@([A-Za-z0-9_][A-Za-z0-9_.\-]*)/g, (m, sp, k)=>sp + String(fwNameDisp('@' + k, form)));
+            }catch(e){ return s; }
+        }
         // form: single|plural|default — غير @key يُعاد كما هو، والمفقود يُعاد خاماً
         function fwNameDisp(v, form){
             try{
@@ -1022,6 +1029,25 @@
                 if(e.d) return e.d;
                 return e.s || e.p || v;
             }catch(e){ return v; }
+        }
+        // أسماء الواجهة الثابتة (title + سايدبار + قائمة الموديلات + نافذة الإعدادات)
+        function fwNameApplyStatic(){
+            try{
+                if(typeof fwNameDispText !== 'function') return;
+                try{ document.title = fwNameDispText(document.title, 'single'); }catch(e){}
+                document.querySelectorAll('.side-fml-item').forEach(a=>{
+                    try{
+                        const t = a.querySelector('.truncate');
+                        if(t && /@/.test(t.textContent || '')) t.textContent = fwNameDispText(t.textContent, 'single');
+                        if(a.dataset && a.dataset.search && /@/.test(a.dataset.search)) a.dataset.search = fwNameDispText(a.dataset.search, 'single');
+                    }catch(e){}
+                });
+                document.querySelectorAll('select[onchange^="playerModelGo"] option').forEach(o=>{
+                    try{ if(/@/.test(o.textContent || '')) o.textContent = fwNameDispText(o.textContent, 'single'); }catch(e){}
+                });
+                const gs = document.getElementById('gridSettingsName');
+                if(gs && /@/.test(gs.textContent || '')) gs.textContent = fwNameDispText(gs.textContent, 'single');
+            }catch(e){}
         }
         // اسم تبويب المتفرع: الخاص به أولاً ثم العام details_tab ثم الافتراضي (@key → الجمع)
         function fwDetailTabLabel(d){
@@ -4148,7 +4174,7 @@
                 try{ window._panelRid = panelRid; window._panelRec = rec; }catch(e){}
                 if(!rec){
                     const tbl = ((fmlMeta.metadata || {}).table) || '';
-                    box.innerHTML = `<div class="py-6"><div class="text-3xl mb-2 text-slate-200"><i class="fa-solid fa-circle-info"></i></div><div class="font-bold text-slate-600 mb-1">${escHtml((fmlMeta.metadata || {}).displayName || currentFml || '')}</div><div class="text-slate-400 font-mono" dir="ltr">${escHtml(tbl)}</div><div class="mt-2">${allRows.length} سجل</div><div class="mt-1">اختر سجلاً لعرض تفاصيله هنا</div></div>`;
+                    box.innerHTML = `<div class="py-6"><div class="text-3xl mb-2 text-slate-200"><i class="fa-solid fa-circle-info"></i></div><div class="font-bold text-slate-600 mb-1">${escHtml(typeof fwNameDispText === 'function' ? fwNameDispText((fmlMeta.metadata || {}).displayName || currentFml || '', 'single') : ((fmlMeta.metadata || {}).displayName || currentFml || ''))}</div><div class="text-slate-400 font-mono" dir="ltr">${escHtml(tbl)}</div><div class="mt-2">${allRows.length} سجل</div><div class="mt-1">اختر سجلاً لعرض تفاصيله هنا</div></div>`;
                     return;
                 }
                 const fields = visibleFields();
