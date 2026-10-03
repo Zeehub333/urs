@@ -1048,6 +1048,14 @@
         function fwNameAdj(key, base){
             try{ return String(base) + (fwNameGender(key) === 'f' ? 'ة' : ''); }catch(e){ return String(base); }
         }
+        // عند الاستخدام يُكتفى بالمفرد وحده (يسقط المعروض/الافتراضي)
+        function fwSingleLabel(main, single){
+            try{
+                const s = String(single || '').trim();
+                if(s) return s;
+                return String(main || '');
+            }catch(e){ return String(main || ''); }
+        }
         // أسماء الجدول ديناميكية: العرض (افتراضي) + المفرد الحقيقي عبر @key
         function fwTreeTableNames(){
             let raw = '', key = null;
@@ -1069,6 +1077,28 @@
             return {table: table || raw, single: single, key: key};
         }
         // أسماء العضو ديناميكية: تبويب الفرع + مفرد مفتاحه
+        // تطبيع عربي للمطابقة (أإآ→ا، ة→ه، ى→ي — كالخادم)
+        function fwNameNorm(s){
+            try{
+                return String(s || '').replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي').trim();
+            }catch(e){ return String(s || ''); }
+        }
+        // مطابقة نص حرفي بسجل مسجل (جمع/افتراضي/مفرد) → مفرد + مفتاح + جنس
+        function fwNameFindByText(text){
+            try{
+                const t = fwNameNorm(text);
+                if(!t || !fwNameCache || !fwNameCache.map) return null;
+                const map = fwNameCache.map;
+                const keys = Object.keys(map);
+                const eq = (v)=>fwNameNorm(v) === t;
+                let hit = keys.find(k=>map[k] && eq(map[k].p))
+                    || keys.find(k=>map[k] && eq(map[k].d))
+                    || keys.find(k=>map[k] && eq(map[k].s));
+                if(!hit) return null;
+                const e = map[hit];
+                return {key: hit, single: e.s || '', gender: (e.g === 'f' ? 'f' : 'm')};
+            }catch(e){ return null; }
+        }
         function fwTreeMemberNames(){
             try{
                 const md = (typeof fwTreeMemberDetail === 'function') ? fwTreeMemberDetail() : null;
@@ -1080,6 +1110,11 @@
                     key = rawTab.slice(1);
                     const s = fwNameDisp(rawTab, 'single', true);
                     if(s && s !== rawTab) single = s;
+                }
+                if(!single && typeof fwNameFindByText === 'function'){
+                    // تبويب حرفي (الأعضاء) يطابق سجلاً مسجلاً → مفرده وجنسه
+                    const m = fwNameFindByText(rawTab) || fwNameFindByText(tab);
+                    if(m){ single = m.single; key = m.key; }
                 }
                 return {tab: tab, single: single, key: key};
             }catch(e){ return null; }
@@ -5864,7 +5899,7 @@
                 }
                 const tools = document.getElementById('fwTreeTools');
                 const _tn = (typeof fwTreeTableNames === 'function') ? fwTreeTableNames() : {table: '', single: ''};
-                const _rootLabel = (_tn.single && _tn.single !== _tn.table) ? (escHtml(_tn.table) + ' - ' + escHtml(_tn.single)) : escHtml(_tn.table || 'جذر');
+                const _rootLabel = escHtml(fwSingleLabel(_tn.table || 'جذر', _tn.single));
                 if(tools) tools.innerHTML = `
                     <div class="relative"><i class="fa-solid fa-search absolute right-2.5 top-2.5 text-slate-400 text-[10px]"></i>
                     <input value="${escAttr(fwTree.search)}" oninput="fwTreeSearch(this.value)" placeholder="بحث في الشجرة..." class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-emerald-500"></div>
@@ -5965,9 +6000,9 @@
             h += `<span class="mr-auto inline-flex items-center gap-1">`;
             // كل الأزرار بأسماء ديناميكية: الجدول - المفرد / التبويب - المفرد
             const _tt = (typeof fwTreeTableNames === 'function') ? fwTreeTableNames() : {table: '', single: ''};
-            const _grpLabel = (_tt.single && _tt.single !== _tt.table) ? (escHtml(_tt.table) + ' - ' + escHtml(_tt.single)) : escHtml(_tt.table);
+            const _grpLabel = escHtml(fwSingleLabel(_tt.table, _tt.single));
             const _mm = (typeof fwTreeMemberNames === 'function') ? fwTreeMemberNames() : null;
-            const _memLabel = (_mm && _mm.single) ? (escHtml(_mm.tab) + ' - ' + escHtml(_mm.single)) : escHtml((_mm && _mm.tab) || '');
+            const _memLabel = escHtml(fwSingleLabel((_mm && _mm.tab) || '', (_mm && _mm.single) || ''));
             if(isMem) h += `<button onclick="fwMemPickOpen()" title="إضافة عضو للمجموعة" class="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold whitespace-nowrap"><i class="fa-solid fa-user-plus"></i> ${_memLabel}</button>`;
             else h += `<button onclick="fwTreeInlineAdd('${String(sel).replace(/'/g, "\\'")}')" title="إضافة فرع" class="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold whitespace-nowrap"><i class="fa-solid fa-plus"></i> ${_grpLabel}</button>`;
             // تحرير المجموعة نفسها يفتح نموذجها (صف الشجرة لا صف العضو)

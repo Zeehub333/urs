@@ -10,7 +10,7 @@
       "default_name": "مجموعات المستخدمين",
       "single_name": "مجموعة",
       "plural_name": "مجموعات",
-      "gender": "m"
+      "gender": "f"
     },
     {
       "name": "users_group",
@@ -18,6 +18,22 @@
       "default_name": "Users Group",
       "single_name": "group",
       "plural_name": "groups",
+      "gender": "m"
+    },
+    {
+      "name": "members",
+      "locale_id": "ar",
+      "default_name": "الأعضاء",
+      "single_name": "عضو",
+      "plural_name": "اعضاء",
+      "gender": "m"
+    },
+    {
+      "name": "members",
+      "locale_id": "en",
+      "default_name": "Members",
+      "single_name": "Member",
+      "plural_name": "Members",
       "gender": "m"
     }
   ]
