@@ -69,6 +69,13 @@
         .fw-tree-act:hover { background: #e0e7ff; color: #4f46e5; }
         .fw-tree-act.danger:hover { background: #fee2e2; color: #dc2626; }
         .fw-tree-inp { width: 100%; background: #fff; border: 1px solid #6366f1; border-radius: 8px; padding: 3px 8px; font-size: 12px; outline: none; }
+        /* وضع الشجرة الهرمية الموسعة: الشجرة كامل العرض فوق الجدول */
+        #gridBodyRow.tree-full { flex-direction: column; }
+        #fwTreeFullWrap { display: none; }
+        #gridBodyRow.tree-full #fwTreeFullWrap { display: flex; }
+        #gridBodyRow.tree-full #groupSidebar { display: none !important; }
+        #gridBodyRow.tree-full #blankPanel { display: none !important; }
+        #gridBodyRow.tree-full #formTableWrap { min-height: 0; }
 {% endblock %}
 {% block sidebar %}
     <!-- Sidebar — kept for navigation (Forms + Reports) -->
@@ -5785,10 +5792,11 @@
             const cfg = fwTreeDetectFields(fmlMeta.fields);
             if(!cfg){ fwTreeTeardown(); return; }
             const same = fwTreeSameForm();
-            const keep = (same && fwTree) ? {selId: fwTree.selId, mode: fwTree.mode, view: fwTree.view, expanded: fwTree.expanded} : null;
+            const keep = (same && fwTree) ? {selId: fwTree.selId, mode: fwTree.mode, view: fwTree.view, layout: fwTree.layout, expanded: fwTree.expanded} : null;
             fwTree = {enabled: true, fmlKey: currentFml, cfg, rows: [], roots: [], byId: {},
                 selId: keep ? keep.selId : null, mode: (keep && keep.mode) || 'children',
                 view: (keep && (keep.view === 'groups' || keep.view === 'members')) ? keep.view : null,
+                layout: (keep && (keep.layout === 'full' || keep.layout === 'side')) ? keep.layout : fwTreeLayoutGet(),
                 expanded: (keep && keep.expanded) || new Set(), search: '', loading: false,
                 addingUnder: null, renaming: null, rootParentVal: null, rootLevel: 1,
                 memIdx: 0, memDet: null, memJx: false, memCustoms: [],
@@ -5835,12 +5843,56 @@
             b.className = 'h-8 px-3 rounded-full inline-flex items-center gap-1.5 text-emerald-700 hover:bg-emerald-50 transition text-xs font-bold whitespace-nowrap';
             b.innerHTML = `<i class="fa-solid fa-plus"></i><span>${escHtml(label)} ${escHtml(adj)}</span>`;
         }
+        function fwTreeLayoutKey(){ try{ return 'fwTreeLayout_' + (currentApp || '') + '_' + (currentFml || ''); }catch(e){ return 'fwTreeLayout'; } }
+        function fwTreeLayoutGet(){ try{ const v = localStorage.getItem(fwTreeLayoutKey()); return v === 'full' ? 'full' : 'side'; }catch(e){ return 'side'; } }
+        function fwTreeLayout(){ return (fwTree && fwTree.layout === 'full') ? 'full' : 'side'; }
+        function fwTreeSetLayout(mode){
+            if(!fwTreeActive()) return;
+            fwTree.layout = (mode === 'full') ? 'full' : 'side';
+            try{ localStorage.setItem(fwTreeLayoutKey(), fwTree.layout); }catch(e){}
+            fwTreeApplyLayout();
+        }
+        function fwTreeToggleLayout(){ try{ fwTreeSetLayout(fwTreeLayout() === 'full' ? 'side' : 'full'); }catch(e){} }
+        // نقل جذر الشجرة الوحيد بين السايدبار والحاوية الموسعة + تبديل التخطيط
+        function fwTreeApplyLayout(){
+            const row = document.getElementById('gridBodyRow');
+            const full = document.getElementById('fwTreeFullWrap');
+            const root = document.getElementById('fwTreeRoot');
+            const side = document.getElementById('groupSidebarContent');
+            if(!fwTreeActive() || !row){
+                if(row) row.classList.remove('tree-full');
+                if(full) full.classList.add('hidden');
+                return;
+            }
+            if(fwTreeLayout() === 'full'){
+                row.classList.add('tree-full');
+                if(full){
+                    full.classList.remove('hidden');
+                    const slot = document.getElementById('fwTreeFullSlot');
+                    if(slot && root && root.parentNode !== slot) slot.appendChild(root);
+                }
+                const bar = document.getElementById('groupSidebar');
+                if(bar){ bar.classList.add('hidden'); bar.classList.remove('flex'); }
+            } else {
+                row.classList.remove('tree-full');
+                if(full) full.classList.add('hidden');
+                if(side && root && root.parentNode !== side) side.appendChild(root);
+                const bar = document.getElementById('groupSidebar');
+                if(bar){ bar.classList.remove('hidden'); bar.classList.add('flex'); }
+            }
+        }
         function fwTreeTeardown(){
             try{
                 if(fwTree && fwTree.headHtml){
                     const head = document.getElementById('groupSidebarHead');
                     if(head) head.innerHTML = fwTree.headHtml;
                 }
+            }catch(e){}
+            try{
+                const row = document.getElementById('gridBodyRow');
+                if(row) row.classList.remove('tree-full');
+                const full = document.getElementById('fwTreeFullWrap');
+                if(full) full.classList.add('hidden');
             }catch(e){}
             fwTree = null;
             try{ if(typeof fwPaintAddBtn === 'function') fwPaintAddBtn(); }catch(e){}
@@ -5855,6 +5907,21 @@
                 }
                 if(tb && !document.getElementById('treeSelBar')){
                     tb.insertAdjacentHTML('beforebegin', `<div id="treeSelBar" class="hidden px-3 py-1.5 items-center gap-2 text-xs shrink-0 bg-emerald-50/60 border-b border-emerald-100 flex-wrap"></div>`);
+                }
+                const row = document.getElementById('gridBodyRow');
+                if(row && !document.getElementById('fwTreeFullWrap')){
+                    const w = document.createElement('div');
+                    w.id = 'fwTreeFullWrap';
+                    w.className = 'hidden w-full shrink-0 flex-col min-h-0 bg-white border-b border-slate-200 overflow-y-auto custom-scroll';
+                    w.style.height = '42%';
+                    w.innerHTML = `<div class="p-3 space-y-2 text-xs">
+                        <div class="flex items-center justify-between">
+                            <h3 class="text-xs font-bold text-slate-700 flex items-center gap-2"><i class="fa-solid fa-sitemap text-emerald-600"></i> الشجرة الهرمية <span id="fwTreeFullCount" class="text-[10px] text-slate-400 font-normal"></span></h3>
+                            <button onclick="fwTreeSetLayout('side')" title="رجوع للعرض الجانبي" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-[11px] font-bold"><i class="fa-solid fa-columns"></i> عرض جانبي</button>
+                        </div>
+                        <div id="fwTreeFullSlot"></div>
+                    </div>`;
+                    row.insertBefore(w, row.firstChild);
                 }
             }catch(e){}
         }
@@ -5894,9 +5961,12 @@
                 const head = document.getElementById('groupSidebarHead');
                 if(head) head.innerHTML = `<h3 class="text-xs font-bold text-slate-700 flex items-center gap-2"><i class="fa-solid fa-sitemap text-emerald-600"></i> شجرة ${escHtml(fwTree.cfg.labelAlias)} <span class="text-[10px] text-slate-400 font-normal">(${fwTree.rows.length})</span></h3><button onclick="fwTreeToggleSidebar(false)" class="text-slate-400 hover:text-slate-600 text-xs"><i class="fa-solid fa-xmark"></i></button>`;
                 const box = document.getElementById('groupSidebarContent');
-                if(box && !document.getElementById('fwTreeTools')){
-                    box.innerHTML = `<div id="fwTreeTools" class="space-y-2"></div><div id="fwTreeList" class="mt-2 space-y-0.5"></div>`;
+                if(box && !document.getElementById('fwTreeRoot')){
+                    box.innerHTML = `<div id="fwTreeRoot"><div id="fwTreeTools" class="space-y-2"></div><div id="fwTreeList" class="mt-2 space-y-0.5"></div></div>`;
                 }
+                const fullCount = document.getElementById('fwTreeFullCount');
+                if(fullCount) fullCount.textContent = '(' + fwTree.rows.length + ')';
+                const isFull = (typeof fwTreeLayout === 'function') ? fwTreeLayout() === 'full' : false;
                 const tools = document.getElementById('fwTreeTools');
                 const _tn = (typeof fwTreeTableNames === 'function') ? fwTreeTableNames() : {table: '', single: ''};
                 const _rootLabel = escHtml(fwSingleLabel(_tn.table || 'جذر', _tn.single));
@@ -5908,9 +5978,11 @@
                         <button onclick="fwTreeExpandAll(true)" title="توسيع الكل" class="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-[11px] font-bold">توسيع</button>
                         <button onclick="fwTreeExpandAll(false)" title="طي الكل" class="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-[11px] font-bold">طي</button>
                         <button onclick="fwTreeReload()" title="تحديث الشجرة" class="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-[11px] font-bold"><i class="fa-solid fa-rotate"></i></button>
+                        <button onclick="fwTreeToggleLayout()" title="${isFull ? 'رجوع للعرض الجانبي' : 'عرض هرمي موسع كامل العرض'}" class="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg text-[11px] font-bold"><i class="fa-solid ${isFull ? 'fa-compress' : 'fa-expand'}"></i></button>
                     </div>`;
                 fwTreePaintList();
                 fwTreePaintSelBar();
+                try{ if(typeof fwTreeApplyLayout === 'function') fwTreeApplyLayout(); }catch(e){}
             }catch(e){}
         }
         function fwTreeMatchSet(){
@@ -6040,6 +6112,7 @@
         }
         function fwTreeToggleSidebar(force){
             if(!fwTreeActive()) return;
+            try{ if(typeof fwTreeLayout === 'function' && fwTreeLayout() === 'full' && force !== false){ fwTreeSetLayout('side'); return; } }catch(e){}
             const bar = document.getElementById('groupSidebar');
             if(!bar) return;
             const show = (force === undefined) ? bar.classList.contains('hidden') : !!force;
@@ -6295,6 +6368,7 @@
         function renderGroupSidebar(rows) {
             // وضع الشجرة يملك السايدبار — لا يخفيه ولا يرسم المجموعات
             try{ if(typeof fwTreeActive === 'function' && fwTreeActive()) return; }catch(e){}
+            try{ const _r = document.getElementById('gridBodyRow'); if(_r) _r.classList.remove('tree-full'); const _f = document.getElementById('fwTreeFullWrap'); if(_f) _f.classList.add('hidden'); }catch(e){}
             const bar = document.getElementById('groupSidebar');
             const box = document.getElementById('groupSidebarContent');
             if (!groupCol) { bar.classList.add('hidden'); bar.classList.remove('flex'); return; }
