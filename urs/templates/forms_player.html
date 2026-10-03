@@ -995,18 +995,18 @@
         // ── حقل الاسم: @key يُحل عرضاً (مفرد/جمع/افتراضي) حسب اللغة ──
         let fwNameCache = null;
         function fwNameLocale(){ try{ return localStorage.getItem('nameLocale') || 'ar'; }catch(e){ return 'ar'; } }
-        async function fwNameEnsure(){
-            if(fwNameCache) return fwNameCache;
-            fwNameCache = {locale: fwNameLocale(), map: {}};
+        // يُحدَّث مع كل تحميل بيانات — تعديل الأسماء من المصمم ينعكس بلا تحديث صفحة
+        async function fwNameEnsure(force){
+            if(fwNameCache && !force) return fwNameCache;
+            const fresh = {locale: fwNameLocale(), map: {}};
             try{
                 const {data} = await fwFetchJson('/api/display-names/?q=');
-                const loc = fwNameLocale();
-                fwNameCache.locale = loc;
                 (data.names || []).forEach(n=>{
-                    if(n.locale_id !== loc) return;
-                    fwNameCache.map[n.name] = {d: n.default_name || '', s: n.single_name || '', p: n.plural_name || ''};
+                    if(n.locale_id !== fresh.locale) return;
+                    fresh.map[n.name] = {d: n.default_name || '', s: n.single_name || '', p: n.plural_name || ''};
                 });
-            }catch(e){}
+                fwNameCache = fresh;
+            }catch(e){ if(!fwNameCache) fwNameCache = fresh; }
             return fwNameCache;
         }
         // حل الرموز داخل نص حر (@key واحد أو أكثر — لا يمس الإيميلات)
@@ -1031,22 +1031,42 @@
             }catch(e){ return v; }
         }
         // أسماء الواجهة الثابتة (title + سايدبار + قائمة الموديلات + نافذة الإعدادات)
+        // الأصل @key يُحفظ في dataset.nk — وإلا ضاع المفتاح بعد أول حل ولا يتحدث لاحقاً
+        function fwNamePut(el, form){
+            try{
+                if(!el) return;
+                let orig = null;
+                try{ orig = el.dataset.nk || null; }catch(e){}
+                const cur = el.textContent || '';
+                if(!orig){
+                    if(!/@/.test(cur)) return;
+                    orig = cur;
+                    try{ el.dataset.nk = orig; }catch(e){}
+                }
+                el.textContent = fwNameDispText(orig, form || 'single');
+            }catch(e){}
+        }
         function fwNameApplyStatic(){
             try{
                 if(typeof fwNameDispText !== 'function') return;
-                try{ document.title = fwNameDispText(document.title, 'single'); }catch(e){}
+                try{
+                    if(window._docTitleTpl === undefined || window._docTitleTpl === null) window._docTitleTpl = document.title;
+                    document.title = fwNameDispText(window._docTitleTpl, 'single');
+                }catch(e){}
                 document.querySelectorAll('.side-fml-item').forEach(a=>{
                     try{
-                        const t = a.querySelector('.truncate');
-                        if(t && /@/.test(t.textContent || '')) t.textContent = fwNameDispText(t.textContent, 'single');
-                        if(a.dataset && a.dataset.search && /@/.test(a.dataset.search)) a.dataset.search = fwNameDispText(a.dataset.search, 'single');
+                        fwNamePut(a.querySelector('.truncate'), 'single');
+                        if(a.dataset){
+                            if(!a.dataset.nksearch && a.dataset.search && /@/.test(a.dataset.search)) a.dataset.nksearch = a.dataset.search;
+                            if(a.dataset.nksearch) a.dataset.search = fwNameDispText(a.dataset.nksearch, 'single');
+                        }
                     }catch(e){}
                 });
                 document.querySelectorAll('select[onchange^="playerModelGo"] option').forEach(o=>{
-                    try{ if(/@/.test(o.textContent || '')) o.textContent = fwNameDispText(o.textContent, 'single'); }catch(e){}
+                    try{ fwNamePut(o, 'single'); }catch(e){}
                 });
-                const gs = document.getElementById('gridSettingsName');
-                if(gs && /@/.test(gs.textContent || '')) gs.textContent = fwNameDispText(gs.textContent, 'single');
+                try{ fwNamePut(document.getElementById('gridSettingsName'), 'single'); }catch(e){}
+                try{ fwNamePut(document.getElementById('formTitleName'), 'single'); }catch(e){}
             }catch(e){}
         }
         // اسم تبويب المتفرع: الخاص به أولاً ثم العام details_tab ثم الافتراضي (@key → الجمع)
@@ -1062,6 +1082,8 @@
             return 'التفاصيل';
         }
         async function renderDetailSection(){
+            // أسماء محدثة قبل بناء التبويبات
+            try{ if(typeof fwNameEnsure === 'function') await fwNameEnsure(true); }catch(e){}
             // تبويب مستقل لكل جدول متفرع باسمه الخاص
             document.querySelectorAll('#tabsBar [data-det-sep]').forEach(s=>s.remove());
             document.querySelectorAll('#tabsBar [data-tab^="cat_details"]').forEach(b=>b.remove());
@@ -3756,6 +3778,8 @@
             return data;
         }
         async function loadAllRecords() {
+            try{ if(typeof fwNameEnsure === 'function') await fwNameEnsure(true); }catch(e){}
+            try{ if(typeof fwNameApplyStatic === 'function') fwNameApplyStatic(); }catch(e){}
             // وضع الأعضاء: التحديث من الفرع لا من الأساسي — بلا سقوط للأساسي
             if(typeof fwTreeMemberActive === 'function' && fwTreeMemberActive()){ try{ await fwTreeMemberReload(); }catch(e){} return; }
             try {
@@ -5453,6 +5477,7 @@
         }
         async function fwTreeMemberReload(){
             if(!fwTreeActive()) return;
+            try{ if(typeof fwNameEnsure === 'function') await fwNameEnsure(true); }catch(e){}
             const md = fwTreeMemberDetail();
             if(!md || !fwTreeActiveSel()){ await loadAllRecords(); return; }
             const key = fwTreeActiveSel();
