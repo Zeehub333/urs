@@ -501,14 +501,14 @@
             if(m) m.remove();
             m = document.createElement('div');
             m.id = 'wsSettingsModal';
-            m.className = 'fixed inset-0 z-[80] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4';
-            m.setAttribute('onclick', 'if(event.target===this)wsSettingsClose()');
-            m.innerHTML = `<div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[88vh] overflow-hidden flex flex-col">
+            m.className = 'fixed inset-0 z-[80]';
+            m.innerHTML = `<div class="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onclick="wsSettingsClose()"></div>
+            <aside class="absolute top-0 bottom-0 right-0 w-[26rem] max-w-[92vw] bg-white shadow-2xl flex flex-col overflow-hidden">
                 <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-indigo-50 shrink-0">
                     <h3 class="text-sm font-bold text-slate-800"><i class="fa-solid fa-gear text-indigo-600"></i> إعدادات مساحة العمل</h3>
                     <button onclick="wsSettingsClose()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
                 </div>
-                <div class="p-5 space-y-3 text-xs overflow-y-auto custom-scroll" id="wsSettingsBody">
+                <div class="p-5 space-y-3 text-xs overflow-y-auto custom-scroll flex-1 min-h-0" id="wsSettingsBody">
                     <p class="text-slate-400 text-center py-4">جاري التحميل...</p>
                 </div>
                 <div class="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2 shrink-0">
@@ -516,11 +516,12 @@
                     <button onclick="wsSettingsClose()" class="px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs">إلغاء</button>
                     <button onclick="wsSettingsSave()" class="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold">حفظ</button>
                 </div>
-            </div>`;
+            </aside>`;
             document.body.appendChild(m);
+            try{ if(typeof lockScroll === 'function') lockScroll(); }catch(e){}
             wsSettingsLoad(id);
         }
-        function wsSettingsClose(){ const m = document.getElementById('wsSettingsModal'); if(m) m.remove(); window._wsEditId = null; }
+        function wsSettingsClose(){ const m = document.getElementById('wsSettingsModal'); if(m) m.remove(); window._wsEditId = null; try{ if(typeof unlockScroll === 'function') unlockScroll(); }catch(e){} }
         async function wsSettingsLoad(id){
             const box = document.getElementById('wsSettingsBody');
             try{
