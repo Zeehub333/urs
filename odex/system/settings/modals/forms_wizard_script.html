@@ -327,10 +327,6 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                     <button onclick="fwImportMain()" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold"><i class="fa-solid fa-download"></i> استيراد الأعمدة كمدخلات</button>
                     <button onclick="fwOpenPreview('${fwEsc((fwMainTable || '').replace(/'/g, "\\'"))}')" class="px-3 py-1.5 bg-sky-50 hover:bg-sky-100 text-sky-700 rounded-lg font-bold"><i class="fa-solid fa-table-cells"></i> استعلام تجريبي</button>
                 </div>
-                <div class="flex flex-wrap items-center gap-2 mt-2">
-                    <label class="text-[11px] font-bold text-slate-600">تسمية تبويبة التفاصيل في المشغل:</label>
-                    <input value="${fwEsc(fwDetailsTab || 'التفاصيل')}" oninput="fwDetailsTab=this.value" placeholder="التفاصيل" class="wb-inp" style="max-width:220px">
-                </div>
             </div>
             <div class="wb-panel">
                 <div class="flex items-center justify-between mb-2">
@@ -339,6 +335,10 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                         <button onclick="fwImportTablesOpen()" class="px-3 py-1.5 bg-violet-50 hover:bg-violet-100 text-violet-700 rounded-lg font-bold" title="استيراد عدة جداول دفعة واحدة كمتفرعة"><i class="fa-solid fa-file-import"></i> استيراد جداول</button>
                         <button onclick="fwAddBranch()" class="px-3 py-1.5 bg-violet-50 hover:bg-violet-100 text-violet-700 rounded-lg font-bold"><i class="fa-solid fa-plus"></i> إضافة جدول متفرع</button>
                     </div>
+                </div>
+                <div class="flex flex-wrap items-center gap-2 bg-white border border-slate-200 rounded-xl px-2.5 py-2 mb-2">
+                    <label class="text-[11px] font-bold text-slate-600">تسمية تبويب التفاصيل في المشغل:</label>
+                    <input value="${fwEsc(fwDetailsTab || 'التفاصيل')}" oninput="fwDetailsTab=this.value" placeholder="التفاصيل" class="wb-inp" style="max-width:220px">
                 </div>
                 <div class="space-y-2">${fwBranches.map((b, i)=>{
                     const cache = b.colsCache || [];
