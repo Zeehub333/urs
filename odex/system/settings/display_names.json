@@ -3,5 +3,20 @@
     "ar",
     "en"
   ],
-  "names": []
+  "names": [
+    {
+      "name": "users_group",
+      "locale_id": "ar",
+      "default_name": "المجموعة",
+      "single_name": "مجموعة",
+      "plural_name": "مجموعات"
+    },
+    {
+      "name": "users_group",
+      "locale_id": "en",
+      "default_name": "group",
+      "single_name": "group",
+      "plural_name": "groups"
+    }
+  ]
 }
