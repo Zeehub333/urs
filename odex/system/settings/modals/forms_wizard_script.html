@@ -163,7 +163,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                     config: f.config || {}
                 }));
                 // الجداول المتفرعة (وضع ربط + ظهور + مفتاح فرعي + الحقول المخصصة junction)
-                fwBranches = (data.details || []).map(d=>({table: d.table, alias: d.alias || d.table, master: d.master || '', detail: d.detail || '', link_mode: (d.link_mode === 'junction' || (!d.link_mode && ((d.junction && d.junction.table) || ((d.columns || []).some(c=>c && c.junction))))) ? 'junction' : 'direct', sub_key: d.sub_key || d.subKey || 'id', visible: d.visible !== false, cols: (d.columns || []).map(c=>({name: c.name, alias: c.alias || c.name, data_type: c.data_type || 'VARCHAR', input_type: c.input_type || 'text', required: !!c.required, default: (c.default != null ? String(c.default) : ''), options: (Array.isArray(c.options) ? c.options : []), junction: !!c.junction, ref: !!c.ref, formula: c.formula || c.calc_expr || '', calc_mode: c.calc_mode || ''})), colsCache: []}));
+                fwBranches = (data.details || []).map(d=>({table: d.table, alias: d.alias || d.table, tab: d.tab || d.tabLabel || '', master: d.master || '', detail: d.detail || '', link_mode: (d.link_mode === 'junction' || (!d.link_mode && ((d.junction && d.junction.table) || ((d.columns || []).some(c=>c && c.junction))))) ? 'junction' : 'direct', sub_key: d.sub_key || d.subKey || 'id', visible: d.visible !== false, cols: (d.columns || []).map(c=>({name: c.name, alias: c.alias || c.name, data_type: c.data_type || 'VARCHAR', input_type: c.input_type || 'text', required: !!c.required, default: (c.default != null ? String(c.default) : ''), options: (Array.isArray(c.options) ? c.options : []), junction: !!c.junction, ref: !!c.ref, formula: c.formula || c.calc_expr || '', calc_mode: c.calc_mode || ''})), colsCache: []}));
                 // مدخلات الفروع: أعد بناء جدولها من الأعمدة (تُدمج عند الحفظ) — مخصص بوجهة junction: ومرجع بحث بوجهة ref:
                 fwBranches.forEach(b=>{
                     (b.cols || []).forEach(c=>{
@@ -336,17 +336,15 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                         <button onclick="fwAddBranch()" class="px-3 py-1.5 bg-violet-50 hover:bg-violet-100 text-violet-700 rounded-lg font-bold"><i class="fa-solid fa-plus"></i> إضافة جدول متفرع</button>
                     </div>
                 </div>
-                <div class="flex flex-wrap items-center gap-2 bg-white border border-slate-200 rounded-xl px-2.5 py-2 mb-2">
-                    <label class="text-[11px] font-bold text-slate-600">تسمية تبويب التفاصيل في المشغل:</label>
-                    <input value="${fwEsc(fwDetailsTab || 'التفاصيل')}" oninput="fwDetailsTab=this.value" placeholder="التفاصيل" class="wb-inp" style="max-width:220px">
-                </div>
+                <div class="text-[11px] text-slate-500 bg-white border border-slate-200 rounded-xl px-2.5 py-2 mb-2">اسم التبويب يُضبط لكل جدول من حقل «اسم التبويب» في صفّه (فارغ = الاسم المعروض).</div>
                 <div class="space-y-2">${fwBranches.map((b, i)=>{
                     const cache = b.colsCache || [];
                     const masterOpts = fwMainColsCache.map(c=>`<option ${b.master===c.name?'selected':''}>${fwEsc(c.name)}</option>`).join('');
                     return `<div class="bg-slate-50 border border-slate-200 rounded-xl p-2.5 space-y-2">
-                        <div class="grid grid-cols-2 lg:grid-cols-5 gap-2">
+                        <div class="grid grid-cols-2 lg:grid-cols-6 gap-2">
                             <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">الجدول المتفرع</label><select onchange="fwBranchChanged(${i})" data-b="table" class="wb-inp font-mono" dir="ltr"><option value="">— اختر —</option>${fwTablesCache.map(t=>`<option value="${fwEsc(t.full || t.name)}" ${b.table&&fwBareTbl(b.table)===fwBareTbl(t.full||t.name)?'selected':''}>${fwEsc(t.full || t.name)}${t.custom ? ' ★' : ''}</option>`).join('')}</select></div>
                             <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">الاسم المعروض</label><input value="${fwEsc(b.alias || '')}" oninput="fwBranches[${i}].alias=this.value" placeholder="البنود" class="wb-inp"></div>
+                            <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">اسم التبويب</label><input value="${fwEsc(b.tab || '')}" oninput="fwBranches[${i}].tab=this.value" placeholder="= المعروض" class="wb-inp"></div>
                             <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">عمود الأساسي (PK)</label><select onchange="fwBranches[${i}].master=this.value" class="wb-inp font-mono" dir="ltr"><option value="">—</option>${masterOpts}</select></div>
                             <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">عمود الربط (FK)${(b.link_mode === 'junction') ? ' <span class="text-teal-600">— غير مطلوب (جدول ثالث)</span>' : ' <span class="text-rose-500">— مطلوب</span>'}</label><select onchange="fwBranches[${i}].detail=this.value" class="wb-inp font-mono" dir="ltr"><option value="">—</option>${cache.map(c=>`<option ${b.detail===c.name?'selected':''}>${fwEsc(c.name)}</option>`).join('')}</select></div>
                             <div class="flex items-end gap-1">
@@ -703,7 +701,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                 svg.innerHTML = s;
             }catch(e){}
         }
-        function fwAddBranch(){ fwBranches.push({table:'', alias:'', master:'', detail:'', link_mode:'direct', sub_key:'id', visible:true, cols:[], colsCache:[]}); fwRenderSheet(); }
+        function fwAddBranch(){ fwBranches.push({table:'', alias:'', tab:'', master:'', detail:'', link_mode:'direct', sub_key:'id', visible:true, cols:[], colsCache:[]}); fwRenderSheet(); }
         /* ── استيراد متعدد الجداول كمتفرعة ── */
         function fwImportTablesOpen(){
             let m = document.getElementById('fwImportTablesModal');
@@ -1854,7 +1852,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                     }
                 }
                 const _cols = Object.values(_best).map(x=>{ const {_src, ...rest} = x._c; return rest; });
-                return {table: b.table, alias: b.alias || b.table, master: b.master, detail: b.detail, link_mode: (b.link_mode === 'junction' ? 'junction' : 'direct'), sub_key: (b.sub_key || 'id'), visible: b.visible !== false, rel_type: 'one_to_many', columns: _cols};
+                return {table: b.table, alias: b.alias || b.table, tab: (b.tab || ''), master: b.master, detail: b.detail, link_mode: (b.link_mode === 'junction' ? 'junction' : 'direct'), sub_key: (b.sub_key || 'id'), visible: b.visible !== false, rel_type: 'one_to_many', columns: _cols};
             });
             return {
                 file: (fwEditMode ? fwEditMode.file : file),

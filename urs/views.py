@@ -1821,6 +1821,9 @@ def api_models_design_save(request, app_name):
                 de = ET.SubElement(d_el, "detail")
                 de.set("table", _dt)
                 de.set("alias", str(_d.get("alias") or _dt))
+                _dtab = str(_d.get("tab") or _d.get("tabLabel") or "").strip()
+                if _dtab:
+                    de.set("tab", _dtab)
                 de.set("master", _dm)
                 de.set("detail", _dd)
                 de.set("rel_type", str(_d.get("rel_type") or "one_to_many"))

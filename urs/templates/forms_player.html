@@ -741,7 +741,7 @@
                 const b = document.querySelector('#tabsBar [data-tab="' + id + '"]');
                 if(b && b.textContent.trim()) return b.textContent.trim();
             }catch(e){}
-            if(id === 'cat_details') return 'التفاصيل';
+            if(id === 'cat_details' || String(id).indexOf('cat_details_') === 0) return 'التفاصيل';
             return id;
         }
         function stackVisibleContents(){
@@ -985,27 +985,39 @@
             if(pkf){ try{ const v = fmlkGet(pkf.name); if(v !== '' && v != null) return v; }catch(e){} }
             return '';
         }
+        // اسم تبويب المتفرع: الخاص به أولاً ثم العام details_tab ثم الافتراضي
+        function fwDetailTabLabel(d){
+            try{
+                const t = String((d && (d.tab || d.tabLabel)) || '').trim();
+                if(t) return t;
+                // fmlMeta هو الرد الكامل — العام داخل .metadata (مع قبول المسطح للتوافق)
+                const _md = (fmlMeta && (fmlMeta.metadata || fmlMeta)) || {};
+                const g = String(_md.details_tab || _md.detailsTab || fmlMeta.details_tab || fmlMeta.detailsTab || '').trim();
+                if(g) return g;
+            }catch(e){}
+            return 'التفاصيل';
+        }
         async function renderDetailSection(){
-            document.querySelectorAll('#tabsBar [data-tab="cat_details"]').forEach(b=>b.remove());
-            document.querySelectorAll('[data-tab-content="cat_details"]').forEach(b=>b.remove());
+            // تبويب مستقل لكل جدول متفرع باسمه الخاص
+            document.querySelectorAll('#tabsBar [data-det-sep]').forEach(s=>s.remove());
+            document.querySelectorAll('#tabsBar [data-tab^="cat_details"]').forEach(b=>b.remove());
+            document.querySelectorAll('[data-tab-content^="cat_details"]').forEach(b=>b.remove());
             const dets = fwDetails();
             const visDets = dets.map((d, i)=>({d, i})).filter(x=>x.d.visible !== false);
             if(!visDets.length){
                 fwDetailRows = [];
                 // بلا تفاصيل (أو كلها مخفية): أزل بقايا بطاقة سجل سابق
-                try{ document.querySelectorAll('#formRoot [data-stcard="cat_details"]').forEach(c=>{ if(!c.querySelector('[data-tab-content]')) c.remove(); }); }catch(e){}
+                try{ document.querySelectorAll('#formRoot [data-stcard^="cat_details"]').forEach(c=>{ if(!c.querySelector('[data-tab-content]')) c.remove(); }); }catch(e){}
                 return;
             }
-            let tabLabel = 'التفاصيل';
-            try{
-                // fmlMeta هو الرد الكامل — الاسم داخل .metadata (مع قبول المسطح للتوافق)
-                const _md = (fmlMeta && (fmlMeta.metadata || fmlMeta)) || {};
-                tabLabel = (_md.details_tab || _md.detailsTab || fmlMeta.details_tab || fmlMeta.detailsTab) || 'التفاصيل';
-            }catch(e){}
             const bar = document.getElementById('tabsBar');
-            if(bar) bar.insertAdjacentHTML('beforeend', `<span class="text-slate-300">›</span><button onclick="switchTab('cat_details')" data-tab="cat_details" class="tab-btn px-4 py-1.5 rounded-full text-xs font-medium border whitespace-nowrap bg-white border-slate-200 text-slate-600">${escHtml(tabLabel)}</button>`);
             const root = document.getElementById('formRoot');
-            if(root) root.insertAdjacentHTML('beforeend', `<div data-tab-content="cat_details" style="display:none"><div id="fwDetailWrap" class="space-y-4"></div></div>`);
+            visDets.forEach(({d, i})=>{
+                const tid = 'cat_details_' + i;
+                const tabLabel = fwDetailTabLabel(d);
+                if(bar) bar.insertAdjacentHTML('beforeend', `<span class="text-slate-300" data-det-sep>›</span><button onclick="switchTab('${tid}')" data-tab="${tid}" class="tab-btn px-4 py-1.5 rounded-full text-xs font-medium border whitespace-nowrap bg-white border-slate-200 text-slate-600">${escHtml(tabLabel)}</button>`);
+                if(root) root.insertAdjacentHTML('beforeend', `<div data-tab-content="${tid}" style="display:none"><div id="fwDetailWrap_${i}" data-fw-detailwrap="${i}" class="space-y-4"></div></div>`);
+            });
             try{ stackAppendDetailsCard(); }catch(e){}
             fwDetailRows = dets.map(()=>[]);
             fwDetailCols = dets.map(()=>null);
@@ -1122,14 +1134,15 @@
             }catch(e){}
         }
         function paintDetailGrids(){
-            const wrap = document.getElementById('fwDetailWrap');
-            if(!wrap) return;
             const dets = fwDetails();
             const visDets = dets.map((d, i)=>({d, i})).filter(x=>x.d.visible !== false);
             visDets.forEach(({i})=>{ fwDetailEnsurePool(i); });
             let mkey = '';
             try{ mkey = fwMasterKey() || ''; }catch(e){}
-            wrap.innerHTML = visDets.map(({d, i})=>{
+            visDets.forEach(({d, i})=>{
+                // كل متفرع في تبويبه الخاص — الأزرار وحدها ثم الجدول (الاسم على زر التبويب)
+                const wrap = document.getElementById('fwDetailWrap_' + i) || document.getElementById('fwDetailWrap');
+                if(!wrap) return;
                 const {jx, cols} = fwDetailGridCols(i);
                 const rows = fwDetailRows[i] || [];
                 // عمود ID = العمود المرجعي لمطابقة one_to_many (يُختم خادمياً عند الحفظ)
@@ -1145,11 +1158,9 @@
                 }catch(e){}
                 const sibBar = `<span id="fwSibBar_${i}" class="inline-flex items-center gap-1"></span>`;
                 const dlBtn = `<button onclick="fwDownloadOpen(${i})" title="إنزال سجلات جدول التفاصيل بالبحث والاختيار المتعدد" class="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[11px] font-bold"><i class="fa-solid fa-download"></i> إنزال البيانات</button>`;
-                // عنوان البطاقة يُعرض فقط مع تعدد التفاصيل — وإلا الأزرار وحدها لرفع الجدول
-                const _showTitle = visDets.length > 1;
-                return `<div class="fmlk-category p-4">
-                    <div class="flex items-center ${_showTitle ? 'justify-between' : 'justify-end'} mb-2 flex-wrap gap-2">
-                        ${_showTitle ? `<div class="text-xs font-bold text-slate-700 flex items-center gap-2"><i class="fa-solid fa-diagram-project text-violet-600"></i> ${escHtml(d.alias || d.table)} <span class="text-[10px] text-slate-400 font-normal">(${rows.length})</span></div>` : ''}
+                // كل متفرع في تبويبه الخاص باسمه — الأزرار وحدها ثم الجدول
+                wrap.innerHTML = `<div class="fmlk-category p-4">
+                    <div class="flex items-center justify-end mb-2 flex-wrap gap-2">
                         <div class="flex items-center gap-1 flex-wrap">${sibBar}${dlBtn}<button onclick="fwDetailAddRow(${i})" class="px-2.5 py-1 bg-violet-50 hover:bg-violet-100 text-violet-700 rounded-lg text-[11px] font-bold"><i class="fa-solid fa-plus"></i> إضافة سطر</button></div>
                     </div>
                     <div class="fw-acc-wrap fw-acc-scroll"><table class="fw-acc" dir="rtl">
@@ -1157,7 +1168,7 @@
                         <tbody id="fwAccBody_${i}">${rows.map((r, ri)=>fwDetailRowHtml(i, d, jx, cols, r, ri, mkey)).join('') || `<tr><td colspan="${cols.length + 3}" class="p-3 text-center text-slate-400">لا سطور — أضف سطراً أو أنزل البيانات</td></tr>`}</tbody>
                     </table></div>
                 </div>`;
-            }).join('');
+            });
             visDets.forEach(({i})=>{ try{ fwDetailGate(i); }catch(e){} });
             visDets.forEach(({i})=>{ try{ fwSibLoad(i); }catch(e){} });
         }
@@ -1265,7 +1276,7 @@
                 const _gateEv = (e)=>{
                     try{
                         const t = e.target;
-                        if(t && t.dataset && t.dataset.drow !== undefined && t.closest && t.closest('#fwDetailWrap')){
+                        if(t && t.dataset && t.dataset.drow !== undefined && t.closest && t.closest('[data-fw-detailwrap]')){
                             fwDetailCalc(+t.dataset.drow);
                             fwDetailGate(+t.dataset.drow);
                             fwDetailTopUp(+t.dataset.drow);

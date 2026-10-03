@@ -179,12 +179,14 @@ class FMLKDetail:
     link_mode: str = "direct"  # direct: FK مباشر | junction: جدول ثالث دائماً
     junction: Dict[str, Any] = field(default_factory=dict)  # {table, model} رابط M2M
     columns: List[Dict[str, Any]] = field(default_factory=list)  # [{name, alias, data_type, input_type, junction?}]
+    tab: str = ""  # اسم تبويب هذا المتفرع في المشغل (فارغ = العام details_tab)
     raw_attrs: Dict[str, str] = field(default_factory=dict)
     def to_dict(self):
         return {"table": self.table, "alias": self.alias or self.table, "master": self.master,
                 "detail": self.detail, "rel_type": self.rel_type, "sub_key": self.sub_key,
                 "subKey": self.sub_key, "visible": bool(self.visible),
                 "link_mode": self.link_mode or "direct",
+                "tab": self.tab or "",
                 "junction": dict(self.junction or {}), "columns": self.columns}
 
 @dataclass
@@ -379,7 +381,8 @@ class FMLKFormCompiler:
                     rel_type=(get("rel_type", "relType", "rel-type") or "one_to_many").strip().lower(),
                     sub_key=_subk, visible=_vis, link_mode=_lmode,
                     junction=({"table": _jtbl, "model": _jmod} if _jtbl else {}),
-                    columns=cols, raw_attrs=dict(el.attrib)))
+                    columns=cols, tab=(get("tab", "tabLabel", "tab_label") or "").strip(),
+                    raw_attrs=dict(el.attrib)))
         self._details = result
         return result
 
