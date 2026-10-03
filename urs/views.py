@@ -331,6 +331,12 @@ def home(request):
     _g = _gate_redirect(request)
     if _g is not None:
         return _g
+    try:
+        _ws = (request.GET.get("workspace") or "").strip()
+        if _ws:
+            request.session["workspace"] = _ws
+    except Exception:
+        pass
     # Dynamic apps: FOLDER-DRIVEN (workspace apps first, DB-only leftovers last)
     apps = _load_apps_folder_driven()
 
@@ -917,6 +923,25 @@ def wizard_flags_cp(request):
         return _wizard_flags()
     except Exception:
         return {"has_rml_wizard": False, "has_fml_wizard": False}
+
+
+def workspace_cp(request):
+    """Context processor — current_workspace (session choice else primary) in every template."""
+    try:
+        from . import workspace as _wsm
+        wid = ""
+        try:
+            _sess = request.session
+            wid = (_sess.get("workspace") or "").strip()
+        except Exception:
+            wid = ""
+        infos = _wsm.workspaces_info()
+        cur = next((w for w in infos if w.get("id") == wid), None)
+        if cur is None:
+            cur = infos[0] if infos else None
+        return {"current_workspace": cur or {}}
+    except Exception:
+        return {"current_workspace": {}}
 
 
 def app_detail(request, app_name):

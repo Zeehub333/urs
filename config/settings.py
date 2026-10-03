@@ -83,6 +83,7 @@ TEMPLATES = [
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
                 'urs.views.wizard_flags_cp',
+                'urs.views.workspace_cp',
             ],
         },
     },

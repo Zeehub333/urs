@@ -1,0 +1,11 @@
+{% if current_workspace and current_workspace.id %}
+<div class="bg-white border-b border-gray-200 px-4 py-1 flex items-center gap-2 text-[11px] shrink-0">
+    <span class="w-5 h-5 rounded-md flex items-center justify-center text-white text-[9px] shrink-0" style="background: {{ current_workspace.brand_colors.primary|default:'#4f46e5' }}">
+        {% if current_workspace.logo %}<img src="{{ current_workspace.logo }}" alt="" class="w-5 h-5 rounded-md object-cover">{% else %}<i class="fa-solid fa-cube"></i>{% endif %}
+    </span>
+    <span class="font-bold" style="color: {{ current_workspace.brand_colors.primary|default:'#4f46e5' }}">{{ current_workspace.brand }}</span>
+    <span class="font-semibold text-gray-800">{{ current_workspace.name }}</span>
+    {% if current_workspace.company %}<span class="text-gray-400 hidden sm:inline">• {{ current_workspace.company }}</span>{% endif %}
+    <a href="/" class="mr-auto text-indigo-600 hover:text-indigo-800 font-bold whitespace-nowrap" title="مدير مساحات العمل"><i class="fa-solid fa-layer-group"></i> تغيير مساحة العمل</a>
+</div>
+{% endif %}
