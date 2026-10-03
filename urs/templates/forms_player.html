@@ -1024,9 +1024,10 @@
                 const k = s.slice(1);
                 const e = (fwNameCache && fwNameCache.map[k]) || null;
                 if(!e) return v;
-                if(form === 'single' && e.s) return e.s;
-                if(form === 'plural' && e.p) return e.p;
+                // الاسم الافتراضي هو المعتمد في العرض — ثم المفرد/الجمع احتياطاً
                 if(e.d) return e.d;
+                if(form === 'plural' && e.p) return e.p;
+                if(form === 'single' && e.s) return e.s;
                 return e.s || e.p || v;
             }catch(e){ return v; }
         }
