@@ -71,6 +71,22 @@
     </style>
     {% block head_extra %}{% endblock %}
     <link rel="stylesheet" href="{% static 'components/fx-package.css' %}">
+    {% if current_workspace.brand_colors %}
+    <style id="wsBrandTheme">
+        :root{--ws-primary:{{ current_workspace.brand_colors.primary|default:'#4f46e5' }};--ws-accent:{{ current_workspace.brand_colors.accent|default:'#10b981' }};}
+        .bg-indigo-600{background-color:var(--ws-primary)!important}
+        .hover\:bg-indigo-700:hover{background-color:var(--ws-primary)!important;filter:brightness(.92)}
+        .text-indigo-600{color:var(--ws-primary)!important}
+        .text-indigo-700{color:var(--ws-primary)!important}
+        .border-indigo-600{border-color:var(--ws-primary)!important}
+        .bg-indigo-50{background-color:color-mix(in srgb,var(--ws-primary) 10%,#fff)!important}
+        .bg-emerald-600{background-color:var(--ws-accent)!important}
+        .hover\:bg-emerald-700:hover{background-color:var(--ws-accent)!important;filter:brightness(.92)}
+        .text-emerald-600{color:var(--ws-accent)!important}
+        .text-emerald-700{color:var(--ws-accent)!important}
+        .bg-emerald-50{background-color:color-mix(in srgb,var(--ws-accent) 10%,#fff)!important}
+    </style>
+    {% endif %}
 </head>
 <body class="bg-gray-100 text-gray-800 flex h-screen overflow-hidden">
 <div id="notifyStack" class="fixed top-4 left-1/2 -translate-x-1/2 z-[100] flex flex-col items-center pointer-events-none"></div>

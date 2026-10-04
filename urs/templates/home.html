@@ -501,61 +501,132 @@
             if(m) m.remove();
             m = document.createElement('div');
             m.id = 'wsSettingsModal';
-            m.className = 'fixed inset-0 z-[80]';
-            m.innerHTML = `<div class="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onclick="wsSettingsClose()"></div>
-            <aside class="absolute top-0 bottom-0 right-0 w-[26rem] max-w-[92vw] bg-white shadow-2xl flex flex-col overflow-hidden">
-                <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-indigo-50 shrink-0">
-                    <h3 class="text-sm font-bold text-slate-800"><i class="fa-solid fa-gear text-indigo-600"></i> إعدادات مساحة العمل</h3>
-                    <button onclick="wsSettingsClose()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+            m.className = 'fixed inset-0 z-[80] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4';
+            m.setAttribute('onclick', 'if(event.target===this)wsSettingsClose()');
+            m.innerHTML = `<div class="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[88vh] overflow-hidden flex">
+                <aside class="w-44 shrink-0 border-l border-slate-200 bg-slate-50/60 p-3 space-y-1">
+                    <button data-wssec-btn="general" onclick="wsSecGo('general')" class="w-full text-right px-3 py-2 rounded-xl text-xs font-bold"><i class="fa-solid fa-circle-info ml-1"></i> المعلومات العامة</button>
+                    <button data-wssec-btn="brand" onclick="wsSecGo('brand')" class="w-full text-right px-3 py-2 rounded-xl text-xs font-bold"><i class="fa-solid fa-palette ml-1"></i> البراند</button>
+                    <button data-wssec-btn="conn" onclick="wsSecGo('conn')" class="w-full text-right px-3 py-2 rounded-xl text-xs font-bold"><i class="fa-solid fa-plug ml-1"></i> الاتصال والتخويل</button>
+                </aside>
+                <div class="flex-1 flex flex-col min-w-0 min-h-0">
+                    <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-indigo-50 shrink-0">
+                        <h3 class="text-sm font-bold text-slate-800"><i class="fa-solid fa-gear text-indigo-600"></i> إعدادات مساحة العمل</h3>
+                        <button onclick="wsSettingsClose()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+                    </div>
+                    <div class="p-5 space-y-3 text-xs overflow-y-auto custom-scroll flex-1 min-h-0" id="wsSettingsBody">
+                        <p class="text-slate-400 text-center py-4">جاري التحميل...</p>
+                    </div>
+                    <div class="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2 shrink-0">
+                        <span id="wsSettingsMsg" class="text-[11px] text-rose-600 font-bold ml-auto"></span>
+                        <button onclick="wsSettingsClose()" class="px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs">إلغاء</button>
+                        <button onclick="wsSettingsSave()" class="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold">حفظ</button>
+                    </div>
                 </div>
-                <div class="p-5 space-y-3 text-xs overflow-y-auto custom-scroll flex-1 min-h-0" id="wsSettingsBody">
-                    <p class="text-slate-400 text-center py-4">جاري التحميل...</p>
-                </div>
-                <div class="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2 shrink-0">
-                    <span id="wsSettingsMsg" class="text-[11px] text-rose-600 font-bold ml-auto"></span>
-                    <button onclick="wsSettingsClose()" class="px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs">إلغاء</button>
-                    <button onclick="wsSettingsSave()" class="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold">حفظ</button>
-                </div>
-            </aside>`;
+            </div>`;
             document.body.appendChild(m);
             try{ if(typeof lockScroll === 'function') lockScroll(); }catch(e){}
+            window._wsSec = 'general';
             wsSettingsLoad(id);
+        }
+        function wsSecGo(sec){
+            window._wsSec = sec;
+            document.querySelectorAll('#wsSettingsModal [data-wssec-btn]').forEach(b=>{
+                const on = b.getAttribute('data-wssec-btn') === sec;
+                b.className = 'w-full text-right px-3 py-2 rounded-xl text-xs font-bold transition ' + (on ? 'bg-indigo-600 text-white shadow' : 'text-slate-600 hover:bg-slate-100');
+            });
+            document.querySelectorAll('#wsSettingsBody [data-wssec]').forEach(d=>{
+                d.style.display = d.getAttribute('data-wssec') === sec ? '' : 'none';
+            });
+        }
+        function wsLogoPick(input){
+            const msg = document.getElementById('wsSettingsMsg');
+            try{
+                const f = input && input.files ? input.files[0] : null;
+                if(!f) return;
+                if(!String(f.type || '').startsWith('image/')){ if(msg) msg.textContent = 'اختر ملف صورة'; input.value = ''; return; }
+                if((f.size || 0) > 512 * 1024){ if(msg) msg.textContent = 'الصورة أكبر من 512KB'; input.value = ''; return; }
+                const rd = new FileReader();
+                rd.onload = ()=>{
+                    const url = String(rd.result || '');
+                    const t = document.getElementById('wsF_logo');
+                    if(t) t.value = url;
+                    const p = document.getElementById('wsF_logoPrev');
+                    if(p) p.src = url;
+                    if(msg) msg.textContent = '';
+                };
+                rd.readAsDataURL(f);
+            }catch(e){ if(msg) msg.textContent = 'تعذر قراءة الصورة'; }
+        }
+        function wsBrandPreview(){
+            try{
+                const p = document.getElementById('wsF_primary');
+                const a = document.getElementById('wsF_accent');
+                const bar = document.getElementById('wsBrandPrev');
+                if(bar) bar.style.background = (p && p.value) || '#4f46e5';
+                const btn = document.getElementById('wsBrandPrevBtn');
+                if(btn) btn.style.background = (a && a.value) || '#10b981';
+            }catch(e){}
         }
         function wsSettingsClose(){ const m = document.getElementById('wsSettingsModal'); if(m) m.remove(); window._wsEditId = null; try{ if(typeof unlockScroll === 'function') unlockScroll(); }catch(e){} }
         async function wsSettingsLoad(id){
             const box = document.getElementById('wsSettingsBody');
             try{
-                const res = await fetch('/api/workspaces/');
-                const d = await res.json();
+                const [wres, lres] = await Promise.all([fetch('/api/workspaces/'), fetch('/api/lookup/lists/')]);
+                const d = await wres.json();
                 const w = (d.workspaces || []).find(x=>x.id === id);
                 if(!w) throw new Error('مساحة غير معروفة');
+                const lists = await lres.json().catch(()=>({}));
                 window._wsEditId = id;
+                window._wsLists = {countries: lists.countries || [], currencies: lists.currencies || []};
                 const c = w.brand_colors || {};
-                const inp = (k, v, label, extra)=>`<div><label class="block font-semibold text-slate-700 mb-1">${label}</label><input id="wsF_${k}" value="${String(v ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;')}" ${extra||''} class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"></div>`;
+                const esc = (v)=>String(v ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+                const inp = (k, v, label, extra)=>`<div><label class="block font-semibold text-slate-700 mb-1">${label}</label><input id="wsF_${k}" value="${esc(v)}" ${extra||''} class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"></div>`;
+                const selMatch = (cur, code, ar)=>String(cur || '') === String(code) || String(cur || '') === String(ar);
+                const coOpts = (window._wsLists.countries || []).map(x=>`<option value="${esc(x.c)}" ${selMatch(w.country, x.c, x.ar)?'selected':''}>${esc(x.ar)} (${esc(x.c)})</option>`).join('');
+                const cuOpts = (window._wsLists.currencies || []).map(x=>`<option value="${esc(x.c)}" ${selMatch(w.currency, x.c, x.ar)?'selected':''}>${esc(x.ar)} (${esc(x.c)}${x.s ? ' ' + esc(x.s) : ''})</option>`).join('');
                 box.innerHTML = `
+                <div data-wssec="general" class="space-y-3">
                     ${inp('name', w.name, 'اسم مساحة العمل *')}
                     <div class="grid grid-cols-2 gap-3">
-                        ${inp('brand', w.brand, 'البراند')}
                         ${inp('company', w.company, 'اسم الشركة')}
-                    </div>
-                    <div class="grid grid-cols-2 gap-3">
                         ${inp('domain', w.domain, 'الدومين الأساسي (لإيميلات الشركة)', 'dir="ltr" placeholder="company.com"')}
-                        ${inp('fiscal_year', w.fiscal_year || new Date().getFullYear(), 'السنة المالية')}
-                    </div>
-                    <div class="grid grid-cols-2 gap-3">
-                        ${inp('country', w.country, 'الدولة')}
-                        ${inp('currency', w.currency, 'العملة')}
-                    </div>
-                    <div><label class="block font-semibold text-slate-700 mb-1">الشعار (مسار أو رابط)</label><input id="wsF_logo" value="${String(w.logo ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;')}" dir="ltr" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"></div>
-                    <div class="grid grid-cols-2 gap-3">
-                        <div><label class="block font-semibold text-slate-700 mb-1">اللون الأساسي</label><input id="wsF_primary" type="color" value="${/^#[0-9a-fA-F]{6}$/.test(c.primary||'')?c.primary:'#4f46e5'}" class="w-full h-10 bg-slate-50 border border-slate-200 rounded-xl px-1"></div>
-                        <div><label class="block font-semibold text-slate-700 mb-1">لون التمييز</label><input id="wsF_accent" type="color" value="${/^#[0-9a-fA-F]{6}$/.test(c.accent||'')?c.accent:'#10b981'}" class="w-full h-10 bg-slate-50 border border-slate-200 rounded-xl px-1"></div>
                     </div>
                     <div class="grid grid-cols-3 gap-3">
+                        ${inp('fiscal_year', w.fiscal_year || new Date().getFullYear(), 'السنة المالية')}
+                        <div><label class="block font-semibold text-slate-700 mb-1">الدولة</label><select id="wsF_country" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"><option value="">— اختر —</option>${coOpts}</select></div>
+                        <div><label class="block font-semibold text-slate-700 mb-1">العملة</label><select id="wsF_currency" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"><option value="">— اختر —</option>${cuOpts}</select></div>
+                    </div>
+                </div>
+                <div data-wssec="brand" class="space-y-3" style="display:none">
+                    ${inp('brand', w.brand, 'اسم البراند')}
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">الشعار (رفع صورة ≤512KB أو مسار/رابط)</label>
+                        <div class="flex items-center gap-2">
+                            <img id="wsF_logoPrev" src="${esc(w.logo)}" class="w-14 h-14 rounded-xl object-cover border border-slate-200 bg-slate-50 shrink-0" alt="">
+                            <input id="wsF_logoFile" type="file" accept="image/*" onchange="wsLogoPick(this)" class="flex-1 min-w-0 text-[11px] text-slate-500">
+                        </div>
+                        <input id="wsF_logo" value="${esc(w.logo)}" dir="ltr" placeholder="/static/logo.png أو https://..." class="mt-1 w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono" oninput="try{document.getElementById('wsF_logoPrev').src=this.value}catch(e){}">
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div><label class="block font-semibold text-slate-700 mb-1">اللون الأساسي</label><input id="wsF_primary" type="color" value="${/^#[0-9a-fA-F]{6}$/.test(c.primary||'')?c.primary:'#4f46e5'}" oninput="wsBrandPreview()" class="w-full h-10 bg-slate-50 border border-slate-200 rounded-xl px-1"></div>
+                        <div><label class="block font-semibold text-slate-700 mb-1">لون التمييز</label><input id="wsF_accent" type="color" value="${/^#[0-9a-fA-F]{6}$/.test(c.accent||'')?c.accent:'#10b981'}" oninput="wsBrandPreview()" class="w-full h-10 bg-slate-50 border border-slate-200 rounded-xl px-1"></div>
+                    </div>
+                    <div class="rounded-xl border border-slate-200 overflow-hidden">
+                        <div id="wsBrandPrev" class="px-3 py-2 text-white text-[11px] font-bold">معاينة حية — تُطبق الألوان على كامل الواجهة بعد الحفظ</div>
+                        <div class="p-2 bg-slate-50"><span id="wsBrandPrevBtn" class="inline-block px-3 py-1 rounded-lg text-white text-[11px] font-bold">زر تجريبي</span></div>
+                    </div>
+                </div>
+                <div data-wssec="conn" class="space-y-3" style="display:none">
+                    <div class="grid grid-cols-2 gap-3">
                         ${inp('primary_connection', w.primary_connection, 'الاتصال المحلي الأساسي', 'dir="ltr"')}
-                        ${inp('users_table', w.users_table, 'جدول المستخدمين', 'dir="ltr"')}
-                        <div><label class="block font-semibold text-slate-700 mb-1">الحالة</label><select id="wsF_status" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"><option value="active" ${w.status==='active'?'selected':''}>نشطة</option><option value="archived" ${w.status==='archived'?'selected':''}>مؤرشفة</option><option value="disabled" ${w.status==='disabled'?'selected':''}>معطلة</option></select></div>
-                    </div>`;
+                        ${inp('users_table', w.users_table, 'جدول المستخدمين الرئيسي', 'dir="ltr"')}
+                    </div>
+                    <div><label class="block font-semibold text-slate-700 mb-1">الحالة (تخويل الدخول للمساحة)</label><select id="wsF_status" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"><option value="active" ${w.status==='active'?'selected':''}>نشطة — مسموح الدخول</option><option value="archived" ${w.status==='archived'?'selected':''}>مؤرشفة</option><option value="disabled" ${w.status==='disabled'?'selected':''}>معطلة — ممنوع الدخول</option></select></div>
+                    <p class="text-[11px] text-slate-400">الحالة «معطلة» تمنع الدخول والتفاعل مع كل محتويات المساحة خادمياً.</p>
+                </div>`;
+                wsSecGo(window._wsSec || 'general');
+                wsBrandPreview();
             }catch(e){ box.innerHTML = `<p class="text-rose-500 text-center py-6">${String((e && e.message) || e)}</p>`; }
         }
         async function wsSettingsSave(){

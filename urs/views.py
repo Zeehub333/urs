@@ -349,12 +349,16 @@ def api_workspace_save(request, ws_id):
 
         cur = _wsm.load_workspace_settings(ws)
         bc = data.get("brand_colors") if isinstance(data.get("brand_colors"), dict) else {}
+        _raw_logo = str(data.get("logo") or "")
+        if len(_raw_logo) > 700000:
+            return JsonResponse({"error": "logo too large (700KB max)"}, status=400)
+        _logo = _raw_logo.strip()[:700000]
         new_ws = {
             "name": _s(data.get("name"), 80) or cur.get("name") or ws_id,
             "brand": _s(data.get("brand"), 80) or cur.get("brand") or "Odex",
             "company": _s(data.get("company"), 120),
             "domain": _s(data.get("domain"), 120),
-            "logo": _s(data.get("logo"), 500),
+            "logo": _logo,
             "country": _s(data.get("country"), 80),
             "currency": _s(data.get("currency"), 40),
             "brand_colors": {
@@ -431,6 +435,30 @@ def api_workspace_save(request, ws_id):
         return JsonResponse({"error": str(e)}, status=500)
 
 
+def _lookup_json_file(name):
+    """Read a JSON list from the settings app dir (workspace-aware)."""
+    try:
+        for d in ws_settings_apps():
+            p = d / name
+            if p.is_file():
+                data = json.loads(p.read_text(encoding="utf-8") or "[]")
+                if isinstance(data, list):
+                    return data
+    except Exception:
+        pass
+    return []
+
+
+def api_lookup_lists(request):
+    """GET /api/lookup/lists/ → {countries:[{c,ar,en}], currencies:[{c,ar,s}]}."""
+    try:
+        return JsonResponse({"countries": _lookup_json_file("countries.json"),
+                             "currencies": _lookup_json_file("currencies.json")},
+                            json_dumps_params={"ensure_ascii": False})
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
 def api_workspaces_list(request):
     """GET /api/workspaces/ → workspaces + primary connection/users table."""
     try:
@@ -455,7 +483,8 @@ def home(request):
         _ws = (request.GET.get("workspace") or "").strip()
         if _ws:
             from . import workspace as _wsm_home
-            if _ws in {_w.get("id") for _w in _wsm_home.workspaces_info() if _w.get("id")}:
+            if _ws in {_w.get("id") for _w in _wsm_home.workspaces_info() if _w.get("id")} \
+                    and (_wsm_home.workspace_status(_ws) or "active") == "active":
                 request.session["workspace"] = _ws
     except Exception:
         pass

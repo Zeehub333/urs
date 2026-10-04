@@ -215,6 +215,17 @@ def load_workspace_settings(ws_path):
     name = Path(ws_path).name
     data["name"] = name
     try:
+        import re as _re_hex
+        _bc = data.get("brand_colors") or {}
+
+        def _hex(v, fb):
+            v = str(v or "").strip()
+            return v if _re_hex.fullmatch(r"#[0-9a-fA-F]{6}", v or "") else fb
+        data["brand_colors"] = {"primary": _hex(_bc.get("primary"), "#4f46e5"),
+                                "accent": _hex(_bc.get("accent"), "#10b981")}
+    except Exception:
+        pass
+    try:
         import importlib.util as _ilu
         sp = Path(ws_path) / "settings.py"
         if sp.is_file():
@@ -278,6 +289,21 @@ def workspace_info(ws_path):
 def workspaces_info():
     """All workspaces for manager/API (stable order)."""
     return [workspace_info(w) for w in workspace_dirs()]
+
+
+def workspace_status(ws_id):
+    """STATUS from workspace.conf (active default). Cheap single-file read."""
+    try:
+        ws_id = str(ws_id or "").strip()
+        if not ws_id:
+            return ""
+        for ws in workspace_dirs():
+            if ws.name == ws_id:
+                st = (read_conf(ws / "workspace.conf").get("STATUS") or "active").strip().lower()
+                return st or "active"
+    except Exception:
+        pass
+    return ""
 
 
 def primary_workspace():
