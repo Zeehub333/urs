@@ -935,6 +935,7 @@ def _login_clear(ip, key):
 _WS_USER_COLS = ("username", "user_name", "login", "login_name", "email", "mail")
 _WS_PASS_COLS = ("password", "passwd", "pwd", "password_hash", "pass_hash",
                  "pass", "user_password", "pwd_hash")
+_WS_SU_COLS = ("is_superuser", "superuser", "super_user", "is_admin")
 _SYS_SCHEMAS = ("pg_catalog", "information_schema")
 
 
@@ -951,7 +952,8 @@ def _ws_user_table_candidates(cur, tbl):
                     "AND table_schema NOT LIKE 'pg\\_%' ORDER BY 1", (tbl,))
         for r in (cur.fetchall() or []):
             try:
-                out.append("%s.%s" % (r[0], tbl))
+                if r is not None and len(r) > 0 and str(r[0]).strip() != "":
+                    out.append("%s.%s" % (r[0], tbl))
             except Exception:
                 pass
     except Exception:
@@ -974,7 +976,8 @@ def _ws_user_table_candidates(cur, tbl):
         _got = []
         for r in (cur.fetchall() or []):
             try:
-                _got.append("%s.%s" % (r[0], r[1]))
+                if r is not None and len(r) > 1 and str(r[0]).strip() != "" and str(r[1]).strip() != "":
+                    _got.append("%s.%s" % (r[0], r[1]))
             except Exception:
                 pass
         _got.sort(key=lambda t: (0 if "user" in t.lower() else 1, t))
@@ -1301,6 +1304,233 @@ def workspace_login(request, ws_id):
         if mode not in ("view", "edit"):
             mode = "view"
         return render(request, "enter.html", {"workspace": info, "ws_mode": mode})
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+def _ws_users_table_info(cur, configured, schema_hint=""):
+    """Resolve the users table: qualified as-is, else locate bare name.
+
+    Returns (sch, tbl, cols{lower: data_type}, error, candidates).
+    Bare name in several schemas → schema_hint wins, else error listing them.
+    """
+    import re as _re_id
+    configured = str(configured or "").strip()
+    if "." in configured:
+        sch, _, tbl = configured.partition(".")
+        if not (_re_id.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", sch or "")
+                and _re_id.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", tbl or "")):
+            return None, None, {}, "اسم غير صالح في جدول المستخدمين", []
+    else:
+        tbl = configured
+        if not _re_id.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", tbl or ""):
+            return None, None, {}, "اسم غير صالح في جدول المستخدمين", []
+        try:
+            cur.execute("SELECT table_schema FROM information_schema.tables "
+                        "WHERE table_name=%s AND table_schema NOT IN ('pg_catalog','information_schema') "
+                        "AND table_schema NOT LIKE 'pg\\_%' ORDER BY 1", (tbl,))
+            found = []
+            for r in (cur.fetchall() or []):
+                try:
+                    if r is not None and len(r) > 0 and str(r[0]).strip() != "":
+                        found.append(str(r[0]))
+                except Exception:
+                    continue
+        except Exception as e:
+            try:
+                _ws_login_log.warning("table search failed tbl=%s err=%s", tbl, str(e)[:200])
+            except Exception:
+                pass
+            return None, None, {}, "تعذر البحث عن الجدول: %s" % str(e)[:150], []
+        if not found:
+            try:
+                cands = _ws_user_table_candidates(cur, tbl)
+            except Exception:
+                cands = []
+            msg = "جدول المستخدمين '%s' غير موجود" % tbl
+            if cands:
+                msg += " — المرشح: %s" % cands[0]
+            return None, None, {}, msg, cands
+        sch = str(schema_hint or "").strip()
+        if sch:
+            if sch not in found:
+                return None, None, {}, "الجدول '%s' غير موجود في السكيما %s (موجود في: %s)" % (
+                    tbl, sch, "، ".join(found)), []
+        elif len(found) > 1:
+            return None, None, {}, "الجدول '%s' موجود في عدة سكيمات (%s) — حدد السكيما" % (
+                tbl, "، ".join(found)), []
+        else:
+            sch = found[0]
+    try:
+        cur.execute("SELECT lower(column_name), data_type FROM information_schema.columns "
+                    "WHERE table_schema=%s AND table_name=%s", (sch, tbl))
+        cols = {}
+        for r in (cur.fetchall() or []):
+            try:
+                if r is not None and len(r) > 1 and str(r[0]).strip() != "":
+                    cols[str(r[0])] = str(r[1]).lower()
+            except Exception:
+                continue
+    except Exception as e:
+        return None, None, {}, "تعذر قراءة أعمدة الجدول: %s" % str(e)[:150], []
+    if not cols:
+        return None, None, {}, "جدول المستخدمين غير موجود (%s.%s)" % (sch, tbl), []
+    return sch, tbl, cols, "", []
+
+
+def _ws_bool_val(dtype, on=True):
+    """DB literal for a boolean-ish column by its data type."""
+    d = str(dtype or "").lower()
+    if "bool" in d:
+        return True if on else False
+    if any(k in d for k in ("int", "serial", "numeric", "decimal", "float", "double", "real")):
+        return 1 if on else 0
+    return "1" if on else "0"
+
+
+def api_workspace_users_count(request, ws_id):
+    """GET /api/workspaces/<id>/users-count/?table= → {count, schema, table}."""
+    if not _ws_master_ok(request):
+        return JsonResponse({"error": "master password required", "master_required": True}, status=403)
+    try:
+        from . import workspace as _wsm
+        ws_id = (ws_id or "").strip()
+        if ws_id not in {w.name for w in _wsm.workspace_dirs()}:
+            return JsonResponse({"error": "unknown workspace"}, status=404)
+        obj, utable, err = _ws_login_connection(ws_id)
+        if err or obj is None:
+            return JsonResponse({"error": err or "no connection"}, status=400)
+        override = str(request.GET.get("table") or "").strip()
+        if override:
+            utable = override
+        try:
+            conn = _ws_pg_connect(obj)
+        except Exception as e:
+            return JsonResponse({"error": "تعذر الاتصال بقاعدة البيانات: %s" % str(e)[:200]}, status=400)
+        try:
+            cur = conn.cursor()
+            sch, tbl, _cols, err, _cands = _ws_users_table_info(
+                cur, utable, str(request.GET.get("schema") or "").strip())
+            if err:
+                return JsonResponse({"error": err, "candidates": _cands}, status=400)
+            _tq = "%s.%s" % (_ws_quote_ident(sch), _ws_quote_ident(tbl))
+            cur.execute("SELECT count(*) FROM %s" % _tq)
+            n = cur.fetchone()
+            n = int(n[0]) if n else 0
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        return JsonResponse({"count": n, "schema": sch, "table": "%s.%s" % (sch, tbl)},
+                            json_dumps_params={"ensure_ascii": False})
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@csrf_exempt
+def api_workspace_superuser(request, ws_id):
+    """POST /api/workspaces/<id>/superuser/ {username, password, full_name?, schema?}.
+
+    Allowed ONLY when the users table is empty. Password stored hashed
+    (engine format); superuser/active flags set when columns exist.
+    Requires master password. Never returns hashes.
+    """
+    if request.method != "POST":
+        return JsonResponse({"error": "POST required"}, status=405)
+    if not _ws_master_ok(request):
+        return JsonResponse({"error": "master password required", "master_required": True}, status=403)
+    try:
+        from . import workspace as _wsm
+        ws_id = (ws_id or "").strip()
+        if ws_id not in {w.name for w in _wsm.workspace_dirs()}:
+            return JsonResponse({"error": "unknown workspace"}, status=404)
+        try:
+            data = json.loads(request.body.decode() or "{}")
+        except Exception:
+            return JsonResponse({"error": "invalid JSON"}, status=400)
+        if not isinstance(data, dict):
+            return JsonResponse({"error": "invalid JSON"}, status=400)
+        username = str(data.get("username") or "").strip()
+        password = str(data.get("password") or "")
+        full_name = str(data.get("full_name") or "").strip()[:200]
+        if not username:
+            return JsonResponse({"error": "اسم المستخدم مطلوب"}, status=400)
+        if len(password) < 6:
+            return JsonResponse({"error": "كلمة المرور 6 أحرف فأكثر"}, status=400)
+        if "confirm_password" in data and str(data.get("confirm_password") or "") != password:
+            return JsonResponse({"error": "تأكيد كلمة المرور غير مطابق"}, status=400)
+        obj, utable, err = _ws_login_connection(ws_id)
+        if err or obj is None:
+            return JsonResponse({"error": err or "no connection"}, status=400)
+        _ov = str(data.get("table") or "").strip()
+        if _ov:
+            utable = _ov
+        try:
+            conn = _ws_pg_connect(obj)
+        except Exception as e:
+            return JsonResponse({"error": "تعذر الاتصال بقاعدة البيانات: %s" % str(e)[:200]}, status=400)
+        try:
+            cur = conn.cursor()
+            sch, tbl, cols, err, _cands = _ws_users_table_info(
+                cur, utable, str(data.get("schema") or "").strip())
+            if err:
+                return JsonResponse({"error": err, "candidates": _cands}, status=400)
+            _tq = "%s.%s" % (_ws_quote_ident(sch), _ws_quote_ident(tbl))
+            cur.execute("SELECT count(*) FROM %s" % _tq)
+            _n = cur.fetchone()
+            if _n and int(_n[0] or 0) > 0:
+                return JsonResponse({"error": "الجدول يحتوي مستخدمين بالفعل — الإنشاء للمشرف الأول فقط"}, status=400)
+            ucol = next((c for c in _WS_USER_COLS if c in cols), None)
+            pcol = next((c for c in _WS_PASS_COLS if c in cols), None)
+            if not ucol or not pcol:
+                return JsonResponse({"error": "جدول المستخدمين بلا عمودي اسم/كلمة مرور"}, status=400)
+            _fcol = next((c for c in ("full_name", "fullname", "name", "display_name") if c in cols), None)
+            _sucol = next((c for c in _WS_SU_COLS if c in cols), None)
+            _accol = "is_active" if "is_active" in cols else ("active" if "active" in cols else None)
+            try:
+                cur.execute("SELECT 1 FROM %s WHERE %s = %%s LIMIT 1" % (_tq, _ws_quote_ident(ucol)),
+                            (username,))
+                if cur.fetchone() is not None:
+                    return JsonResponse({"error": "اسم المستخدم موجود بالفعل"}, status=400)
+            except Exception:
+                pass
+            try:
+                from fmlk_engine.engine import hash_secret as _hs
+                _hpw = _hs(password)
+            except Exception:
+                return JsonResponse({"error": "تعذر تشفير كلمة المرور"}, status=500)
+            _fields = [ucol, pcol]
+            _vals = [username, _hpw]
+            if _fcol:
+                _fields.append(_fcol)
+                _vals.append(full_name)
+            if _sucol:
+                _fields.append(_sucol)
+                _vals.append(_ws_bool_val(cols.get(_sucol), True))
+            if _accol:
+                _fields.append(_accol)
+                _vals.append(_ws_bool_val(cols.get(_accol), True))
+            _ph = ", ".join(["%s"] * len(_fields))
+            _cols_sql = ", ".join(_ws_quote_ident(c) for c in _fields)
+            cur.execute("INSERT INTO %s (%s) VALUES (%s)" % (_tq, _cols_sql, _ph), tuple(_vals))
+            try:
+                conn.commit()
+            except Exception:
+                pass
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        try:
+            _ws_login_log.info("superuser created ws=%s table=%s.%s user=%s", ws_id, sch, tbl, username[:64])
+        except Exception:
+            pass
+        return JsonResponse({"ok": True, "username": username,
+                             "is_superuser": bool(_sucol),
+                             "table": "%s.%s" % (sch, tbl)},
+                            json_dumps_params={"ensure_ascii": False})
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
