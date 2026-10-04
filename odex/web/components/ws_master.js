@@ -1,6 +1,6 @@
 /* Master password gate — shared by manager (تعديل/إعدادات/add) and settings save.
- * Usage: wsMasterEnsure(actionFn) — runs action immediately when the session
- * is master-authed, else shows the password modal (create mode on first use).
+ * Usage: wsMasterEnsure(actionFn) — ALWAYS prompts (every press); a successful
+ * check stamps the session so the follow-through works (edit entry, design save).
  */
 async function wsMasterStatus() {
     const res = await fetch('/api/master/status/');
@@ -66,12 +66,10 @@ async function wsMasterSubmit(firstSet) {
     }
 }
 async function wsMasterEnsure(action) {
+    // المطالبة في كل ضغطة (تعديل / إعدادات / إضافة) — بلا تجاوز بجلسة سابقة.
+    // نجاح التحقق يثبت الجلسة ليتابع التدفق (دخول وضع التعديل وحفظ التصميم).
     try {
         const st = await wsMasterStatus();
-        if (st && st.authed) {
-            action();
-            return;
-        }
         wsMasterOpen(!(st && st.set), action);
     } catch (e) {
         wsMasterOpen(false, action);
