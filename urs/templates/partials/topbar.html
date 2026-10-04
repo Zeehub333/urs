@@ -7,7 +7,7 @@
             <span class="absolute bottom-0 right-0 w-2 h-2 bg-emerald-500 border border-white rounded-full"></span>
         </div>
         <div>
-            <h3 class="text-[11px] font-bold text-gray-800 leading-none">admin</h3>
+            <h3 class="text-[11px] font-bold text-gray-800 leading-none">{% if ws_user.username %}{{ ws_user.username }}{% if ws_user.is_superuser %} <span class="text-amber-500" title="مشرف عام">★</span>{% endif %}{% else %}admin{% endif %}</h3>
         </div>
     </div>
 

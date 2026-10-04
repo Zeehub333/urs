@@ -30,6 +30,7 @@ urlpatterns = [
     path('api/master/auth/', urs_views.api_master_auth, name='api_master_auth'),
     path('api/workspaces/create/', urs_views.api_workspaces_create, name='api_workspaces_create'),
     path('api/lookup/lists/', urs_views.api_lookup_lists, name='api_lookup_lists'),
+    path('api/lookup/tables/', urs_views.api_lookup_tables, name='api_lookup_tables'),
     path('api/workspaces/<str:ws_id>/save/', urs_views.api_workspace_save, name='api_workspace_save'),
     path('my-reports/', urs_views.my_reports, name='my_reports'),
     path('dashboards/', urs_views.dashboards, name='dashboards'),

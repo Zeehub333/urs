@@ -706,6 +706,47 @@ def api_lookup_lists(request):
         return JsonResponse({"error": str(e)}, status=500)
 
 
+def api_lookup_tables(request):
+    """GET /api/lookup/tables/?connection=<name> → [{schema, table, full}].
+
+    Read-only metadata for searchable table pickers (e.g. users table).
+    Exempt from the workspace gate like the other lookup lists.
+    """
+    try:
+        from .models import Connection
+        cname = (request.GET.get("connection") or "").strip()
+        if not cname:
+            return JsonResponse({"error": "connection required"}, status=400)
+        obj = Connection.objects.filter(name=cname).first()
+        if obj is None:
+            return JsonResponse({"error": "unknown connection"}, status=404)
+        try:
+            obj = _effective_or_row(obj.id) or obj
+        except Exception:
+            pass
+        try:
+            conn = _ws_pg_connect(obj)
+        except Exception as e:
+            return JsonResponse({"error": "تعذر الاتصال بقاعدة البيانات: %s" % str(e)[:200]}, status=400)
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT table_schema, table_name FROM information_schema.tables "
+                        "WHERE table_type IN ('BASE TABLE','VIEW') "
+                        "AND table_schema NOT IN ('pg_catalog','information_schema') "
+                        "AND table_schema NOT LIKE 'pg\\_%' ORDER BY 1, 2 LIMIT 2000")
+            rows = [{"schema": str(r[0]), "table": str(r[1]),
+                     "full": "%s.%s" % (r[0], r[1])} for r in (cur.fetchall() or [])]
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        return JsonResponse({"tables": rows, "total": len(rows)},
+                            json_dumps_params={"ensure_ascii": False})
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
 def workspace_exit(request):
     """GET /exit/ — leave the workspace (clear session entry) → manager list."""
     try:
@@ -1180,13 +1221,17 @@ def api_workspace_login(request, ws_id):
             _tq = "%s.%s" % (_ws_quote_ident(sch), _ws_quote_ident(tbl))
             _active_col = "is_active" if "is_active" in cols else ("active" if "active" in cols else None)
             _aq = (", %s" % _ws_quote_ident(_active_col)) if _active_col else ""
-            cur.execute("SELECT %s, %s%s FROM %s WHERE %s = %%s LIMIT 1" % (_uq, _pq, _aq, _tq, _uq),
+            _su_col = next((c for c in ("is_superuser", "superuser", "super_user", "is_admin") if c in cols), None)
+            _sq = (", %s" % _ws_quote_ident(_su_col)) if _su_col else ""
+            cur.execute("SELECT %s, %s%s%s FROM %s WHERE %s = %%s LIMIT 1" % (_uq, _pq, _aq, _sq, _tq, _uq),
                         (username,))
             row = cur.fetchone()
             if row is None:
-                cur.execute("SELECT %s, %s%s FROM %s WHERE lower(%s) = lower(%%s) LIMIT 1" % (_uq, _pq, _aq, _tq, _uq),
+                cur.execute("SELECT %s, %s%s%s FROM %s WHERE lower(%s) = lower(%%s) LIMIT 1" % (_uq, _pq, _aq, _sq, _tq, _uq),
                             (username,))
                 row = cur.fetchone()
+            _sidx = 2 + (1 if _active_col else 0)
+            _is_su = bool(_su_col and len(row or []) > _sidx and str(row[_sidx]).lower() in ("1", "true", "t", "yes", "y", "on")) if row is not None else False
             if row is not None and _active_col and str(row[2] if len(row) > 2 else "").lower() in ("0", "false", "f", "no", "n", "off"):
                 _login_note_fail(_ip, _tkey)
                 return JsonResponse({"error": "هذا الحساب موقوف"}, status=403)
@@ -1230,12 +1275,12 @@ def api_workspace_login(request, ws_id):
             request.session["ws_mode"] = mode
             request.session["fiscal_year"] = int(_m.group(0)) if _m else None
             request.session["fiscal_schema"] = sch
-            request.session["ws_user"] = {"username": str(_uname)}
+            request.session["ws_user"] = {"username": str(_uname), "is_superuser": bool(_is_su)}
         except Exception:
             pass
         _login_clear(_ip, _tkey)
         return JsonResponse({"ok": True, "redirect": "/apps/",
-                             "user": {"username": str(_uname)}},
+                             "user": {"username": str(_uname), "is_superuser": bool(_is_su)}},
                             json_dumps_params={"ensure_ascii": False})
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
@@ -1937,11 +1982,18 @@ def workspace_cp(request):
         cur = next((w for w in infos if w.get("id") == wid), None)
         if cur is None:
             cur = infos[0] if infos else None
+        try:
+            _wu = request.session.get("ws_user") or {}
+            _wu = {"username": str(_wu.get("username") or ""),
+                   "is_superuser": bool(_wu.get("is_superuser"))} if isinstance(_wu, dict) else {}
+        except Exception:
+            _wu = {}
         return {"current_workspace": cur or {},
                 "ws_mode": _ws_mode(request),
+                "ws_user": _wu,
                 "ws_can_design": _ws_can_design(request)}
     except Exception:
-        return {"current_workspace": {}}
+        return {"current_workspace": {}, "ws_user": {}}
 
 
 def app_detail(request, app_name):
