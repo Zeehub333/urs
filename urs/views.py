@@ -311,6 +311,291 @@ def workspace_home(request):
     })
 
 
+_WS_ID_RE = None
+try:
+    import re as _re_wsid
+    _WS_ID_RE = _re_wsid.compile(r"[A-Za-z0-9][A-Za-z0-9_\-]*")
+except Exception:
+    _WS_ID_RE = None
+
+
+def _ws_valid_id(ws_id):
+    try:
+        return bool(ws_id) and _WS_ID_RE.fullmatch(str(ws_id) or "") is not None
+    except Exception:
+        return bool(ws_id)
+
+
+def _write_ws_settings_py(ws, values):
+    """Write <ws>/settings.py WORKSPACE dict (surgical block replace). Returns values."""
+    import ast as _ast
+    import io as _io
+    sp = ws / "settings.py"
+    try:
+        src = sp.read_text(encoding="utf-8")
+    except Exception:
+        src = '"""Workspace settings (auto-created)."""\nWORKSPACE = {}\n'
+    try:
+        tree = _ast.parse(src)
+        node = next(n for n in _ast.walk(tree)
+                    if isinstance(n, _ast.Assign)
+                    and any(isinstance(t, _ast.Name) and t.id == "WORKSPACE" for t in n.targets))
+        old = _ast.literal_eval(node.value)
+        if not isinstance(old, dict):
+            old = {}
+    except Exception:
+        old, node = {}, None
+    merged = dict(old)
+    merged.update(values or {})
+    buf = _io.StringIO()
+    buf.write("{\n")
+    for k, v in merged.items():
+        buf.write("    %r: %r,\n" % (k, v))
+    buf.write("}")
+    new_block = "WORKSPACE = " + buf.getvalue()
+    if node is not None:
+        lines = src.splitlines(keepends=True)
+        lines[node.lineno - 1:node.end_lineno] = [new_block + "\n"]
+        src = "".join(lines)
+    else:
+        src = src.rstrip("\n") + "\n\n" + new_block + "\n"
+    sp.write_text(src, encoding="utf-8")
+    return merged
+
+
+def _write_ws_conf(ws, primary_connection="", users_table="", status="active"):
+    """Write <ws>/workspace.conf bindings (display keys live in settings.py)."""
+    cp = ws / "workspace.conf"
+    try:
+        conf_lines = cp.read_text(encoding="utf-8").splitlines()
+    except Exception:
+        conf_lines = ["# Workspace runtime bindings."]
+    drop = {"WORKSPACE_NAME", "BRAND", "COMPANY", "DOMAIN"}
+    out = []
+    for ln in conf_lines:
+        s = ln.strip()
+        if s and not s.startswith("#") and "=" in s:
+            k = s.split("=", 1)[0].strip()
+            if k in drop:
+                continue
+            if k in ("PRIMARY_CONNECTION", "USERS_TABLE", "STATUS"):
+                continue
+        out.append(ln)
+    if primary_connection:
+        out.append("PRIMARY_CONNECTION=%s" % primary_connection)
+    if users_table:
+        out.append("USERS_TABLE=%s" % users_table)
+    out.append("STATUS=%s" % (status or "active"))
+    cp.write_text("\n".join(out).rstrip("\n") + "\n", encoding="utf-8")
+
+
+def _ws_ensure_connection(name, params):
+    """Upsert local Connection row (host/port/user/password/database).
+
+    paramsSubset of {host, port, user, password, instance}. Password applies
+    only when non-empty (blank keeps stored value). Never returns the password.
+    Returns (name, created).
+    """
+    from .models import Connection
+    name = str(name or "").strip()
+    if not name:
+        return "", False
+    vals = {}
+    if isinstance(params, dict):
+        _h = str(params.get("host") or "").strip()
+        if _h:
+            vals["host"] = _h[:255]
+        try:
+            _p = int(str(params.get("port") or "").strip())
+            if 1 <= _p <= 65535:
+                vals["port"] = _p
+        except Exception:
+            pass
+        _u = str(params.get("user") or "").strip()
+        if _u:
+            vals["user"] = _u[:100]
+        _pw = str(params.get("password") or "")
+        if _pw:
+            vals["password"] = _pw[:255]
+        if "instance" in params:
+            vals["instance"] = str(params.get("instance") or "").strip()[:100]
+    obj = Connection.objects.filter(name=name).first()
+    if obj is not None:
+        if vals:
+            for _k, _v in vals.items():
+                setattr(obj, _k, _v)
+            try:
+                obj.save(update_fields=list(vals) + ["updated_at"])
+            except Exception:
+                obj.save()
+        return name, False
+    base = dict(host="127.0.0.1", port=5432, user="postgres",
+                password="postgres", instance="urs", engine="postgres",
+                schema="", description="", is_local=True, is_queryable=True)
+    base.update(vals)
+    Connection.objects.create(name=name, **base)
+    return name, True
+
+
+_WS_COPY_PATTERNS = ("metadata.json", "*.fmlk", "*.fml", "*.cml",
+                     "display_names.json", "countries.json",
+                     "currencies.json", "country_codes.json")
+
+
+def _ws_copy_settings_files(src_app, dst_app):
+    """Copy settings-app definition files (modals + metadata + lists). Returns count."""
+    import shutil as _sh
+    n = 0
+    try:
+        for pat in _WS_COPY_PATTERNS:
+            for p in sorted(src_app.glob(pat)):
+                try:
+                    if p.is_file():
+                        _sh.copy2(str(p), str(dst_app / p.name))
+                        n += 1
+                except Exception:
+                    continue
+        for sub in ("modals",):
+            s, d = src_app / sub, dst_app / sub
+            if s.is_dir():
+                try:
+                    _sh.copytree(str(s), str(d), dirs_exist_ok=True)
+                    n += sum(1 for _ in d.rglob("*") if _.is_file())
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    return n
+
+
+@csrf_exempt
+def api_workspaces_create(request):
+    """POST /api/workspaces/create/ — new workspace: folder + conf + settings.py,
+    copy settings files from another workspace, ensure default local connection.
+
+    Body: {id? (auto workspace_N), name?, brand?, company?, domain?, country?,
+      currency?, primary_connection?, users_table?, from? (source workspace id)}
+    """
+    if request.method != "POST":
+        return JsonResponse({"error": "POST required"}, status=405)
+    try:
+        from . import workspace as _wsm
+        data = json.loads(request.body.decode() or "{}")
+    except Exception:
+        return JsonResponse({"error": "invalid JSON"}, status=400)
+    try:
+        if not isinstance(data, dict):
+            return JsonResponse({"error": "invalid JSON"}, status=400)
+        import datetime as _dt
+        import re as _re_hex
+
+        def _s(v, lng=120):
+            return str(v if v is not None else "").strip()[:lng]
+
+        ws_id = _s(data.get("id") or data.get("workspace") or "", 64)
+        if not ws_id:
+            nums = []
+            for w in _wsm.workspace_dirs():
+                m = _re_hex.fullmatch(r"workspace_(\d+)", w.name or "")
+                if m:
+                    nums.append(int(m.group(1)))
+            ws_id = "workspace_%d" % ((max(nums) if nums else 0) + 1)
+        if not _ws_valid_id(ws_id):
+            return JsonResponse({"error": "id: أحرف لاتينية/أرقام/_/- فقط"}, status=400)
+        if not ws_id.startswith("workspace_"):
+            return JsonResponse({"error": "id must start with workspace_ (discovery pattern)"}, status=400)
+        if (BASE_DIR / ws_id).exists():
+            return JsonResponse({"error": "workspace exists: %s" % ws_id}, status=400)
+        src_id = _s(data.get("from") or "", 64)
+        src_ws = None
+        if src_id:
+            for w in _wsm.workspace_dirs():
+                if w.name == src_id:
+                    src_ws = w
+                    break
+            if src_ws is None:
+                return JsonResponse({"error": "unknown source workspace"}, status=404)
+        else:
+            prim = _wsm.primary_workspace()
+            src_ws = prim
+
+        ws = BASE_DIR / ws_id
+        (ws / "apps" / "settings").mkdir(parents=True, exist_ok=False)
+        (ws / "__init__.py").write_text(
+            '"""Workspace package marker (plain module, not a Django app)."""\n', encoding="utf-8")
+
+        def _color(v, fb):
+            v = _s(v, 16)
+            return v if _re_hex.fullmatch(r"#[0-9a-fA-F]{6}", v or "") else fb
+
+        _write_ws_settings_py(ws, {
+            "name": _s(data.get("name"), 80) or ws_id,
+            "brand": _s(data.get("brand"), 80) or "Odex",
+            "company": _s(data.get("company"), 120),
+            "domain": _s(data.get("domain"), 120),
+            "logo": "",
+            "country": _s(data.get("country"), 80),
+            "currency": _s(data.get("currency"), 40),
+            "brand_colors": {
+                "primary": _color((data.get("brand_colors") or {}).get("primary")
+                                  if isinstance(data.get("brand_colors"), dict) else "", "#4f46e5"),
+                "accent": _color((data.get("brand_colors") or {}).get("accent")
+                                if isinstance(data.get("brand_colors"), dict) else "", "#10b981"),
+            },
+            "fiscal_year": _s(data.get("fiscal_year"), 16) or str(_dt.date.today().year),
+        })
+        _pc = _s(data.get("primary_connection"), 80) or "urs_local"
+        _ut = _s(data.get("users_table"), 160) or "users"
+        _write_ws_conf(ws, _pc, _ut, "active")
+
+        copied = 0
+        if src_ws is not None:
+            _src_app = src_ws / "apps" / "settings"
+            if _src_app.is_dir():
+                copied = _ws_copy_settings_files(_src_app, ws / "apps" / "settings")
+
+        # default local connection per workspace settings: posted params win;
+        # existing row + no params → untouched; new row → clone urs_local
+        # else localhost defaults inside the helper.
+        _posted_conn = {k: v for k, v in (data.get("connection") or {}).items()
+                        if k in ("host", "port", "user", "password", "instance")} \
+            if isinstance(data.get("connection"), dict) else {}
+        _merged = dict(_posted_conn)
+        try:
+            from .models import Connection
+            if not Connection.objects.filter(name=conn_name).exists() and not _merged:
+                _tpl = Connection.objects.filter(name="urs_local").first()
+                if _tpl is not None:
+                    _merged = {"host": getattr(_tpl, "host", "") or "",
+                               "port": getattr(_tpl, "port", "") or "",
+                               "user": getattr(_tpl, "user", "") or "",
+                               "password": getattr(_tpl, "password", "") or "",
+                               "instance": getattr(_tpl, "instance", "") or ""}
+        except Exception:
+            pass
+        conn_name, conn_created = _pc, False
+        try:
+            _cn, _cc = _ws_ensure_connection(conn_name, _merged)
+            conn_created = bool(_cc)
+            if not _cn:
+                conn_name = _pc
+        except Exception:
+            pass
+        try:
+            if conn_created:
+                from .models import Connection as _Conn2
+                _Conn2.objects.filter(name=conn_name).update(
+                    description="default local connection for %s" % ws_id)
+        except Exception:
+            pass
+        return JsonResponse({"ok": True, "workspace": _wsm.workspace_info(ws),
+                             "copied_files": copied, "connection": conn_name,
+                             "connection_created": conn_created},
+                            json_dumps_params={"ensure_ascii": False})
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
 @csrf_exempt
 def api_workspace_save(request, ws_id):
     """POST /api/workspaces/<id>/save/ — edit workspace props (session required).
@@ -319,13 +604,14 @@ def api_workspace_save(request, ws_id):
       settings.py WORKSPACE: name, brand, company, domain, logo, country,
         currency, brand_colors{primary,accent}, fiscal_year (empty → current year)
       workspace.conf: primary_connection, users_table, status
+      connection?: {host, port, user, password?, instance} → upserts the
+        primary-connection row (blank password keeps stored value)
     Display props live ONLY in settings.py (overlapping conf keys are dropped).
     """
     if request.method != "POST":
         return JsonResponse({"error": "POST required"}, status=405)
     try:
         from . import workspace as _wsm
-        import ast as _ast
         import datetime as _dt
         known = {w.get("id") for w in _wsm.workspaces_info() if w.get("id")}
         ws_id = (ws_id or "").strip()
@@ -367,69 +653,23 @@ def api_workspace_save(request, ws_id):
             },
             "fiscal_year": _s(data.get("fiscal_year"), 16) or str(_dt.date.today().year),
         }
-        # merge into settings.py WORKSPACE dict (surgical: keep header/comments)
-        sp = ws / "settings.py"
-        try:
-            src = sp.read_text(encoding="utf-8")
-        except Exception:
-            src = '"""Workspace settings (auto-created)."""\nWORKSPACE = {}\n'
-        try:
-            tree = _ast.parse(src)
-            node = next(n for n in _ast.walk(tree)
-                        if isinstance(n, _ast.Assign)
-                        and any(isinstance(t, _ast.Name) and t.id == "WORKSPACE" for t in n.targets))
-            old = _ast.literal_eval(node.value)
-            if not isinstance(old, dict):
-                old = {}
-        except Exception:
-            old, node = {}, None
-        merged = dict(old)
-        merged.update(new_ws)
-        import io as _io
-        buf = _io.StringIO()
-        buf.write("{\n")
-        for k, v in merged.items():
-            buf.write("    %r: %r,\n" % (k, v))
-        buf.write("}")
-        new_block = "WORKSPACE = " + buf.getvalue()
-        if node is not None:
-            lines = src.splitlines(keepends=True)
-            lines[node.lineno - 1:node.end_lineno] = [new_block + "\n"]
-            src = "".join(lines)
-        else:
-            src = src.rstrip("\n") + "\n\n" + new_block + "\n"
-        sp.write_text(src, encoding="utf-8")
-
-        # workspace.conf: update bindings, drop display keys (settings.py is the source)
-        cp = ws / "workspace.conf"
-        try:
-            conf_lines = cp.read_text(encoding="utf-8").splitlines()
-        except Exception:
-            conf_lines = ["# Workspace runtime bindings."]
-        _old_conf = _wsm.read_conf(cp) if cp.is_file() else {}
+        _write_ws_settings_py(ws, new_ws)
+        _old_conf = _wsm.read_conf(ws / "workspace.conf")
         _pc = _s(data.get("primary_connection"), 80) or _old_conf.get("PRIMARY_CONNECTION", "")
         _ut = _s(data.get("users_table"), 160) or _old_conf.get("USERS_TABLE", "")
         _st = _s(data.get("status"), 16).lower()
         if _st not in ("active", "archived", "disabled"):
             _st = _old_conf.get("STATUS", "active").strip().lower() or "active"
-        drop = {"WORKSPACE_NAME", "BRAND", "COMPANY", "DOMAIN"}
-        out = []
-        for ln in conf_lines:
-            s = ln.strip()
-            if s and not s.startswith("#") and "=" in s:
-                k = s.split("=", 1)[0].strip()
-                if k in drop:
-                    continue
-                if k in ("PRIMARY_CONNECTION", "USERS_TABLE", "STATUS"):
-                    continue
-            out.append(ln)
-        if _pc:
-            out.append("PRIMARY_CONNECTION=%s" % _pc)
-        if _ut:
-            out.append("USERS_TABLE=%s" % _ut)
-        out.append("STATUS=%s" % _st)
-        cp.write_text("\n".join(out).rstrip("\n") + "\n", encoding="utf-8")
-        return JsonResponse({"ok": True, "workspace": _wsm.workspace_info(ws)},
+        _write_ws_conf(ws, _pc, _ut, _st)
+        _conn_saved = False
+        if isinstance(data.get("connection"), dict):
+            try:
+                _cn, _cc = _ws_ensure_connection(_pc, data.get("connection"))
+                _conn_saved = bool(_cn)
+            except Exception:
+                _conn_saved = False
+        return JsonResponse({"ok": True, "workspace": _wsm.workspace_info(ws),
+                             "connection_saved": _conn_saved},
                             json_dumps_params={"ensure_ascii": False})
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
@@ -474,11 +714,30 @@ def workspace_exit(request):
     return redirect("/")
 
 
-def api_workspaces_list(request):
-    """GET /api/workspaces/ → workspaces + primary connection/users table."""
+def _ws_conn_params(name):
+    """Connection params for prefill (host/port/user/instance — NEVER password)."""
     try:
+        from .models import Connection
+        o = Connection.objects.filter(name=(name or "").strip()).first()
+        if o is None:
+            return {"host": "", "port": "", "user": "", "instance": ""}
+        return {"host": o.host or "", "port": o.port or "",
+                "user": o.user or "", "instance": o.instance or ""}
+    except Exception:
+        return {"host": "", "port": "", "user": "", "instance": ""}
+
+
+def api_workspaces_list(request):
+    """GET /api/workspaces/ → workspaces (+connection_params, never password)."""
+    try:
+        _ws = ws_workspaces_info()
+        for _w in _ws:
+            try:
+                _w["connection_params"] = _ws_conn_params(_w.get("primary_connection"))
+            except Exception:
+                _w["connection_params"] = {"host": "", "port": "", "user": "", "instance": ""}
         return JsonResponse({
-            "workspaces": ws_workspaces_info(),
+            "workspaces": _ws,
             "primary_connection": ws_primary_connection(),
             "users_table": ws_primary_users_table(),
         }, json_dumps_params={"ensure_ascii": False})

@@ -580,6 +580,7 @@
                 window._wsEditId = id;
                 window._wsLists = {countries: lists.countries || [], currencies: lists.currencies || []};
                 const c = w.brand_colors || {};
+                const cp = w.connection_params || {};
                 const esc = (v)=>String(v ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
                 const inp = (k, v, label, extra)=>`<div><label class="block font-semibold text-slate-700 mb-1">${label}</label><input id="wsF_${k}" value="${esc(v)}" ${extra||''} class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"></div>`;
                 const selMatch = (cur, code, ar)=>String(cur || '') === String(code) || String(cur || '') === String(ar);
@@ -622,6 +623,18 @@
                         ${inp('primary_connection', w.primary_connection, 'الاتصال المحلي الأساسي', 'dir="ltr"')}
                         ${inp('users_table', w.users_table, 'جدول المستخدمين الرئيسي', 'dir="ltr"')}
                     </div>
+                    <div class="rounded-xl border border-slate-200 p-3 space-y-3 bg-slate-50/50">
+                        <div class="text-[11px] font-bold text-slate-600">بيانات الاتصال المحلي الأساسي</div>
+                        <div class="grid grid-cols-2 gap-3">
+                            <div><label class="block font-semibold text-slate-700 mb-1">الهوست</label><input id="wsF_host" value="${esc(cp.host)}" dir="ltr" placeholder="127.0.0.1" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono"></div>
+                            <div><label class="block font-semibold text-slate-700 mb-1">البورت</label><input id="wsF_port" value="${esc(cp.port)}" dir="ltr" inputmode="numeric" placeholder="5432" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono"></div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-3">
+                            <div><label class="block font-semibold text-slate-700 mb-1">اسم المستخدم</label><input id="wsF_user" value="${esc(cp.user)}" dir="ltr" autocomplete="off" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono"></div>
+                            <div><label class="block font-semibold text-slate-700 mb-1">كلمة المرور</label><input id="wsF_password" type="password" value="" dir="ltr" placeholder="•••••• — فارغة للإبقاء" autocomplete="new-password" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono"></div>
+                        </div>
+                        <div><label class="block font-semibold text-slate-700 mb-1">قاعدة البيانات</label><input id="wsF_instance" value="${esc(cp.instance)}" dir="ltr" placeholder="urs" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono"></div>
+                    </div>
                     <div><label class="block font-semibold text-slate-700 mb-1">الحالة (تخويل الدخول للمساحة)</label><select id="wsF_status" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"><option value="active" ${w.status==='active'?'selected':''}>نشطة — مسموح الدخول</option><option value="archived" ${w.status==='archived'?'selected':''}>مؤرشفة</option><option value="disabled" ${w.status==='disabled'?'selected':''}>معطلة — ممنوع الدخول</option></select></div>
                     <p class="text-[11px] text-slate-400">الحالة «معطلة» تمنع الدخول والتفاعل مع كل محتويات المساحة خادمياً.</p>
                 </div>`;
@@ -634,11 +647,13 @@
             const msg = document.getElementById('wsSettingsMsg');
             if(!id) return;
             const v = (k)=>{ const el = document.getElementById('wsF_' + k); return el ? el.value : ''; };
+            const conn = {host: v('host'), port: v('port'), user: v('user'), instance: v('instance')};
+            if(String(v('password') || '').trim() !== '') conn.password = v('password');
             const body = {name: v('name'), brand: v('brand'), company: v('company'), domain: v('domain'),
                 logo: v('logo'), country: v('country'), currency: v('currency'),
                 brand_colors: {primary: v('primary'), accent: v('accent')},
                 fiscal_year: v('fiscal_year'), primary_connection: v('primary_connection'),
-                users_table: v('users_table'), status: v('status')};
+                users_table: v('users_table'), status: v('status'), connection: conn};
             if(!String(body.name).trim()){ if(msg) msg.textContent = 'اسم المساحة مطلوب'; return; }
             try{
                 const res = await fetch('/api/workspaces/' + encodeURIComponent(id) + '/save/', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
