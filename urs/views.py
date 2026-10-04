@@ -1233,6 +1233,12 @@ def api_workspace_login(request, ws_id):
                 cur.execute("SELECT %s, %s%s%s FROM %s WHERE lower(%s) = lower(%%s) LIMIT 1" % (_uq, _pq, _aq, _sq, _tq, _uq),
                             (username,))
                 row = cur.fetchone()
+            # malformed driver row (empty/short tuple) → treat as not found
+            try:
+                if row is not None and (not isinstance(row, (list, tuple)) or len(row) < 2):
+                    row = None
+            except Exception:
+                row = None
             _sidx = 2 + (1 if _active_col else 0)
             _is_su = bool(_su_col and len(row or []) > _sidx and str(row[_sidx]).lower() in ("1", "true", "t", "yes", "y", "on")) if row is not None else False
             if row is not None and _active_col and str(row[2] if len(row) > 2 else "").lower() in ("0", "false", "f", "no", "n", "off"):
