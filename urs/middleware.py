@@ -22,6 +22,7 @@ _EXEMPT_PREFIXES = (
     "/settings/setup/",
     "/admin/",
     "/static/",
+    "/enter/",
 )
 
 
@@ -54,31 +55,33 @@ class WorkspaceGateMiddleware:
         except Exception:
             _sid = ""
         _settings_only = bool(_sid and _sid in known)
-        # Entry with explicit workspace choice (?workspace=<id>[&mode=..][&settings=..])
+        # Mode switch on a HELD session only (?mode=edit needs master).
+        # Workspace entry itself happens ONLY via the login page (no param entry).
         try:
-            asked = (request.GET.get("workspace") or "").strip()
+            _m = (request.GET.get("mode") or "").strip().lower()
         except Exception:
-            asked = ""
-        if asked and asked in known and active(asked):
+            _m = ""
+        if _m in ("view", "edit"):
             try:
-                request.session["workspace"] = asked
+                _held0 = (request.session.get("workspace") or "").strip()
             except Exception:
-                pass
-            try:
-                _m = (request.GET.get("mode") or "").strip().lower()
+                _held0 = ""
+            if _held0 and _held0 in known and active(_held0):
                 if _m == "view":
-                    request.session["ws_mode"] = "view"
-                elif _m == "edit":
-                    # edit mode needs master password (pre-authed session)
+                    try:
+                        request.session["ws_mode"] = "view"
+                    except Exception:
+                        pass
+                else:
                     try:
                         _mok = bool(request.session.get("master_ok"))
                     except Exception:
                         _mok = False
                     if _mok:
-                        request.session["ws_mode"] = "edit"
-            except Exception:
-                pass
-            return self.get_response(request)
+                        try:
+                            request.session["ws_mode"] = "edit"
+                        except Exception:
+                            pass
         # Session-held workspace (must still exist and be active)
         try:
             held = (request.session.get("workspace") or "").strip()

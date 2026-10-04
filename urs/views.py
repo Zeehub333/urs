@@ -546,7 +546,6 @@ def api_workspaces_create(request):
                 "accent": _color((data.get("brand_colors") or {}).get("accent")
                                 if isinstance(data.get("brand_colors"), dict) else "", "#10b981"),
             },
-            "fiscal_year": _s(data.get("fiscal_year"), 16) or str(_dt.date.today().year),
         })
         _pc = _s(data.get("primary_connection"), 80) or "urs_local"
         _ut = _s(data.get("users_table"), 160) or "users"
@@ -606,7 +605,7 @@ def api_workspace_save(request, ws_id):
 
     Body (all optional, validated):
       settings.py WORKSPACE: name, brand, company, domain, logo, country,
-        currency, brand_colors{primary,accent}, fiscal_year (empty → current year)
+        currency, brand_colors{primary,accent} (no fiscal year — resolved from schemas)
       workspace.conf: primary_connection, users_table, status
       connection?: {host, port, user, password?, instance} → upserts the
         primary-connection row (blank password keeps stored value)
@@ -659,7 +658,6 @@ def api_workspace_save(request, ws_id):
                 "primary": _color(bc.get("primary"), (cur.get("brand_colors") or {}).get("primary") or "#4f46e5"),
                 "accent": _color(bc.get("accent"), (cur.get("brand_colors") or {}).get("accent") or "#10b981"),
             },
-            "fiscal_year": _s(data.get("fiscal_year"), 16) or str(_dt.date.today().year),
         }
         _write_ws_settings_py(ws, new_ws)
         _old_conf = _wsm.read_conf(ws / "workspace.conf")
@@ -797,6 +795,315 @@ def _ws_master_ok(request):
         return False
 
 
+_FYEAR_RE = None
+try:
+    import re as _re_fy
+    _FYEAR_RE = _re_fy.compile(r"(19|20)\d{2}")
+except Exception:
+    _FYEAR_RE = None
+
+
+def extract_fiscal_years(schema_names):
+    """Pure: [{year, schema}] sorted desc from schema names holding a year."""
+    out = []
+    try:
+        for s in schema_names or []:
+            try:
+                m = _FYEAR_RE.search(str(s or "")) if _FYEAR_RE else None
+            except Exception:
+                m = None
+            if m:
+                out.append({"year": int(m.group(0)), "schema": str(s)})
+    except Exception:
+        pass
+    try:
+        out.sort(key=lambda r: (-r["year"], r["schema"]))
+    except Exception:
+        pass
+    return out
+
+
+def _ws_quote_ident(name):
+    """Double-quote an identifier (escapes embedded quotes)."""
+    return '"%s"' % str(name or "").replace('"', '""')
+
+
+_WS_USER_COLS = ("username", "user_name", "login", "login_name", "email", "mail")
+_WS_PASS_COLS = ("password", "passwd", "pwd", "password_hash", "pass_hash",
+                 "pass", "user_password", "pwd_hash")
+
+
+def _verify_login_password(plain, stored, username=""):
+    """Check a plain password against stored value across known hash types.
+
+    plaintext (legacy) → fmlk verify_secret (Django hashers + std fallback) →
+    hex sha256/sha1/md5 → werkzeug pbkdf2 → werkzeug scrypt → bcrypt →
+    argon2 → MySQL *SHA1 → Postgres md5(password+user). Never raises.
+    """
+    import hashlib as _hl
+    import hmac as _hm
+    p, s = str(plain or ""), str(stored or "")
+    if not p or not s:
+        return False
+    try:
+        if _hm.compare_digest(s, p):
+            return True
+    except Exception:
+        if s == p:
+            return True
+    try:
+        from fmlk_engine.engine import verify_secret as _vs
+        if _vs(p, s):
+            return True
+    except Exception:
+        pass
+    try:
+        _low = s.lower()
+        if len(s) in (64, 40, 32) and all(ch in "0123456789abcdef" for ch in _low):
+            _algo = {64: "sha256", 40: "sha1", 32: "md5"}[len(s)]
+            if _hl.new(_algo, p.encode("utf-8")).hexdigest() == _low:
+                return True
+    except Exception:
+        pass
+    try:  # werkzeug pbkdf2:sha256:iters$salt$hex (also sha512)
+        _parts = s.split("$")
+        if len(_parts) == 3:
+            _meth = _parts[0].split(":")
+            if len(_meth) == 3 and _meth[0] == "pbkdf2" and _meth[1] in ("sha256", "sha512"):
+                _iters = int(_meth[2])
+                if 1_000 <= _iters <= 5_000_000:
+                    _dk = _hl.pbkdf2_hmac(_meth[1], p.encode("utf-8"),
+                                          _parts[1].encode("utf-8"), _iters)
+                    if _hm.compare_digest(_dk.hex(), _parts[2].lower()):
+                        return True
+    except Exception:
+        pass
+    try:  # werkzeug scrypt:n:r:p$salt$hex
+        _parts = s.split("$")
+        if len(_parts) == 3 and _parts[0].startswith("scrypt:"):
+            _n, _r, _pp = (int(x) for x in _parts[0].split(":")[1:])
+            _dk = _hl.scrypt(p.encode("utf-8"), salt=_parts[1].encode("utf-8"),
+                             n=_n, r=_r, p=_pp, dklen=len(_parts[2]) // 2)
+            if _hm.compare_digest(_dk.hex(), _parts[2].lower()):
+                return True
+    except Exception:
+        pass
+    try:  # bcrypt $2a$/$2b$/$2y$ (library optional)
+        if s[:4] in ("$2a$", "$2b$", "$2y$"):
+            import bcrypt as _bc
+            if _bc.checkpw(p.encode("utf-8"), s.encode("utf-8")):
+                return True
+    except Exception:
+        pass
+    try:  # argon2 (library optional)
+        if s.startswith("$argon2"):
+            from argon2 import PasswordHasher as _PH
+            from argon2.exceptions import VerifyMismatchError as _VME
+            try:
+                _PH().verify(s, p)
+                return True
+            except _VME:
+                pass
+    except Exception:
+        pass
+    try:  # MySQL old PASSWORD(): * + UPPER(SHA1(SHA1(pw)))
+        if len(s) == 41 and s.startswith("*"):
+            _inner = _hl.sha1(p.encode("utf-8")).digest()
+            if ("*" + _hl.sha1(_inner).hexdigest().upper()) == s.upper():
+                return True
+    except Exception:
+        pass
+    try:  # Postgres md5 role password: 'md5' + md5(password + username)
+        if len(s) == 35 and s.startswith("md5"):
+            if "md5" + _hl.md5((p + str(username or "")).encode("utf-8")).hexdigest() == s.lower():
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _ws_login_connection(ws_id):
+    """Primary-connection row (+ users table) for a workspace.
+
+    Returns (obj, users_table, error). obj overlays app.conf for urs_local.
+    """
+    try:
+        from . import workspace as _wsm
+        from .models import Connection
+        ws = next((w for w in _wsm.workspace_dirs() if w.name == ws_id), None)
+        if ws is None:
+            return None, "", "unknown workspace"
+        conf = _wsm.read_conf(ws / "workspace.conf")
+        cname = (conf.get("PRIMARY_CONNECTION") or "").strip()
+        if not cname:
+            return None, "", "لا اتصال محلي معرف في إعدادات مساحة العمل"
+        obj = Connection.objects.filter(name=cname).first()
+        if obj is None:
+            return None, "", "الاتصال '%s' غير موجود" % cname
+        try:
+            obj = _effective_or_row(obj.id) or obj
+        except Exception:
+            pass
+        return obj, (conf.get("USERS_TABLE") or "").strip() or "users", ""
+    except Exception as e:
+        return None, "", str(e)
+
+
+def _ws_pg_connect(obj):
+    """psycopg2 connection from a Connection row (PostgreSQL only)."""
+    if (getattr(obj, "engine", "") or "").strip().lower() not in ("postgres", ""):
+        raise ValueError("السنوات والمستخدمون يُقرؤون من PostgreSQL فقط")
+    import psycopg2
+    return psycopg2.connect(dbname=obj.instance or "urs", user=obj.user,
+                            password=obj.password, host=obj.host,
+                            port=obj.port, connect_timeout=5)
+
+
+def api_workspace_fiscal_years(request, ws_id):
+    """GET /api/workspaces/<id>/fiscal-years/ → [{year, schema}] from DB schemas."""
+    try:
+        from . import workspace as _wsm
+        ws_id = (ws_id or "").strip()
+        if ws_id not in {w.name for w in _wsm.workspace_dirs()}:
+            return JsonResponse({"error": "unknown workspace"}, status=404)
+        obj, _ut, err = _ws_login_connection(ws_id)
+        if err or obj is None:
+            return JsonResponse({"error": err or "no connection"}, status=400)
+        try:
+            conn = _ws_pg_connect(obj)
+        except Exception as e:
+            return JsonResponse({"error": "تعذر الاتصال بقاعدة البيانات: %s" % str(e)[:200]}, status=400)
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT schema_name FROM information_schema.schemata ORDER BY 1")
+            schemas = [r[0] for r in (cur.fetchall() or [])]
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        schemas = [s for s in schemas
+                   if s not in ("pg_catalog", "information_schema")
+                   and not str(s).startswith("pg_")]
+        return JsonResponse({"years": extract_fiscal_years(schemas)},
+                            json_dumps_params={"ensure_ascii": False})
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@csrf_exempt
+def api_workspace_login(request, ws_id):
+    """POST /api/workspaces/<id>/login/ {schema, username, password, mode?}.
+
+    Users table from workspace.conf (schema-qualified as-is, else fiscal schema).
+    Password checked plain → engine hashes → common schemes. Never returns hashes.
+    """
+    if request.method != "POST":
+        return JsonResponse({"error": "POST required"}, status=405)
+    try:
+        from . import workspace as _wsm
+        import re as _re_id
+        ws_id = (ws_id or "").strip()
+        if ws_id not in {w.name for w in _wsm.workspace_dirs()}:
+            return JsonResponse({"error": "unknown workspace"}, status=404)
+        try:
+            data = json.loads(request.body.decode() or "{}")
+        except Exception:
+            return JsonResponse({"error": "invalid JSON"}, status=400)
+        if not isinstance(data, dict):
+            return JsonResponse({"error": "invalid JSON"}, status=400)
+        schema = str(data.get("schema") or "").strip()
+        username = str(data.get("username") or "").strip()
+        password = str(data.get("password") or "")
+        mode = str(data.get("mode") or "view").strip().lower()
+        if mode not in ("view", "edit"):
+            mode = "view"
+        if not schema or not username or not password:
+            return JsonResponse({"error": "السنة المالية واسم المستخدم وكلمة المرور مطلوبة"}, status=400)
+        if mode == "edit" and not _ws_master_ok(request):
+            return JsonResponse({"error": "master password required", "master_required": True}, status=403)
+        obj, utable, err = _ws_login_connection(ws_id)
+        if err or obj is None:
+            return JsonResponse({"error": err or "no connection"}, status=400)
+        if "." in utable:
+            sch, _, tbl = utable.partition(".")
+        else:
+            sch, tbl = schema, utable
+        for _ident, _label in ((sch, "schema"), (tbl, "المستخدمين")):
+            if not _re_id.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", _ident or ""):
+                return JsonResponse({"error": "اسم غير صالح في جدول %s" % _label}, status=400)
+        try:
+            conn = _ws_pg_connect(obj)
+        except Exception as e:
+            return JsonResponse({"error": "تعذر الاتصال بقاعدة البيانات: %s" % str(e)[:200]}, status=400)
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT column_name FROM information_schema.columns "
+                        "WHERE table_schema=%s AND table_name=%s", (sch, tbl))
+            cols = [str(r[0]).lower() for r in (cur.fetchall() or [])]
+            if not cols:
+                return JsonResponse({"error": "جدول المستخدمين غير موجود في السنة المحددة"}, status=400)
+            ucol = next((c for c in _WS_USER_COLS if c in cols), None)
+            pcol = next((c for c in _WS_PASS_COLS if c in cols), None)
+            if not ucol:
+                return JsonResponse({"error": "لا عمود اسم مستخدم في جدول المستخدمين"}, status=400)
+            if not pcol:
+                return JsonResponse({"error": "لا عمود كلمة مرور في جدول المستخدمين"}, status=400)
+            _uq, _pq = _ws_quote_ident(ucol), _ws_quote_ident(pcol)
+            _tq = "%s.%s" % (_ws_quote_ident(sch), _ws_quote_ident(tbl))
+            cur.execute("SELECT %s, %s FROM %s WHERE %s = %%s LIMIT 1" % (_uq, _pq, _tq, _uq),
+                        (username,))
+            row = cur.fetchone()
+            if row is None:
+                cur.execute("SELECT %s, %s FROM %s WHERE lower(%s) = lower(%%s) LIMIT 1" % (_uq, _pq, _tq, _uq),
+                            (username,))
+                row = cur.fetchone()
+            if row is None or not _verify_login_password(password, row[1], username=row[0]):
+                return JsonResponse({"error": "بيانات الدخول غير صحيحة"}, status=403)
+            _uname = row[0]
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        try:
+            _m = _FYEAR_RE.search(sch) if _FYEAR_RE else None
+        except Exception:
+            _m = None
+        try:
+            request.session["workspace"] = ws_id
+            request.session["ws_mode"] = mode
+            request.session["fiscal_year"] = int(_m.group(0)) if _m else None
+            request.session["fiscal_schema"] = sch
+            request.session["ws_user"] = {"username": str(_uname)}
+        except Exception:
+            pass
+        return JsonResponse({"ok": True, "redirect": "/apps/",
+                             "user": {"username": str(_uname)}},
+                            json_dumps_params={"ensure_ascii": False})
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+def workspace_login(request, ws_id):
+    """Login page on workspace entry: fiscal year + username + password."""
+    _g = _gate_redirect(request)
+    if _g is not None:
+        return _g
+    try:
+        from . import workspace as _wsm
+        ws_id = (ws_id or "").strip()
+        info = next((w for w in _wsm.workspaces_info() if w.get("id") == ws_id), None)
+        if info is None:
+            return redirect("/")
+        mode = (request.GET.get("mode") or "view").strip().lower()
+        if mode not in ("view", "edit"):
+            mode = "view"
+        return render(request, "enter.html", {"workspace": info, "ws_mode": mode})
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
 def api_workspaces_list(request):
     """GET /api/workspaces/ → workspaces (+connection_params, never password)."""
     try:
@@ -823,15 +1130,7 @@ def home(request):
     _g = _gate_redirect(request)
     if _g is not None:
         return _g
-    try:
-        _ws = (request.GET.get("workspace") or "").strip()
-        if _ws:
-            from . import workspace as _wsm_home
-            if _ws in {_w.get("id") for _w in _wsm_home.workspaces_info() if _w.get("id")} \
-                    and (_wsm_home.workspace_status(_ws) or "active") == "active":
-                request.session["workspace"] = _ws
-    except Exception:
-        pass
+    # NOTE: workspace entry happens ONLY via the login page (no param entry).
     # Dynamic apps: FOLDER-DRIVEN (workspace apps first, DB-only leftovers last)
     apps = _load_apps_folder_driven()
 

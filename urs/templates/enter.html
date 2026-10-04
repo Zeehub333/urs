@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}تسجيل الدخول — {{ workspace.name }}{% endblock %}
+{% block topbar %}{% include "partials/topbar.html" %}{% endblock %}
+{% block sidebar %}{% endblock %}
+{% block main %}
+    <div class="flex-1 flex items-center justify-center p-6 min-h-0 overflow-y-auto">
+        <div class="bg-white rounded-3xl shadow-xl w-full max-w-md overflow-hidden">
+            <div class="px-6 py-5 text-white text-center" style="background: {{ workspace.brand_colors.primary|default:'#4f46e5' }}">
+                {% if workspace.logo %}
+                <img src="{{ workspace.logo }}" alt="" class="w-14 h-14 rounded-2xl object-cover mx-auto mb-2 border border-white/30 bg-white/20">
+                {% else %}
+                <div class="w-14 h-14 rounded-2xl mx-auto mb-2 bg-white/20 flex items-center justify-center text-2xl"><i class="fa-solid fa-cube"></i></div>
+                {% endif %}
+                <div class="text-[11px] font-bold opacity-90">{{ workspace.brand }}</div>
+                <h1 class="font-extrabold text-lg">{{ workspace.name }}</h1>
+                {% if workspace.company %}<p class="text-[11px] opacity-80">{{ workspace.company }}</p>{% endif %}
+            </div>
+            <div class="p-6 space-y-3 text-xs">
+                <div>
+                    <label class="block font-semibold text-slate-700 mb-1">السنة المالية *</label>
+                    <select id="liYear" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 font-bold">
+                        <option value="">— جاري تحميل السنوات... —</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block font-semibold text-slate-700 mb-1">اسم المستخدم *</label>
+                    <input id="liUser" autocomplete="username" placeholder="username" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 font-mono" dir="ltr">
+                </div>
+                <div>
+                    <label class="block font-semibold text-slate-700 mb-1">كلمة المرور *</label>
+                    <input id="liPass" type="password" autocomplete="current-password" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 font-mono" dir="ltr">
+                </div>
+                <p id="liMsg" class="text-[11px] text-rose-600 font-bold min-h-[18px]"></p>
+                <button onclick="wsLoginSubmit()" class="w-full py-2.5 text-white rounded-xl text-sm font-bold hover:opacity-90" style="background: {{ workspace.brand_colors.primary|default:'#4f46e5' }}">دخول ←</button>
+                <a href="/" class="block text-center text-[11px] text-slate-400 hover:text-slate-600 font-bold">← مساحات العمل</a>
+            </div>
+        </div>
+    </div>
+{% endblock %}
+{% block scripts %}
+<script>
+const WS_LOGIN_ID = "{{ workspace.id|escapejs }}";
+const WS_LOGIN_MODE = "{{ ws_mode|escapejs }}";
+async function wsLoginYears(){
+    const sel = document.getElementById('liYear');
+    const msg = document.getElementById('liMsg');
+    try{
+        const res = await fetch('/api/workspaces/' + encodeURIComponent(WS_LOGIN_ID) + '/fiscal-years/');
+        const d = await res.json();
+        if(!res.ok) throw new Error(d.error || 'تعذر جلب السنوات');
+        const rows = d.years || [];
+        if(!rows.length) throw new Error('لا سنوات مالية في سكيمات قاعدة البيانات');
+        sel.innerHTML = rows.map(r=>`<option value="${String(r.schema).replace(/"/g,'&quot;')}">${r.year} — ${String(r.schema).replace(/</g,'&lt;')}</option>`).join('');
+        if(msg) msg.textContent = '';
+    }catch(e){
+        sel.innerHTML = '<option value="">— تعذر التحميل —</option>';
+        if(msg) msg.textContent = String((e && e.message) || e).slice(0, 200);
+    }
+}
+async function wsLoginSubmit(){
+    const msg = document.getElementById('liMsg');
+    const schema = document.getElementById('liYear').value;
+    const username = document.getElementById('liUser').value.trim();
+    const password = document.getElementById('liPass').value;
+    if(!schema || !username || !password){ if(msg) msg.textContent = 'السنة المالية واسم المستخدم وكلمة المرور مطلوبة'; return; }
+    if(msg) msg.textContent = 'جارٍ التحقق...';
+    try{
+        const res = await fetch('/api/workspaces/' + encodeURIComponent(WS_LOGIN_ID) + '/login/', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({schema, username, password, mode: WS_LOGIN_MODE})});
+        const d = await res.json().catch(()=>({}));
+        if(!res.ok) throw new Error(d.error || 'فشل الدخول');
+        location.href = (d.redirect || '/apps/');
+    }catch(e){ if(msg) msg.textContent = String((e && e.message) || e).slice(0, 200); }
+}
+document.addEventListener('keydown', (e)=>{ if(e.key === 'Enter' && document.getElementById('liPass')) wsLoginSubmit(); });
+wsLoginYears();
+</script>
+{% endblock %}

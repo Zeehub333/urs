@@ -44,7 +44,7 @@
                                 <div class="flex flex-wrap gap-1.5 text-[10px]">
                                     {% if w.country %}<span class="px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full font-bold">{{ w.country }}</span>{% endif %}
                                     {% if w.currency %}<span class="px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full font-bold">{{ w.currency }}</span>{% endif %}
-                                    {% if w.fiscal_year %}<span class="px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full font-bold">مالية {{ w.fiscal_year }}</span>{% endif %}
+
                                     <span class="px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded-full font-bold">{{ w.counts.apps }} تطبيق</span>
                                     <span class="px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded-full font-bold">{{ w.counts.forms }} نموذج</span>
                                     <span class="px-2 py-0.5 bg-amber-50 text-amber-700 rounded-full font-bold">{{ w.counts.reports }} تقرير</span>
@@ -56,7 +56,7 @@
                                 {% endif %}
                                 <div class="grid grid-cols-3 gap-2">
                                     <a href="/apps/?workspace={{ w.id }}&mode=edit" onclick="return wsEnterEdit(event, '{{ w.id }}')" class="block text-center py-2.5 text-white rounded-xl text-xs font-bold hover:opacity-90" style="background: {{ w.brand_colors.primary|default:'#4f46e5' }}" title="دخول كامل — المحركات والمصممون وأدوات التصميم (بكلمة الماستر)"><i class="fa-solid fa-pen-ruler"></i> تعديل</a>
-                                    <a href="/apps/?workspace={{ w.id }}&mode=view" class="block text-center py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold" title="دخول للعرض — بلا أدوات المطور والمصممين"><i class="fa-solid fa-eye"></i> دخول</a>
+                                    <a href="/enter/{{ w.id }}/?mode=view" class="block text-center py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold" title="دخول للعرض — بلا أدوات المطور والمصممين"><i class="fa-solid fa-eye"></i> دخول</a>
                                     <a href="/apps/?workspace={{ w.id }}&settings={{ w.id }}" onclick="return wsEnterSettings(event, '{{ w.id }}')" class="block text-center py-2.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-xl text-xs font-bold" title="تعديل خصائص المساحة (بكلمة الماستر)"><i class="fa-solid fa-gear"></i> إعدادات</a>
                                 </div>
                             </div>
@@ -84,7 +84,7 @@
                                     </div>
                                     <span class="mr-auto text-[10px] bg-slate-100 text-slate-500 rounded-full px-2 py-0.5 font-bold">{{ w.status }}</span>
                                 </div>
-                                <a href="/apps/?workspace={{ w.id }}" class="block text-center w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs font-bold">دخول ←</a>
+                                <a href="/enter/{{ w.id }}/" class="block text-center w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs font-bold">دخول ←</a>
                             </div>
                         </article>
                         {% endfor %}
@@ -100,7 +100,7 @@
 <script>
 function wsEnterEdit(ev, id){
     if(ev) ev.preventDefault();
-    wsMasterEnsure(()=>{ location.href = '/apps/?workspace=' + encodeURIComponent(id) + '&mode=edit'; });
+    wsMasterEnsure(()=>{ location.href = '/enter/' + encodeURIComponent(id) + '/?mode=edit'; });
     return false;
 }
 function wsEnterSettings(ev, id){
