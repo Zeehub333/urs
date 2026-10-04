@@ -1,13 +1,13 @@
 # Workspace 1 — primary workspace identity & branding.
 # Read by urs/workspace.py (safe import, WORKSPACE dict only).
 WORKSPACE = {
-    'name': 'workspace_1',
+    'name': 'شركة الروضة للصرافة 2026 النظام الجديد',
     'brand': 'Odex',
-    'company': '',
-    'domain': '',
+    'company': 'شركة الروضة للصرافة',
+    'domain': 'alrawda.com',
     'logo': '',
-    'country': '',
-    'currency': '',
-    'brand_colors': {'primary': '#4f46e5', 'accent': '#10b981'},
+    'country': 'YE',
+    'currency': 'YER',
+    'brand_colors': {'primary': '#10b981', 'accent': '#f5c000'},
     'fiscal_year': '2026',
 }

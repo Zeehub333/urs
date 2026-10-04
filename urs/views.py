@@ -460,6 +460,20 @@ def api_lookup_lists(request):
         return JsonResponse({"error": str(e)}, status=500)
 
 
+def workspace_exit(request):
+    """GET /exit/ — leave the workspace (clear session entry) → manager list."""
+    try:
+        for _k in ("workspace", "ws_mode"):
+            try:
+                if _k in request.session:
+                    del request.session[_k]
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return redirect("/")
+
+
 def api_workspaces_list(request):
     """GET /api/workspaces/ → workspaces + primary connection/users table."""
     try:

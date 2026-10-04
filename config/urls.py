@@ -21,6 +21,7 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('', urs_views.workspace_home, name='workspace'),
     path('apps/', urs_views.home, name='apps'),
+    path('exit/', urs_views.workspace_exit, name='exit'),
     path('api/workspaces/', urs_views.api_workspaces_list, name='api_workspaces_list'),
     path('api/lookup/lists/', urs_views.api_lookup_lists, name='api_lookup_lists'),
     path('api/workspaces/<str:ws_id>/save/', urs_views.api_workspace_save, name='api_workspace_save'),
