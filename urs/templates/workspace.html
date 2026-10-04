@@ -109,6 +109,10 @@ function wsEnterSettings(ev, id){
     return false;
 }
 function wsCreateOpen(){
+    // فتح نموذج الإضافة نفسه يتطلب الماستر — لا عرض ولا حفظ بدونه
+    wsMasterEnsure(wsCreateOpenDo);
+}
+function wsCreateOpenDo(){
     let m = document.getElementById('wsCreateModal');
     if(m) m.remove();
     m = document.createElement('div');
