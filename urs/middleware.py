@@ -14,6 +14,8 @@ from django.shortcuts import redirect
 _EXEMPT_EXACT = frozenset({
     "/",
     "/favicon.ico",
+    "/api/master/status/",
+    "/api/master/auth/",
 })
 _EXEMPT_PREFIXES_API = ("/api/workspaces/",)
 _EXEMPT_PREFIXES = (
@@ -64,8 +66,16 @@ class WorkspaceGateMiddleware:
                 pass
             try:
                 _m = (request.GET.get("mode") or "").strip().lower()
-                if _m in ("edit", "view"):
-                    request.session["ws_mode"] = _m
+                if _m == "view":
+                    request.session["ws_mode"] = "view"
+                elif _m == "edit":
+                    # edit mode needs master password (pre-authed session)
+                    try:
+                        _mok = bool(request.session.get("master_ok"))
+                    except Exception:
+                        _mok = False
+                    if _mok:
+                        request.session["ws_mode"] = "edit"
             except Exception:
                 pass
             return self.get_response(request)

@@ -17,7 +17,7 @@ from pathlib import Path
 
 APPCONF_KEYS = ["PYTHON", "HOST", "PORT", "SETTINGS",
                 "DB_ENGINE", "DB_HOST", "DB_PORT", "DB_USER", "DB_PASS", "DB_NAME", "DB_SCHEMA",
-                "DB_INSTANCENAME"]
+                "DB_INSTANCENAME", "master_pass"]
 
 DBPASS_ROUNDS = 200_000
 
@@ -174,3 +174,35 @@ def has_db_details(path=None):
         return bool((read_appconf(path).get("DB_HOST") or "").strip())
     except Exception:
         return False
+
+
+def master_is_set(path=None):
+    """True when app.conf carries a non-empty master_pass envelope."""
+    try:
+        return bool((read_appconf(path).get("master_pass") or "").strip())
+    except Exception:
+        return False
+
+
+def master_verify(candidate, secret=None, path=None):
+    """Check a master password against the stored envelope (constant-time)."""
+    try:
+        stored = (read_appconf(path).get("master_pass") or "").strip()
+        if not stored or not candidate:
+            return False
+        import hmac as _hm
+        return _hm.compare_digest(dbpass_resolve(stored, secret), str(candidate))
+    except Exception:
+        return False
+
+
+def master_set(new_plain, secret=None, path=None):
+    """First-time set (min 6 chars) — stores PBKDF2$ envelope. Returns (ok, err)."""
+    try:
+        new_plain = str(new_plain or "")
+        if len(new_plain) < 6:
+            return False, "min 6 chars"
+        ok = write_appconf({"master_pass": dbpass_encrypt(new_plain, secret)}, path)
+        return (True, "") if ok else (False, "write failed")
+    except Exception as e:
+        return False, str(e)

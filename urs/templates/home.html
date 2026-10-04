@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 {% block title %}تطبيقات النظام — Odex ERP{% endblock %}
 {% block sidebar %}
     <!-- Sidebar (Right side in Arabic RTL) — بدون اسم شركة -->
@@ -234,6 +235,7 @@
     {% endblock %}
     {% endblock %}
     {% block scripts %}
+    <script src="{% static 'components/ws_master.js' %}"></script>
     <script>
         // Dynamic search — filters app-card via /api/apps/?q=...
         const searchInput = document.getElementById('appSearch');
@@ -643,6 +645,9 @@
             }catch(e){ box.innerHTML = `<p class="text-rose-500 text-center py-6">${String((e && e.message) || e)}</p>`; }
         }
         async function wsSettingsSave(){
+            wsMasterEnsure(wsSettingsDo);
+        }
+        async function wsSettingsDo(){
             const id = window._wsEditId;
             const msg = document.getElementById('wsSettingsMsg');
             if(!id) return;

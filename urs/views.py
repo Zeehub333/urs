@@ -475,9 +475,13 @@ def api_workspaces_create(request):
 
     Body: {id? (auto workspace_N), name?, brand?, company?, domain?, country?,
       currency?, primary_connection?, users_table?, from? (source workspace id)}
+    Requires master password (session master_ok).
     """
     if request.method != "POST":
         return JsonResponse({"error": "POST required"}, status=405)
+    _mk = _ws_require_master(request)
+    if _mk is not None:
+        return _mk
     try:
         from . import workspace as _wsm
         data = json.loads(request.body.decode() or "{}")
@@ -607,9 +611,13 @@ def api_workspace_save(request, ws_id):
       connection?: {host, port, user, password?, instance} → upserts the
         primary-connection row (blank password keeps stored value)
     Display props live ONLY in settings.py (overlapping conf keys are dropped).
+    Requires master password (session master_ok).
     """
     if request.method != "POST":
         return JsonResponse({"error": "POST required"}, status=405)
+    _mk = _ws_require_master(request)
+    if _mk is not None:
+        return _mk
     try:
         from . import workspace as _wsm
         import datetime as _dt
@@ -725,6 +733,68 @@ def _ws_conn_params(name):
                 "user": o.user or "", "instance": o.instance or ""}
     except Exception:
         return {"host": "", "port": "", "user": "", "instance": ""}
+
+
+def api_master_status(request):
+    """GET /api/master/status/ → {set, authed}. Pre-entry surface (exempt)."""
+    try:
+        from config import dbconf as _dbc
+        try:
+            _authed = bool(request.session.get("master_ok"))
+        except Exception:
+            _authed = False
+        return JsonResponse({"set": bool(_dbc.master_is_set()), "authed": _authed})
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@csrf_exempt
+def api_master_auth(request):
+    """POST /api/master/auth/ — first-time set {new_password, confirm_password}
+    (min 6) or verify {password}. Sets session master_ok. Exempt (pre-entry)."""
+    if request.method != "POST":
+        return JsonResponse({"error": "POST required"}, status=405)
+    try:
+        from config import dbconf as _dbc
+        from django.conf import settings as _djset
+        try:
+            data = json.loads(request.body.decode() or "{}")
+        except Exception:
+            return JsonResponse({"error": "invalid JSON"}, status=400)
+        if not isinstance(data, dict):
+            return JsonResponse({"error": "invalid JSON"}, status=400)
+        _secret = getattr(_djset, "SECRET_KEY", "") or ""
+        if not _dbc.master_is_set():
+            npw = str(data.get("new_password") or "")
+            cfm = str(data.get("confirm_password") or "")
+            if len(npw) < 6:
+                return JsonResponse({"error": "min 6 chars"}, status=400)
+            if npw != cfm:
+                return JsonResponse({"error": "mismatch"}, status=400)
+            ok, err = _dbc.master_set(npw, secret=_secret)
+            if not ok:
+                return JsonResponse({"error": err or "write failed"}, status=500)
+            try:
+                request.session["master_ok"] = True
+            except Exception:
+                pass
+            return JsonResponse({"ok": True, "first_set": True})
+        if _dbc.master_verify(data.get("password") or "", secret=_secret):
+            try:
+                request.session["master_ok"] = True
+            except Exception:
+                pass
+            return JsonResponse({"ok": True})
+        return JsonResponse({"error": "wrong password"}, status=403)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+def _ws_master_ok(request):
+    try:
+        return bool(request.session.get("master_ok"))
+    except Exception:
+        return False
 
 
 def api_workspaces_list(request):
@@ -1360,11 +1430,21 @@ def _ws_mode(request):
 
 
 def _ws_can_design(request):
-    """True only in تعديل (edit) mode."""
+    """True only in تعديل (edit) mode with master password authed."""
     try:
-        return _ws_mode(request) == "edit"
+        return _ws_mode(request) == "edit" and _ws_master_ok(request)
     except Exception:
         return False
+
+
+def _ws_require_master(request):
+    """None when master authed, else 403 JSON (settings/add surfaces)."""
+    try:
+        if _ws_master_ok(request):
+            return None
+    except Exception:
+        pass
+    return JsonResponse({"error": "master password required", "master_required": True}, status=403)
 
 
 def _ws_require_design(request):
