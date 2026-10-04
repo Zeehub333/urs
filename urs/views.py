@@ -894,6 +894,55 @@ def _login_clear(ip, key):
 _WS_USER_COLS = ("username", "user_name", "login", "login_name", "email", "mail")
 _WS_PASS_COLS = ("password", "passwd", "pwd", "password_hash", "pass_hash",
                  "pass", "user_password", "pwd_hash")
+_SYS_SCHEMAS = ("pg_catalog", "information_schema")
+
+
+def _ws_user_table_candidates(cur, tbl):
+    """Suggest alternatives when the configured users table is missing.
+
+    [same-name table in other schemas] + [tables having username+password
+    columns, 'user' names first]. Pure read-only. Never raises.
+    """
+    out = []
+    try:
+        cur.execute("SELECT table_schema FROM information_schema.tables "
+                    "WHERE table_name=%s AND table_schema NOT IN ('pg_catalog','information_schema') "
+                    "AND table_schema NOT LIKE 'pg\\_%' ORDER BY 1", (tbl,))
+        for r in (cur.fetchall() or []):
+            try:
+                out.append("%s.%s" % (r[0], tbl))
+            except Exception:
+                pass
+    except Exception:
+        pass
+    try:
+        _u = ",".join(["%s"] * len(_WS_USER_COLS))
+        _p = ",".join(["%s"] * len(_WS_PASS_COLS))
+        cur.execute(
+            "SELECT table_schema, table_name FROM information_schema.columns "
+            "WHERE lower(column_name) IN (%s) "
+            "AND table_schema NOT IN ('pg_catalog','information_schema') "
+            "AND table_schema NOT LIKE 'pg\\_%%' "
+            "INTERSECT "
+            "SELECT table_schema, table_name FROM information_schema.columns "
+            "WHERE lower(column_name) IN (%s) "
+            "AND table_schema NOT IN ('pg_catalog','information_schema') "
+            "AND table_schema NOT LIKE 'pg\\_%%' "
+            "ORDER BY 1, 2" % (_u, _p),
+            tuple(_WS_USER_COLS) + tuple(_WS_PASS_COLS))
+        _got = []
+        for r in (cur.fetchall() or []):
+            try:
+                _got.append("%s.%s" % (r[0], r[1]))
+            except Exception:
+                pass
+        _got.sort(key=lambda t: (0 if "user" in t.lower() else 1, t))
+        for t in _got:
+            if t not in out:
+                out.append(t)
+    except Exception:
+        pass
+    return out[:5]
 
 
 def _verify_login_password(plain, stored, username=""):
@@ -1111,7 +1160,16 @@ def api_workspace_login(request, ws_id):
                         "WHERE table_schema=%s AND table_name=%s", (sch, tbl))
             cols = [str(r[0]).lower() for r in (cur.fetchall() or [])]
             if not cols:
-                return JsonResponse({"error": "جدول المستخدمين غير موجود في السنة المحددة"}, status=400)
+                try:
+                    _cands = _ws_user_table_candidates(cur, tbl)
+                except Exception:
+                    _cands = []
+                _msg = "جدول المستخدمين '%s' غير موجود في السنة المحددة (%s)" % (tbl, sch)
+                if _cands:
+                    _msg += " — المرشح: %s — حدّث جدول المستخدمين في إعدادات مساحة العمل" % _cands[0]
+                    if len(_cands) > 1:
+                        _msg += " (أو: %s)" % "، ".join(_cands[1:3])
+                return JsonResponse({"error": _msg, "candidates": _cands}, status=400)
             ucol = next((c for c in _WS_USER_COLS if c in cols), None)
             pcol = next((c for c in _WS_PASS_COLS if c in cols), None)
             if not ucol:
@@ -1120,13 +1178,18 @@ def api_workspace_login(request, ws_id):
                 return JsonResponse({"error": "لا عمود كلمة مرور في جدول المستخدمين"}, status=400)
             _uq, _pq = _ws_quote_ident(ucol), _ws_quote_ident(pcol)
             _tq = "%s.%s" % (_ws_quote_ident(sch), _ws_quote_ident(tbl))
-            cur.execute("SELECT %s, %s FROM %s WHERE %s = %%s LIMIT 1" % (_uq, _pq, _tq, _uq),
+            _active_col = "is_active" if "is_active" in cols else ("active" if "active" in cols else None)
+            _aq = (", %s" % _ws_quote_ident(_active_col)) if _active_col else ""
+            cur.execute("SELECT %s, %s%s FROM %s WHERE %s = %%s LIMIT 1" % (_uq, _pq, _aq, _tq, _uq),
                         (username,))
             row = cur.fetchone()
             if row is None:
-                cur.execute("SELECT %s, %s FROM %s WHERE lower(%s) = lower(%%s) LIMIT 1" % (_uq, _pq, _tq, _uq),
+                cur.execute("SELECT %s, %s%s FROM %s WHERE lower(%s) = lower(%%s) LIMIT 1" % (_uq, _pq, _aq, _tq, _uq),
                             (username,))
                 row = cur.fetchone()
+            if row is not None and _active_col and str(row[2] if len(row) > 2 else "").lower() in ("0", "false", "f", "no", "n", "off"):
+                _login_note_fail(_ip, _tkey)
+                return JsonResponse({"error": "هذا الحساب موقوف"}, status=403)
             if row is None:
                 # dummy verify evens out timing (no user enumeration)
                 try:
