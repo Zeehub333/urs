@@ -828,6 +828,69 @@ def _ws_quote_ident(name):
     return '"%s"' % str(name or "").replace('"', '""')
 
 
+import logging as _logging
+_ws_login_log = _logging.getLogger("urs.login")
+
+_LOGIN_USER_TRIES = 5
+_LOGIN_IP_TRIES = 30
+_LOGIN_WINDOW = 600  # seconds
+
+
+def _login_client_ip(request):
+    """Best-effort client IP (proxy-aware)."""
+    try:
+        _xff = (request.META.get("HTTP_X_FORWARDED_FOR") or "").split(",")[0].strip()
+        if _xff:
+            return _xff[:64]
+    except Exception:
+        pass
+    try:
+        return str(request.META.get("REMOTE_ADDR") or "")[:64]
+    except Exception:
+        return ""
+
+
+def _login_throttle_key(ip, ws_id, username):
+    return "wslogin:%s:%s:%s" % (ip or "-", ws_id or "-", (username or "").lower())
+
+
+def _login_locked(ip, key):
+    """(blocked, retry_after_secs): user key 5 tries, IP key 30 (shared offices)."""
+    try:
+        from django.core.cache import cache
+        for _k, _lim in (("wslogin:ip:" + (ip or "-"), _LOGIN_IP_TRIES), (key, _LOGIN_USER_TRIES)):
+            try:
+                _n = int(cache.get(_k) or 0)
+            except Exception:
+                _n = 0
+            if _n >= _lim:
+                return True, _LOGIN_WINDOW
+    except Exception:
+        pass
+    return False, 0
+
+
+def _login_note_fail(ip, key):
+    try:
+        from django.core.cache import cache
+        for _k in ("wslogin:ip:" + (ip or "-"), key):
+            try:
+                _n = int(cache.get(_k) or 0) + 1
+                cache.set(_k, _n, _LOGIN_WINDOW)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
+def _login_clear(ip, key):
+    try:
+        from django.core.cache import cache
+        cache.delete_many(["wslogin:ip:" + (ip or "-"), key])
+    except Exception:
+        pass
+
+
 _WS_USER_COLS = ("username", "user_name", "login", "login_name", "email", "mail")
 _WS_PASS_COLS = ("password", "passwd", "pwd", "password_hash", "pass_hash",
                  "pass", "user_password", "pwd_hash")
@@ -991,12 +1054,12 @@ def api_workspace_fiscal_years(request, ws_id):
         return JsonResponse({"error": str(e)}, status=500)
 
 
-@csrf_exempt
 def api_workspace_login(request, ws_id):
     """POST /api/workspaces/<id>/login/ {schema, username, password, mode?}.
 
     Users table from workspace.conf (schema-qualified as-is, else fiscal schema).
     Password checked plain → engine hashes → common schemes. Never returns hashes.
+    CSRF enforced; brute-force throttled (5/10min per IP+user); session rotated.
     """
     if request.method != "POST":
         return JsonResponse({"error": "POST required"}, status=405)
@@ -1022,6 +1085,12 @@ def api_workspace_login(request, ws_id):
             return JsonResponse({"error": "السنة المالية واسم المستخدم وكلمة المرور مطلوبة"}, status=400)
         if mode == "edit" and not _ws_master_ok(request):
             return JsonResponse({"error": "master password required", "master_required": True}, status=403)
+        _ip = _login_client_ip(request)
+        _tkey = _login_throttle_key(_ip, ws_id, username)
+        _blocked, _retry = _login_locked(_ip, _tkey)
+        if _blocked:
+            return JsonResponse({"error": "محاولات كثيرة — حاول بعد %d دقائق" % max(1, int((_retry + 59) // 60)),
+                                 "locked": True, "retry_after": _retry}, status=429)
         obj, utable, err = _ws_login_connection(ws_id)
         if err or obj is None:
             return JsonResponse({"error": err or "no connection"}, status=400)
@@ -1058,7 +1127,26 @@ def api_workspace_login(request, ws_id):
                 cur.execute("SELECT %s, %s FROM %s WHERE lower(%s) = lower(%%s) LIMIT 1" % (_uq, _pq, _tq, _uq),
                             (username,))
                 row = cur.fetchone()
-            if row is None or not _verify_login_password(password, row[1], username=row[0]):
+            if row is None:
+                # dummy verify evens out timing (no user enumeration)
+                try:
+                    _verify_login_password("x" * 12, "pbkdf2_sha256$200000$" + "0" * 32 + "$" + "0" * 64)
+                except Exception:
+                    pass
+                _login_note_fail(_ip, _tkey)
+                try:
+                    _ws_login_log.warning("login unknown user ws=%s schema=%s user=%s ip=%s",
+                                          ws_id, sch, username[:64], _ip)
+                except Exception:
+                    pass
+                return JsonResponse({"error": "بيانات الدخول غير صحيحة"}, status=403)
+            if not _verify_login_password(password, row[1], username=row[0]):
+                _login_note_fail(_ip, _tkey)
+                try:
+                    _ws_login_log.warning("login bad password ws=%s schema=%s user=%s ip=%s",
+                                          ws_id, sch, str(row[0])[:64], _ip)
+                except Exception:
+                    pass
                 return JsonResponse({"error": "بيانات الدخول غير صحيحة"}, status=403)
             _uname = row[0]
         finally:
@@ -1071,6 +1159,10 @@ def api_workspace_login(request, ws_id):
         except Exception:
             _m = None
         try:
+            try:
+                request.session.cycle_key()
+            except Exception:
+                pass
             request.session["workspace"] = ws_id
             request.session["ws_mode"] = mode
             request.session["fiscal_year"] = int(_m.group(0)) if _m else None
@@ -1078,6 +1170,7 @@ def api_workspace_login(request, ws_id):
             request.session["ws_user"] = {"username": str(_uname)}
         except Exception:
             pass
+        _login_clear(_ip, _tkey)
         return JsonResponse({"ok": True, "redirect": "/apps/",
                              "user": {"username": str(_uname)}},
                             json_dumps_params={"ensure_ascii": False})

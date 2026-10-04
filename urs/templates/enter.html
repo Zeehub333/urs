@@ -16,6 +16,7 @@
                 {% if workspace.company %}<p class="text-[11px] opacity-80">{{ workspace.company }}</p>{% endif %}
             </div>
             <div class="p-6 space-y-3 text-xs">
+                {% csrf_token %}
                 <div>
                     <label class="block font-semibold text-slate-700 mb-1">السنة المالية *</label>
                     <select id="liYear" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 font-bold">
@@ -24,11 +25,11 @@
                 </div>
                 <div>
                     <label class="block font-semibold text-slate-700 mb-1">اسم المستخدم *</label>
-                    <input id="liUser" autocomplete="username" placeholder="username" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 font-mono" dir="ltr">
+                    <input id="liUser" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="100" placeholder="username" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 font-mono" dir="ltr">
                 </div>
                 <div>
                     <label class="block font-semibold text-slate-700 mb-1">كلمة المرور *</label>
-                    <input id="liPass" type="password" autocomplete="current-password" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 font-mono" dir="ltr">
+                    <input id="liPass" type="password" autocomplete="current-password" maxlength="256" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 font-mono" dir="ltr">
                 </div>
                 <p id="liMsg" class="text-[11px] text-rose-600 font-bold min-h-[18px]"></p>
                 <button onclick="wsLoginSubmit()" class="w-full py-2.5 text-white rounded-xl text-sm font-bold hover:opacity-90" style="background: {{ workspace.brand_colors.primary|default:'#4f46e5' }}">دخول ←</button>
@@ -57,15 +58,24 @@ async function wsLoginYears(){
         if(msg) msg.textContent = String((e && e.message) || e).slice(0, 200);
     }
 }
+function wsCsrfToken(){
+    try{
+        const m = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]*)/);
+        if(m) return decodeURIComponent(m[1]);
+        const el = document.querySelector('input[name="csrfmiddlewaretoken"]');
+        if(el) return el.value;
+    }catch(e){}
+    return '';
+}
 async function wsLoginSubmit(){
     const msg = document.getElementById('liMsg');
     const schema = document.getElementById('liYear').value;
-    const username = document.getElementById('liUser').value.trim();
+    const username = document.getElementById('liUser').value.trim().slice(0, 100);
     const password = document.getElementById('liPass').value;
     if(!schema || !username || !password){ if(msg) msg.textContent = 'السنة المالية واسم المستخدم وكلمة المرور مطلوبة'; return; }
     if(msg) msg.textContent = 'جارٍ التحقق...';
     try{
-        const res = await fetch('/api/workspaces/' + encodeURIComponent(WS_LOGIN_ID) + '/login/', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({schema, username, password, mode: WS_LOGIN_MODE})});
+        const res = await fetch('/api/workspaces/' + encodeURIComponent(WS_LOGIN_ID) + '/login/', {method:'POST', headers:{'Content-Type':'application/json', 'X-CSRFToken': wsCsrfToken()}, body: JSON.stringify({schema, username, password, mode: WS_LOGIN_MODE})});
         const d = await res.json().catch(()=>({}));
         if(!res.ok) throw new Error(d.error || 'فشل الدخول');
         location.href = (d.redirect || '/apps/');
