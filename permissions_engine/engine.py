@@ -337,7 +337,15 @@ class PermissionsEngine:
                 user_obj = User.objects.filter(username=username).first()
                 if not user_obj:
                     # Auto-create user if not exists (for demo)
-                    user_obj = User.objects.create_user(username=username, password="password")
+                    # last_login explicit: hardened DBs reject NULL on auth_user
+                    try:
+                        from django.utils import timezone as _tz
+                        _now = _tz.now()
+                    except Exception:
+                        import datetime as _dt
+                        _now = _dt.datetime.now(_dt.timezone.utc)
+                    user_obj = User.objects.create_user(username=username, password="password",
+                                                        last_login=_now)
                     # Assign roles as groups
                     from django.contrib.auth.models import Group
                     for role in roles:
@@ -400,10 +408,17 @@ class PermissionsEngine:
                 elif u.is_staff:
                     roles.append("manager")
                 users_info.append({"username": u.username, "roles": roles, "is_superuser": u.is_superuser})
-            # If no users, create a demo admin
+            # If no users, create a demo admin (last_login explicit: see above)
             if not users_info:
                 from django.contrib.auth.models import User as U2
-                admin = U2.objects.create_superuser("admin", "admin@system.local", "admin")
+                try:
+                    from django.utils import timezone as _tz2
+                    _now2 = _tz2.now()
+                except Exception:
+                    import datetime as _dt2
+                    _now2 = _dt2.datetime.now(_dt2.timezone.utc)
+                admin = U2.objects.create_superuser("admin", "admin@system.local", "admin",
+                                                    last_login=_now2)
                 users_info.append({"username": "admin", "roles": ["admin"], "is_superuser": True})
         except Exception as e:
             # Fallback: create drivers for a default set of demo users
