@@ -641,12 +641,18 @@
                         </div>
                         <div><label class="block font-semibold text-slate-700 mb-1">قاعدة البيانات</label><input id="wsF_instance" value="${esc(cp.instance)}" dir="ltr" placeholder="urs" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono"></div>
                     </div>
+                    <div class="rounded-xl border border-amber-200 bg-amber-50/50 p-3 space-y-2">
+                        <div class="text-[11px] font-bold text-amber-700"><i class="fa-solid fa-crown"></i> المشرف العام — يُنشأ فقط عندما يكون جدول المستخدمين فارغاً</div>
+                        <div id="wsSuBox"><p class="text-slate-400 text-[11px]">...</p></div>
+                    </div>
                     <div><label class="block font-semibold text-slate-700 mb-1">الحالة (تخويل الدخول للمساحة)</label><select id="wsF_status" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"><option value="active" ${w.status==='active'?'selected':''}>نشطة — مسموح الدخول</option><option value="archived" ${w.status==='archived'?'selected':''}>مؤرشفة</option><option value="disabled" ${w.status==='disabled'?'selected':''}>معطلة — ممنوع الدخول</option></select></div>
                     <p class="text-[11px] text-slate-400">الحالة «معطلة» تمنع الدخول والتفاعل مع كل محتويات المساحة خادمياً.</p>
                 </div>`;
                 wsSecGo(window._wsSec || 'general');
                 wsBrandPreview();
                 wsTablesFetch();
+                try{ const _ut = document.getElementById('wsF_users_table'); if(_ut && !(_ut.dataset.suBound)){ _ut.dataset.suBound = '1'; _ut.addEventListener('change', ()=>wsSuRefresh()); } }catch(e){}
+                wsSuRefresh();
             }catch(e){ box.innerHTML = `<p class="text-rose-500 text-center py-6">${String((e && e.message) || e)}</p>`; }
         }
         async function wsTablesFetch(){
@@ -662,6 +668,50 @@
                 if(!res.ok) throw new Error(d.error || '');
                 dl.innerHTML = (d.tables || []).map(t=>`<option value="${escT(t.full)}">${escT(t.full)}</option>`).join('');
             }catch(e){ dl.innerHTML = ''; }
+        }
+        async function wsSuRefresh(){
+            const box = document.getElementById('wsSuBox');
+            if(!box || !window._wsEditId) return;
+            box.innerHTML = '<p class="text-slate-400 text-[11px]">جارٍ فحص جدول المستخدمين...</p>';
+            try{
+                const tEl = document.getElementById('wsF_users_table');
+                const t = tEl ? String(tEl.value || '').trim() : '';
+                const res = await fetch('/api/workspaces/' + encodeURIComponent(window._wsEditId) + '/users-count/?table=' + encodeURIComponent(t));
+                const d = await res.json();
+                if(!res.ok) throw new Error(d.error || '');
+                if((d.count || 0) > 0){
+                    box.innerHTML = `<p class="text-[11px] text-slate-500">المستخدمون المسجلون: <b>${d.count}</b> <span class="font-mono" dir="ltr">${String(d.table || '').replace(/</g,'&lt;')}</span></p>`;
+                    return;
+                }
+                box.innerHTML = `<p class="text-[11px] text-slate-500">الجدول <span class="font-mono" dir="ltr">${String(d.table || '').replace(/</g,'&lt;')}</span> فارغ — أنشئ المشرف العام الأول:</p>
+                <div class="grid grid-cols-2 gap-2">
+                    <div><input id="wsSu_user" placeholder="اسم المستخدم *" autocomplete="off" class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 font-mono" dir="ltr"></div>
+                    <div><input id="wsSu_name" placeholder="الاسم الكامل" class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2"></div>
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                    <div><input id="wsSu_pw1" type="password" placeholder="كلمة المرور (6+)" autocomplete="new-password" class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 font-mono" dir="ltr"></div>
+                    <div><input id="wsSu_pw2" type="password" placeholder="تأكيد كلمة المرور" autocomplete="new-password" class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 font-mono" dir="ltr"></div>
+                </div>
+                <p id="wsSuMsg" class="text-[11px] text-rose-600 font-bold"></p>
+                <button onclick="wsSuCreate()" class="px-4 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold"><i class="fa-solid fa-crown"></i> إنشاء مشرف عام</button>`;
+            }catch(e){ box.innerHTML = `<p class="text-rose-500 text-[11px]">${String((e && e.message) || e).slice(0, 200)}</p>`; }
+        }
+        async function wsSuCreate(){
+            const msg = document.getElementById('wsSuMsg');
+            const v = (id)=>{ const el = document.getElementById(id); return el ? el.value : ''; };
+            const username = String(v('wsSu_user') || '').trim();
+            const pw1 = String(v('wsSu_pw1') || ''), pw2 = String(v('wsSu_pw2') || '');
+            if(!username){ if(msg) msg.textContent = 'اسم المستخدم مطلوب'; return; }
+            if(pw1.length < 6){ if(msg) msg.textContent = 'كلمة المرور 6 أحرف فأكثر'; return; }
+            if(pw1 !== pw2){ if(msg) msg.textContent = 'تأكيد كلمة المرور غير مطابق'; return; }
+            const tEl = document.getElementById('wsF_users_table');
+            try{
+                const res = await fetch('/api/workspaces/' + encodeURIComponent(window._wsEditId) + '/superuser/', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({username, password: pw1, full_name: String(v('wsSu_name') || '').trim(), table: tEl ? String(tEl.value || '').trim() : ''})});
+                const d = await res.json().catch(()=>({}));
+                if(!res.ok) throw new Error(d.error || 'فشل الإنشاء');
+                try{ notify('أُنشئ المشرف العام ✓', 'success'); }catch(e){}
+                wsSuRefresh();
+            }catch(e){ if(msg) msg.textContent = String((e && e.message) || e).slice(0, 200); }
         }
         async function wsSettingsSave(){
             wsMasterEnsure(wsSettingsDo);
