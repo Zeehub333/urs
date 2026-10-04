@@ -1,5 +1,5 @@
 """
-FMLK field-type registry — 10 traditional + 15 relational field types.
+FMLK field-type registry — 11 traditional + 15 relational field types.
 
 Each entry describes one inputType: Arabic label, description, usage example,
 category (traditional = single-table simple data, relational = cross-table),
@@ -17,6 +17,7 @@ ALIASES: Dict[str, List[str]] = {
     "boolean": ["boolean", "checkbox", "bool", "check"],
     "select": ["select", "dropdown", "choice", "list", "combobox"],
     "password": ["password", "passwd", "pwd", "secret", "passcode"],
+    "phone_number": ["phone_number", "phone", "mobile", "mobile_number", "tel", "telephone"],
     "ip_address": ["ip_address", "ipaddress", "ip", "ipv4", "ip_address_field"],
     "port_picker": ["port_picker", "portpicker", "port", "port_number", "port_picker_field"],
     "list-input": ["list-input", "list_input", "listinput", "iplist", "ip_list", "string_list", "value_list", "multi_text"],
@@ -47,6 +48,7 @@ CONFIG_ATTRS: Dict[str, List[str]] = {
     "cascading_select": ["parent_field"],
     "multiselect": ["allow_new"],
     "password": [],
+    "phone_number": ["phone_country"],
     "ip_address": [],
     "port_picker": [],
     "lookup": [],
@@ -94,6 +96,9 @@ TYPES: List[Dict] = [
     {"key": "select", "ar": "صندوق اختيار", "en": "Select", "category": "traditional",
      "description": "قائمة منسدلة ببيانات محددة ثابتة (options) يختار منها المستخدم قيمة واحدة.",
      "usage": "اختيار نوع المحرك من قائمة محددة: postgres/oracle/sqlserver."},
+    {"key": "phone_number", "ar": "رقم جوال", "en": "Phone Number", "category": "traditional",
+     "description": "رقم جوال بمفتاح الدولة (180 دولة) والتحقق من طول الرقم حسب الدولة — يُحفظ أرقاماً.",
+     "usage": "رقم جوال العميل أو الموظف مع رمز الدولة.", "attrs": ["phone_country"]},
     {"key": "password", "ar": "كلمة مرور", "en": "Password", "category": "traditional",
      "description": "إدخال مخفي (نقاط) لكلمات المرور — لا تظهر في السجلات أبداً بل نجوم عشوائية الطول، ولا تُحفظ النجوم عند التعديل.",
      "usage": "كلمة مرور اتصال قاعدة البيانات."},

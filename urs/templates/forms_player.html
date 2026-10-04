@@ -2581,8 +2581,16 @@
                         break;
                     }
                     case 'phone':
-                        input = `<div class="flex gap-1.5"><input data-field="${field.name}" value="${escAttr(val)}" placeholder="+966 12 345 6789" ${patternAttr} ${minLenAttr} ${maxLenAttr} class="flex-1 fx-inp font-mono" dir="ltr"/><span class="px-3 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold flex items-center">🇸🇦</span></div>`;
+                    case 'phone_number': {
+                        const _cc0 = String(cfg(field, 'phone_country') || 'SA').toUpperCase();
+                        const _pv = String(val ?? '').replace(/\D/g, '');
+                        input = `<div class="flex gap-1.5 items-center" dir="ltr">`
+                            + `<select data-phone-cc="${escAttr(field.name)}" data-cc="${escAttr(_cc0)}" onchange="FMLK.phoneCountry('${field.name}', this.value)" title="رمز الدولة" class="fx-inp !px-1 font-mono shrink-0" style="max-width:7.5rem"><option value="${escAttr(_cc0)}">…</option></select>`
+                            + `<input data-field="${field.name}" value="${escAttr(_pv)}" placeholder="5XXXXXXXX" ${patternAttr} ${minLenAttr} ${maxLenAttr} inputmode="tel" autocomplete="off" spellcheck="false" oninput="FMLK.phoneInput('${field.name}', this)" class="flex-1 min-w-0 fx-inp font-mono" dir="ltr"/>`
+                            + `<span data-phone-hint="${escAttr(field.name)}" class="text-[10px] font-bold text-slate-400 whitespace-nowrap"></span></div>`;
+                        setTimeout(()=>{ try{ FMLK.phoneInit(field.name); }catch(e){} }, 0);
                         break;
+                    }
                     case 'email':
                         input = `<div class="fx-wrap"><span class="fx-ic"><i class="fa-solid fa-envelope"></i></span><input type="email" data-field="${field.name}" value="${escAttr(val)}" placeholder="example@domain.com" ${patternAttr} ${minLenAttr} ${maxLenAttr} class="fx-inp font-mono" dir="ltr"/></div>`;
                         break;
@@ -3126,6 +3134,68 @@
                 const name = el.getAttribute('data-port-input') || '';
                 if((el.value || '') !== '') el.value = String(Math.min(65535, parseInt(el.value || '0', 10) || 0));
                 this.portSync(name);
+            },
+            _phoneCodes: null,
+            async phoneCodes(){
+                // رموز الدول وأطوال الأرقام (180 دولة) — تُجلب مرة واحدة وتُخزَّن
+                if(this._phoneCodes) return this._phoneCodes;
+                try{
+                    const res = await fetch('/api/lookup/lists/');
+                    const d = await res.json();
+                    if(d && Array.isArray(d.country_codes) && d.country_codes.length) this._phoneCodes = d.country_codes;
+                }catch(e){}
+                if(!this._phoneCodes) this._phoneCodes = [{c: 'SA', dial: '+966', len: 9}];
+                return this._phoneCodes;
+            },
+            async phoneInit(name){
+                const codes = await this.phoneCodes();
+                try{
+                    document.querySelectorAll(`select[data-phone-cc="${CSS.escape(name)}"]`).forEach(sel=>{
+                        const def = String(sel.getAttribute('data-cc') || 'SA').toUpperCase();
+                        sel.innerHTML = codes.map(o=>`<option value="${escAttr(o.c)}" ${o.c === def ? 'selected' : ''}>${escHtml(o.dial)} ${escHtml(o.c)}</option>`).join('');
+                        if(!codes.some(o=>o.c === sel.value)) sel.selectedIndex = 0;
+                    });
+                }catch(e){}
+                this.phoneApply(name);
+            },
+            phoneCountry(name, cc){
+                try{
+                    document.querySelectorAll(`select[data-phone-cc="${CSS.escape(name)}"]`).forEach(sel=>{ sel.value = cc; });
+                }catch(e){}
+                this.phoneApply(name);
+            },
+            phoneInput(name, el){
+                try{
+                    const digits = String(el.value || '').replace(/\D/g, '');
+                    const codes = this._phoneCodes || [];
+                    const sel = document.querySelector(`select[data-phone-cc="${CSS.escape(name)}"]`);
+                    const hit = codes.find(o=>o.c === (sel ? sel.value : ''));
+                    const len = hit ? parseInt(hit.len, 10) : 0;
+                    el.value = len ? digits.slice(0, len) : digits;
+                }catch(e){}
+                this.phoneApply(name);
+            },
+            phoneApply(name){
+                // تلميح الطول + إطار أخضر عند اكتمال الرقم (القيمة المخزنة أرقام فقط)
+                try{
+                    const codes = this._phoneCodes || [];
+                    const sels = document.querySelectorAll(`select[data-phone-cc="${CSS.escape(name)}"]`);
+                    const inps = document.querySelectorAll(`#formRoot input[data-field="${CSS.escape(name)}"], #blankPanelBody input[data-field="${CSS.escape(name)}"]`);
+                    const hints = document.querySelectorAll(`[data-phone-hint="${CSS.escape(name)}"]`);
+                    const sel = sels.length ? sels[0] : null;
+                    const hit = codes.find(o=>o.c === (sel ? sel.value : ''));
+                    const len = hit ? parseInt(hit.len, 10) : 0;
+                    inps.forEach(inp=>{
+                        if(len) inp.setAttribute('maxlength', String(len));
+                        const n = String(inp.value || '').replace(/\D/g, '').length;
+                        const full = len && n === len;
+                        inp.classList.toggle('!border-emerald-400', !!full);
+                    });
+                    hints.forEach(h=>{
+                        h.textContent = len ? (hit.dial + ' • ' + len + ' أرقام') : '';
+                        h.className = 'text-[10px] font-bold whitespace-nowrap ' + 'text-slate-400';
+                    });
+                }catch(e){}
             },
             statusSync(name, value){
                 // الحالات radio: حدّث القيمة المخفية وأعد تلوين الأزرار

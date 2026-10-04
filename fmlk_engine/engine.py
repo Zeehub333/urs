@@ -232,6 +232,10 @@ class FMLKFormEngine:
             if f.input_type == "number" and f.name not in errors:
                 try: float(val)
                 except: errors[f.name] = "يجب أن يكون رقماً"
+            if f.input_type in ("phone", "phone_number") and f.name not in errors:
+                _digits = re.sub(r"\D", "", sval)
+                if len(_digits) < 6:
+                    errors[f.name] = f"{f.alias} رقم هاتف غير صالح"
             # ── Validation Engine ──
             rules = f.validation or {}
             # regex / pattern

@@ -450,10 +450,11 @@ def _lookup_json_file(name):
 
 
 def api_lookup_lists(request):
-    """GET /api/lookup/lists/ → {countries:[{c,ar,en}], currencies:[{c,ar,s}]}."""
+    """GET /api/lookup/lists/ → {countries, currencies, country_codes:[{c,dial,len}]}."""
     try:
         return JsonResponse({"countries": _lookup_json_file("countries.json"),
-                             "currencies": _lookup_json_file("currencies.json")},
+                             "currencies": _lookup_json_file("currencies.json"),
+                             "country_codes": _lookup_json_file("country_codes.json")},
                             json_dumps_params={"ensure_ascii": False})
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
