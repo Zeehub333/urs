@@ -56,20 +56,27 @@ function wizApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof 
         }
         function rmlWizardPrev(){ if(rmlWizardStep>1) showRmlStep(rmlWizardStep-1); }
         function cleanProg(v){
-            return (v || '').toLowerCase().replace(/[\s\-]+/g, '_').replace(/[^a-z0-9_]/g, '').replace(/_+/g, '_').replace(/^_+|_+$/g, '');
+            return (v || '').toLowerCase().replace(/[\s\-]+/g, '_').replace(/[^a-z0-9_]/g, '');
         }
         function syncRmlFileName(){
-            // الاسم المختصر → اسم الملف لحظياً أثناء الكتابة
-            const prog = document.getElementById('rmlProgName').value;
+            const progInput = document.getElementById('rmlProgName');
             const fileInput = document.getElementById('rmlFileName');
+            if(!progInput || !fileInput) return;
+            const prog = progInput.value.trim();
+            if(!prog){
+                fileInput.value = '';
+                return;
+            }
             const c = cleanProg(prog);
-            fileInput.value = c ? c + '.rml' : '';
+            fileInput.value = c ? (c.endsWith('.rml') ? c : c + '.rml') : '';
         }
         function syncRmlProgName(){
-            // اسم الملف → الاسم المختصر لحظياً أثناء الكتابة
             const fileInput = document.getElementById('rmlFileName');
             const progInput = document.getElementById('rmlProgName');
-            progInput.value = cleanProg(fileInput.value.trim().replace(/\.rml$/i, ''));
+            if(!progInput || !fileInput) return;
+            const file = fileInput.value.trim().replace(/\.rml$/i, '');
+            const c = cleanProg(file);
+            progInput.value = c;
         }
         let wizardEditMode = null; // {file} when editing an existing report
         function resetWizardState(){
@@ -107,6 +114,7 @@ function wizApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof 
             if(typeof lockScroll === 'function') lockScroll();
             try{ if(typeof refreshCatDatalists === 'function') refreshCatDatalists(); }catch(e){}
             showRmlStep(1);
+            rdOpenReportProps('meta');
             loadConnectionsForWizard();
             if(typeof rdUpdateConnectionsHost === 'function') rdUpdateConnectionsHost();
             renderWizardFields();
@@ -182,10 +190,11 @@ function wizApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof 
                 wizardEditMode = {file: file};
                 document.getElementById('rmlCreateBtn').textContent = 'حفظ التعديلات';
                 document.getElementById('rmlWizardTitle').innerHTML = '<i class="fa-solid fa-pen-to-square text-amber-600"></i> تعديل تقرير: ' + (md.displayName || file);
-                document.getElementById('rmlFileName').disabled = true;
+                document.getElementById('rmlFileName').disabled = false;
                 document.getElementById('addRmlModal').classList.remove('hidden');
                 if(typeof lockScroll === 'function') lockScroll();
                 showRmlStep(1);
+                rdOpenReportProps('meta');
                 await loadConnectionsForWizard();
                 renderWizardFields();
                 renderWizardColumns();

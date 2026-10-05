@@ -39,7 +39,7 @@
                 </main>
                 <!-- لوحة خصائص العمود المتحركة بأنميشن -->
                                 <!-- لوحة خصائص التقرير والعناصر المتحركة بأنميشن والمزيحة للوحة -->
-                <aside id="rdPropsDrawer" class="rd-props-drawer">
+                <aside id="rdPropsDrawer" class="rd-props-drawer open">
                     <!-- 1. شاشة خصائص التقرير المدمجة (بيانات التقرير الأساسية + الاتصالات) -->
                     <div id="rdReportPropsPanel" class="flex-1 min-h-0 flex flex-col overflow-hidden h-full">
                         <div class="p-3 border-b border-slate-200 bg-slate-50/90 flex items-center justify-between shrink-0">
@@ -62,8 +62,8 @@
                             <div id="rdRepPaneMeta" class="space-y-2.5">
                                 <div id="rmlWizardStep1" class="space-y-2.5">
                                     <div><label class="block text-[10px] font-bold text-slate-500 mb-1">الاسم العربي *</label><input id="rmlDisplayName" placeholder="تقرير جديد" class="wb-inp w-full"></div>
-                                    <div><label class="block text-[10px] font-bold text-slate-500 mb-1">الاسم الإنجليزي *</label><input id="rmlProgName" placeholder="my_report" class="wb-inp w-full font-mono" dir="ltr" oninput="syncRmlFileName()"></div>
-                                    <div><label class="block text-[10px] font-bold text-slate-500 mb-1">اسم الملف *</label><input id="rmlFileName" placeholder="my_report.rml" class="wb-inp w-full font-mono" dir="ltr" oninput="syncRmlProgName()"></div>
+                                    <div><label class="block text-[10px] font-bold text-slate-500 mb-1">الاسم الإنجليزي *</label><input id="rmlProgName" placeholder="my_report" class="wb-inp w-full font-mono" dir="ltr" oninput="syncRmlFileName()" onchange="syncRmlFileName()"></div>
+                                    <div><label class="block text-[10px] font-bold text-slate-500 mb-1">اسم الملف *</label><input id="rmlFileName" placeholder="my_report.rml" class="wb-inp w-full font-mono" dir="ltr" oninput="syncRmlProgName()" onchange="syncRmlProgName()"></div>
                                     <div class="grid grid-cols-2 gap-2">
                                         <div><label class="block text-[10px] font-bold text-slate-500 mb-1">الأيقونة</label><select id="rmlIcon" class="wb-inp w-full"><option value="fa-chart-bar">أعمدة</option><option value="fa-chart-line">خط بياني</option><option value="fa-chart-pie">دائري</option><option value="fa-table">جدول</option><option value="fa-file-lines">مستند</option></select></div>
                                         <div><label class="block text-[10px] font-bold text-slate-500 mb-1">الفئة</label><input id="rmlCategory" list="rmlCategoryList" placeholder="اكتب جديدة أو اختر" class="wb-inp w-full" autocomplete="off"><datalist id="rmlCategoryList"></datalist></div>
