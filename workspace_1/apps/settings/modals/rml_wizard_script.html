@@ -1517,56 +1517,62 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
         function removeWizardDetailColumn(idx){ wizardDetail.columns.splice(idx,1); renderWizardColumns(); try{ if(typeof rptPreviewSoon === 'function') rptPreviewSoon(); }catch(e){}}
         function updateWizardDetailColumn(idx, field, val){ wizardDetail.columns[idx][field]=val; }
         function renderWizardColumns(){
-            rptPalCSS();
-            const container = document.getElementById('wbSheetBody') || document.getElementById('wizardColumnsList');
-            if(!container) return;
-            if(!wizardColumns.length){
-                container.innerHTML = wbGeneralWherePanel() + `
-                <div class="flex-1 flex flex-col items-center justify-center p-8 text-center bg-slate-50/50 m-3 rounded-2xl border-2 border-dashed border-slate-200">
-                    <i class="fa-solid fa-table-columns text-3xl text-slate-300 mb-2"></i>
-                    <p class="text-slate-500 font-bold text-sm mb-1">لا توجد أعمدة في التقرير بعد</p>
-                    <p class="text-slate-400 text-xs mb-3">ابدأ بإضافة أعمدة أو استورد الحقول من تبويب الحقول والمخطط</p>
-                    <button type="button" onclick="addWizardColumn()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-200 flex items-center gap-1.5"><i class="fa-solid fa-plus"></i> إضافة عمود جديد</button>
-                </div>`;
+            if(window._inRenderWizardColumns) return;
+            window._inRenderWizardColumns = true;
+            try{
+                rptPalCSS();
+                const container = document.getElementById('wbSheetBody') || document.getElementById('wizardColumnsList');
+                if(!container) return;
+                if(!wizardColumns.length){
+                    container.innerHTML = wbGeneralWherePanel() + `
+                    <div class="flex-1 flex flex-col items-center justify-center p-8 text-center bg-slate-50/50 m-3 rounded-2xl border-2 border-dashed border-slate-200">
+                        <i class="fa-solid fa-table-columns text-3xl text-slate-300 mb-2"></i>
+                        <p class="text-slate-500 font-bold text-sm mb-1">لا توجد أعمدة في التقرير بعد</p>
+                        <p class="text-slate-400 text-xs mb-3">ابدأ بإضافة أعمدة أو استورد الحقول من تبويب الحقول والمخطط</p>
+                        <button type="button" onclick="addWizardColumn()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-200 flex items-center gap-1.5"><i class="fa-solid fa-plus"></i> إضافة عمود جديد</button>
+                    </div>`;
+                    rptPropsRender();
+                    return;
+                }
+                container.innerHTML = `
+                <!-- 1. الشرط العام (General WHERE) في الأعلى -->
+                <div class="rd-pal-where border-b border-slate-200 bg-slate-50/80 p-2.5 shrink-0">
+                    ${wbGeneralWherePanel()}
+                </div>
+                <!-- 2. شريط بيانات التقرير الرئيسية + إجراءات -->
+                <div class="rd-pal-bar flex items-center justify-between px-3 py-2 bg-white border-b border-slate-100 shrink-0">
+                    <div class="flex items-center gap-2">
+                        <span class="font-bold text-slate-800 text-xs flex items-center gap-1.5">
+                            <i class="fa-solid fa-table-cells text-emerald-600"></i>
+                            <span>بيانات التقرير الرئيسية — معاينة حية (أول 50 صف)</span>
+                        </span>
+                        <span class="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-bold">الأعمدة: ${wizardColumns.length}</span>
+                        <span class="text-[10px] bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full font-bold">الظاهرة: ${(wizardColumns.filter(rptVis)||[]).length}</span>
+                    </div>
+                    <div class="flex items-center gap-1.5">
+                        <button type="button" onclick="addWizardColumn()" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1 shadow-sm transition"><i class="fa-solid fa-plus text-[10px]"></i> عمود جديد</button>
+                        <button type="button" onclick="rptPreviewFetch(true)" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold flex items-center gap-1 transition"><i class="fa-solid fa-rotate text-[10px]"></i> تحديث المعاينة</button>
+                    </div>
+                </div>
+                <!-- 3. المعاينة الحية للأعمدة والبيانات مع تمرير داخلي وسحب وإفلات بدون أسهم -->
+                <div id="rptPrevBox" class="flex-1 min-h-0 flex flex-col overflow-hidden"></div>
+                <!-- 4. طي وتوسيع التفاصيل -->
+                <div class="rd-det-strip border-t border-slate-200 bg-slate-50/90 px-3 py-2 flex items-center justify-between shrink-0">
+                    <button type="button" onclick="rptDetOpen=!rptDetOpen;renderWizardColumns()" class="inline-flex items-center gap-2 text-xs font-bold text-slate-700 hover:text-slate-900 transition">
+                        <i class="fa-solid ${rptDetOpen ? 'fa-chevron-down' : 'fa-chevron-left'} text-slate-400"></i>
+                        <span>أعمدة وتفاصيل التقرير التحليلي (Detail)</span>
+                        <span class="text-[10px] bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-bold">${((wizardDetail.columns||[]).length)}</span>
+                    </button>
+                    <button type="button" onclick="addWizardDetailColumn()" class="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-bold flex items-center gap-1 transition"><i class="fa-solid fa-plus text-[10px]"></i> عمود فرعي</button>
+                </div>
+                <div id="rptDetBox" class="${rptDetOpen ? '' : 'hidden'} border-t border-slate-200 bg-white p-2 shrink-0 max-h-48 overflow-y-auto custom-scroll">${rptDetOpen ? rptDetListHTML() : ''}</div>
+                `;
+                rptPreviewRender();
                 rptPropsRender();
-                return;
+                rptPreviewSoon();
+            }finally{
+                window._inRenderWizardColumns = false;
             }
-            container.innerHTML = `
-            <!-- 1. الشرط العام (General WHERE) في الأعلى -->
-            <div class="rd-pal-where border-b border-slate-200 bg-slate-50/80 p-2.5 shrink-0">
-                ${wbGeneralWherePanel()}
-            </div>
-            <!-- 2. شريط بيانات التقرير الرئيسية + إجراءات -->
-            <div class="rd-pal-bar flex items-center justify-between px-3 py-2 bg-white border-b border-slate-100 shrink-0">
-                <div class="flex items-center gap-2">
-                    <span class="font-bold text-slate-800 text-xs flex items-center gap-1.5">
-                        <i class="fa-solid fa-table-cells text-emerald-600"></i>
-                        <span>بيانات التقرير الرئيسية — معاينة حية (أول 50 صف)</span>
-                    </span>
-                    <span class="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-bold">الأعمدة: ${wizardColumns.length}</span>
-                    <span class="text-[10px] bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full font-bold">الظاهرة: ${(wizardColumns.filter(rptVis)||[]).length}</span>
-                </div>
-                <div class="flex items-center gap-1.5">
-                    <button type="button" onclick="addWizardColumn()" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1 shadow-sm transition"><i class="fa-solid fa-plus text-[10px]"></i> عمود جديد</button>
-                    <button type="button" onclick="rptPreviewFetch(true)" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold flex items-center gap-1 transition"><i class="fa-solid fa-rotate text-[10px]"></i> تحديث المعاينة</button>
-                </div>
-            </div>
-            <!-- 3. المعاينة الحية للأعمدة والبيانات مع تمرير داخلي وسحب وإفلات بدون أسهم -->
-            <div id="rptPrevBox" class="flex-1 min-h-0 flex flex-col overflow-hidden"></div>
-            <!-- 4. طي وتوسيع التفاصيل -->
-            <div class="rd-det-strip border-t border-slate-200 bg-slate-50/90 px-3 py-2 flex items-center justify-between shrink-0">
-                <button type="button" onclick="rptDetOpen=!rptDetOpen;renderWizardColumns()" class="inline-flex items-center gap-2 text-xs font-bold text-slate-700 hover:text-slate-900 transition">
-                    <i class="fa-solid ${rptDetOpen ? 'fa-chevron-down' : 'fa-chevron-left'} text-slate-400"></i>
-                    <span>أعمدة وتفاصيل التقرير التحليلي (Detail)</span>
-                    <span class="text-[10px] bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-bold">${((wizardDetail.columns||[]).length)}</span>
-                </button>
-                <button type="button" onclick="addWizardDetailColumn()" class="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-bold flex items-center gap-1 transition"><i class="fa-solid fa-plus text-[10px]"></i> عمود فرعي</button>
-            </div>
-            <div id="rptDetBox" class="${rptDetOpen ? '' : 'hidden'} border-t border-slate-200 bg-white p-2 shrink-0 max-h-48 overflow-y-auto custom-scroll">${rptDetOpen ? rptDetListHTML() : ''}</div>
-            `;
-            rptPreviewRender();
-            rptPropsRender();
-            rptPreviewSoon();
         }
         /* ── Report palette: flex sidebar + live preview + animated props ── */
         let rptSel = {kind: null, idx: -1};
@@ -2150,7 +2156,7 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
             return `<div class="bg-indigo-50/60 border border-indigo-200 rounded-xl p-3 space-y-2">
                 <div class="flex items-center justify-between gap-2">
                     <span class="text-[11px] font-bold text-indigo-700"><i class="fa-solid fa-filter"></i> الشرط العام للتقرير (WHERE) — فلترة ثابتة تُطبق على كل تنفيذ</span>
-                    ${wizardGeneralWhere ? `<button onclick="updateGeneralWhere('');renderWizardColumns();try{if(typeof wbRenderActiveSheet==='function')wbRenderActiveSheet();}catch(e){}" title="مسح الشرط" class="text-[10px] text-slate-400 hover:text-rose-600 font-bold">مسح <i class="fa-solid fa-xmark"></i></button>` : ''}
+                    ${wizardGeneralWhere ? `<button onclick="updateGeneralWhere('');renderWizardColumns();" title="مسح الشرط" class="text-[10px] text-slate-400 hover:text-rose-600 font-bold">مسح <i class="fa-solid fa-xmark"></i></button>` : ''}
                 </div>
                 <div class="flex gap-1"><input value="${wbEsc(wizardGeneralWhere || '').replace(/"/g, '&quot;')}" oninput="updateGeneralWhere(this.value);exprAuto(this,'general:0')" placeholder="[RT_BILL_DATE] >= '2026-01-01' AND [BILL_AMT] > 1000" autocomplete="off" class="flex-1 min-w-0 bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-mono" dir="ltr"><button onclick="openExprExpand(0, false, 'general')" title="تحرير موسع" class="px-2.5 rounded-lg bg-violet-50 hover:bg-violet-100 text-violet-700 shrink-0"><i class="fa-solid fa-expand text-[11px]"></i></button><button onclick="openExprBuilder(0, false, 'general')" title="اختيار الاتصال ← الجدول ← الحقل" class="px-2.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 shrink-0"><i class="fa-solid fa-magnifying-glass text-[11px]"></i></button></div>
                 <p class="text-[10px] text-slate-500">مراجع الحقول بين <span class="font-mono" dir="ltr">[ ]</span> + <span class="font-mono" dir="ltr">AND / OR / NOT</span> والمقارنات — مثال: <span class="font-mono" dir="ltr">[TransferID] &gt; 100</span>. <span class="font-mono" dir="ltr">@</span> يستدعي عموداً محسوباً من المصمم (يُوسَّع لتعبيره): <span class="font-mono" dir="ltr">@NetAmount &gt; 1000</span>. تُربط الجداول تلقائياً — وشروط الاتصالات الأخرى البسيطة (عمود = قيمة) تُنفَّذ على مرحلتين تلقائياً.</p>
@@ -3040,9 +3046,12 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
             try{ wbPaintStatus(); }catch(e){}
         }
         function wbRenderActiveSheet(){
-            const body = document.getElementById('wbSheetBody');
-            const fbar = document.getElementById('wbSheetFoot');
-            if(!body) return;
+            if(window._inWbRenderActiveSheet) return;
+            window._inWbRenderActiveSheet = true;
+            try{
+                const body = document.getElementById('wbSheetBody');
+                const fbar = document.getElementById('wbSheetFoot');
+                if(!body) return;
             if(fbar) fbar.classList.add('hidden');
             if(wbSheet === 'palette' || wbSheet === 'columns'){
                 renderWizardColumns();
@@ -3263,6 +3272,9 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
             body.innerHTML = html;
             if(fbar){ fbar.innerHTML = foot; fbar.style.display = foot ? '' : 'none'; }
             wbPaintStatus();
+            }finally{
+                window._inWbRenderActiveSheet = false;
+            }
         }
         function wbRenderConns(){
             const host = document.getElementById('wbConnsHost');
@@ -3954,13 +3966,17 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
             const dirty = document.getElementById('wbDirty');
             if(dirty) dirty.classList.toggle('hidden', !(wizardFields.length || wizardColumns.length || wizardConnections.length));
         }
-        // الجسر: استدعاءات المعالج تحدّث الشبكة والحالة دائماً
-        ['renderWizardFields','renderWizardColumns','renderWizardGroups','renderWizardDetail','renderWizardCharts','renderWizardRules'].forEach(fn=>{
+        // الجسر: استدعاءات المعالج تحدّث الشبكة والحالة دائماً (بدون أعمدة/تفاصيل لتفادي الحلقات اللانهائية)
+        ['renderWizardFields','renderWizardGroups','renderWizardCharts','renderWizardRules'].forEach(fn=>{
             const orig = window[fn];
             if(typeof orig === 'function'){
                 window[fn] = function(){
                     const r = orig.apply(this, arguments);
-                    try{ if(document.getElementById('addRmlModal') && !document.getElementById('addRmlModal').classList.contains('hidden')) wbRenderActiveSheet(); }catch(e){}
+                    try{
+                        if(!window._inWbRenderActiveSheet && !window._inRenderWizardColumns && wbSheet !== 'palette' && wbSheet !== 'columns' && wbSheet !== 'detail'){
+                            if(document.getElementById('addRmlModal') && !document.getElementById('addRmlModal').classList.contains('hidden')) wbRenderActiveSheet();
+                        }
+                    }catch(e){}
                     return r;
                 };
             }
