@@ -22,11 +22,22 @@
                 </div>
                 <div id="rmlError" class="hidden text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-3 py-1.5 text-xs mt-2"></div>
             </div>
-            <!-- الشبكة (أوراق متعددة) -->
-            <div id="wbSheets" class="flex-1 min-h-0 flex flex-col overflow-hidden text-xs">
-                <div id="wbSheetTabs" class="flex items-center gap-0.5 px-2 pt-1.5 border-b border-slate-100 bg-slate-50/40 shrink-0 overflow-x-auto custom-scroll"></div>
-                <div id="wbSheetBody" class="flex-1 min-h-0 overflow-y-auto custom-scroll p-2"></div>
-                <div id="wbSheetFoot" class="shrink-0 border-t border-slate-200 bg-slate-50/70 px-2 py-1.5 flex items-center gap-2"></div>
+            <!-- بيئة عمل المصمم: flex ثلاثي (سايدبار 10vw + لوحة التقرير 80vw + خصائص العمود المنزلقة بأنميشن) -->
+            <div id="wbSheets" class="flex-1 min-h-0 flex flex-row overflow-hidden text-xs relative rpt-flex">
+                <!-- سايدبار 10vw: كل التبويبات عدا الأعمدة والتفاصيل -->
+                <aside id="rdSidebar" class="rd-sidebar shrink-0 bg-slate-50/90 border-l border-slate-200 p-2 flex flex-col gap-1 overflow-y-auto custom-scroll" style="width: 10vw; min-width: 130px; max-width: 200px;">
+                    <div class="text-[10px] font-extrabold text-slate-400 px-2 py-1 mb-1 tracking-wider uppercase">أقسام المصمم</div>
+                    <div id="wbSheetTabs" class="flex flex-col gap-1 flex-1"></div>
+                    <div id="rptSideCols" class="hidden"></div>
+                    <div id="rptSideDet" class="hidden"></div>
+                </aside>
+                <!-- لوحة التقرير 80vw -->
+                <main id="rdMainPalette" class="rd-palette flex-1 min-w-0 flex flex-col overflow-hidden relative bg-white" style="width: 80vw;">
+                    <div id="wbSheetBody" class="flex-1 min-h-0 overflow-y-auto custom-scroll flex flex-col"></div>
+                    <div id="wbSheetFoot" class="shrink-0 border-t border-slate-200 bg-slate-50/70 px-3 py-1.5 flex items-center gap-2 hidden"></div>
+                </main>
+                <!-- لوحة خصائص العمود المتحركة بأنميشن -->
+                <aside id="rdPropsDrawer" class="rd-props-drawer"></aside>
             </div>
             <!-- مستودعات البيانات المخفية (تُملأ بواسطة منطق المعالج الحالي وتُرسم في الشبكة) -->
             <div id="rmlWizardStep2" class="hidden">

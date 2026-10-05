@@ -757,6 +757,15 @@ class RmlRefnameTests(SimpleTestCase):
         with self.assertRaises(ValueError):
             eng._plan_value_refs([me])
 
+    def test_refname_with_get_and_bracket(self):
+        eng = self._eng()
+        p = self._col(name="salary", alias="الراتب", expr="=get(employees.basic_salary)", col_refname="base_sal")
+        s = self._col(name="bonus", alias="البونص", expr="[base_sal] * 0.1")
+        plan = eng._plan_value_refs([p, s])
+        self.assertIsNotNone(plan)
+        self.assertEqual([x.name for x in plan["base"]], ["salary"])
+        self.assertEqual([[x.name for x in lvl] for lvl in plan["levels"]], [["bonus"]])
+
     def test_compiler_parses_refname(self):
         from rml_python.compiler import RMLColumn
         import dataclasses

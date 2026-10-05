@@ -1920,25 +1920,39 @@ class RMLReportEngine:
         return out
 
     def _value_tokens(self, text, refmap) -> set:
-        """@refname tokens in text that name a known col_refname (literals skipped)."""
+        """@refname (or [refname]) tokens in text that name a known col_refname (literals skipped)."""
         found = set()
-        if not text or "@" not in str(text) or not refmap:
+        if not text or not refmap:
             return found
-        for seg in re.split(self._REFNAME_SEG_RE, str(text))[0::2]:
+        st = str(text)
+        if "@" not in st and "[" not in st:
+            return found
+        for seg in re.split(self._REFNAME_SEG_RE, st)[0::2]:
             for m in self._REFNAME_TOKEN_RE.finditer(seg):
-                if str(m.group(1)).lower() in refmap:
-                    found.add(str(m.group(1)).lower())
+                k = str(m.group(1)).lower()
+                if k in refmap:
+                    found.add(k)
+            for m in re.finditer(r"\[([A-Za-z_][A-Za-z0-9_]*)\]", seg):
+                k = str(m.group(1)).lower()
+                if k in refmap:
+                    found.add(k)
         return found
 
     def _rewrite_value_expr(self, text, alias_of) -> str:
-        """Replace @refname with the referenced column's quoted SELECT alias."""
+        """Replace @refname (and [refname]) with the referenced column's quoted SELECT alias."""
         segs = re.split(self._REFNAME_SEG_RE, str(text or ""))
         for i in range(0, len(segs), 2):
             def _rep(m):
                 key = str(m.group(1)).lower()
                 return alias_of.get(key, m.group(0))
-            segs[i] = re.sub(r"(?<![\w$#@.\"'])@([A-Za-z_][A-Za-z0-9_]*)(?![\w])",
-                             _rep, segs[i])
+            def _rep_b(m):
+                key = str(m.group(1)).lower()
+                if key in alias_of:
+                    return alias_of[key]
+                return m.group(0)
+            s = re.sub(r"(?<![\w$#@.\"'])@([A-Za-z_][A-Za-z0-9_]*)(?![\w])", _rep, segs[i])
+            s = re.sub(r"\[([A-Za-z_][A-Za-z0-9_]*)\]", _rep_b, s)
+            segs[i] = s
         return "".join(segs)
 
     def _plan_value_refs(self, columns, extra_aliases=None):
@@ -1990,7 +2004,7 @@ class RMLReportEngine:
             except Exception:
                 _traw = ""
             if "__py_" in str(_traw) or re.search(
-                    r"(?i)\b(XLOOKUP|VLOOKUP|FILTER|GET|SUMIF|SUMIFS|COUNTIF|COUNTBLANK|COUNTBY|SUMBY|SERIAL|ROWNUM|ROW)\s*\(", str(_traw)):
+                    r"(?i)\b(XLOOKUP|VLOOKUP|FILTER|SUMIF|SUMIFS|COUNTIF|COUNTBLANK|COUNTBY|SUMBY|SERIAL|ROWNUM|ROW)\s*\(", str(_traw)):
                 using = sorted({getattr(c, "alias", None) or getattr(c, "name", "")
                                 for c in cols if r in deps.get(id(c), set())})
                 raise ValueError("المرجع @%s يحتاج تقييم Python (جدول %s) — القيمة المرجعية تعمل على أعمدة SQL فقط"
@@ -7639,7 +7653,21 @@ class RMLReportEngine:
                         for _d in raw_rows:
                             for _k in _strip:
                                 _d.pop(_k, None)
-                    result_rows = [{k: _fmt_cell(v) for k, v in _r.items()} for _r in raw_rows]
+                    result_rows = []
+                    _refcols = [(str(getattr(c, "col_refname", None) or getattr(c, "colRefname", None) or "").strip(),
+                                 getattr(c, "alias", None) or getattr(c, "name", None))
+                                for c in (exec_plan.get("columns") or [])
+                                if getattr(c, "col_refname", None) or getattr(c, "colRefname", None)]
+                    for _r in raw_rows:
+                        _row_d = {k: _fmt_cell(v) for k, v in _r.items()}
+                        for _rn, _al in _refcols:
+                            if _rn:
+                                _val = _row_d.get(_al)
+                                if _val is None and _al:
+                                    _val = _row_d.get(str(_al).lower())
+                                _row_d[_rn] = _val
+                                _row_d["@" + _rn] = _val
+                        result_rows.append(_row_d)
             finally:
                 try: cur.close()
                 except: pass
