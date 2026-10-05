@@ -108,6 +108,7 @@ function wizApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof 
             try{ if(typeof refreshCatDatalists === 'function') refreshCatDatalists(); }catch(e){}
             showRmlStep(1);
             loadConnectionsForWizard();
+            if(typeof rdUpdateConnectionsHost === 'function') rdUpdateConnectionsHost();
             renderWizardFields();
             renderWizardColumns();
             renderWizardDetail();
@@ -214,7 +215,9 @@ function wizApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof 
                 const conns = (data.connections || []).filter(c => _localOnly ? !!c.is_local : true);
                 wizardConnNames = {};
                 wizardConnSchemas = {};
+                window._rawConnectionsData = conns;
                 conns.forEach(c=>{ wizardConnNames[String(c.id)] = c.name; wizardConnSchemas[String(c.id)] = c.schema || ''; });
+                if(typeof rdUpdateConnectionsHost === 'function') rdUpdateConnectionsHost();
                 if(!conns.length){ list.innerHTML='<p class="text-slate-400">لا توجد اتصالات — أنشئ اتصالاً أولاً</p>'; return; }
                 list.innerHTML = conns.map(c=>`
                     <label class="flex items-center gap-3 p-2.5 rounded-xl border ${wizardConnections.includes(String(c.id))?'bg-emerald-50 border-emerald-200':'bg-white border-slate-200 hover:bg-slate-50'} cursor-pointer transition">
@@ -1513,15 +1516,29 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
             try{ applyColSubTab(); }catch(e){}
         }
         function addWizardDetailColumn(){
+            if(!wizardDetail.columns) wizardDetail.columns = [];
             const newIdx = wizardDetail.columns.length;
             wizardDetail.columns.push({id:String(newIdx+1), name:'dcol_'+(newIdx+1), alias:'عمود فرعي '+(newIdx+1), expr:'', col_refname:'', visible:true, width:null, col_type:'direct', icon:'fa-hashtag', is_amount:false, refFk:'', join_type:'one_to_one'});
-            renderWizardColumns();
-            try{ rptSelectCol('dcol', newIdx); }catch(e){}
-            try{ if(typeof rptPreviewSoon === 'function') rptPreviewSoon(); }catch(e){}
+            rdTreeOpen.det = true;
+            rdRenderElementsTree();
+            if(!document.getElementById('rptPrevBox')){
+                renderWizardColumns();
+            } else {
+                rptSelectCol('dcol', newIdx);
+                rptPreviewSoon();
+                try{ wbPaintStatus(); }catch(e){}
+            }
         }
         function refreshDetailRelHint(){ try{ applyColSubTab(); }catch(e){} }
-        function removeWizardDetailColumn(idx){ wizardDetail.columns.splice(idx,1); renderWizardColumns(); try{ if(typeof rptPreviewSoon === 'function') rptPreviewSoon(); }catch(e){}}
-        function updateWizardDetailColumn(idx, field, val){ wizardDetail.columns[idx][field]=val; }
+        function removeWizardDetailColumn(idx){
+            if(!wizardDetail.columns) return;
+            wizardDetail.columns.splice(idx,1);
+            rptCloseProps();
+            rdRenderElementsTree();
+            try{ rptPreviewSoon(); }catch(e){}
+            try{ wbPaintStatus(); }catch(e){}
+        }
+        function updateWizardDetailColumn(idx, field, val){ if(wizardDetail.columns && wizardDetail.columns[idx]){ wizardDetail.columns[idx][field]=val; } }
         function renderWizardColumns(){
             if(window._inRenderWizardColumns) return;
             window._inRenderWizardColumns = true;
@@ -1537,42 +1554,39 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                         <p class="text-slate-400 text-xs mb-3">ابدأ بإضافة أعمدة أو استورد الحقول من تبويب الحقول والمخطط</p>
                         <button type="button" onclick="addWizardColumn()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-200 flex items-center gap-1.5"><i class="fa-solid fa-plus"></i> إضافة عمود جديد</button>
                     </div>`;
+                    rdRenderElementsTree();
                     rptPropsRender();
                     return;
                 }
+                const isDetailRpt = (((document.getElementById('rmlReportType') || {}).value === 'detail') || ((wizardDetail.columns||[]).length > 0));
                 container.innerHTML = `
                 <!-- 1. الشرط العام (General WHERE) في الأعلى -->
-                <div class="rd-pal-where border-b border-slate-200 bg-slate-50/80 p-2.5 shrink-0">
+                <div class="rd-pal-where border-b border-slate-200 bg-slate-50/80 p-2 shrink-0">
                     ${wbGeneralWherePanel()}
                 </div>
-                <!-- 2. شريط بيانات التقرير الرئيسية + إجراءات -->
-                <div class="rd-pal-bar flex items-center justify-between px-3 py-2 bg-white border-b border-slate-100 shrink-0">
+                <!-- 2. شريط بيانات التقرير الرئيسية + إحصائيات وإجراءات -->
+                <div class="rd-pal-bar flex items-center justify-between px-3 py-1.5 bg-white border-b border-slate-100 shrink-0">
                     <div class="flex items-center gap-2">
                         <span class="font-bold text-slate-800 text-xs flex items-center gap-1.5">
                             <i class="fa-solid fa-table-cells text-emerald-600"></i>
-                            <span>بيانات التقرير الرئيسية — معاينة حية (أول 20 صف)</span>
+                            <span>معاينة حية في الوقت الحقيقي (أول 20 صف)</span>
                         </span>
                         <span class="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-bold">الأعمدة: ${wizardColumns.length}</span>
                         <span class="text-[10px] bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full font-bold">الظاهرة: ${(wizardColumns.filter(rptVis)||[]).length}</span>
+                        ${(wizardDetail.columns||[]).length ? `<span class="text-[10px] bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full font-bold">الفرعية: ${(wizardDetail.columns||[]).length}</span>` : ''}
+                        ${wizardGroups.length ? `<span class="text-[10px] bg-amber-50 text-amber-800 px-2 py-0.5 rounded-full font-bold">المجموعات: ${wizardGroups.length}</span>` : ''}
                     </div>
                     <div class="flex items-center gap-1.5">
-                        <button type="button" onclick="addWizardColumn()" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1 shadow-sm transition"><i class="fa-solid fa-plus text-[10px]"></i> عمود جديد</button>
-                        <button type="button" onclick="rptPreviewFetch(true)" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold flex items-center gap-1 transition"><i class="fa-solid fa-rotate text-[10px]"></i> تحديث المعاينة</button>
+                        <button type="button" onclick="rdToggleReportProps()" class="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg text-xs font-bold flex items-center gap-1.5 transition"><i class="fa-solid fa-sliders text-[10px]"></i> خصائص التقرير</button>
+                        ${isDetailRpt ? `<button type="button" onclick="rptToggleAllRows()" class="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-bold flex items-center gap-1 transition"><i class="fa-solid fa-angles-down text-[10px]"></i> طي / توسيع التفاصيل</button>` : ''}
+                        <button type="button" onclick="addWizardColumn()" class="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold flex items-center gap-1 shadow-xs transition"><i class="fa-solid fa-plus text-[10px]"></i> عمود</button>
+                        <button type="button" onclick="rptPreviewFetch(true)" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-lg text-xs font-bold flex items-center gap-1 transition"><i class="fa-solid fa-rotate text-[10px]"></i> تحديث المعاينة</button>
                     </div>
                 </div>
-                <!-- 3. المعاينة الحية للأعمدة والبيانات مع تمرير داخلي وسحب وإفلات بدون أسهم -->
-                <div id="rptPrevBox" class="flex-1 min-h-0 flex flex-col overflow-hidden"></div>
-                <!-- 4. طي وتوسيع التفاصيل -->
-                <div class="rd-det-strip border-t border-slate-200 bg-slate-50/90 px-3 py-2 flex items-center justify-between shrink-0">
-                    <button type="button" onclick="rptDetOpen=!rptDetOpen;renderWizardColumns()" class="inline-flex items-center gap-2 text-xs font-bold text-slate-700 hover:text-slate-900 transition">
-                        <i class="fa-solid ${rptDetOpen ? 'fa-chevron-down' : 'fa-chevron-left'} text-slate-400"></i>
-                        <span>أعمدة وتفاصيل التقرير التحليلي (Detail)</span>
-                        <span class="text-[10px] bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-bold">${((wizardDetail.columns||[]).length)}</span>
-                    </button>
-                    <button type="button" onclick="addWizardDetailColumn()" class="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-bold flex items-center gap-1 transition"><i class="fa-solid fa-plus text-[10px]"></i> عمود فرعي</button>
-                </div>
-                <div id="rptDetBox" class="${rptDetOpen ? '' : 'hidden'} border-t border-slate-200 bg-white p-2 shrink-0 max-h-48 overflow-y-auto custom-scroll">${rptDetOpen ? rptDetListHTML() : ''}</div>
+                <!-- 3. المعاينة الحية بشاشة كاملة مع دعم المجموعات والأعمدة والطي والتوسيع التحليلي -->
+                <div id="rptPrevBox" class="flex-1 min-h-0 flex flex-col overflow-hidden h-full"></div>
                 `;
+                rdRenderElementsTree();
                 rptPreviewRender();
                 rptPropsRender();
                 rptPreviewSoon();
@@ -1582,9 +1596,124 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
         }
         /* ── Report palette: flex sidebar + live preview + animated props ── */
         let rptSel = {kind: null, idx: -1};
-        let rptDetOpen = true;
         let rptPrev = {cols: [], rows: [], loading: false, error: '', sql: ''};
         let rptPrevTimer = null;
+        let rdTreeOpen = {cols: true, det: true, groups: true};
+        let rptExpandedRows = new Set();
+        function rdTreeToggle(branch){
+            rdTreeOpen[branch] = !rdTreeOpen[branch];
+            rdRenderElementsTree();
+        }
+        function toggleColVis(kind, idx){
+            const list = kind === 'dcol' ? (wizardDetail.columns || []) : wizardColumns;
+            if(!list[idx]) return;
+            list[idx].visible = !rptVis(list[idx]);
+            rdRenderElementsTree();
+            rptPreviewSoon();
+        }
+        function rptToggleRow(ri){
+            if(rptExpandedRows.has(ri)) rptExpandedRows.delete(ri);
+            else rptExpandedRows.add(ri);
+            rptPreviewRender();
+        }
+        function rptToggleAllRows(){
+            const rows = rptPrev.rows || [];
+            if(rptExpandedRows.size >= rows.length){
+                rptExpandedRows.clear();
+            } else {
+                rows.forEach((_, idx)=>rptExpandedRows.add(idx));
+            }
+            rptPreviewRender();
+        }
+        function rdRenderElementsTree(){
+            const host = document.getElementById('rdElementsTree');
+            if(!host) return;
+
+            const cols = wizardColumns || [];
+            const colsHtml = cols.map((c, i)=>{
+                const isSel = rptSel.kind === 'col' && rptSel.idx === i;
+                const vis = rptVis(c);
+                return `<div class="rd-tree-leaf flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs cursor-pointer transition select-none ${isSel ? 'bg-emerald-50 border border-emerald-200 text-emerald-900 font-bold' : 'hover:bg-slate-100 text-slate-700 ' + (vis ? '' : 'opacity-50')}" onclick="rptSelectCol('col', ${i})">
+                    <i class="fa-solid fa-grip-vertical text-slate-300 text-[9px] cursor-grab"></i>
+                    <i class="fa-solid ${rptEsc(c.icon || 'fa-hashtag')} text-[10px] text-slate-400"></i>
+                    <span class="flex-1 truncate" title="${rptEsc(c.alias || c.name)}">${rptEsc(c.alias || c.name || ('عمود ' + (i+1)))}</span>
+                    <button type="button" class="rpt-eye ${vis ? '' : 'no'} text-[10px] p-0.5" title="${vis ? 'ظاهر' : 'مخفي'}" onclick="event.stopPropagation();toggleColVis('col', ${i})"><i class="fa-solid fa-eye${vis ? '' : '-slash'}"></i></button>
+                </div>`;
+            }).join('') || '<p class="text-[10px] text-slate-400 px-2 py-1">لا توجد أعمدة بعد</p>';
+
+            const dcols = (wizardDetail && wizardDetail.columns) || [];
+            const detHtml = dcols.map((c, i)=>{
+                const isSel = rptSel.kind === 'dcol' && rptSel.idx === i;
+                const vis = rptVis(c);
+                return `<div class="rd-tree-leaf flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs cursor-pointer transition select-none ${isSel ? 'bg-indigo-50 border border-indigo-200 text-indigo-900 font-bold' : 'hover:bg-slate-100 text-slate-700 ' + (vis ? '' : 'opacity-50')}" onclick="rptSelectCol('dcol', ${i})">
+                    <i class="fa-solid fa-grip-vertical text-slate-300 text-[9px] cursor-grab"></i>
+                    <i class="fa-solid ${rptEsc(c.icon || 'fa-hashtag')} text-[10px] text-indigo-400"></i>
+                    <span class="flex-1 truncate" title="${rptEsc(c.alias || c.name)}">${rptEsc(c.alias || c.name || ('فرعي ' + (i+1)))}</span>
+                    <button type="button" class="rpt-eye ${vis ? '' : 'no'} text-[10px] p-0.5" title="${vis ? 'ظاهر' : 'مخفي'}" onclick="event.stopPropagation();toggleColVis('dcol', ${i})"><i class="fa-solid fa-eye${vis ? '' : '-slash'}"></i></button>
+                </div>`;
+            }).join('') || '<p class="text-[10px] text-slate-400 px-2 py-1">لا توجد أعمدة فرعية بعد</p>';
+
+            const groups = wizardGroups || [];
+            const grpHtml = groups.map((g, i)=>{
+                const isSel = rptSel.kind === 'group' && rptSel.idx === i;
+                return `<div class="rd-tree-leaf flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs cursor-pointer transition select-none ${isSel ? 'bg-amber-100 border border-amber-300 text-amber-900 font-bold' : 'hover:bg-slate-100 text-slate-700'}" onclick="rptSelectCol('group', ${i})">
+                    <i class="fa-solid fa-layer-group text-[10px] text-amber-500"></i>
+                    <span class="flex-1 truncate" title="${rptEsc(g.name || ('مجموعة ' + (i+1)))}">${rptEsc(g.name || ('مجموعة ' + (i+1)))}</span>
+                    <span class="text-[9px] bg-amber-100 text-amber-800 px-1 rounded font-mono">م${g.level||1}</span>
+                    <span class="text-[9px] text-slate-400">(${(g.columns||[]).length})</span>
+                </div>`;
+            }).join('') || '<p class="text-[10px] text-slate-400 px-2 py-1">لا توجد مجموعات بعد</p>';
+
+            host.innerHTML = `
+            <!-- فرع الأعمدة الرئيسية -->
+            <div class="rd-tree-branch">
+                <div class="rd-tree-head flex items-center justify-between p-1.5 rounded-lg select-none cursor-pointer" onclick="rdTreeToggle('cols')">
+                    <div class="flex items-center gap-1.5 min-w-0">
+                        <i class="fa-solid ${rdTreeOpen.cols ? 'fa-chevron-down' : 'fa-chevron-left'} text-[10px] text-slate-400"></i>
+                        <i class="fa-solid fa-table-columns text-emerald-600 text-xs"></i>
+                        <span class="font-bold text-xs text-slate-700 truncate">الأعمدة</span>
+                        <span class="text-[10px] bg-slate-200/80 text-slate-600 px-1.5 py-0.2 rounded-full font-bold">${cols.length}</span>
+                    </div>
+                    <button type="button" onclick="event.stopPropagation();addWizardColumn()" class="w-5 h-5 rounded hover:bg-emerald-100 text-emerald-700 flex items-center justify-center text-xs transition" title="إضافة عمود جديد"><i class="fa-solid fa-plus text-[10px]"></i></button>
+                </div>
+                <div class="rd-tree-children ${rdTreeOpen.cols ? '' : 'hidden'} pr-2 pl-1 py-1 space-y-0.5">
+                    ${colsHtml}
+                </div>
+            </div>
+
+            <!-- فرع التفاصيل -->
+            <div class="rd-tree-branch">
+                <div class="rd-tree-head flex items-center justify-between p-1.5 rounded-lg select-none cursor-pointer" onclick="rdTreeToggle('det')">
+                    <div class="flex items-center gap-1.5 min-w-0">
+                        <i class="fa-solid ${rdTreeOpen.det ? 'fa-chevron-down' : 'fa-chevron-left'} text-[10px] text-slate-400"></i>
+                        <i class="fa-solid fa-list-check text-indigo-600 text-xs"></i>
+                        <span class="font-bold text-xs text-slate-700 truncate">التفاصيل</span>
+                        <span class="text-[10px] bg-slate-200/80 text-slate-600 px-1.5 py-0.2 rounded-full font-bold">${dcols.length}</span>
+                    </div>
+                    <button type="button" onclick="event.stopPropagation();addWizardDetailColumn()" class="w-5 h-5 rounded hover:bg-indigo-100 text-indigo-700 flex items-center justify-center text-xs transition" title="إضافة عمود فرعي"><i class="fa-solid fa-plus text-[10px]"></i></button>
+                </div>
+                <div class="rd-tree-children ${rdTreeOpen.det ? '' : 'hidden'} pr-2 pl-1 py-1 space-y-0.5">
+                    ${detHtml}
+                </div>
+            </div>
+
+            <!-- فرع المجموعات -->
+            <div class="rd-tree-branch">
+                <div class="rd-tree-head flex items-center justify-between p-1.5 rounded-lg select-none cursor-pointer" onclick="rdTreeToggle('groups')">
+                    <div class="flex items-center gap-1.5 min-w-0">
+                        <i class="fa-solid ${rdTreeOpen.groups ? 'fa-chevron-down' : 'fa-chevron-left'} text-[10px] text-slate-400"></i>
+                        <i class="fa-solid fa-layer-group text-amber-600 text-xs"></i>
+                        <span class="font-bold text-xs text-slate-700 truncate">المجموعات</span>
+                        <span class="text-[10px] bg-slate-200/80 text-slate-600 px-1.5 py-0.2 rounded-full font-bold">${groups.length}</span>
+                    </div>
+                    <button type="button" onclick="event.stopPropagation();addWizardGroup()" class="w-5 h-5 rounded hover:bg-amber-100 text-amber-700 flex items-center justify-center text-xs transition" title="إضافة مجموعة رأس"><i class="fa-solid fa-plus text-[10px]"></i></button>
+                </div>
+                <div class="rd-tree-children ${rdTreeOpen.groups ? '' : 'hidden'} pr-2 pl-1 py-1 space-y-0.5">
+                    ${grpHtml}
+                </div>
+            </div>
+            `;
+        }
         function rptPalCSS(){
             if(document.getElementById('rptPalCss')) return;
             const st = document.createElement('style');
@@ -1594,11 +1723,11 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
 .rd-nav-btn{display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:9px;font-size:11px;font-weight:700;color:#475569;background:transparent;border:1px solid transparent;cursor:pointer;transition:all .16s ease;text-align:right;width:100%}
 .rd-nav-btn:hover{background:#f1f5f9;color:#0f172a}
 .rd-nav-btn.active{background:#ecfdf5;color:#065f46;border-color:#a7f3d0;box-shadow:0 1px 2px rgba(0,0,0,.04);font-weight:800}
-.rd-palette{width:80vw;flex:1;min-width:0;display:flex;flex-direction:column;background:#ffffff;position:relative;overflow:hidden;height:100%;min-height:0}
+.rd-palette{flex:1;min-width:0;display:flex;flex-direction:column;background:#ffffff;position:relative;overflow:hidden;height:100%;min-height:0;transition:flex-basis .28s ease}
 .rd-palette #wbSheetBody{flex:1;min-height:0;height:100%;display:flex;flex-direction:column;overflow:hidden}
 #rptPrevBox{flex:1;min-height:0;height:100%;display:flex;flex-direction:column;overflow:hidden}
-.rd-props-drawer{position:absolute;top:0;bottom:0;left:0;width:340px;max-width:90vw;background:#ffffff;border-right:1px solid #cbd5e1;box-shadow:6px 0 25px rgba(15,23,42,.15);z-index:50;display:flex;flex-direction:column;transform:translateX(-105%);transition:transform .28s cubic-bezier(0.16,1,0.3,1),box-shadow .28s ease,opacity .2s ease;opacity:0;pointer-events:none}
-.rd-props-drawer.open{transform:translateX(0);opacity:1;pointer-events:auto}
+.rd-props-drawer{position:relative;width:0;min-width:0;max-width:0;background:#ffffff;border-right:0px solid #cbd5e1;box-shadow:none;z-index:20;display:flex;flex-direction:column;overflow:hidden;transition:width .28s cubic-bezier(0.16,1,0.3,1),min-width .28s cubic-bezier(0.16,1,0.3,1),max-width .28s cubic-bezier(0.16,1,0.3,1),border-width .28s ease,opacity .2s ease;opacity:0;pointer-events:none;flex-shrink:0}
+.rd-props-drawer.open{width:380px;min-width:380px;max-width:380px;border-right-width:1px;opacity:1;pointer-events:auto;box-shadow:-4px 0 16px rgba(15,23,42,.06)}
 .rpt-side{display:none}
 .rpt-side-item{display:flex;align-items:center;gap:4px;padding:5px 6px;border-radius:8px;font-size:11px;cursor:pointer;border:1px solid transparent;color:#334155}
 .rpt-side-item:hover{background:#eef2ff}
@@ -1610,7 +1739,9 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
 .rpt-eye.no{color:#f43f5e}
 .rpt-gridwrap{flex:1;min-height:0;height:100%;overflow:auto;border:1px solid #e2e8f0;border-radius:10px;background:#ffffff;margin:6px 8px}
 .rpt-grid{width:100%;border-collapse:separate;border-spacing:0;font-size:11px}
-.rpt-grid th{position:sticky;top:0;background:#f8fafc;z-index:5;border-bottom:2px solid #cbd5e1;border-left:1px solid #f1f5f9;padding:7px 10px;white-space:nowrap;user-select:none;cursor:grab;transition:background .15s ease}
+.rpt-grid tr.rpt-grp-row th{position:sticky;top:0;background:#fef3c7;z-index:7;border-bottom:1px solid #fcd34d;border-left:1px solid #fef3c7;padding:4px 8px;white-space:nowrap;user-select:none}
+.rpt-grid tr.rpt-col-row th{position:sticky;top:0;background:#f8fafc;z-index:5;border-bottom:2px solid #cbd5e1;border-left:1px solid #f1f5f9;padding:7px 10px;white-space:nowrap;user-select:none;cursor:grab;transition:background .15s ease}
+.rpt-grid.has-grp tr.rpt-col-row th{top:27px}
 .rpt-grid th:hover{background:#eef2ff}
 .rpt-grid th.onsel{background:#e0e7ff;box-shadow:inset 0 -3px 0 #4f46e5}
 .rpt-grid th.rpt-drop{outline:2px dashed #6366f1;outline-offset:-2px}
@@ -1631,7 +1762,7 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                 const on = rptSel.kind === 'col' && rptSel.idx === i;
                 const vis = rptVis(c);
                 return `<div class="rpt-side-item${on ? ' on' : ''}${vis ? '' : ' off'}" draggable="true" ondragstart="rptDrag(event,'col',${i})" ondragover="rptOver(event)" ondrop="rptDrop(event,'col',${i})" onclick="rptSelectCol('col',${i})">`
-                    + `<button class="rpt-eye${vis ? '' : ' no'}" title="إظهار/إخفاء" onclick="event.stopPropagation();wizardColumns[${i}].visible=${vis ? 'false' : 'true'};renderWizardColumns();rptPreviewSoon()"><i class="fa-solid fa-eye${vis ? '' : '-slash'}"></i></button>`
+                    + `<button class="rpt-eye${vis ? '' : ' no'}" title="إظهار/إخفاء" onclick="event.stopPropagation();toggleColVis('col',${i})"><i class="fa-solid fa-eye${vis ? '' : '-slash'}"></i></button>`
                     + `<span class="lbl" title="${rptEsc(c.alias || c.name)}">${rptEsc(c.alias || c.name || ('عمود ' + (i + 1)))}</span></div>`;
             }).join('');
         }
@@ -1642,7 +1773,7 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                 const on = rptSel.kind === 'dcol' && rptSel.idx === i;
                 const vis = rptVis(c);
                 return `<div class="rpt-side-item${on ? ' on' : ''}${vis ? '' : ' off'}" onclick="rptSelectCol('dcol',${i})">`
-                    + `<button class="rpt-eye${vis ? '' : ' no'}" title="إظهار/إخفاء" onclick="event.stopPropagation();wizardDetail.columns[${i}].visible=${vis ? 'false' : 'true'};renderWizardColumns();"><i class="fa-solid fa-eye${vis ? '' : '-slash'}"></i></button>`
+                    + `<button class="rpt-eye${vis ? '' : ' no'}" title="إظهار/إخفاء" onclick="event.stopPropagation();toggleColVis('dcol',${i})"><i class="fa-solid fa-eye${vis ? '' : '-slash'}"></i></button>`
                     + `<span class="lbl" title="${rptEsc(c.alias || c.name)}">${rptEsc(c.alias || c.name || ('فرعي ' + (i + 1)))}</span></div>`;
             }).join('');
         }
@@ -1650,6 +1781,7 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
             try{
                 if(rptSel.kind === 'col') return wizardColumns[rptSel.idx] || null;
                 if(rptSel.kind === 'dcol') return (wizardDetail.columns || [])[rptSel.idx] || null;
+                if(rptSel.kind === 'group') return wizardGroups[rptSel.idx] || null;
             }catch(e){}
             return null;
         }
@@ -1662,17 +1794,172 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
             document.querySelectorAll('.rpt-dcol-item').forEach((it, i)=>{
                 it.classList.toggle('onsel', kind === 'dcol' && i === idx);
             });
+            rdRenderElementsTree();
         }
         function rptCloseProps(){
             rptSel = {kind: null, idx: -1};
             rptPropsRender();
             document.querySelectorAll('.onsel').forEach(el=>el.classList.remove('onsel'));
+            rdRenderElementsTree();
         }
+        /* ── Report Properties Panel & Displacing Sidebar Helpers ── */
+        function rdSetReportTab(tab){
+            const tabMeta = document.getElementById('rdRepTabMeta');
+            const tabConns = document.getElementById('rdRepTabConns');
+            const paneMeta = document.getElementById('rdRepPaneMeta');
+            const paneConns = document.getElementById('rdRepPaneConns');
+            if(!paneMeta || !paneConns) return;
+            if(tab === 'conns'){
+                if(tabConns) tabConns.className = 'flex-1 py-2 text-center font-bold border-b-2 border-emerald-600 text-emerald-700 transition';
+                if(tabMeta) tabMeta.className = 'flex-1 py-2 text-center font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-700 transition';
+                paneConns.classList.remove('hidden');
+                paneMeta.classList.add('hidden');
+            } else {
+                if(tabMeta) tabMeta.className = 'flex-1 py-2 text-center font-bold border-b-2 border-emerald-600 text-emerald-700 transition';
+                if(tabConns) tabConns.className = 'flex-1 py-2 text-center font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-700 transition';
+                paneMeta.classList.remove('hidden');
+                paneConns.classList.add('hidden');
+            }
+        }
+        function rdOpenReportProps(tab){
+            const drawer = document.getElementById('rdPropsDrawer');
+            const repPanel = document.getElementById('rdReportPropsPanel');
+            const elPanel = document.getElementById('rdElementPropsPanel');
+            if(!drawer) return;
+            if(repPanel) repPanel.classList.remove('hidden');
+            if(elPanel) elPanel.classList.add('hidden');
+            drawer.classList.add('open');
+            if(tab) rdSetReportTab(tab);
+            rdUpdateConnectionsHost();
+        }
+        function rdClosePropsDrawer(){
+            const drawer = document.getElementById('rdPropsDrawer');
+            if(drawer) drawer.classList.remove('open');
+        }
+        function rdToggleReportProps(){
+            const drawer = document.getElementById('rdPropsDrawer');
+            const repPanel = document.getElementById('rdReportPropsPanel');
+            if(!drawer) return;
+            const isOpen = drawer.classList.contains('open') && repPanel && !repPanel.classList.contains('hidden');
+            if(isOpen){
+                rdClosePropsDrawer();
+            } else {
+                rdOpenReportProps('meta');
+            }
+        }
+        function rdUpdateConnectionsHost(){
+            const host = document.getElementById('rdConnectionsHost');
+            const badge = document.getElementById('rdConnsCountBadge');
+            if(badge) badge.textContent = (wizardConnections || []).length;
+            if(!host) return;
+            const conns = window._rawConnectionsData || [];
+            if(!conns.length){
+                host.innerHTML = '<p class="text-[11px] text-slate-400 py-3 text-center">لا توجد اتصالات مسجلة بعد — أنشئ اتصالاً أولاً</p>';
+                return;
+            }
+            host.innerHTML = conns.map(c => {
+                const isChecked = (wizardConnections || []).includes(String(c.id));
+                const eng = (typeof ENGINE_NAMES !== 'undefined' && ENGINE_NAMES[c.engine]) || c.engine || 'SQL';
+                const typeBadge = (c.conn_type||c.connType||'database')==='iot' ? 'bg-violet-100 text-violet-700' : 'bg-sky-100 text-sky-700';
+                const typeName = (c.conn_type||c.connType||'database')==='iot' ? 'IoT' : 'قاعدة بيانات';
+                const idx = (wizardConnections||[]).indexOf(String(c.id));
+                return `
+                <label class="flex items-center gap-2.5 p-2 rounded-xl border ${isChecked ? 'bg-emerald-50/80 border-emerald-300 shadow-2xs' : 'bg-white border-slate-200 hover:bg-slate-50'} cursor-pointer transition select-none">
+                    <input type="checkbox" value="${c.id}" ${isChecked ? 'checked' : ''} onchange="toggleWizardConnection('${c.id}')" class="rounded text-emerald-600 focus:ring-emerald-500">
+                    <div class="flex-1 min-w-0">
+                        <div class="font-bold text-xs text-slate-800 flex items-center gap-1.5 truncate">
+                            <span class="truncate">${rptEsc(c.name)}</span>
+                            <span class="text-[9px] px-1.5 py-0.2 rounded-full font-semibold ${typeBadge}">${typeName}</span>
+                            <span class="text-[9px] px-1.5 py-0.2 rounded-full font-semibold bg-slate-100 text-slate-600">${eng}</span>
+                        </div>
+                        <div class="text-[10px] text-slate-400 truncate font-mono" dir="ltr">${rptEsc(c.host || 'localhost')}:${rptEsc(c.port || '')}/${rptEsc(c.instance || '')}</div>
+                    </div>
+                    ${isChecked ? `<span class="text-[10px] font-extrabold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded-full shrink-0">#${idx+1}</span>` : ''}
+                </label>`;
+            }).join('');
+        }
+
         function rptPropsRender(){
             const drawer = document.getElementById('rdPropsDrawer') || document.getElementById('rptPropsWrap');
             if(!drawer) return;
+            const repPanel = document.getElementById('rdReportPropsPanel');
+            const elPanel = document.getElementById('rdElementPropsPanel');
+            if(!rptSel || rptSel.idx === -1 || !rptSel.kind){
+                if(elPanel) { elPanel.innerHTML = ''; elPanel.classList.add('hidden'); }
+                if(repPanel && repPanel.classList.contains('hidden')){
+                    drawer.classList.remove('open');
+                }
+                return;
+            }
+            if(!elPanel) return;
+            if(repPanel) repPanel.classList.add('hidden');
+            elPanel.classList.remove('hidden');
+            drawer.classList.add('open');
+            if(rptSel.kind === 'group'){
+                const g = wizardGroups[rptSel.idx];
+                if(!g){
+                    drawer.className = 'rd-props-drawer';
+                    drawer.innerHTML = '';
+                    return;
+                }
+                const i = rptSel.idx;
+                const lvlOpts = [1,2,3,4,5].map(l=>`<option value="${l}" ${Number(g.level||1)===l?'selected':''}>مستوى ${l}${l===1?' (رئيسية)':' (فرعية متداخلة)'}</option>`).join('');
+                elPanel.innerHTML = `
+                <div class="p-3 border-b border-amber-200 bg-amber-50/70 flex items-center justify-between shrink-0">
+                    <div class="flex items-center gap-2 min-w-0">
+                        <span class="w-7 h-7 rounded-lg bg-amber-100 text-amber-700 flex items-center justify-center text-xs shrink-0"><i class="fa-solid fa-layer-group"></i></span>
+                        <div class="min-w-0">
+                            <div class="font-bold text-slate-800 text-xs truncate">خصائص المجموعة: ${rptEsc(g.name || ('مجموعة ' + (i + 1)))}</div>
+                            <div class="text-[10px] text-amber-700">مجموعة رأس العمود (Header Group) #${i + 1}</div>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-1 shrink-0">
+                        <button type="button" onclick="rdOpenReportProps()" class="px-2 py-1 rounded-lg text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-[10px] font-bold flex items-center gap-1" title="خصائص التقرير"><i class="fa-solid fa-sliders text-[9px]"></i> التقرير</button>
+                        <button type="button" onclick="removeWizardGroup(${i});" class="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50" title="حذف المجموعة"><i class="fa-solid fa-trash-can text-xs"></i></button>
+                        <button type="button" onclick="rptCloseProps()" class="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-200" title="إغلاق"><i class="fa-solid fa-xmark text-sm"></i></button>
+                    </div>
+                </div>
+                <div class="flex-1 min-h-0 overflow-y-auto custom-scroll p-3 space-y-3 text-xs">
+                    <div>
+                        <label class="rpt-fl">اسم المجموعة (يعرض كرأس مدمج فوق أعمدتها) *</label>
+                        <input value="${rptEsc(g.name || '')}" oninput="updateWizardGroup(${i},'name',this.value);rdRenderElementsTree();" onchange="updateWizardGroup(${i},'name',this.value);rdRenderElementsTree();rptPreviewSoon();" class="rpt-in font-bold text-slate-800" placeholder="مثال: بيانات العميل">
+                    </div>
+                    <div class="grid grid-cols-2 gap-2">
+                        <div>
+                            <label class="rpt-fl">مستوى التداخل (Level)</label>
+                            <select onchange="updateWizardGroup(${i},'level',parseInt(this.value)||1);rdRenderElementsTree();rptPreviewSoon();" class="rpt-in font-bold">${lvlOpts}</select>
+                        </div>
+                        <div>
+                            <label class="rpt-fl">الترتيب (Order)</label>
+                            <input type="number" min="1" step="1" value="${g.order || (i + 1)}" onchange="updateWizardGroup(${i},'order',parseInt(this.value)||${i + 1});rptPreviewSoon();" class="rpt-in font-mono" dir="ltr">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="rpt-fl">معرف المجموعة (ID)</label>
+                        <input value="${rptEsc(g.id || String(i + 1))}" onchange="updateWizardGroup(${i},'id',this.value)" class="rpt-in font-mono bg-slate-50 text-slate-500" dir="ltr">
+                    </div>
+                    <div class="pt-2 border-t border-slate-200">
+                        <div class="flex items-center justify-between mb-1.5">
+                            <label class="rpt-fl mb-0">الأعمدة المندرجة تحت هذه المجموعة:</label>
+                            <span class="text-[10px] text-amber-700 font-bold bg-amber-100 px-2 py-0.5 rounded-full">${(g.columns||[]).length} أعمدة</span>
+                        </div>
+                        <p class="text-[10px] text-slate-400 mb-2">حدد الأعمدة التي تريد ضمها لهذه المجموعة لتظهر برأس مدمج (spanning) فوقها في الجدول:</p>
+                        <div class="space-y-1 max-h-60 overflow-y-auto custom-scroll border border-slate-200 rounded-xl p-2 bg-slate-50/50">
+                            ${(wizardColumns || []).map(c=>{
+                                const inG = (g.columns || []).includes(c.alias || c.name);
+                                return `<label class="flex items-center gap-2 p-1.5 rounded-lg border text-xs cursor-pointer transition ${inG ? 'bg-amber-100 border-amber-300 text-amber-900 font-bold shadow-2xs' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}">
+                                    <input type="checkbox" ${inG ? 'checked' : ''} onchange="toggleWizardGroupColumn(${i}, '${rptEsc(c.alias || c.name).replace(/'/g,"\\'")}', this.checked)" class="rounded text-amber-600">
+                                    <i class="fa-solid ${rptEsc(c.icon || 'fa-hashtag')} text-[10px] text-slate-400"></i>
+                                    <span class="flex-1 truncate">${rptEsc(c.alias || c.name)}</span>
+                                </label>`;
+                            }).join('') || '<p class="text-[10px] text-slate-400 p-2 text-center">لا توجد أعمدة رئيسية بعد</p>'}
+                        </div>
+                    </div>
+                </div>`;
+                return;
+            }
             const col = rptSelCol();
-            if(!col || rptSel.idx === -1){
+            if(!col){
                 drawer.className = 'rd-props-drawer';
                 drawer.innerHTML = '';
                 return;
@@ -1684,8 +1971,7 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
             const w = (col.width ?? '');
             const rn = col.col_refname || col.colRefname || '';
 
-            drawer.className = 'rd-props-drawer open';
-            drawer.innerHTML = `
+            elPanel.innerHTML = `
             <div class="p-3 border-b border-slate-200 bg-slate-50 flex items-center justify-between shrink-0">
                 <div class="flex items-center gap-2 min-w-0">
                     <span class="w-7 h-7 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center text-xs shrink-0"><i class="fa-solid fa-sliders"></i></span>
@@ -1695,9 +1981,10 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                     </div>
                 </div>
                 <div class="flex items-center gap-1 shrink-0">
-                    <button type="button" class="rpt-eye-big ${vis ? 'on' : 'no'} p-1.5 rounded-lg hover:bg-slate-200" title="${vis ? 'ظاهر افتراضياً' : 'مخفي افتراضياً'}" onclick="${upd}'visible',${vis ? 'false' : 'true'});renderWizardColumns();rptPreviewSoon();"><i class="fa-solid fa-eye${vis ? '' : '-slash'} text-xs"></i></button>
-                    ${isD ? `<button type="button" onclick="removeWizardDetailColumn(${i});rptCloseProps();renderWizardColumns()" class="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50" title="حذف العمود"><i class="fa-solid fa-trash-can text-xs"></i></button>`
-                          : `<button type="button" onclick="removeWizardColumn(${i});rptCloseProps();renderWizardColumns()" class="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50" title="حذف العمود"><i class="fa-solid fa-trash-can text-xs"></i></button>`}
+                    <button type="button" onclick="rdOpenReportProps()" class="px-2 py-1 rounded-lg text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-[10px] font-bold flex items-center gap-1" title="خصائص التقرير"><i class="fa-solid fa-sliders text-[9px]"></i> التقرير</button>
+                    <button type="button" class="rpt-eye-big ${vis ? 'on' : 'no'} p-1.5 rounded-lg hover:bg-slate-200" title="${vis ? 'ظاهر افتراضياً' : 'مخفي افتراضياً'}" onclick="${upd}'visible',${vis ? 'false' : 'true'});rdRenderElementsTree();rptPreviewSoon();"><i class="fa-solid fa-eye${vis ? '' : '-slash'} text-xs"></i></button>
+                    ${isD ? `<button type="button" onclick="removeWizardDetailColumn(${i});" class="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50" title="حذف العمود"><i class="fa-solid fa-trash-can text-xs"></i></button>`
+                          : `<button type="button" onclick="removeWizardColumn(${i});" class="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50" title="حذف العمود"><i class="fa-solid fa-trash-can text-xs"></i></button>`}
                     <button type="button" onclick="rptCloseProps()" class="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-200" title="إغلاق لوحة الخصائص"><i class="fa-solid fa-xmark text-sm"></i></button>
                 </div>
             </div>
@@ -1707,7 +1994,7 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                     <label class="block text-[11px] font-bold text-violet-900">
                         <i class="fa-solid fa-at text-violet-600"></i> الاسم المرجعي col_refname (لجلب قيمته النهائية في الأعمدة الأخرى دون دمج دوال)
                     </label>
-                    <input value="${rptEsc(rn)}" onchange="${upd}'col_refname',this.value.trim());renderWizardColumns();rptPreviewSoon();" placeholder="مثال: net_total" class="w-full bg-white border border-violet-200 rounded-lg px-2.5 py-1.5 text-xs font-mono" dir="ltr">
+                    <input value="${rptEsc(rn)}" oninput="${upd}'col_refname',this.value.trim());rdRenderElementsTree();" onchange="${upd}'col_refname',this.value.trim());rdRenderElementsTree();rptPreviewSoon();" placeholder="مثال: net_total" class="w-full bg-white border border-violet-200 rounded-lg px-2.5 py-1.5 text-xs font-mono" dir="ltr">
                     <p class="text-[10px] text-violet-700 leading-normal">
                         استدعِ هذا العمود في أي عمود آخر بـ <span class="font-mono font-bold" dir="ltr">@${rn || 'refname'}</span> أو <span class="font-mono font-bold" dir="ltr">[${rn || 'refname'}]</span> لجلب قيمته المحسوبة النهائية من السجل مباشرة دون دمج تعبيرات دواله.
                     </p>
@@ -1726,11 +2013,11 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                 <div class="grid grid-cols-2 gap-2">
                     <div>
                         <label class="rpt-fl">الاسم المعروض *</label>
-                        <input value="${rptEsc(col.alias)}" oninput="${upd}'alias',this.value)" onchange="${upd}'alias',this.value);renderWizardColumns();" class="rpt-in">
+                        <input value="${rptEsc(col.alias)}" oninput="${upd}'alias',this.value);rdRenderElementsTree();" onchange="${upd}'alias',this.value);rdRenderElementsTree();rptPreviewSoon();" class="rpt-in">
                     </div>
                     <div>
                         <label class="rpt-fl">الاسم البرمجي</label>
-                        <input value="${rptEsc(col.name)}" onchange="${upd}'name',this.value);renderWizardColumns();" class="rpt-in font-mono" dir="ltr">
+                        <input value="${rptEsc(col.name)}" oninput="${upd}'name',this.value);rdRenderElementsTree();" onchange="${upd}'name',this.value);rdRenderElementsTree();rptPreviewSoon();" class="rpt-in font-mono" dir="ltr">
                     </div>
                 </div>
 
@@ -1741,14 +2028,14 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                     </div>
                     <div>
                         <label class="rpt-fl">العرض بالبكسل px</label>
-                        <input type="number" min="40" max="1200" step="10" value="${w}" onchange="${upd}'width',this.value===''?null:parseInt(this.value,10));renderWizardColumns();" placeholder="تلقائي" class="rpt-in font-mono" dir="ltr">
+                        <input type="number" min="40" max="1200" step="10" value="${w}" onchange="${upd}'width',this.value===''?null:parseInt(this.value,10));rptPreviewSoon();" placeholder="تلقائي" class="rpt-in font-mono" dir="ltr">
                     </div>
                 </div>
 
                 <div class="grid grid-cols-2 gap-2">
                     <div>
                         <label class="rpt-fl">الأيقونة (FontAwesome)</label>
-                        <input value="${rptEsc(col.icon || 'fa-hashtag')}" onchange="${upd}'icon',this.value);renderWizardColumns();" class="rpt-in font-mono" dir="ltr" placeholder="fa-hashtag">
+                        <input value="${rptEsc(col.icon || 'fa-hashtag')}" oninput="${upd}'icon',this.value);rdRenderElementsTree();" onchange="${upd}'icon',this.value);rdRenderElementsTree();rptPreviewSoon();" class="rpt-in font-mono" dir="ltr" placeholder="fa-hashtag">
                     </div>
                     ${isD ? '' : `<div>
                         <label class="rpt-fl">التجميع (Aggregate)</label>
@@ -1764,12 +2051,12 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                 <div class="pt-2 border-t border-slate-100 space-y-2">
                     <div class="text-[11px] font-bold text-slate-700">خيارات متقدمة والعرض الافتراضي:</div>
                     <label class="flex items-center gap-2 p-2 rounded-lg bg-slate-50 border border-slate-200 cursor-pointer hover:bg-slate-100 transition">
-                        <input type="checkbox" ${vis ? 'checked' : ''} onchange="${upd}'visible',this.checked);renderWizardColumns();rptPreviewSoon();" class="w-4 h-4 rounded text-emerald-600">
+                        <input type="checkbox" ${vis ? 'checked' : ''} onchange="${upd}'visible',this.checked);rdRenderElementsTree();rptPreviewSoon();" class="w-4 h-4 rounded text-emerald-600">
                         <span class="flex-1 text-[11px] font-medium text-slate-700">إظهار العمود افتراضياً (يمكن للمستخدم تغييره في المشغل لاحقاً)</span>
                     </label>
                     <div class="flex flex-wrap items-center gap-3">
                         <label class="flex items-center gap-1.5 text-[11px] font-bold text-slate-600 cursor-pointer">
-                            <input type="checkbox" ${col.is_amount?'checked':''} onchange="${upd}'is_amount',this.checked);renderWizardColumns();rptPreviewSoon();" class="rounded text-indigo-600">
+                            <input type="checkbox" ${col.is_amount?'checked':''} onchange="${upd}'is_amount',this.checked);rptPreviewSoon();" class="rounded text-indigo-600">
                             <span>مبلغ — فواصل الآلاف</span>
                         </label>
                         ${isD ? '' : `<label class="flex items-center gap-1.5 text-[11px] font-bold text-slate-600 cursor-pointer">
@@ -1779,12 +2066,34 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                     </div>
                     <div class="flex items-center gap-2">
                         <label class="flex items-center gap-1.5 text-[11px] font-bold text-slate-600 cursor-pointer">
-                            <input type="checkbox" ${col.is_status?'checked':''} onchange="${upd}'is_status',this.checked);renderWizardColumns();" class="rounded text-violet-600">
+                            <input type="checkbox" ${col.is_status?'checked':''} onchange="${upd}'is_status',this.checked);rptPropsRender();" class="rounded text-violet-600">
                             <span>عمود حالة (Status Map)</span>
                         </label>
                         ${col.is_status ? statusDefineBtn(i, ((col.status_map||[]).length)) : ''}
                     </div>
                 </div>
+                ${isD ? '' : `
+                <!-- تعيين مجموعة رأس العمود -->
+                <div class="p-2.5 bg-amber-50/80 border border-amber-200 rounded-xl space-y-1.5">
+                    <div class="flex items-center justify-between">
+                        <label class="block text-[11px] font-bold text-amber-900">
+                            <i class="fa-solid fa-layer-group text-amber-600"></i> مجموعة رأس العمود (Header Group)
+                        </label>
+                        <button type="button" onclick="rptSelectCol('group', 0);" class="text-[10px] text-amber-700 hover:underline font-bold">إدارة المجموعات</button>
+                    </div>
+                    ${wizardGroups.length ? `
+                        <div class="space-y-1 mt-1">
+                            ${wizardGroups.map((g, gi)=>{
+                                const inG = (g.columns || []).includes(col.alias || col.name);
+                                return `<label class="flex items-center gap-2 p-1.5 rounded-lg border text-xs cursor-pointer ${inG ? 'bg-amber-100 border-amber-300 text-amber-900 font-bold' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}">
+                                    <input type="checkbox" ${inG ? 'checked' : ''} onchange="toggleWizardGroupColumn(${gi}, '${rptEsc(col.alias || col.name).replace(/'/g,"\\'")}', this.checked);" class="rounded text-amber-600">
+                                    <span class="flex-1 truncate">${rptEsc(g.name || ('مجموعة ' + (gi + 1)))}</span>
+                                    <span class="text-[10px] text-slate-400">مستوى ${g.level || 1}</span>
+                                </label>`;
+                            }).join('')}
+                        </div>
+                    ` : `<p class="text-[10px] text-slate-400">لا توجد مجموعات معرفة بعد. <button type="button" onclick="addWizardGroup();" class="text-amber-700 font-bold underline">إضافة مجموعة</button></p>`}
+                </div>`}
             </div>`;
         }
         function rptDetListHTML(){
@@ -1799,8 +2108,8 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                     + `<span class="flex-1 truncate font-medium text-slate-800" title="${rptEsc(c.alias || c.name)}">${rptEsc(c.alias || c.name)}</span>`
                     + `<span class="truncate font-mono text-[11px] text-slate-400 max-w-xs" dir="ltr" title="${rptEsc(c.expr)}">${rptEsc(c.expr)}</span>`
                     + (c.col_refname || c.colRefname ? `<span class="font-mono text-[10px] bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded font-bold" dir="ltr">@${rptEsc(c.col_refname || c.colRefname)}</span>` : '')
-                    + `<button class="rpt-eye${vis ? '' : ' no'}" title="${vis ? 'ظاهر افتراضياً (انقر للإخفاء)' : 'مخفي افتراضياً (انقر للإظهار)'}" onclick="event.stopPropagation();wizardDetail.columns[${i}].visible=${vis ? 'false' : 'true'};renderWizardColumns();"><i class="fa-solid fa-eye${vis ? '' : '-slash'}"></i></button>`
-                    + `<button onclick="event.stopPropagation();removeWizardDetailColumn(${i});rptCloseProps();renderWizardColumns()" class="text-slate-400 hover:text-rose-600 transition px-1" title="حذف العمود"><i class="fa-solid fa-trash-can text-[11px]"></i></button></div>`;
+                    + `<button class="rpt-eye${vis ? '' : ' no'}" title="${vis ? 'ظاهر افتراضياً (انقر للإخفاء)' : 'مخفي افتراضياً (انقر للإظهار)'}" onclick="event.stopPropagation();toggleColVis('dcol',${i});"><i class="fa-solid fa-eye${vis ? '' : '-slash'}"></i></button>`
+                    + `<button onclick="event.stopPropagation();removeWizardDetailColumn(${i});" class="text-slate-400 hover:text-rose-600 transition px-1" title="حذف العمود"><i class="fa-solid fa-trash-can text-[11px]"></i></button></div>`;
             }).join('');
         }
         function rptDrag(ev, kind, idx){ try{ ev.dataTransfer.setData('text/plain', kind + ':' + idx); ev.dataTransfer.effectAllowed = 'move'; }catch(e){} }
@@ -1821,7 +2130,9 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                     else if(from < rptSel.idx && idx >= rptSel.idx) rptSel.idx--;
                     else if(from > rptSel.idx && idx <= rptSel.idx) rptSel.idx++;
                 }
-                renderWizardColumns();
+                rdRenderElementsTree();
+                rptPreviewRender();
+                rptPropsRender();
                 rptPreviewSoon();
             }catch(e){}
         }
@@ -1878,6 +2189,42 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
             try{ if(rptPrevTimer) clearTimeout(rptPrevTimer); }catch(e){}
             rptPrevTimer = setTimeout(()=>{ try{ rptPreviewFetch(false); }catch(e){} }, 700);
         }
+        function rptGroupHeaderRowHTML(cols){
+            if(!wizardGroups || !wizardGroups.length || !cols || !cols.length) return '';
+            const isDetailRpt = (((document.getElementById('rmlReportType') || {}).value === 'detail') || (((wizardDetail || {}).columns||[]).length > 0));
+            const colGroupMap = cols.map(c => {
+                const alias = c.alias || c.name;
+                const name = c.name;
+                return wizardGroups.find(g => (g.columns || []).includes(alias) || (g.columns || []).includes(name)) || null;
+            });
+            if(!colGroupMap.some(Boolean)) return '';
+            let html = '<tr class="rpt-grp-row">';
+            if(isDetailRpt){
+                html += '<th class="rpt-grp-th-empty w-8"></th>';
+            }
+            let i = 0;
+            while(i < cols.length){
+                const g = colGroupMap[i];
+                let span = 1;
+                while(i + span < cols.length && colGroupMap[i + span] === g){
+                    span++;
+                }
+                if(g){
+                    html += `<th colspan="${span}" class="rpt-grp-th p-1 text-center bg-amber-100/90 text-amber-900 border-b border-amber-300 border-l border-amber-200 font-bold text-xs" title="مجموعة: ${rptEsc(g.name)} (مستوى ${g.level||1})">
+                        <div class="flex items-center justify-center gap-1">
+                            <i class="fa-solid fa-layer-group text-amber-600 text-[10px]"></i>
+                            <span class="truncate">${rptEsc(g.name || ('مجموعة ' + g.id))}</span>
+                            <span class="text-[9px] bg-amber-200/80 text-amber-800 px-1.5 rounded-full font-mono">م${g.level||1}</span>
+                        </div>
+                    </th>`;
+                } else {
+                    html += `<th colspan="${span}" class="rpt-grp-th-empty p-1 bg-slate-50/70 border-b border-slate-200 border-l border-slate-100 text-slate-300 text-[10px]"></th>`;
+                }
+                i += span;
+            }
+            html += '</tr>';
+            return html;
+        }
         function rptPreviewRender(){
             const box = document.getElementById('rptPrevBox');
             if(!box) return;
@@ -1888,7 +2235,15 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                 box.innerHTML = '<p class="text-slate-400 text-xs py-8 text-center">لا توجد أعمدة للمعاينة</p>';
                 return;
             }
-            const head = cols.map((c, i)=>{
+            const isDetailRpt = (((document.getElementById('rmlReportType') || {}).value === 'detail') || (((wizardDetail || {}).columns||[]).length > 0));
+            const dcols = (wizardDetail && wizardDetail.columns) || [];
+            const grpHtml = rptGroupHeaderRowHTML(cols);
+            const hasGrp = Boolean(grpHtml);
+            let head = '';
+            if(isDetailRpt){
+                head += `<th class="w-8 text-center p-1 text-slate-400 font-bold" title="طي / توسيع التفاصيل"><i class="fa-solid fa-layer-group text-xs"></i></th>`;
+            }
+            head += cols.map((c, i)=>{
                 const on = rptSel.kind === 'col' && i === rptSel.idx;
                 const vis = rptVis(c);
                 const w = parseInt(c.width, 10);
@@ -1903,7 +2258,7 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                         </span>
                         <span class="flex items-center gap-1 shrink-0">
                             ${rn ? `<span class="font-mono text-[10px] bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded font-bold" dir="ltr" title="مرجع نهائي: @${rptEsc(rn)}">@${rptEsc(rn)}</span>` : ''}
-                            <button type="button" class="rpt-eye ${vis ? '' : 'no'}" title="${vis ? 'ظاهر افتراضياً (انقر للإخفاء)' : 'مخفي افتراضياً (انقر للإظهار)'}" onclick="event.stopPropagation();wizardColumns[${i}].visible=${vis ? 'false' : 'true'};renderWizardColumns();rptPreviewSoon()"><i class="fa-solid fa-eye${vis ? '' : '-slash'} text-[11px]"></i></button>
+                            <button type="button" class="rpt-eye ${vis ? '' : 'no'}" title="${vis ? 'ظاهر افتراضياً (انقر للإخفاء)' : 'مخفي افتراضياً (انقر للإظهار)'}" onclick="event.stopPropagation();toggleColVis('col',${i})"><i class="fa-solid fa-eye${vis ? '' : '-slash'} text-[11px]"></i></button>
                         </span>
                     </div>
                 </th>`;
@@ -1918,25 +2273,70 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                 return (r === null || r === undefined) ? '' : String(r);
             };
             const rows = rptPrev.rows || [];
+            const totalCols = cols.length + (isDetailRpt ? 1 : 0);
             const body = rows.map((r, ri)=>{
                 const arr = Array.isArray(r) ? r : null;
-                return `<tr class="hover:bg-slate-50 transition border-b border-slate-100">`
-                    + cols.map((c, i)=>{
-                        const val = arr ? (arr[i] ?? '') : cell(r, i);
-                        const vis = rptVis(c);
-                        return `<td class="p-2 border-l border-slate-100 whitespace-nowrap text-slate-700 ${vis ? '' : 'opacity-50 bg-slate-50/40'}" title="${rptEsc(val)}">${rptEsc(val)}</td>`;
-                    }).join('')
-                    + `</tr>`;
+                const isExp = rptExpandedRows.has(ri);
+                let rowHtml = `<tr class="hover:bg-slate-50 transition border-b border-slate-100 ${isExp ? 'bg-indigo-50/20' : ''}">`;
+                if(isDetailRpt){
+                    rowHtml += `<td class="w-8 text-center p-1 cursor-pointer select-none" onclick="rptToggleRow(${ri})" title="انقر لعرض تفاصيل هذا السجل"><i class="fa-solid ${isExp ? 'fa-chevron-down text-indigo-600' : 'fa-chevron-left text-slate-400'} text-xs"></i></td>`;
+                }
+                rowHtml += cols.map((c, i)=>{
+                    const val = arr ? (arr[i] ?? '') : cell(r, i);
+                    const vis = rptVis(c);
+                    return `<td class="p-2 border-l border-slate-100 whitespace-nowrap text-slate-700 ${vis ? '' : 'opacity-50 bg-slate-50/40'}" title="${rptEsc(val)}">${rptEsc(val)}</td>`;
+                }).join('');
+                rowHtml += `</tr>`;
+                if(isDetailRpt && isExp){
+                    rowHtml += `<tr class="rpt-detail-subrow bg-indigo-50/30">
+                        <td colspan="${totalCols}" class="p-3 bg-indigo-50/40 border-b border-indigo-100">
+                            <div class="rounded-xl border border-indigo-200 bg-white p-3 shadow-xs">
+                                <div class="flex items-center justify-between pb-2 mb-2 border-b border-indigo-100">
+                                    <span class="text-xs font-bold text-indigo-900 flex items-center gap-1.5">
+                                        <i class="fa-solid fa-list-check text-indigo-600"></i> تفاصيل السجل #${ri + 1}
+                                    </span>
+                                    <span class="text-[10px] text-indigo-500 font-mono">صفوف تفصيلية تابعة (Detail Rows)</span>
+                                </div>
+                                ${dcols.length ? `
+                                    <div class="overflow-x-auto custom-scroll">
+                                        <table class="w-full text-xs border-collapse">
+                                            <thead>
+                                                <tr class="bg-indigo-50 text-indigo-900 border-b border-indigo-200">
+                                                    ${dcols.map((dc, di)=>{
+                                                        const dvis = rptVis(dc);
+                                                        return `<th class="p-1.5 text-right font-bold cursor-pointer hover:bg-indigo-100 transition ${dvis ? '' : 'opacity-50'}" onclick="rptSelectCol('dcol', ${di})" title="انقر لخصائص العمود الفرعي"><i class="fa-solid ${rptEsc(dc.icon||'fa-hashtag')} text-[10px] text-indigo-500"></i> ${rptEsc(dc.alias||dc.name)}</th>`;
+                                                    }).join('')}
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <tr class="border-b border-slate-100 hover:bg-slate-50">
+                                                    ${dcols.map(dc=>`<td class="p-1.5 text-slate-400 font-mono text-[11px]">—</td>`).join('')}
+                                                </tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                ` : `<p class="text-[11px] text-slate-400 text-center py-2">لا توجد أعمدة فرعية مضافة في تبويب التفاصيل — أضف من زر + في شجرة العناصر</p>`}
+                            </div>
+                        </td>
+                    </tr>`;
+                }
+                return rowHtml;
             }).join('');
-            box.innerHTML = `<div class="rpt-gridwrap custom-scroll"><table class="rpt-grid"><thead><tr>${head}</tr></thead><tbody>${body || `<tr><td colspan="${cols.length}" class="p-8 text-center text-slate-400">لا توجد بيانات مسترجعة من الاستعلام</td></tr>`}</tbody></table></div>`
+            box.innerHTML = `<div class="rpt-gridwrap custom-scroll"><table class="rpt-grid ${hasGrp ? 'has-grp' : ''}"><thead>${grpHtml}<tr class="rpt-col-row">${head}</tr></thead><tbody>${body || `<tr><td colspan="${totalCols}" class="p-8 text-center text-slate-400">لا توجد بيانات مسترجعة من الاستعلام</td></tr>`}</tbody></table></div>`
                 + `<div class="px-3 py-1 bg-slate-50 text-[10px] text-slate-500 border-t border-slate-200 flex items-center justify-between shrink-0"><span>عرض أول ${rows.length} صف • السحب والإفلات لرؤوس الأعمدة للترتيب بدون أسهم • النقر على أي رأس لفتح لوحة الخصائص</span><span>الأعمدة المخفية (المعلمة بـ <i class="fa-solid fa-eye-slash text-rose-500"></i>) يمكن تعديل عرضها وإخفائها في المشغل لاحقاً</span></div>`;
         }
         function addWizardColumn(){
             const newIdx = wizardColumns.length;
             wizardColumns.push({id:String(newIdx+1), name:'col_'+(newIdx+1), alias:'عمود '+(newIdx+1), expr:'', col_refname:'', visible:true, width:null, col_type:'direct', where_clause:'', icon:'fa-hashtag', is_amount:false, is_distinct:false, is_status:false, status_map:[], refTable:'', refFk:'', refDisplay:'', join_type:'one_to_one'});
-            renderWizardColumns();
-            try{ rptSelectCol('col', newIdx); }catch(e){}
-            try{ if(typeof rptPreviewSoon === 'function') rptPreviewSoon(); }catch(e){}
+            rdTreeOpen.cols = true;
+            rdRenderElementsTree();
+            if(!document.getElementById('rptPrevBox')){
+                renderWizardColumns();
+            } else {
+                rptSelectCol('col', newIdx);
+                rptPreviewSoon();
+                try{ wbPaintStatus(); }catch(e){}
+            }
         }
         const RULE_VAR_TYPES = [['text','نصية'],['number','رقمية'],['date','تاريخ'],['time','وقت'],['expression','تعبير'],['custom_function','دالة مخصصة'],['boolean','منطقي (صح/غلط)'],['choice','اختيار من خيارات']];
         function renderWizardRules(){
@@ -2004,7 +2404,14 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
             if(field==='options') v.options = String(val||'').split(/[،,]/).map(s=>s.trim()).filter(Boolean);
             else v[field]=val;
         }
-        function removeWizardColumn(idx){ if(wizardColumns.length<=1) return notify('يجب عمود واحد على الأقل', 'info'); wizardColumns.splice(idx,1); renderWizardColumns(); try{ if(typeof rptPreviewSoon === 'function') rptPreviewSoon(); }catch(e){}}
+        function removeWizardColumn(idx){
+            if(wizardColumns.length<=1) return notify('يجب بقاء عمود واحد على الأقل', 'info');
+            wizardColumns.splice(idx,1);
+            rptCloseProps();
+            rdRenderElementsTree();
+            try{ if(typeof rptPreviewSoon === 'function') rptPreviewSoon(); }catch(e){}
+            try{ wbPaintStatus(); }catch(e){}
+        }
         function updateWizardColumn(idx, field, val){ wizardColumns[idx][field]=val; if(field==='expr'||field==='alias'||field==='name') autoDetectStatusColumn(idx); }
         /* ── Column type + formatting modal (drives ops + pickers; '' = auto) ── */
         const COL_TYPE_TILES = [['','تلقائي','fa-magic'],['text','نص','fa-font'],['number','رقم','fa-hashtag'],['date','تاريخ','fa-calendar-day'],['datetime','تاريخ ووقت','fa-calendar-clock'],['time','وقت','fa-clock'],['list','قائمة','fa-list-check'],['status','حالة','fa-tags']];
@@ -2347,17 +2754,41 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
         function addWizardGroup(){
             let mx = 0;
             wizardGroups.forEach(g=>{ const n = parseInt(g.id); if(!isNaN(n)) mx = Math.max(mx, n); });
+            const newIdx = wizardGroups.length;
             wizardGroups.push({id:String(mx + 1), name:'مجموعة '+(wizardGroups.length+1), order:wizardGroups.length+1, level:1, columns:[]});
-            renderWizardGroups();
+            rdTreeOpen.groups = true;
+            rdRenderElementsTree();
+            rptSelectCol('group', newIdx);
+            try{ renderWizardGroups(); }catch(e){}
+            try{ rptPreviewSoon(); }catch(e){}
+            try{ wbPaintStatus(); }catch(e){}
         }
-        function removeWizardGroup(idx){ wizardGroups.splice(idx,1); renderWizardGroups(); }
-        function updateWizardGroup(idx, field, val){ wizardGroups[idx][field]=val; }
+        function removeWizardGroup(idx){
+            wizardGroups.splice(idx,1);
+            rptCloseProps();
+            rdRenderElementsTree();
+            try{ renderWizardGroups(); }catch(e){}
+            try{ rptPreviewSoon(); }catch(e){}
+            try{ wbPaintStatus(); }catch(e){}
+        }
+        function updateWizardGroup(idx, field, val){
+            if(wizardGroups[idx]){
+                wizardGroups[idx][field]=val;
+                rdRenderElementsTree();
+                try{ rptPreviewSoon(); }catch(e){}
+            }
+        }
         function toggleWizardGroupColumn(gIdx, colAlias, checked){
             const g = wizardGroups[gIdx];
+            if(!g) return;
             if(!g.columns) g.columns = [];
             if(checked){ if(!g.columns.includes(colAlias)) g.columns.push(colAlias); }
             else { g.columns = g.columns.filter(a=>a!==colAlias); }
-            renderWizardGroups();
+            rdRenderElementsTree();
+            rptPropsRender();
+            try{ renderWizardGroups(); }catch(e){}
+            try{ rptPreviewSoon(); }catch(e){}
+            try{ wbPaintStatus(); }catch(e){}
         }
         function insertDocTemplateVar(){
             const ta = document.getElementById('wizardDocTemplate');
@@ -2993,7 +3424,6 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
             ['conns','الاتصالات','fa-plug'],
             ['fields','الحقول والمخطط','fa-database'],
             ['rules','القواعد','fa-square-root-variable'],
-            ['groups','المجموعات','fa-layer-group'],
             ['charts','المخططات','fa-chart-column'],
             ['docs','المستندات','fa-file-lines'],
             ['xsql','XSQL استعلام موسع','fa-bolt'],
@@ -3039,8 +3469,16 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
             body.innerHTML = html;
         }
         function wbGoSheet(s){
+            if(s === 'conns'){
+                wbSheet = 'palette';
+                wbRenderSheets();
+                wbRenderActiveSheet();
+                rdOpenReportProps('conns');
+                return;
+            }
             if(s === 'columns' || s === 'palette'){ s = 'palette'; }
             else if(s === 'detail'){ s = 'palette'; rptDetOpen = true; }
+            else if(s === 'groups'){ s = 'palette'; rptGroupsOpen = true; }
             wbSheet = s;
             try{ if(s==='fields') wbSetTab('fields'); else if(s==='conns') wbSetTab('home'); }catch(e){}
             wbRenderSheets();
@@ -3073,6 +3511,11 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
             }
             if(wbSheet === 'detail'){
                 rptDetOpen = true;
+                renderWizardColumns();
+                return;
+            }
+            if(wbSheet === 'groups'){
+                rptGroupsOpen = true;
                 renderWizardColumns();
                 return;
             }
@@ -3987,7 +4430,7 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                 window[fn] = function(){
                     const r = orig.apply(this, arguments);
                     try{
-                        if(!window._inWbRenderActiveSheet && !window._inRenderWizardColumns && wbSheet !== 'palette' && wbSheet !== 'columns' && wbSheet !== 'detail'){
+                        if(!window._inWbRenderActiveSheet && !window._inRenderWizardColumns && wbSheet !== 'palette' && wbSheet !== 'columns' && wbSheet !== 'detail' && wbSheet !== 'groups'){
                             if(document.getElementById('addRmlModal') && !document.getElementById('addRmlModal').classList.contains('hidden')) wbRenderActiveSheet();
                         }
                     }catch(e){}

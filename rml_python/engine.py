@@ -1953,7 +1953,15 @@ class RMLReportEngine:
 
     def _rewrite_value_expr(self, text, alias_of) -> str:
         """Replace @refname (and [refname]) with the referenced column's quoted SELECT alias."""
-        segs = re.split(self._REFNAME_SEG_RE, str(text or ""))
+        s = str(text or "").lstrip()
+        if s.startswith("=") and not s.startswith("=="):
+            s = s[1:].lstrip()
+        try:
+            from .namespaces import _transpile_if_calls
+            s = _transpile_if_calls(s)
+        except Exception:
+            pass
+        segs = re.split(self._REFNAME_SEG_RE, s)
         for i in range(0, len(segs), 2):
             def _rep(m):
                 key = str(m.group(1)).lower()
@@ -1963,10 +1971,19 @@ class RMLReportEngine:
                 if key in alias_of:
                     return alias_of[key]
                 return m.group(0)
-            s = re.sub(r"(?<![\w$#@.\"'])@([A-Za-z_][A-Za-z0-9_]*)(?![\w])", _rep, segs[i])
-            s = re.sub(r"\[([A-Za-z_][A-Za-z0-9_]*)\]", _rep_b, s)
-            segs[i] = s
-        return "".join(segs)
+            s_seg = re.sub(r"(?<![\w$#@.\"'])@([A-Za-z_][A-Za-z0-9_]*)(?![\w])", _rep, segs[i])
+            s_seg = re.sub(r"\[([A-Za-z_][A-Za-z0-9_]*)\]", _rep_b, s_seg)
+            segs[i] = s_seg
+        out = "".join(segs)
+        known_aliases = set(alias_of.values())
+        def _rep_str_lit(m):
+            whole = m.group(0)
+            if whole in known_aliases:
+                return whole
+            inner = m.group(1)
+            return "'" + inner.replace("'", "''") + "'"
+        out = re.sub(r'(?<![\w.\"])"([^"]*)"(?![\w.\"])', _rep_str_lit, out)
+        return out
 
     def _plan_value_refs(self, columns, extra_aliases=None):
         """Topo plan for @refname dependents. None when no value-refs exist.

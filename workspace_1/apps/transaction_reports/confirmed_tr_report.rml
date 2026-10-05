@@ -77,7 +77,7 @@
     <column id="2" name="col_رقم الحوالة" alias="رقم الحوالة" expr="=get(vewOutgoingTransfersDeliveringReport.رقم الحوالة)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
     <column id="3" name="col_المصدر" alias="المصدر" expr="=get(vewOutgoingTransfersDeliveringReport.المصدر)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
     <column id="4" name="col_المنطقة" alias="المنطقة" expr="=get(vewOutgoingTransfersDeliveringReport.المنطقة)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
-    <column id="5" name="col_الجهة" alias="الجهة" expr="=get(vewOutgoingTransfersDeliveringReport.الجهة)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="5" name="col_الجهة" alias="الجهة" expr="=get(vewOutgoingTransfersDeliveringReport.الجهة)" dataType="VARCHAR" join_type="one_to_one" visible="0" icon="fa-hashtag"/>
     <column id="6" name="col_مبلغ الحوالة" alias="مبلغ الحوالة" expr="=get(vewOutgoingTransfersDeliveringReport.مبلغ الحوالة)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
     <column id="7" name="col_عملة الحوالة" alias="عملة الحوالة" expr="=get(vewOutgoingTransfersDeliveringReport.عملة الحوالة)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
     <column id="8" name="col_المستلم" alias="المستلم" expr="=get(vewOutgoingTransfersDeliveringReport.المستلم)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>

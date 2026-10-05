@@ -357,7 +357,20 @@ def _transpile_if_calls(text: str, _depth: int = 0) -> str:
     args = _split_top_commas(text[m.end():k - 1])
     if len(args) != 3 or not args[0].strip():
         return text[:k] + _transpile_if_calls(text[k:], _depth + 1)
-    repl = f"CASE WHEN {args[0].strip()} THEN {args[1].strip()} ELSE {args[2].strip()} END"
+
+    def _norm_formula_arg(v: str) -> str:
+        s = v.strip()
+        if len(s) >= 2 and s.startswith('"') and s.endswith('"') and s.count('"') == 2:
+            return "'" + s[1:-1].replace("'", "''") + "'"
+        return re.sub(r'(?<![\w.\"])"([^"]*)"(?![\w.\"])', lambda mm: "'" + mm.group(1).replace("'", "''") + "'", s)
+
+    cond = args[0].strip()
+    cond = re.sub(r"(?<!=)==(?!=)", "=", cond)
+    cond = _norm_formula_arg(cond)
+    t_val = _norm_formula_arg(args[1])
+    f_val = _norm_formula_arg(args[2])
+
+    repl = f"CASE WHEN {cond} THEN {t_val} ELSE {f_val} END"
     return _transpile_if_calls(text[:m.start()] + repl + text[k:], _depth + 1)
 
 

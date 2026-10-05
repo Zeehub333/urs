@@ -8,36 +8,86 @@
                 <button onclick="rmlWizardNext()" id="rmlNextBtn">التالي</button>
                 <button onclick="submitAddRml()" id="rmlCreateBtn">حفظ</button>
             </div>
-            <!-- الشريط المعلوماتي (الخطوة 1: بيانات التقرير) -->
-            <div id="wbInfoStrip" class="border-b border-slate-100 px-3 py-2 bg-slate-50/60 shrink-0">
-                <div id="rmlWizardStep1" class="grid grid-cols-2 lg:grid-cols-4 gap-2 text-xs">
-                    <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">الاسم العربي *</label><input id="rmlDisplayName" placeholder="تقرير جديد" class="wb-inp"></div>
-                    <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">الاسم الإنجليزي *</label><input id="rmlProgName" placeholder="my_report" class="wb-inp font-mono" dir="ltr" oninput="syncRmlFileName()"></div>
-                    <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">اسم الملف *</label><input id="rmlFileName" placeholder="my_report.rml" class="wb-inp font-mono" dir="ltr" oninput="syncRmlProgName()"></div>
-                    <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">الأيقونة</label><select id="rmlIcon" class="wb-inp"><option value="fa-chart-bar">أعمدة</option><option value="fa-chart-line">خط بياني</option><option value="fa-chart-pie">دائري</option><option value="fa-table">جدول</option><option value="fa-file-lines">مستند</option></select></div>
-                    <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">الفئة</label><input id="rmlCategory" list="rmlCategoryList" placeholder="اكتب جديدة أو اختر" class="wb-inp" autocomplete="off"><datalist id="rmlCategoryList"></datalist></div>
-                    <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">النوع</label><select id="rmlReportType" onchange="toggleWizardDetailBox();wbSyncSheets()" class="wb-inp"><option value="master">إجمالي (Master)</option><option value="detail">تحليلي (Detail)</option><option value="doc">مستندي (Doc)</option></select></div>
-                    <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">النطاق</label><input id="rmlNamespace" placeholder="hr" class="wb-inp font-mono" dir="ltr"></div>
-                    <div class="col-span-2 lg:col-span-1"><label class="block text-[10px] font-bold text-slate-400 mb-0.5">الوصف</label><input id="rmlDescription" placeholder="وصف مختصر" class="wb-inp"></div>
-                </div>
-                <div id="rmlError" class="hidden text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-3 py-1.5 text-xs mt-2"></div>
-            </div>
+            <!-- شريط الأخطاء العام -->
+            <div id="wbInfoStrip" class="hidden"></div>
             <!-- بيئة عمل المصمم: flex ثلاثي (سايدبار 10vw + لوحة التقرير 80vw + خصائص العمود المنزلقة بأنميشن) -->
             <div id="wbSheets" class="flex-1 min-h-0 flex flex-row overflow-hidden text-xs relative rpt-flex h-full">
-                <!-- سايدبار 10vw: كل التبويبات عدا الأعمدة والتفاصيل -->
-                <aside id="rdSidebar" class="rd-sidebar shrink-0 bg-slate-50/90 border-l border-slate-200 p-2 flex flex-col gap-1 overflow-y-auto custom-scroll h-full" style="width: 10vw; min-width: 130px; max-width: 200px;">
-                    <div class="text-[10px] font-extrabold text-slate-400 px-2 py-1 mb-1 tracking-wider uppercase">أقسام المصمم</div>
-                    <div id="wbSheetTabs" class="flex flex-col gap-1 flex-1"></div>
+                <!-- سايدبار: أقسام المصمم + واجهة شجرة العناصر (الأعمدة، التفاصيل، المجموعات) -->
+                <aside id="rdSidebar" class="rd-sidebar shrink-0 bg-slate-50/95 border-l border-slate-200 flex flex-col overflow-hidden h-full">
+                    <div class="p-2 border-b border-slate-200 shrink-0">
+                        <button type="button" onclick="rdToggleReportProps()" class="w-full flex items-center justify-between px-2.5 py-1.5 mb-2 rounded-xl border border-emerald-200 bg-emerald-50/80 hover:bg-emerald-100 text-emerald-900 font-bold text-xs transition shadow-2xs">
+                            <span class="flex items-center gap-1.5"><i class="fa-solid fa-sliders text-emerald-600"></i> خصائص التقرير</span>
+                            <i class="fa-solid fa-chevron-left text-[10px] text-emerald-500"></i>
+                        </button>
+                        <div class="text-[10px] font-extrabold text-slate-400 px-2 py-0.5 mb-1 tracking-wider uppercase">أقسام المصمم</div>
+                        <div id="wbSheetTabs" class="flex flex-col gap-1"></div>
+                    </div>
+                    <div class="flex-1 min-h-0 flex flex-col p-2 overflow-hidden">
+                        <div class="flex items-center justify-between px-2 py-1 mb-1 text-[10px] font-extrabold text-slate-500 uppercase tracking-wider shrink-0">
+                            <span>واجهة العناصر</span>
+                            <i class="fa-solid fa-sitemap text-slate-400 text-[10px]"></i>
+                        </div>
+                        <div id="rdElementsTree" class="flex-1 min-h-0 overflow-y-auto custom-scroll space-y-1.5"></div>
+                    </div>
                     <div id="rptSideCols" class="hidden"></div>
                     <div id="rptSideDet" class="hidden"></div>
                 </aside>
                 <!-- لوحة التقرير 80vw -->
-                <main id="rdMainPalette" class="rd-palette flex-1 min-w-0 flex flex-col overflow-hidden relative bg-white h-full" style="width: 80vw;">
+                <main id="rdMainPalette" class="rd-palette flex-1 min-w-0 flex flex-col overflow-hidden relative bg-white h-full">
                     <div id="wbSheetBody" class="flex-1 min-h-0 flex flex-col h-full overflow-hidden"></div>
                     <div id="wbSheetFoot" class="shrink-0 border-t border-slate-200 bg-slate-50/70 px-3 py-1.5 flex items-center gap-2 hidden"></div>
                 </main>
                 <!-- لوحة خصائص العمود المتحركة بأنميشن -->
-                <aside id="rdPropsDrawer" class="rd-props-drawer"></aside>
+                                <!-- لوحة خصائص التقرير والعناصر المتحركة بأنميشن والمزيحة للوحة -->
+                <aside id="rdPropsDrawer" class="rd-props-drawer">
+                    <!-- 1. شاشة خصائص التقرير المدمجة (بيانات التقرير الأساسية + الاتصالات) -->
+                    <div id="rdReportPropsPanel" class="flex-1 min-h-0 flex flex-col overflow-hidden h-full">
+                        <div class="p-3 border-b border-slate-200 bg-slate-50/90 flex items-center justify-between shrink-0">
+                            <div class="flex items-center gap-2 min-w-0">
+                                <span class="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center text-xs shrink-0"><i class="fa-solid fa-sliders"></i></span>
+                                <div class="min-w-0">
+                                    <h4 class="font-bold text-slate-800 text-xs truncate">خصائص التقرير</h4>
+                                    <p class="text-[10px] text-slate-400">البيانات الأساسية ومصادر الاتصال</p>
+                                </div>
+                            </div>
+                            <button type="button" onclick="rdClosePropsDrawer()" class="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-200 transition" title="إغلاق اللوحة">
+                                <i class="fa-solid fa-xmark text-sm"></i>
+                            </button>
+                        </div>
+                        <div class="flex border-b border-slate-200 bg-slate-50/50 shrink-0 text-xs">
+                            <button type="button" onclick="rdSetReportTab('meta')" id="rdRepTabMeta" class="flex-1 py-2 text-center font-bold border-b-2 border-emerald-600 text-emerald-700 transition">بيانات التقرير</button>
+                            <button type="button" onclick="rdSetReportTab('conns')" id="rdRepTabConns" class="flex-1 py-2 text-center font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-700 transition">الاتصالات (<span id="rdConnsCountBadge">0</span>)</button>
+                        </div>
+                        <div class="flex-1 min-h-0 overflow-y-auto custom-scroll p-3 space-y-3">
+                            <div id="rdRepPaneMeta" class="space-y-2.5">
+                                <div id="rmlWizardStep1" class="space-y-2.5">
+                                    <div><label class="block text-[10px] font-bold text-slate-500 mb-1">الاسم العربي *</label><input id="rmlDisplayName" placeholder="تقرير جديد" class="wb-inp w-full"></div>
+                                    <div><label class="block text-[10px] font-bold text-slate-500 mb-1">الاسم الإنجليزي *</label><input id="rmlProgName" placeholder="my_report" class="wb-inp w-full font-mono" dir="ltr" oninput="syncRmlFileName()"></div>
+                                    <div><label class="block text-[10px] font-bold text-slate-500 mb-1">اسم الملف *</label><input id="rmlFileName" placeholder="my_report.rml" class="wb-inp w-full font-mono" dir="ltr" oninput="syncRmlProgName()"></div>
+                                    <div class="grid grid-cols-2 gap-2">
+                                        <div><label class="block text-[10px] font-bold text-slate-500 mb-1">الأيقونة</label><select id="rmlIcon" class="wb-inp w-full"><option value="fa-chart-bar">أعمدة</option><option value="fa-chart-line">خط بياني</option><option value="fa-chart-pie">دائري</option><option value="fa-table">جدول</option><option value="fa-file-lines">مستند</option></select></div>
+                                        <div><label class="block text-[10px] font-bold text-slate-500 mb-1">الفئة</label><input id="rmlCategory" list="rmlCategoryList" placeholder="اكتب جديدة أو اختر" class="wb-inp w-full" autocomplete="off"><datalist id="rmlCategoryList"></datalist></div>
+                                    </div>
+                                    <div class="grid grid-cols-2 gap-2">
+                                        <div><label class="block text-[10px] font-bold text-slate-500 mb-1">النوع</label><select id="rmlReportType" onchange="toggleWizardDetailBox();wbSyncSheets()" class="wb-inp w-full"><option value="master">إجمالي (Master)</option><option value="detail">تحليلي (Detail)</option><option value="doc">مستندي (Doc)</option></select></div>
+                                        <div><label class="block text-[10px] font-bold text-slate-500 mb-1">النطاق</label><input id="rmlNamespace" placeholder="hr" class="wb-inp w-full font-mono" dir="ltr"></div>
+                                    </div>
+                                    <div><label class="block text-[10px] font-bold text-slate-500 mb-1">الوصف</label><input id="rmlDescription" placeholder="وصف مختصر" class="wb-inp w-full"></div>
+                                </div>
+                            </div>
+                            <div id="rdRepPaneConns" class="space-y-2 hidden">
+                                <div class="flex items-center justify-between mb-1 pb-1 border-b border-slate-100">
+                                    <span class="text-[11px] font-bold text-slate-600">قواعد البيانات المرتبطة:</span>
+                                    <button type="button" onclick="loadConnectionsForWizard()" class="text-[10px] text-emerald-600 hover:text-emerald-700 font-bold flex items-center gap-1"><i class="fa-solid fa-rotate"></i> تحديث</button>
+                                </div>
+                                <div id="rdConnectionsHost" class="space-y-1.5"></div>
+                            </div>
+                        </div>
+                        <div id="rmlError" class="hidden text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-3 py-1.5 text-xs m-3 mt-0"></div>
+                    </div>
+                    <!-- 2. لوحة خصائص العنصر المحدد (الأعمدة / المجموعات / التفاصيل) -->
+                    <div id="rdElementPropsPanel" class="flex-1 min-h-0 flex flex-col overflow-hidden h-full hidden"></div>
+                </aside>
             </div>
             <!-- مستودعات البيانات المخفية (تُملأ بواسطة منطق المعالج الحالي وتُرسم في الشبكة) -->
             <div id="rmlWizardStep2" class="hidden">
