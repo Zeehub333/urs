@@ -8210,7 +8210,7 @@ def _write_detail_el(rml, ET, detail):
         col_el.set("id", str(col.get("id", str(idx))))
         col_el.set("name", col.get("name", f"col{idx}"))
         col_el.set("alias", col.get("alias", col.get("name", f"col{idx}")))
-        col_el.set("expr", col.get("expr", col.get("name", f"col{idx}")))
+        col_el.set("expr", col.get("expr") or "")
         ctype = col.get("col_type", col.get("type", "direct"))
         if ctype and ctype != "direct":
             col_el.set("col_type", ctype)
@@ -8424,12 +8424,12 @@ def _render_rml_xml(prog_name, displayName, icon, category, schema, description,
         cid = col.get("id", str(idx))
         name = col.get("name", f"col{idx}")
         alias = col.get("alias", name)
-        expr = col.get("expr", name)
+        expr = col.get("expr") if col.get("expr") is not None else ""
         ctype = col.get("col_type", col.get("type", "direct"))
         col_el.set("id", str(cid))
         col_el.set("name", name)
         col_el.set("alias", alias)
-        col_el.set("expr", expr)
+        col_el.set("expr", str(expr))
         if ctype and ctype != "direct":
             col_el.set("col_type", ctype)
         if col.get("data_type") or col.get("dataType"):

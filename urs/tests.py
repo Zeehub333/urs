@@ -808,6 +808,21 @@ class RmlPaletteTests(SimpleTestCase):
         self.assertIn('width="220"', out)
         self.assertNotIn('visible="0" verbo', out)
 
+    def test_empty_column_and_render_xml_no_db_column_fallback(self):
+        from rml_python.compiler import RMLColumn, RMLField
+        from rml_python.engine import _build_select
+        col = RMLColumn(id="25", name="col_25", alias="عمود 25", expr="")
+        fld = RMLField(id="1", name="salary", table_source="emp", connection_id="1")
+        sel = _build_select([col], fields=[fld])
+        self.assertIn('NULL AS "عمود 25"', sel)
+        self.assertNotIn('"col_25"', sel)
+
+        cols = [{"id": "25", "name": "col_25", "alias": "عمود 25", "expr": ""}]
+        out = _v._render_rml_xml("t", "T", "fa-x", "X", "S", "", None, [], [], cols,
+                                 [], [], "master", None, [], "", [], False, [], 1, "", {})
+        self.assertIn('name="col_25"', out)
+        self.assertIn('expr=""', out)
+
     def test_design_preview_validates(self):
         req = RequestFactory().post("/api/apps/settings/rml/design-preview/",
                                     data=json.dumps({}), content_type="application/json")

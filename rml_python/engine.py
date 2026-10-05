@@ -1100,14 +1100,17 @@ def _build_select(columns: List[RMLColumn], fields: Optional[List] = None,
     parts = []
     for col in columns:
         alias_q = _q(col.alias)
-        raw = (col.expr or col.name or "").strip()
+        raw = (col.expr or "").strip()
+        if not raw and getattr(col, "name", None):
+            cname_clean = str(col.name).strip().lower()
+            if any(str(getattr(f, "name", "") or "").strip().lower() == cname_clean for f in (fields or [])):
+                raw = str(col.name).strip()
+        base_sql: str
         if rules and "$" in raw:
             raw = _expand_rv(raw, rules)
         expr = _resolve_expression(raw, fields, ns_registry, _visited, table_map, conn_map, _abt,
-                                     default_tables=default_tables)
-        base_sql: str
-        if raw.strip().upper() == "NULL":
-            # Merge placeholder for cross-DB columns (filled post-fetch)
+                                     default_tables=default_tables) if raw else ""
+        if not raw or raw.strip().upper() == "NULL":
             base_sql = "NULL"
         # fk_lookup: generate subquery from ref_tables (new) or single ref (backward compat)
         elif col.col_type == "fk_lookup":
@@ -1175,7 +1178,11 @@ def _build_select(columns: List[RMLColumn], fields: Optional[List] = None,
                 base_sql = f"(SELECT {_q(ref_display)} FROM {ref_from} WHERE {_q(ref_fk)} = {key_sql})"
         elif col.col_type in ("aggregated", "computed"):
             if re.match(r'^[A-Za-z_][A-Za-z0-9_]*$', raw):
-                base_sql = _q(raw)
+                _known_f = {str(getattr(_f, "name", "") or "").strip().lower() for _f in (fields or [])}
+                if (_known_f and raw.lower() not in _known_f) or raw.lower().startswith("col_") or raw.lower().startswith("dcol_"):
+                    base_sql = "NULL"
+                else:
+                    base_sql = _q(raw)
             else:
                 base_sql = expr
         else:  # direct
@@ -1203,7 +1210,13 @@ def _build_select(columns: List[RMLColumn], fields: Optional[List] = None,
                                 _use_rx = True
                         except Exception:
                             pass
-                    base_sql = expr if _use_rx else _q(raw)
+                        base_sql = expr if _use_rx else _q(raw)
+                    else:
+                        _known_f = {str(getattr(_f, "name", "") or "").strip().lower() for _f in (fields or [])}
+                        if (_known_f and raw.lower() not in _known_f) or raw.lower().startswith("col_") or raw.lower().startswith("dcol_"):
+                            base_sql = "NULL"
+                        else:
+                            base_sql = _q(raw)
             else:
                 base_sql = expr
         # Apply per-column where_clause (resolved the same way). Keeps backward compat when empty.

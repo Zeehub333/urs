@@ -1512,7 +1512,13 @@ function showExprAC(input, target, matches){
 list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفرعية تُدار من لوحة الأعمدة أعلاه (تحديد + خصائص + سحب).</p>';
             try{ applyColSubTab(); }catch(e){}
         }
-        function addWizardDetailColumn(){ wizardDetail.columns.push({id:String(wizardDetail.columns.length+1), name:'dcol_'+(wizardDetail.columns.length+1), alias:'عمود فرعي '+(wizardDetail.columns.length+1), expr:'', col_refname:'', visible:true, width:null, col_type:'direct', icon:'fa-hashtag', is_amount:false, refFk:'', join_type:'one_to_one'}); renderWizardColumns(); try{ if(typeof rptPreviewSoon === 'function') rptPreviewSoon(); }catch(e){}}
+        function addWizardDetailColumn(){
+            const newIdx = wizardDetail.columns.length;
+            wizardDetail.columns.push({id:String(newIdx+1), name:'dcol_'+(newIdx+1), alias:'عمود فرعي '+(newIdx+1), expr:'', col_refname:'', visible:true, width:null, col_type:'direct', icon:'fa-hashtag', is_amount:false, refFk:'', join_type:'one_to_one'});
+            renderWizardColumns();
+            try{ rptSelectCol('dcol', newIdx); }catch(e){}
+            try{ if(typeof rptPreviewSoon === 'function') rptPreviewSoon(); }catch(e){}
+        }
         function refreshDetailRelHint(){ try{ applyColSubTab(); }catch(e){} }
         function removeWizardDetailColumn(idx){ wizardDetail.columns.splice(idx,1); renderWizardColumns(); try{ if(typeof rptPreviewSoon === 'function') rptPreviewSoon(); }catch(e){}}
         function updateWizardDetailColumn(idx, field, val){ wizardDetail.columns[idx][field]=val; }
@@ -1923,7 +1929,13 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
             box.innerHTML = `<div class="rpt-gridwrap custom-scroll"><table class="rpt-grid"><thead><tr>${head}</tr></thead><tbody>${body || `<tr><td colspan="${cols.length}" class="p-8 text-center text-slate-400">لا توجد بيانات مسترجعة من الاستعلام</td></tr>`}</tbody></table></div>`
                 + `<div class="px-3 py-1 bg-slate-50 text-[10px] text-slate-500 border-t border-slate-200 flex items-center justify-between shrink-0"><span>عرض أول ${rows.length} صف • السحب والإفلات لرؤوس الأعمدة للترتيب بدون أسهم • النقر على أي رأس لفتح لوحة الخصائص</span><span>الأعمدة المخفية (المعلمة بـ <i class="fa-solid fa-eye-slash text-rose-500"></i>) يمكن تعديل عرضها وإخفائها في المشغل لاحقاً</span></div>`;
         }
-        function addWizardColumn(){ wizardColumns.push({id:String(wizardColumns.length+1), name:'col_'+(wizardColumns.length+1), alias:'عمود '+(wizardColumns.length+1), expr:'', col_refname:'', visible:true, width:null, col_type:'direct', where_clause:'', icon:'fa-hashtag', is_amount:false, is_distinct:false, is_status:false, status_map:[], refTable:'', refFk:'', refDisplay:'', join_type:'one_to_one'}); renderWizardColumns(); try{ if(typeof rptPreviewSoon === 'function') rptPreviewSoon(); }catch(e){}}
+        function addWizardColumn(){
+            const newIdx = wizardColumns.length;
+            wizardColumns.push({id:String(newIdx+1), name:'col_'+(newIdx+1), alias:'عمود '+(newIdx+1), expr:'', col_refname:'', visible:true, width:null, col_type:'direct', where_clause:'', icon:'fa-hashtag', is_amount:false, is_distinct:false, is_status:false, status_map:[], refTable:'', refFk:'', refDisplay:'', join_type:'one_to_one'});
+            renderWizardColumns();
+            try{ rptSelectCol('col', newIdx); }catch(e){}
+            try{ if(typeof rptPreviewSoon === 'function') rptPreviewSoon(); }catch(e){}
+        }
         const RULE_VAR_TYPES = [['text','نصية'],['number','رقمية'],['date','تاريخ'],['time','وقت'],['expression','تعبير'],['custom_function','دالة مخصصة'],['boolean','منطقي (صح/غلط)'],['choice','اختيار من خيارات']];
         function renderWizardRules(){
             const container = document.getElementById('wizardRulesList');
