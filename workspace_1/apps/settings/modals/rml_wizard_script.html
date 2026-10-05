@@ -1544,7 +1544,7 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                     <div class="flex items-center gap-2">
                         <span class="font-bold text-slate-800 text-xs flex items-center gap-1.5">
                             <i class="fa-solid fa-table-cells text-emerald-600"></i>
-                            <span>بيانات التقرير الرئيسية — معاينة حية (أول 50 صف)</span>
+                            <span>بيانات التقرير الرئيسية — معاينة حية (أول 20 صف)</span>
                         </span>
                         <span class="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-bold">الأعمدة: ${wizardColumns.length}</span>
                         <span class="text-[10px] bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full font-bold">الظاهرة: ${(wizardColumns.filter(rptVis)||[]).length}</span>
@@ -1859,7 +1859,7 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                     else{
                         rptPrev.error = '';
                         rptPrev.cols = Array.isArray(d.columns) ? d.columns : [];
-                        rptPrev.rows = Array.isArray(d.rows) ? d.rows.slice(0, 50) : [];
+                        rptPrev.rows = Array.isArray(d.rows) ? d.rows.slice(0, 20) : [];
                         rptPrev.sql = d.sql || '';
                     }
                     rptPreviewRender();
@@ -1873,7 +1873,7 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
         function rptPreviewRender(){
             const box = document.getElementById('rptPrevBox');
             if(!box) return;
-            if(rptPrev.loading){ box.innerHTML = '<div class="flex-1 flex flex-col items-center justify-center p-8 text-slate-400 text-xs gap-2"><i class="fa-solid fa-circle-notch fa-spin text-xl text-emerald-600"></i><span>جارٍ جلب أول 50 صف من قاعدة البيانات للمعاينة الحية...</span></div>'; return; }
+            if(rptPrev.loading){ box.innerHTML = '<div class="flex-1 flex flex-col items-center justify-center p-8 text-slate-400 text-xs gap-2"><i class="fa-solid fa-circle-notch fa-spin text-xl text-emerald-600"></i><span>جارٍ جلب أول 20 صف من قاعدة البيانات للمعاينة الحية...</span></div>'; return; }
             if(rptPrev.error){ box.innerHTML = `<div class="m-3 p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-xs"><div class="font-bold mb-1"><i class="fa-solid fa-triangle-exclamation"></i> خطأ في استعلام المعاينة:</div><pre class="font-mono text-[11px] whitespace-pre-wrap">${rptEsc(rptPrev.error).slice(0, 800)}</pre></div>`; return; }
             const cols = (wizardColumns || []);
             if(!cols.length){

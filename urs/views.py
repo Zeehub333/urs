@@ -9081,10 +9081,10 @@ def api_rml_fetch_query(request, app_name):
 
 @csrf_exempt
 def api_rml_design_preview(request, app_name):
-    """POST /api/apps/<app>/rml/design-preview/ — wizard state → first 50 rows live.
+    """POST /api/apps/<app>/rml/design-preview/ — wizard state → first 20 rows live.
 
     Body: same shape as draft/fetch-query. Renders to a temp __preview_*.rml,
-    runs synchronously (pageSize 50), deletes the temp. Returns
+    runs synchronously (pageSize 20), deletes the temp. Returns
     {columns, rows, total, sql}. Errors (incl. @refname problems) surface here.
     """
     target = None
@@ -9121,12 +9121,12 @@ def api_rml_design_preview(request, app_name):
         target.write_text(pretty, encoding="utf-8")
         pipe = _rml_get_pipeline(fname, app_name)
         try:
-            result = pipe.execute({"page": 1, "pageSize": 50})
+            result = pipe.execute({"page": 1, "pageSize": 20})
         except ValueError as ve:
             return JsonResponse({"error": str(ve)[:500]}, status=400)
         rows = result.get("rows") if isinstance(result, dict) else None
         if isinstance(rows, list):
-            result["rows"] = rows[:50]
+            result["rows"] = rows[:20]
         return JsonResponse(result if isinstance(result, dict) else {"rows": []},
                             json_dumps_params={"ensure_ascii": False})
     except ValueError as e:
