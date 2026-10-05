@@ -2032,6 +2032,7 @@
         // (إظهار/إخفاء الحقول والتبويبات تصريحي عبر visibleIf في connections.fmlk)
         const CONN_DB_ENGINES = ['postgres', 'oracle', 'sqlserver', 'mysql'];
         const CONN_IOT_ENGINES = ['zk'];
+        const CONN_JSON_ENGINES = ['json'];
         function connTypeHook(){
             try{
                 const meta = fmlMeta.metadata || {};
@@ -2051,7 +2052,7 @@
             const typeSel = document.querySelector('select[data-field="conn_type"]');
             const engSel = document.querySelector('select[data-field="engine"]');
             const t = typeSel ? typeSel.value : 'database';
-            const allowed = (t === 'iot') ? CONN_IOT_ENGINES : CONN_DB_ENGINES;
+            const allowed = (t === 'iot') ? CONN_IOT_ENGINES : ((t === 'json') ? CONN_JSON_ENGINES : CONN_DB_ENGINES);
             if(engSel){
                 const cur = engSel.value;
                 engSel.innerHTML = allowed.map(e=>`<option value="${e}" ${e===cur?'selected':''}>${e}</option>`).join('');

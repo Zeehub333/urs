@@ -282,6 +282,8 @@ def workspace_info(ws_path):
         "status": (conf.get("STATUS") or "active").strip().lower() or "active",
         "primary_connection": conf.get("PRIMARY_CONNECTION") or "",
         "users_table": conf.get("USERS_TABLE") or "",
+        "users_user_column": conf.get("USERS_USER_COLUMN") or "",
+        "users_password_column": conf.get("USERS_PASSWORD_COLUMN") or "",
         "counts": {"apps": apps, "forms": forms, "reports": reports},
     }
 

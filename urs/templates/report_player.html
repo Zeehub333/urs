@@ -345,6 +345,11 @@
             <button onclick="hideThisColumn()" class="w-full text-right px-2 py-1.5 hover:bg-slate-50 rounded-lg flex items-center gap-2 text-slate-700">
                 <i class="fa-solid fa-eye-slash text-slate-400"></i> إخفاء هذا العمود
             </button>
+            <div class="flex items-center gap-2 px-2 py-1.5">
+                <i class="fa-solid fa-text-width text-slate-400"></i>
+                <input id="colWidthInput" type="number" min="40" max="1200" step="10" placeholder="العرض px (فارغ = تلقائي)" class="flex-1 min-w-0 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 font-mono" dir="ltr">
+                <button onclick="setColWidth()" class="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold">تطبيق</button>
+            </div>
             <button onclick="clearColumnFilter()" class="w-full text-right px-2 py-1.5 hover:bg-slate-50 rounded-lg flex items-center gap-2 text-rose-600">
                 <i class="fa-solid fa-filter-circle-xmark"></i> إلغاء عامل التصفية
             </button>
@@ -595,6 +600,8 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                 decimals: (c.decimals ?? ''),
                 date_format: c.dateFormat || c.date_format || '',
                 dateFormat: c.dateFormat || c.date_format || '',
+                visible: !(String(c.visible ?? '1').toLowerCase() === '0' || ['false','no','off','hidden'].includes(String(c.visible ?? '1').toLowerCase())),
+                width: (parseInt(c.width, 10) >= 40 ? parseInt(c.width, 10) : ''),
                 is_status: !!(c.is_status || c.isStatus),
                 status_map: c.status_map || c.statusMap || [],
                 statusMap: c.status_map || c.statusMap || [],
@@ -632,6 +639,54 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
         function visCols(all){ const arr = all || []; return arr.filter(c=>!hiddenCols.has(c.alias || c.name)); }
         function allCols(){ return (lastApiData && lastApiData.columns) || (typeof queryColumns !== 'undefined' ? queryColumns : []) || []; }
         loadHiddenCols();
+        // Seed from RML visible:false on first visit (stored prefs win afterwards)
+        try{
+            if(localStorage.getItem(hiddenStoreKey()) === null && typeof queryColumns !== 'undefined'){
+                (queryColumns || []).forEach(c=>{ if(c && c.visible === false) hiddenCols.add(c.alias || c.name); });
+                if(hiddenCols.size) saveHiddenCols();
+            }
+        }catch(e){}
+        // Per-report column widths (RML width = default, adjustable in the column menu)
+        let colWidths = {};
+        function widthsStoreKey(){
+            try{ return 'rml_widths_' + (currentApp || 'app') + '_' + (currentRml || 'rml'); }
+            catch(e){ return 'rml_widths_default'; }
+        }
+        function loadColWidths(){ try{ colWidths = JSON.parse(localStorage.getItem(widthsStoreKey()) || '{}') || {}; }catch(e){ colWidths = {}; } }
+        function saveColWidths(){ try{ localStorage.setItem(widthsStoreKey(), JSON.stringify(colWidths || {})); }catch(e){} }
+        function colWidthOf(alias, qc){
+            try{
+                if(colWidths && colWidths[alias]) return parseInt(colWidths[alias], 10) || '';
+                if(qc && qc.width) return parseInt(qc.width, 10) || '';
+            }catch(e){}
+            return '';
+        }
+        function setColWidth(){
+            try{
+                const inp = document.getElementById('colWidthInput');
+                let w = inp ? parseInt(inp.value, 10) : NaN;
+                if(currentMenuColumn){
+                    if(isNaN(w) || w < 40){ delete colWidths[currentMenuColumn]; }
+                    else { colWidths[currentMenuColumn] = Math.min(w, 1200); }
+                    saveColWidths();
+                }
+                try{ if(typeof renderGrid === 'function') renderGrid(); }catch(e){}
+                const m = document.getElementById('columnDropdownMenu');
+                if(m) m.classList.add('hidden');
+            }catch(e){}
+        }
+        function colWidthStyle(alias){
+            try{
+                let w = (typeof colWidths !== 'undefined' && colWidths[alias]) ? parseInt(colWidths[alias], 10) : NaN;
+                if(!(w >= 40)){
+                    const qc = (typeof queryColumns !== 'undefined' ? queryColumns : []).find(q=>q && (q.alias === alias || q.name === alias));
+                    w = qc && qc.width ? parseInt(qc.width, 10) : NaN;
+                }
+                if(w >= 40) return ' style="min-width:' + Math.min(w, 1200) + 'px;max-width:' + Math.min(w, 1200) + 'px"';
+            }catch(e){}
+            return '';
+        }
+        loadColWidths();
         // ── حفظ حالة آخر فرز دائماً (لكل تقرير) + مشاركتها في الرابط ──
         function sortStoreKey(){
             try{ return 'rml_sort_' + (currentApp || 'app') + '_' + (currentRml || 'rml'); }
@@ -1479,12 +1534,22 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
             const st = ((c && (c.is_status || c.isStatus)) ? statusEntry(c, rawV) : null);
             const wcls = colWrapCls(c);
             const tip = (colTruncated(c, rawV) ? ` title="${String(rawV ?? '').replace(/"/g, '&quot;')}"` : '');
-            if(!st) return `<td class="px-2 py-1 text-slate-800 excel-cell ${wcls}"${tip}>${formattedInner}</td>`;
+            let _cww = '';
+            try{
+                const _wa = (c && (c.alias || c.name)) || '';
+                let _w = (typeof colWidths !== 'undefined' && colWidths[_wa]) ? parseInt(colWidths[_wa], 10) : NaN;
+                if(!(_w >= 40)){
+                    const _qc = (typeof queryColumns !== 'undefined' ? queryColumns : []).find(q=>q && (q.alias === _wa || q.name === _wa));
+                    _w = _qc && _qc.width ? parseInt(_qc.width, 10) : NaN;
+                }
+                if(_w >= 40) _cww = 'min-width:' + Math.min(_w, 1200) + 'px;max-width:' + Math.min(_w, 1200) + 'px;';
+            }catch(e){}
+            if(!st) return `<td class="px-2 py-1 text-slate-800 excel-cell ${wcls}"${tip}${_cww ? ` style="${_cww}"` : ''}>${formattedInner}</td>`;
             const tint = statusTint(st.color, 0.16) || '';
             const fg = (/^#[0-9a-fA-F]{6}$/.test(st.color || '') ? st.color : '#334155');
             const label = String(st.label ?? rawV ?? '').replace(/</g,'&lt;');
-            const style = tint ? ` style="background:${tint}"` : '';
-            return `<td class="px-2 py-1 excel-cell ${wcls}"${style}${tip}><span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold" style="background:${fg};color:${statusFg(st.color)}">${label}</span></td>`;
+            const style = ((tint ? `background:${tint};` : '') + _cww);
+            return `<td class="px-2 py-1 excel-cell ${wcls}"${style ? ` style="${style}"` : ''}${tip}><span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold" style="background:${fg};color:${statusFg(st.color)}">${label}</span></td>`;
         }
         function renderApiData(data, append){
             const cols = visCols(data.columns || []);
@@ -1502,7 +1567,7 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                 if(groupHeader){
                     thead.innerHTML = groupHeader;
                 } else {
-                    thead.innerHTML = '<tr>' + (detailMode() ? '<th class="w-10 px-2 py-2 border-b border-slate-200 bg-slate-100"></th>' : '') + '<th class="w-12 px-3 py-2 text-center border-b border-slate-200 bg-slate-100 font-bold">#</th>' + cols.map(c=>`<th class="px-2 py-1 font-bold border-b border-slate-200 bg-slate-50 text-slate-700 cursor-pointer hover:bg-slate-100 select-none group" onclick="openColumnMenu(event, '${c.alias}')"><div class="flex items-center justify-between"><span>${c.alias}</span><i class="fa-solid fa-chevron-down text-[10px] text-slate-400 group-hover:text-indigo-600"></i></div></th>`).join('') + '</tr>';
+                    thead.innerHTML = '<tr>' + (detailMode() ? '<th class="w-10 px-2 py-2 border-b border-slate-200 bg-slate-100"></th>' : '') + '<th class="w-12 px-3 py-2 text-center border-b border-slate-200 bg-slate-100 font-bold">#</th>' + cols.map(c=>`<th class="px-2 py-1 font-bold border-b border-slate-200 bg-slate-50 text-slate-700 cursor-pointer hover:bg-slate-100 select-none group"${(typeof colWidthStyle === 'function' ? colWidthStyle(c.alias || c.name) : '')} onclick="openColumnMenu(event, '${c.alias}')"><div class="flex items-center justify-between"><span>${c.alias}</span><i class="fa-solid fa-chevron-down text-[10px] text-slate-400 group-hover:text-indigo-600"></i></div></th>`).join('') + '</tr>';
                 }
             }
             const tbody = document.getElementById('tableBody');

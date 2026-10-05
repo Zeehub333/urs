@@ -195,7 +195,7 @@
             }catch(e){ notify('تعذر تحميل التقرير: ' + (e.message || e), 'error'); }
         }
         function closeAddRmlModal(){ document.getElementById('addRmlModal').classList.add('hidden'); document.getElementById('rmlError').classList.add('hidden'); if(typeof unlockScroll === 'function') unlockScroll(); }
-        const ENGINE_NAMES = {postgres:'بوستجريس', oracle:'أوراكل', sqlserver:'إس كيو إل سيرفر', mysql:'ماي إس كيو إل', zk:'جهاز البصمة'};
+        const ENGINE_NAMES = {postgres:'بوستجريس', oracle:'أوراكل', sqlserver:'إس كيو إل سيرفر', mysql:'ماي إس كيو إل', zk:'جهاز البصمة', json:'ملف JSON'};
         let wizardConnNames = {};
         let wizardConnSchemas = {};
         let wizardSchema = '';
@@ -220,7 +220,7 @@
                     <label class="flex items-center gap-3 p-2.5 rounded-xl border ${wizardConnections.includes(String(c.id))?'bg-emerald-50 border-emerald-200':'bg-white border-slate-200 hover:bg-slate-50'} cursor-pointer transition">
                         <input type="checkbox" value="${c.id}" ${wizardConnections.includes(String(c.id))?'checked':''} onchange="toggleWizardConnection('${c.id}')" class="rounded text-emerald-600">
                         <div class="flex-1">
-                            <div class="font-semibold text-slate-800 flex items-center gap-2">${c.name} <span class="text-[10px] px-1.5 py-0.5 rounded-full ${(c.conn_type||c.connType||'database')==='iot'?'bg-violet-100 text-violet-700':'bg-sky-100 text-sky-700'}">${(c.conn_type||c.connType||'database')==='iot'?'IoT':'قاعدة بيانات'}</span> <span class="text-[10px] px-1.5 py-0.5 rounded-full ${c.is_local?'bg-emerald-100 text-emerald-700':'bg-amber-100 text-amber-700'}">${c.is_local?'محلي':'قراءة فقط'}</span> <span class="text-[10px] bg-slate-100 px-1.5 py-0.5 rounded">${ENGINE_NAMES[c.engine]||c.engine}</span></div>
+                            <div class="font-semibold text-slate-800 flex items-center gap-2">${c.name} <span class="text-[10px] px-1.5 py-0.5 rounded-full ${(c.conn_type||c.connType||'database')==='iot'?'bg-violet-100 text-violet-700':((c.conn_type||c.connType||'database')==='json'?'bg-emerald-100 text-emerald-700':'bg-sky-100 text-sky-700')}">${(c.conn_type||c.connType||'database')==='iot'?'IoT':((c.conn_type||c.connType||'database')==='json'?'JSON':'قاعدة بيانات')}</span> <span class="text-[10px] px-1.5 py-0.5 rounded-full ${c.is_local?'bg-emerald-100 text-emerald-700':'bg-amber-100 text-amber-700'}">${c.is_local?'محلي':'قراءة فقط'}</span> <span class="text-[10px] bg-slate-100 px-1.5 py-0.5 rounded">${ENGINE_NAMES[c.engine]||c.engine}</span></div>
                             <div class="text-[11px] text-slate-500">${c.host}:${c.port}/${c.instance}${c.schema ? ' • ' + c.schema : ''}</div>
                         </div>
                         <span class="text-xs font-bold text-emerald-600">${wizardConnections.indexOf(String(c.id))+1 >0 ? 'رقم ' + (wizardConnections.indexOf(String(c.id))+1) : '—'}</span>
@@ -1165,9 +1165,15 @@
             // بادئة = (نمط إكسل): اعرض كل الدوال مباشرة — = وحدها تعني "تعبير"
             // (== و != و <= و >= للمقارنة ولا تُطلق الإكمال)
             if(/(^|[\s,(])=$/.test(before)){
-                const matches = XSQL_FNS.concat(SQL_FNS).slice(0, 12)
-                    .map(f=>({kind:'fn', code:f.fn, tpl:f.tpl, hint:f.hint}));
+                const matches = fxEqMatches();
                 showExprAC(input, target, matches);
+                try{
+                    fxFnsFetch().then(items=>{
+                        if(items && items.length && typeof exprAC !== 'undefined' && exprAC && exprAC.input === input){
+                            showExprAC(input, target, fxEqMatches());
+                        }
+                    });
+                }catch(e){}
                 return;
             }
             // $rule.var — اقتراحات قواعد الأعمال
@@ -1207,14 +1213,36 @@
                 return;
             }
             // @Alias — استدعاء الأعمدة المحسوبة الموجودة في المصمم (تُوسَّع لتعبيرها)
+            // partial function name after = ( , — live filter across ALL sources
+            const fm = before.match(/(=|[(,]\s*)([A-Za-z_][A-Za-z0-9_]*)$/);
+            if(fm){
+                const fpart = fm[2] || '';
+                const fm0 = fxFnFilter(fpart);
+                if(fm0.length){
+                    showExprAC(input, target, fm0);
+                    try{
+                        fxFnsFetch().then(()=>{
+                            if(typeof exprAC !== 'undefined' && exprAC && exprAC.input === input){
+                                const m2 = fxFnFilter(fpart);
+                                if(m2.length) showExprAC(input, target, m2);
+                            }
+                        });
+                    }catch(e){}
+                    return;
+                }
+            }
             const am = before.match(/@([A-Za-z0-9_.\u0600-\u06FF ]*)$/);
             if(am){
                 const atPos = before.length - am[0].length;
                 const prev = atPos > 0 ? before[atPos - 1] : '';
                 if(prev && /[\w$#@."'\u0600-\u06FF]/.test(prev)){ hideExprAC(); return; }
                 const part = (am[1] || '').replace(/\s+$/, '').toLowerCase();
-                const pool = (wizardColumns || []).filter(c=>c.alias || c.name)
-                    .map(c=>({code: c.alias || c.name, name: c.alias || c.name, hint: (c.expr || '').slice(0, 60)}));
+                const pool = [];
+                (wizardColumns || []).filter(c=>c.alias || c.name).forEach(c=>{
+                    const _rn = c.col_refname || c.colRefname || '';
+                    if(_rn) pool.push({code: _rn, name: c.alias || c.name, hint: 'قيمة ✓'});
+                    pool.push({code: c.alias || c.name, name: c.alias || c.name, hint: (c.expr || '').slice(0, 60)});
+                });
                 let matches = pool.filter(o=>o.code.toLowerCase().indexOf(part) >= 0 || o.name.toLowerCase().indexOf(part) >= 0).slice(0, 30);
                 matches.sort((a, b)=>{
                     const rank = (o)=>{
@@ -1256,7 +1284,55 @@
             }
             return box;
         }
-        function showExprAC(input, target, matches){
+                let FX_FN_CACHE = {key:'all', ts:0, all:[], items:[]};
+        function fxFnPool(){
+            const base = (typeof XSQL_FNS !== 'undefined' ? XSQL_FNS : []).concat(typeof SQL_FNS !== 'undefined' ? SQL_FNS : []);
+            const srv = (typeof FX_FN_CACHE !== 'undefined' && FX_FN_CACHE.all) || [];
+            const seen = new Set(), out = [];
+            srv.concat(base).forEach(f=>{
+                const k = String((f && (f.fn || f.code)) || '').toUpperCase();
+                if(k && !seen.has(k)){ seen.add(k); out.push({code:(f.fn || f.code), tpl:f.tpl, hint:f.hint}); }
+            });
+            return out;
+        }
+        function fxEqMatches(){
+            return fxFnPool().slice(0, 12).map(o=>({kind:'fn', code:o.code, tpl:o.tpl, hint:o.hint}));
+        }
+        function fxFnFilter(part){
+            const pool = fxFnPool();
+            const up = String(part || '').toUpperCase();
+            const pre = pool.filter(o=>String(o.code || '').toUpperCase().indexOf(up) === 0);
+            const sub = pool.filter(o=>{ const c = String(o.code || '').toUpperCase(); return c.indexOf(up) > 0; });
+            return pre.concat(sub).slice(0, 12).map(o=>({kind:'fn', code:o.code, tpl:o.tpl, hint:o.hint}));
+        }
+        async function fxFnsFetch(force){
+            const now = Date.now();
+            try{ if(!force && (now - (FX_FN_CACHE.ts || 0)) < 300000 && FX_FN_CACHE.all.length) return FX_FN_CACHE.all; }catch(e){}
+            const seen = new Set(), all = [], items = [];
+            const take = (arr, mark)=>{
+                (arr || []).forEach(f=>{
+                    const k = String((f && f.fn) || '').toUpperCase();
+                    if(!k || seen.has(k)) return;
+                    seen.add(k);
+                    const it = {kind:'fn', code:f.fn, tpl:f.tpl, hint:f.hint};
+                    all.push(it);
+                    if(mark) items.push(it);
+                });
+            };
+            try{
+                const res = await fetch('/api/formulas/autocomplete/?all=1');
+                const d = await res.json().catch(()=>({}));
+                if(res.ok && d){
+                    take(d.migrated, true);
+                    take(d.custom, true);
+                    take(d.natives, false);
+                    take(d.defaults, false);
+                }
+            }catch(e){}
+            FX_FN_CACHE = {key:'all', ts:now, all:all, items:items};
+            return all;
+        }
+function showExprAC(input, target, matches){
             const box = exprACBox();
             exprAC = {input: input, target: target, matches: matches, sel: 0};
             try{
@@ -1426,72 +1502,292 @@
                 }
                 msel.value = wizardDetail.master || '';
             }
+            try{ renderWizardColumns(); }catch(e){}
             const list = document.getElementById('wizardDetailColsList');
             if(!list) return;
             if(!wizardDetail.columns.length){
                 list.innerHTML = '<p class="text-slate-400 text-center py-4">لا توجد أعمدة فرعية — اضغط إضافة عمود فرعي</p>';
                 return;
             }
-list.innerHTML = wizardDetail.columns.map((col, idx)=>`
-                <div class="bg-white border border-slate-200 rounded-xl p-2 space-y-2">
-                    <div class="flex items-center justify-between">
-                        <span class="text-[11px] font-bold text-slate-600">فرعي #${idx+1}</span>
-                        <button onclick="removeWizardDetailColumn(${idx})" class="text-rose-500 hover:text-rose-700 text-xs"><i class="fa-solid fa-trash"></i></button>
-                    </div>
-                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                        <div><label class="block text-[11px] font-semibold text-slate-600">الاسم المعروض *</label><input value="${col.alias||''}" onchange="updateWizardDetailColumn(${idx},'alias',this.value)" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-xs"></div>
-                        <div><label class="block text-[11px] font-semibold text-slate-600">النوع والتنسيق</label><button onclick="openColTypeModal(${idx}, true)" title="اختيار النوع وتهيئة التنسيق" class="w-full bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg px-2 py-1.5 text-xs font-bold text-indigo-700 flex items-center justify-center gap-1.5"><i class="fa-solid fa-shapes text-[11px]"></i><span>${colTypeSummary(col)}</span></button></div>
-                        <div><label class="block text-[11px] font-semibold text-slate-600">التعبير * — من الجدول الافتراضي مباشرة أو عبر رابط معرف في الحقول</label><div class="flex gap-1"><input value="${(col.expr||'').replace(/"/g,'"')}" oninput="updateWizardDetailColumn(${idx},'expr',this.value);exprAuto(this,'dcol:${idx}')" placeholder="[emp_no]" autocomplete="off" class="flex-1 min-w-0 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-mono" dir="ltr"><button onclick="openExprExpand(${idx}, true)" title="تحرير موسع" class="px-2.5 rounded-lg bg-violet-50 hover:bg-violet-100 text-violet-700 shrink-0"><i class="fa-solid fa-expand text-[11px]"></i></button><button onclick="openExprBuilder(${idx}, true)" title="اختيار الحقل" class="px-2.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 shrink-0"><i class="fa-solid fa-magnifying-glass text-[11px]"></i></button></div></div>
-                        <div class="flex items-end pb-1"><label class="flex items-center gap-1.5 text-[11px] font-semibold text-slate-600 cursor-pointer"><input type="checkbox" ${col.is_amount?'checked':''} onchange="updateWizardDetailColumn(${idx},'is_amount',this.checked)" class="rounded text-emerald-600"> مبلغ</label></div>
-                    </div>
-                </div>
-            `).join('');
+list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفرعية تُدار من لوحة الأعمدة أعلاه (تحديد + خصائص + سحب).</p>';
             try{ applyColSubTab(); }catch(e){}
         }
-        function addWizardDetailColumn(){ wizardDetail.columns.push({id:String(wizardDetail.columns.length+1), name:'dcol_'+(wizardDetail.columns.length+1), alias:'عمود فرعي '+(wizardDetail.columns.length+1), expr:'', col_type:'direct', icon:'fa-hashtag', is_amount:false, refFk:'', join_type:'one_to_one'}); renderWizardDetail(); }
+        function addWizardDetailColumn(){ wizardDetail.columns.push({id:String(wizardDetail.columns.length+1), name:'dcol_'+(wizardDetail.columns.length+1), alias:'عمود فرعي '+(wizardDetail.columns.length+1), expr:'', col_type:'direct', icon:'fa-hashtag', is_amount:false, refFk:'', join_type:'one_to_one'}); renderWizardDetail(); try{ if(typeof rptPreviewSoon === 'function') rptPreviewSoon(); }catch(e){}}
         function refreshDetailRelHint(){ try{ applyColSubTab(); }catch(e){} }
-        function removeWizardDetailColumn(idx){ wizardDetail.columns.splice(idx,1); renderWizardDetail(); }
+        function removeWizardDetailColumn(idx){ wizardDetail.columns.splice(idx,1); renderWizardDetail(); try{ if(typeof rptPreviewSoon === 'function') rptPreviewSoon(); }catch(e){}}
         function updateWizardDetailColumn(idx, field, val){ wizardDetail.columns[idx][field]=val; }
         function renderWizardColumns(){
+            rptPalCSS();
             const container = document.getElementById('wizardColumnsList');
+            if(!container) return;
             if(!wizardColumns.length){
                 container.innerHTML = wbGeneralWherePanel() + '<p class="text-slate-400 text-center py-4 text-xs">لا توجد أعمدة — اضغط إضافة عمود</p>';
                 return;
             }
-            container.innerHTML = wbGeneralWherePanel() + wizardColumns.map((col, idx)=>`
-                <div class="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2">
-                    <div class="flex items-center justify-between">
-                        <span class="text-[11px] font-bold text-slate-600">عمود #${idx+1}</span>
-                        <span class="flex items-center gap-1">
-                            <button onclick="moveWizardColumn(${idx},-1)" title="تحريك لأعلى" class="w-7 h-7 rounded-lg hover:bg-slate-200 text-slate-500 flex items-center justify-center"><i class="fa-solid fa-arrow-up text-[11px]"></i></button>
-                            <button onclick="moveWizardColumn(${idx},1)" title="تحريك لأسفل" class="w-7 h-7 rounded-lg hover:bg-slate-200 text-slate-500 flex items-center justify-center"><i class="fa-solid fa-arrow-down text-[11px]"></i></button>
-                            <button onclick="removeWizardColumn(${idx})" title="حذف" class="w-7 h-7 rounded-lg hover:bg-rose-50 text-slate-400 hover:text-rose-600 flex items-center justify-center"><i class="fa-solid fa-trash text-[11px]"></i></button>
-                        </span>
+            container.innerHTML = `
+            <div class="rpt-flex">
+                <aside class="rpt-side">
+                    <div class="rpt-side-title">الأعمدة (${wizardColumns.length})</div>
+                    <div id="rptSideCols">${rptSideColsHTML()}</div>
+                    <div class="rpt-side-title" style="margin-top:8px">التفاصيل ${((wizardDetail.columns||[]).length ? '(' + wizardDetail.columns.length + ')' : '')}</div>
+                    <div id="rptSideDet">${rptSideDetHTML()}</div>
+                </aside>
+                <div class="rpt-pal">
+                    ${wbGeneralWherePanel()}
+                    <div class="rpt-bar">
+                        <span class="rpt-bar-title"><i class="fa-solid fa-table-cells"></i> بيانات التقرير — معاينة حية (أول 50 صف)</span>
+                        <button onclick="rptPreviewFetch(true)" class="rpt-btn"><i class="fa-solid fa-rotate"></i> تحديث المعاينة</button>
                     </div>
-                    <div>
-                        <label class="block text-[11px] font-semibold text-slate-600">التعبير * — [ للحقول ([اتصال.جدول.حقل])، كلمة للدوال، $ للقواعد</label>
-                        <div class="flex gap-1"><input value="${(col.expr||'').replace(/"/g,'&quot;')}" oninput="updateWizardColumn(${idx},'expr',this.value);exprAuto(this,'col:${idx}')" placeholder="[basic_salary] + [gross_salary]" class="flex-1 min-w-0 bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-mono" dir="ltr" autocomplete="off"><button onclick="openExprExpand(${idx}, false)" title="تحرير موسع" class="px-2.5 rounded-lg bg-violet-50 hover:bg-violet-100 text-violet-700 shrink-0"><i class="fa-solid fa-expand text-[11px]"></i></button><button onclick="openExprBuilder(${idx}, false)" title="اختيار الاتصال ← الجدول ← الحقل" class="px-2.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 shrink-0"><i class="fa-solid fa-magnifying-glass text-[11px]"></i></button></div>
+                    <div id="rptPrevBox"></div>
+                    <div id="rptPropsWrap" class="rpt-props"></div>
+                    <div class="rpt-bar" style="margin-top:8px">
+                        <button onclick="rptDetOpen=!rptDetOpen;renderWizardColumns()" class="rpt-btn"><i class="fa-solid ${rptDetOpen ? 'fa-chevron-down' : 'fa-chevron-left'}"></i> أعمدة التفاصيل ${((wizardDetail.columns||[]).length ? '(' + wizardDetail.columns.length + ')' : '')}</button>
+                        <button onclick="addWizardDetailColumn()" class="rpt-btn">+ عمود فرعي</button>
                     </div>
-                    <div class="grid grid-cols-2 lg:grid-cols-5 gap-2">
-                        <div><label class="block text-[11px] font-semibold text-slate-600">الاسم المعروض *</label><input value="${col.alias||''}" onchange="updateWizardColumn(${idx},'alias',this.value)" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs"></div>
-                        <div><label class="block text-[11px] font-semibold text-slate-600">اسم مخصص</label><input value="${col.name||''}" onchange="updateWizardColumn(${idx},'name',this.value)" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-mono" dir="ltr"></div>
-                        <div><label class="block text-[11px] font-semibold text-slate-600">نوع البيانات والتنسيق</label><button onclick="openColTypeModal(${idx}, false)" title="اختيار النوع وتهيئة التنسيق" class="w-full bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg px-2 py-1.5 text-xs font-bold text-indigo-700 flex items-center justify-center gap-1.5"><i class="fa-solid fa-shapes text-[11px]"></i><span>${colTypeSummary(col)}</span></button></div>
-                        <div><label class="block text-[11px] font-semibold text-slate-600">التجميع</label><select onchange="updateWizardColumn(${idx},'col_type',this.value);if(this.value!=='direct'&&!wizardColumns[${idx}].expr.trim()){wizardColumns[${idx}].expr = this.value==='count' ? 'COUNT(*)' : this.value.toUpperCase() + '()';renderWizardColumns();}" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs">${[['direct','بدون (مباشر)'],['count','عد COUNT'],['sum','جمع SUM'],['avg','متوسط AVG'],['min','أدنى MIN'],['max','أقصى MAX']].map(([v,l])=>`<option value="${v}" ${(col.col_type||'direct')===v?'selected':''}>${l}</option>`).join('')}</select></div>
-                        <div><label class="block text-[11px] font-semibold text-slate-600">الأيقونة</label><input value="${col.icon||''}" onchange="updateWizardColumn(${idx},'icon',this.value)" placeholder="fa-hashtag" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-mono" dir="ltr"></div>
-                    </div>
-                    <label class="flex items-center gap-2 text-[11px] font-semibold text-slate-600 cursor-pointer"><input type="checkbox" ${col.is_amount?'checked':''} onchange="updateWizardColumn(${idx},'is_amount',this.checked);renderWizardColumns()" class="rounded text-emerald-600"> مبلغ — يُعرض بفواصل الآلاف</label>
-                    <label class="flex items-center gap-2 text-[11px] font-semibold text-slate-600 cursor-pointer" title="صف واحد لكل قيمة مميزة من هذا العمود (DISTINCT ON)"><input type="checkbox" ${col.is_distinct?'checked':''} onchange="updateWizardColumn(${idx},'is_distinct',this.checked)" class="rounded text-teal-600"> منع التكرار — DISTINCT ON</label>
-                    ${col.is_amount?`<div><label class="block text-[11px] font-semibold text-slate-600">عمود العملة (اختياري)</label><select onchange="updateWizardColumn(${idx},'currency_field',this.value)" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs"><option value="">بدون عملة</option>${wizardColumns.map((o,i)=>i===idx?'':`<option value="${o.name}" ${(col.currency_field||'')===o.name?'selected':''}>${o.alias||o.name}</option>`).join('')}</select></div>`:''}
-                    <div class="flex items-center gap-2">
-                        <label class="flex items-center gap-2 text-[11px] font-semibold text-slate-600 cursor-pointer"><input id="wStatusCb${idx}" type="checkbox" ${col.is_status?'checked':''} onchange="updateWizardColumn(${idx},'is_status',this.checked);renderWizardColumns()" class="rounded text-violet-600"> عمود حالة — قيم مرمزة تُعرض بأسماء وألوان</label>
-                        <span id="wStatusBtn${idx}" class="mr-auto">${col.is_status?statusDefineBtn(idx, (col.status_map||[]).length):''}</span>
-                    </div>
-                    <div><label class="block text-[11px] font-semibold text-slate-600">جملة الشرط (اختياري) — مثال: <span class="font-mono" dir="ltr">[f1]=[f2]</span></label><div class="flex gap-1"><input value="${(col.where_clause||'').replace(/"/g,'&quot;')}" oninput="updateWizardColumn(${idx},'where_clause',this.value);exprAuto(this,'where:${idx}')" onchange="updateWizardColumn(${idx},'where_clause',this.value)" placeholder="[status]='active'" autocomplete="off" class="flex-1 min-w-0 bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-mono" dir="ltr"><button onclick="openExprExpand(${idx}, false, 'where')" title="تحرير موسع" class="px-2.5 rounded-lg bg-violet-50 hover:bg-violet-100 text-violet-700 shrink-0"><i class="fa-solid fa-expand text-[11px]"></i></button><button onclick="openExprBuilder(${idx}, false, 'where')" title="اختيار الاتصال ← الجدول ← الحقل" class="px-2.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 shrink-0"><i class="fa-solid fa-magnifying-glass text-[11px]"></i></button></div></div>
+                    <div id="rptDetBox" class="${rptDetOpen ? '' : 'hidden'}">${rptDetOpen ? rptDetListHTML() : ''}</div>
                 </div>
-            `).join('');
+            </div>`;
+            rptPreviewRender();
+            rptPropsRender();
+            rptPreviewSoon();
         }
-        function addWizardColumn(){ wizardColumns.push({id:String(wizardColumns.length+1), name:'col_'+(wizardColumns.length+1), alias:'عمود '+(wizardColumns.length+1), expr:'', col_type:'direct', where_clause:'', icon:'fa-hashtag', is_amount:false, is_distinct:false, is_status:false, status_map:[], refTable:'', refFk:'', refDisplay:'', join_type:'one_to_one'}); renderWizardColumns(); }
-        const RULE_VAR_TYPES = [['text','نصية'],['number','رقمية'],['date','تاريخ'],['time','وقت'],['expression','تعبير'],['boolean','منطقي (صح/غلط)'],['choice','اختيار من خيارات']];
+        /* ── Report palette: flex sidebar + live preview + animated props ── */
+        let rptSel = {kind: null, idx: -1};
+        let rptDetOpen = true;
+        let rptPrev = {cols: [], rows: [], loading: false, error: '', sql: ''};
+        let rptPrevTimer = null;
+        function rptPalCSS(){
+            if(document.getElementById('rptPalCss')) return;
+            const st = document.createElement('style');
+            st.id = 'rptPalCss';
+            st.textContent = `.rpt-flex{display:flex;gap:8px;align-items:flex-start}
+.rpt-side{width:10vw;min-width:150px;max-width:230px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:8px;position:sticky;top:0;max-height:70vh;overflow-y:auto}
+.rpt-side-title{font-size:11px;font-weight:800;color:#475569;margin-bottom:6px}
+.rpt-side-item{display:flex;align-items:center;gap:4px;padding:5px 6px;border-radius:8px;font-size:11px;cursor:pointer;border:1px solid transparent;color:#334155}
+.rpt-side-item:hover{background:#eef2ff}
+.rpt-side-item.on{background:#eef2ff;border-color:#c7d2fe;color:#4338ca;font-weight:800}
+.rpt-side-item.off{opacity:.45}
+.rpt-side-item .lbl{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rpt-eye{color:#94a3b8;background:none;border:0;cursor:pointer;padding:2px}
+.rpt-eye.no{color:#f43f5e}
+.rpt-pal{flex:1;min-width:0}
+.rpt-bar{display:flex;align-items:center;gap:8px;margin:8px 0 6px}
+.rpt-bar-title{font-size:12px;font-weight:800;color:#334155}
+.rpt-btn{padding:5px 12px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:10px;font-size:11px;font-weight:800;color:#475569;cursor:pointer}
+.rpt-btn:hover{background:#e2e8f0}
+.rpt-gridwrap{overflow:auto;max-height:46vh;border:1px solid #e2e8f0;border-radius:12px;background:#fff}
+.rpt-grid{border-collapse:collapse;width:100%;font-size:11px}
+.rpt-grid th{position:sticky;top:0;background:#f1f5f9;z-index:2;border-bottom:2px solid #cbd5e1;padding:7px 10px;white-space:nowrap;cursor:pointer;user-select:none}
+.rpt-grid th:hover{background:#e0e7ff}
+.rpt-grid th.onsel{background:#e0e7ff;box-shadow:inset 0 -3px 0 #4f46e5}
+.rpt-grid th[draggable=true]{cursor:grab}
+.rpt-grid th.rpt-drop{outline:2px dashed #6366f1;outline-offset:-2px}
+.rpt-grid td{border-bottom:1px solid #f1f5f9;padding:6px 10px;white-space:nowrap;max-width:340px;overflow:hidden;text-overflow:ellipsis}
+.rpt-props{overflow:hidden;max-height:0;opacity:0;transition:max-height .3s ease,opacity .22s ease}
+.rpt-props.open{max-height:72vh;opacity:1;overflow-y:auto}
+.rpt-props-card{margin-top:8px;border:2px solid #c7d2fe;background:#eef2ff55;border-radius:12px;padding:10px}
+.rpt-fl{font-size:11px;font-weight:700;color:#475569;margin-bottom:2px;display:block}
+.rpt-in{width:100%;background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:6px 8px;font-size:11px}
+.rpt-eye-big.on{color:#059669}.rpt-eye-big.no{color:#f43f5e}`;
+            document.head.appendChild(st);
+        }
+        function rptVis(c){ try{ const v = (c || {}).visible; if(v === false) return false; const s = String(v ?? '1').toLowerCase(); return !(s === '0' || s === 'false' || s === 'no' || s === 'off' || s === 'hidden'); }catch(e){ return true; } }
+        function rptEsc(v){ return String(v ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
+        function rptSideColsHTML(){
+            return (wizardColumns || []).map((c, i)=>{
+                const on = rptSel.kind === 'col' && rptSel.idx === i;
+                const vis = rptVis(c);
+                return `<div class="rpt-side-item${on ? ' on' : ''}${vis ? '' : ' off'}" draggable="true" ondragstart="rptDrag(event,'col',${i})" ondragover="rptOver(event)" ondrop="rptDrop(event,'col',${i})" onclick="rptSel={kind:'col',idx:${i}};renderWizardColumns()">`
+                    + `<button class="rpt-eye${vis ? '' : ' no'}" title="إظهار/إخفاء" onclick="event.stopPropagation();wizardColumns[${i}].visible=${vis ? 'false' : 'true'};renderWizardColumns();rptPreviewSoon()"><i class="fa-solid fa-eye${vis ? '' : '-slash'}"></i></button>`
+                    + `<span class="lbl" title="${rptEsc(c.alias || c.name)}">${rptEsc(c.alias || c.name || ('عمود ' + (i + 1)))}</span></div>`;
+            }).join('');
+        }
+        function rptSideDetHTML(){
+            const cols = ((typeof wizardDetail !== 'undefined' && wizardDetail.columns) || []);
+            if(!cols.length) return '<p class="text-slate-400" style="font-size:10px">—</p>';
+            return cols.map((c, i)=>{
+                const on = rptSel.kind === 'dcol' && rptSel.idx === i;
+                const vis = rptVis(c);
+                return `<div class="rpt-side-item${on ? ' on' : ''}${vis ? '' : ' off'}" onclick="rptSel={kind:'dcol',idx:${i}};renderWizardColumns()">`
+                    + `<button class="rpt-eye${vis ? '' : ' no'}" title="إظهار/إخفاء" onclick="event.stopPropagation();wizardDetail.columns[${i}].visible=${vis ? 'false' : 'true'};renderWizardColumns();"><i class="fa-solid fa-eye${vis ? '' : '-slash'}"></i></button>`
+                    + `<span class="lbl" title="${rptEsc(c.alias || c.name)}">${rptEsc(c.alias || c.name || ('فرعي ' + (i + 1)))}</span></div>`;
+            }).join('');
+        }
+        function rptSelCol(){
+            try{
+                if(rptSel.kind === 'col') return wizardColumns[rptSel.idx] || null;
+                if(rptSel.kind === 'dcol') return (wizardDetail.columns || [])[rptSel.idx] || null;
+            }catch(e){}
+            return null;
+        }
+        function rptPropsRender(){
+            const wrap = document.getElementById('rptPropsWrap');
+            if(!wrap) return;
+            const col = rptSelCol();
+            if(!col){ wrap.className = 'rpt-props'; wrap.innerHTML = ''; return; }
+            const isD = rptSel.kind === 'dcol', i = rptSel.idx;
+            const upd = isD ? `updateWizardDetailColumn(${i},` : `updateWizardColumn(${i},`;
+            const expAuto = isD ? `exprAuto(this,'dcol:${i}')` : `exprAuto(this,'col:${i}')`;
+            const vis = rptVis(col);
+            const w = (col.width ?? '');
+            wrap.innerHTML = `<div class="rpt-props-card">
+                <div class="flex items-center gap-2 mb-2">
+                    <b class="text-xs text-indigo-800">خصائص: ${rptEsc(col.alias || col.name || '')}</b>
+                    <span class="mr-auto flex items-center gap-1">
+                        <button class="rpt-eye-big ${vis ? 'on' : 'no'}" title="إظهار/إخفاء" onclick="${upd}'visible',${vis ? 'false' : 'true'});renderWizardColumns()"><i class="fa-solid fa-eye${vis ? '' : '-slash'}"></i></button>
+                        <button onclick="rptSel={kind:null,idx:-1};renderWizardColumns()" class="rpt-btn" title="إغلاق"><i class="fa-solid fa-xmark"></i></button>
+                        ${isD ? `<button onclick="removeWizardDetailColumn(${i});rptSel={kind:null,idx:-1};renderWizardColumns()" class="rpt-btn" style="color:#e11d48" title="حذف"><i class="fa-solid fa-trash"></i></button>`
+                              : `<button onclick="removeWizardColumn(${i});rptSel={kind:null,idx:-1};renderWizardColumns()" class="rpt-btn" style="color:#e11d48" title="حذف"><i class="fa-solid fa-trash"></i></button>`}
+                    </span>
+                </div>
+                <div class="mb-2"><label class="rpt-fl">التعبير * — [ للحقول ، كلمة للدوال (@ref للقيم)، $ للقواعد</label>
+                <div class="flex gap-1"><input value="${rptEsc(col.expr)}" oninput="${upd}'expr',this.value);${expAuto}" placeholder="[basic_salary] + [gross_salary]" class="rpt-in font-mono" dir="ltr" autocomplete="off">`
+                + (isD ? `<button onclick="openExprExpand(${i}, true)" class="rpt-btn" title="تحرير موسع"><i class="fa-solid fa-expand"></i></button><button onclick="openExprBuilder(${i}, true)" class="rpt-btn" title="اختيار الحقل"><i class="fa-solid fa-magnifying-glass"></i></button>`
+                       : `<button onclick="openExprExpand(${i}, false)" class="rpt-btn" title="تحرير موسع"><i class="fa-solid fa-expand"></i></button><button onclick="openExprBuilder(${i}, false)" class="rpt-btn" title="اختيار الاتصال ← الجدول ← الحقل"><i class="fa-solid fa-magnifying-glass"></i></button>`) + `</div></div>
+                <div class="grid grid-cols-2 lg:grid-cols-4 gap-2">
+                    <div><label class="rpt-fl">الاسم المعروض *</label><input value="${rptEsc(col.alias)}" onchange="${upd}'alias',this.value)" class="rpt-in"></div>
+                    <div><label class="rpt-fl">اسم مخصص</label><input value="${rptEsc(col.name)}" onchange="${upd}'name',this.value)" class="rpt-in font-mono" dir="ltr"></div>
+                    <div><label class="rpt-fl">الاسم المرجعي refname — للاستدعاء بـ @القيمة</label><input value="${rptEsc(col.col_refname || col.colRefname || '')}" onchange="${upd}'col_refname',this.value)" placeholder="net_total" class="rpt-in font-mono" dir="ltr"></div>
+                    <div><label class="rpt-fl">الأيقونة</label><input value="${rptEsc(col.icon)}" onchange="${upd}'icon',this.value)" class="rpt-in font-mono" dir="ltr"></div>
+                    <div><label class="rpt-fl">العرض px (المشغل)</label><input type="number" min="40" max="1200" step="10" value="${w}" onchange="${upd}'width',this.value===''?null:parseInt(this.value,10));renderWizardColumns()" class="rpt-in font-mono" dir="ltr"></div>
+                    <div><label class="rpt-fl">نوع البيانات والتنسيق</label><button onclick="openColTypeModal(${i}, ${isD ? 'true' : 'false'})" class="rpt-in" style="background:#eef2ff;font-weight:800;color:#4338ca;cursor:pointer"><i class="fa-solid fa-shapes"></i> ${colTypeSummary(col)}</button></div>
+                    ${isD ? '' : `<div><label class="rpt-fl">التجميع</label><select onchange="updateWizardColumn(${i},'col_type',this.value)" class="rpt-in">${[['direct','بدون (مباشر)'],['count','عد COUNT'],['sum','جمع SUM'],['avg','متوسط AVG'],['min','أدنى MIN'],['max','أقصى MAX']].map(([v,l])=>`<option value="${v}" ${(col.col_type||'direct')===v?'selected':''}>${l}</option>`).join('')}</select></div>
+                    <div class="flex items-end pb-1"><label class="flex items-center gap-1 text-[11px] font-bold cursor-pointer" style="color:#475569"><input type="checkbox" ${col.is_distinct?'checked':''} onchange="updateWizardColumn(${i},'is_distinct',this.checked)"> منع التكرار</label></div>`}
+                </div>
+                <div class="flex flex-wrap items-center gap-3 mt-2">
+                    <label class="flex items-center gap-1 text-[11px] font-bold cursor-pointer" style="color:#475569"><input type="checkbox" ${col.is_amount?'checked':''} onchange="${upd}'is_amount',this.checked);renderWizardColumns()"> مبلغ — فواصل الآلاف</label>
+                    <label class="flex items-center gap-1 text-[11px] font-bold cursor-pointer" style="color:#475569"><input type="checkbox" ${col.is_status?'checked':''} onchange="${upd}'is_status',this.checked);renderWizardColumns()"> عمود حالة</label>
+                    <span>${col.is_status ? statusDefineBtn(i, ((col.status_map||[]).length)) : ''}</span>
+                </div>
+                <div class="mt-2"><label class="rpt-fl">جملة الشرط (اختياري)</label>
+                <div class="flex gap-1"><input value="${rptEsc(col.where_clause)}" oninput="${upd}'where_clause',this.value);${expAuto}" placeholder="[status]='active'" class="rpt-in font-mono" dir="ltr" autocomplete="off"></div></div>
+            </div>`;
+            wrap.className = 'rpt-props open';
+        }
+        function rptDetListHTML(){
+            const cols = ((typeof wizardDetail !== 'undefined' && wizardDetail.columns) || []);
+            if(!cols.length) return '<p class="text-slate-400 text-xs py-2">لا أعمدة فرعية — أضف من الزر أعلاه. تُختبر صفوف التفاصيل من المشغل.</p>';
+            return cols.map((c, i)=>{
+                const on = rptSel.kind === 'dcol' && rptSel.idx === i;
+                const vis = rptVis(c);
+                return `<div class="flex items-center gap-2 border ${on ? 'border-indigo-400 bg-indigo-50' : 'border-slate-200'} rounded-xl px-2 py-1.5 mb-1 text-xs cursor-pointer${vis ? '' : ' opacity-50'}" onclick="rptSel={kind:'dcol',idx:${i}};renderWizardColumns()">`
+                    + `<span class="font-bold text-slate-600">فرعي #${i + 1}</span>`
+                    + `<span class="flex-1 truncate font-mono" dir="ltr" title="${rptEsc(c.expr)}">${rptEsc(c.alias || c.name)}</span>`
+                    + (c.col_refname || c.colRefname ? `<span class="font-mono text-violet-600" dir="ltr">@${rptEsc(c.col_refname || c.colRefname)}</span>` : '')
+                    + `<button class="rpt-eye${vis ? '' : ' no'}" title="إظهار/إخفاء" onclick="event.stopPropagation();wizardDetail.columns[${i}].visible=${vis ? 'false' : 'true'};renderWizardColumns();"><i class="fa-solid fa-eye${vis ? '' : '-slash'}"></i></button>`
+                    + `<button onclick="event.stopPropagation();removeWizardDetailColumn(${i});rptSel={kind:null,idx:-1};renderWizardColumns()" class="text-rose-400 hover:text-rose-600" title="حذف"><i class="fa-solid fa-trash"></i></button></div>`;
+            }).join('');
+        }
+        function rptDrag(ev, kind, idx){ try{ ev.dataTransfer.setData('text/plain', kind + ':' + idx); ev.dataTransfer.effectAllowed = 'move'; }catch(e){} }
+        function rptOver(ev){ try{ ev.preventDefault(); ev.dataTransfer.dropEffect = 'move'; const th = ev.target.closest('th'); if(th) th.classList.add('rpt-drop'); }catch(e){} }
+        function rptDrop(ev, kind, idx){
+            try{
+                ev.preventDefault();
+                document.querySelectorAll('.rpt-drop').forEach(el=>el.classList.remove('rpt-drop'));
+                const parts = String(ev.dataTransfer.getData('text/plain') || '').split(':');
+                if(parts[0] !== kind) return;
+                const from = parseInt(parts[1], 10);
+                if(isNaN(from) || from === idx) return;
+                const arr = kind === 'dcol' ? wizardDetail.columns : wizardColumns;
+                const it = arr.splice(from, 1)[0];
+                arr.splice(idx, 0, it);
+                if(rptSel.kind === kind){
+                    if(rptSel.idx === from) rptSel.idx = idx;
+                    else if(from < rptSel.idx && idx >= rptSel.idx) rptSel.idx--;
+                    else if(from > rptSel.idx && idx <= rptSel.idx) rptSel.idx++;
+                }
+                renderWizardColumns();
+                rptPreviewSoon();
+            }catch(e){}
+        }
+        function rptPreviewPayload(){
+            const tbl = (k)=>{
+                try{
+                    const parts = String(k).split('||');
+                    const o = (typeof wizardTableOpts !== 'undefined' ? wizardTableOpts[k] : null) || {};
+                    return {name: parts.slice(1).join('||'), conn: parts[0], is_default: !!o.is_default, is_sub: !!o.is_sub};
+                }catch(e){ return null; }
+            };
+            return {
+                file: '__palette_preview__', name: '__palette_preview__',
+                displayName: 'معاينة اللوحة', icon: 'fa-table', category: 'preview',
+                schema: (function(){ try{ return (wizardConnSchemas[String(wizardConnections[0])] || wizardSchema || '').trim(); }catch(e){ return ''; } })(),
+                namespace: (function(){ try{ return (document.getElementById('rmlNamespace') || {}).value || ''; }catch(e){ return ''; } })(),
+                report_type: (function(){ try{ return ((document.getElementById('rmlReportType') || {}).value || 'master'); }catch(e){ return 'master'; } })(),
+                detail: (typeof wizardDetail !== 'undefined' ? wizardDetail : null),
+                links: (typeof wizardLinks !== 'undefined' ? wizardLinks : []),
+                table_opts: Object.keys(typeof wizardTableOpts !== 'undefined' ? wizardTableOpts : {}).map(tbl).filter(Boolean),
+                connections: (typeof wizardConnections !== 'undefined' ? wizardConnections : []),
+                fields: (typeof wizardFields !== 'undefined' ? wizardFields : []),
+                columns: (typeof wizardColumns !== 'undefined' ? wizardColumns : []),
+                groups: (typeof wizardGroups !== 'undefined' ? wizardGroups : []),
+                group_levels: (typeof wizardGroupLevels !== 'undefined' ? wizardGroupLevels : 1),
+                charts: (typeof wizardCharts !== 'undefined' ? wizardCharts : []),
+                rules: (typeof wizardRules !== 'undefined' ? wizardRules : []),
+                general_where: (typeof wizardGeneralWhere !== 'undefined' ? wizardGeneralWhere : '')
+            };
+        }
+        function rptPreviewFetch(manual){
+            const box = document.getElementById('rptPrevBox');
+            if(!box) return;
+            let app = 'settings';
+            try{ app = (typeof wizApp === 'function' ? wizApp() : (typeof APP_NAME !== 'undefined' ? APP_NAME : 'settings')) || 'settings'; }catch(e){}
+            rptPrev.loading = true;
+            rptPreviewRender();
+            fetch('/api/apps/' + encodeURIComponent(app) + '/rml/design-preview/', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(rptPreviewPayload())})
+                .then(r=>r.json().then(d=>({ok:r.ok, d})))
+                .then(({ok, d})=>{
+                    rptPrev.loading = false;
+                    if(!ok){ rptPrev.error = String((d && d.error) || 'فشل المعاينة'); rptPrev.rows = []; rptPrev.cols = []; }
+                    else{
+                        rptPrev.error = '';
+                        rptPrev.cols = Array.isArray(d.columns) ? d.columns : [];
+                        rptPrev.rows = Array.isArray(d.rows) ? d.rows.slice(0, 50) : [];
+                        rptPrev.sql = d.sql || '';
+                    }
+                    rptPreviewRender();
+                })
+                .catch(e=>{ rptPrev.loading = false; rptPrev.error = String((e && e.message) || e); rptPreviewRender(); });
+        }
+        function rptPreviewSoon(){
+            try{ if(rptPrevTimer) clearTimeout(rptPrevTimer); }catch(e){}
+            rptPrevTimer = setTimeout(()=>{ try{ rptPreviewFetch(false); }catch(e){} }, 700);
+        }
+        function rptPreviewRender(){
+            const box = document.getElementById('rptPrevBox');
+            if(!box) return;
+            if(rptPrev.loading){ box.innerHTML = '<p class="text-slate-400 text-xs py-4 text-center"><i class="fa-solid fa-circle-notch fa-spin"></i> جارٍ جلب أول 50 صف...</p>'; return; }
+            if(rptPrev.error){ box.innerHTML = `<p class="text-rose-500 text-xs py-3 whitespace-pre-line">${rptEsc(rptPrev.error).slice(0, 600)}</p>`; return; }
+            const cols = (wizardColumns || []).filter(rptVis);
+            if(!rptPrev.cols.length && !rptPrev.rows.length){
+                box.innerHTML = '<p class="text-slate-400 text-xs py-4 text-center">لا معاينة بعد — اضغط تحديث المعاينة</p>';
+                return;
+            }
+            const cell = (r, i)=>{
+                if(r !== null && typeof r === 'object' && !Array.isArray(r)){
+                    const c = cols[i];
+                    const k = c ? (c.alias || c.name) : null;
+                    const v = k && r[k] !== undefined ? r[k] : (c && r[c.name] !== undefined ? r[c.name] : '');
+                    return v === null || v === undefined ? '' : String(v);
+                }
+                return (r === null || r === undefined) ? '' : String(r);
+            };
+            const head = cols.map((c, i)=>{
+                const on = rptSel.kind === 'col' && wizardColumns.indexOf(c) === rptSel.idx;
+                const w = parseInt(c.width, 10);
+                const style = (w >= 40) ? ` style="min-width:${Math.min(w, 1200)}px"` : '';
+                const oi = wizardColumns.indexOf(c);
+                return `<th draggable="true" ondragstart="rptDrag(event,'col',${oi})" ondragover="rptOver(event)" ondrop="rptDrop(event,'col',${oi})" onclick="rptSel={kind:'col',idx:${oi}};renderWizardColumns()" title="اسحب للترتيب — انقر للخصائص" class="${on ? 'onsel' : ''}"${style}>${rptEsc(c.alias || c.name)}${(c.col_refname || c.colRefname) ? ` <span style="color:#7c3aed" dir="ltr">@${rptEsc(c.col_refname || c.colRefname)}</span>` : ''}</th>`;
+            }).join('');
+            const body = (rptPrev.rows || []).map(r=>{
+                const arr = Array.isArray(r) ? r : null;
+                return '<tr>' + cols.map((c, i)=>`<td title="${rptEsc(arr ? (arr[i] ?? '') : cell(r, i))}">${rptEsc(arr ? (arr[i] ?? '') : cell(r, i))}</td>`).join('') + '</tr>';
+            }).join('');
+            box.innerHTML = `<div class="rpt-gridwrap"><table class="rpt-grid"><thead><tr>${head}</tr></thead><tbody>${body || '<tr><td>—</td></tr>'}</tbody></table></div>`
+                + `<p class="text-slate-400 mt-1" style="font-size:10px">صفوف: ${(rptPrev.rows || []).length} • الأعمدة المخفية لا تظهر هنا (تظهر في المشغل حسب visible)</p>`;
+        }
+        function addWizardColumn(){ wizardColumns.push({id:String(wizardColumns.length+1), name:'col_'+(wizardColumns.length+1), alias:'عمود '+(wizardColumns.length+1), expr:'', col_type:'direct', where_clause:'', icon:'fa-hashtag', is_amount:false, is_distinct:false, is_status:false, status_map:[], refTable:'', refFk:'', refDisplay:'', join_type:'one_to_one'}); renderWizardColumns(); try{ if(typeof rptPreviewSoon === 'function') rptPreviewSoon(); }catch(e){}}
+        const RULE_VAR_TYPES = [['text','نصية'],['number','رقمية'],['date','تاريخ'],['time','وقت'],['expression','تعبير'],['custom_function','دالة مخصصة'],['boolean','منطقي (صح/غلط)'],['choice','اختيار من خيارات']];
         function renderWizardRules(){
             const container = document.getElementById('wizardRulesList');
             if(!container) return;
@@ -1557,7 +1853,7 @@ list.innerHTML = wizardDetail.columns.map((col, idx)=>`
             if(field==='options') v.options = String(val||'').split(/[،,]/).map(s=>s.trim()).filter(Boolean);
             else v[field]=val;
         }
-        function removeWizardColumn(idx){ if(wizardColumns.length<=1) return notify('يجب عمود واحد على الأقل', 'info'); wizardColumns.splice(idx,1); renderWizardColumns(); }
+        function removeWizardColumn(idx){ if(wizardColumns.length<=1) return notify('يجب عمود واحد على الأقل', 'info'); wizardColumns.splice(idx,1); renderWizardColumns(); try{ if(typeof rptPreviewSoon === 'function') rptPreviewSoon(); }catch(e){}}
         function updateWizardColumn(idx, field, val){ wizardColumns[idx][field]=val; if(field==='expr'||field==='alias'||field==='name') autoDetectStatusColumn(idx); }
         /* ── Column type + formatting modal (drives ops + pickers; '' = auto) ── */
         const COL_TYPE_TILES = [['','تلقائي','fa-magic'],['text','نص','fa-font'],['number','رقم','fa-hashtag'],['date','تاريخ','fa-calendar-day'],['datetime','تاريخ ووقت','fa-calendar-clock'],['time','وقت','fa-clock'],['list','قائمة','fa-list-check'],['status','حالة','fa-tags']];

@@ -218,14 +218,42 @@
                     <span class="bg-emerald-100 text-emerald-700 font-bold px-2 py-0.5 rounded text-[10px]">V2.0.0</span>
                     <span>جميع الحقوق محفوظة © 2026</span>
                 </div>
-            </footer>
+</footer>
 
         </main>
     </div>
+<!-- Users table selector card -->
+<div class="bg-white rounded-3xl border border-gray-200 shadow-sm p-4 mb-6">
+    <h2 class="text-base font-bold text-gray-800 mb-2">طاولة المستخدمين</h2>
+    <p class="text-[11px] text-gray-500 mb-3">حدد الجدول الذي يحتوي على مستخدمي النظام (يكون بصيغة schema.table)</p>
+    <select id="wsUsersTable" class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 font-mono text-sm">
+        <option value="main_hq_2026.sys_users">main_hq_2026.sys_users (افتراضي)</option>
+        <option value="ies202601.users">ies202601.users (العملة)</option>
+    </select>
+    <p class="text-[10px] text-slate-400 mt-2">يتطلب إعادة تحميل الصفحة للتغيير.</p>
+</div>
+
 {% endblock %}
 {% block modals %}{% include "partials/support_modal.html" %}{% endblock %}
 {% block scripts %}
     <script>
+        // Users table selector initialization - runs after DOM is ready
+        document.addEventListener('DOMContentLoaded', function(){
+            const _wt = '{{ workspace_info.users_table || "main_hq_2026.sys_users" }}';
+            const _selector = document.getElementById('wsUsersTable');
+            if(_selector){
+                _selector.value = _wt.split('.').pop() || _wt;
+                _selector.addEventListener('change', function(){
+                    const _new = this.value;
+                    fetch('/api/settings/users-table/', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({users_table: _new})
+                    }).then(r=>r.json()).then(d=>{ if(d.ok) location.reload(); });
+                });
+            }
+        });
+
         let CONTROLS = [];
         let RULES = [];
         let META = null;

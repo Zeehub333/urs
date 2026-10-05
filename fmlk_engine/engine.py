@@ -1,5 +1,5 @@
-"""
-FMLK Form Engine — Production Ready
+﻿"""
+FMLK Form Engine â€” Production Ready
 Inputting methods, SQL INSERT/UPDATE/DELETE builders, tabs/categories/positioning, records CRUD.
 """
 from __future__ import annotations
@@ -22,7 +22,7 @@ def _blank_incompatible(field) -> bool:
     """True when binding '' to this column would crash PG (int/date/bool/...).
 
     Empty strings are only storable in TEXT-ish columns; for the rest the
-    builder must skip the column (→ NULL/DB default) instead of binding ''.
+    builder must skip the column (â†’ NULL/DB default) instead of binding ''.
     Unknown/empty types stay TEXT-ish (legacy behavior preserved).
     """
     try:
@@ -40,16 +40,21 @@ def _blank_incompatible(field) -> bool:
     return False
 
 
-# ── Secret hashing (password inputs are stored HASHED, never plaintext) ──
+# â”€â”€ Secret hashing (password inputs are stored HASHED, never plaintext) â”€â”€
 # Django hashers first (PBKDF2-HMAC-SHA256, verifiable via check_password);
 # stdlib PBKDF2 fallback when Django auth hashers are unavailable.
+# NOTE: the std prefix MUST stay distinct from Django's "pbkdf2_sha256$"
+# namespace — otherwise Django hashes are mis-parsed as std hashes and
+# Django's check_password is never reached (login always fails).
 _STD_HASH_PREFIX = "pbkdf2_sha256_std$"
-_STD_HASH_ITERS = 200_000
+# Iteration count aligned with the reference FastAPI auth service
+# (hash_password_pbkdf2). Stored per-hash, so older values keep verifying.
+_STD_HASH_ITERS = 600_000
 
 
 def is_hashed_secret(value: Any) -> bool:
     """True if the value already looks like a password hash (any Django
-    hasher format or our stdlib fallback) — must NOT be re-hashed."""
+    hasher format or our stdlib fallback) â€” must NOT be re-hashed."""
     s = str(value or "")
     if not s or "$" not in s:
         return False
@@ -81,32 +86,85 @@ def hash_secret(value: Any) -> str:
     return f"{_STD_HASH_PREFIX}{_STD_HASH_ITERS}${salt}${dk.hex()}"
 
 
+def _pbkdf2_hex_candidates(password: str, salt: str, iters: int):
+    """Possible derived keys for a hex-style pbkdf2_sha256 hash.
+
+    Two dialects exist in the wild for the SAME "pbkdf2_sha256$i$s$hex"
+    shape and MUST both be tried:
+      - std (this system):  salt hex-DECODED to bytes
+      - reference FastAPI auth service (hash_password_pbkdf2): salt as
+        UTF-8 bytes (secrets.token_hex output used raw)
+    Each candidate is an exact constant-time comparison — trying both
+    loses no security; an attacker must still satisfy one full equation.
+    """
+    import hashlib as _hl
+    out = []
+    try:
+        out.append(_hl.pbkdf2_hmac("sha256", password.encode("utf-8"),
+                                   bytes.fromhex(salt), int(iters)).hex())
+    except Exception:
+        pass
+    try:
+        out.append(_hl.pbkdf2_hmac("sha256", password.encode("utf-8"),
+                                   str(salt or "").encode("utf-8"), int(iters)).hex())
+    except Exception:
+        pass
+    return out
+
+
 def verify_secret(value: Any, hashed: Any) -> bool:
-    """Check a plaintext candidate against a stored hash (Django or fallback)."""
+    """Check a plaintext candidate against a stored hash (Django or fallback).
+
+    Django's check_password runs first so every Django hasher format
+    (pbkdf2_sha256, argon2, bcrypt, ...) verifies via its own parser;
+    hex-style pbkdf2_sha256 hashes (ours + the reference FastAPI service)
+    verify via _pbkdf2_hex_candidates with constant-time compare
+    (the reference uses plain == — timing-unsafe — we do better).
+    """
     s, h = str(value or ""), str(hashed or "")
     if not s or not h:
         return False
+    try:
+        from django.contrib.auth.hashers import check_password
+        if check_password(s, h):
+            return True
+    except Exception:
+        pass
+    import hmac as _hm
     if h.startswith(_STD_HASH_PREFIX):
         try:
             _, iters, salt, dkhex = h.split("$")
-            import hashlib as _hl
-            dk = _hl.pbkdf2_hmac("sha256", s.encode("utf-8"), bytes.fromhex(salt), int(iters))
-            import hmac as _hm
-            return _hm.compare_digest(dk.hex(), dkhex)
+            for _cand in _pbkdf2_hex_candidates(s, salt, iters):
+                if _hm.compare_digest(_cand, str(dkhex or "").lower()):
+                    return True
+            return False
         except Exception:
             return False
+    # Foreign hex-style "pbkdf2_sha256$iters$salt$hexdigest" (reference
+    # service shape: 32-hex salt, 64/128-hex digest). Django already said
+    # no above, so only the dual-encoding PBKDF2 equation can still match.
     try:
-        from django.contrib.auth.hashers import check_password
-        return bool(check_password(s, h))
+        _parts = h.split("$")
+        if (len(_parts) == 4 and _parts[0] == "pbkdf2_sha256"
+                and _parts[3] and all(ch in "0123456789abcdefABCDEF" for ch in _parts[3])
+                and len(_parts[3]) in (64, 128) and 1_000 <= int(_parts[1]) <= 5_000_000):
+            for _cand in _pbkdf2_hex_candidates(s, _parts[2], _parts[1]):
+                if _hm.compare_digest(_cand, _parts[3].lower()):
+                    return True
+    except Exception:
+        pass
+    try:
+        from django.contrib.auth.hashers import check_password as _cp2
+        return bool(_cp2(s, h))
     except Exception:
         return False
 
 
 def get_options_source(table: str, column: str, schema: str = "", limit: int = 500, search: str | None = None, display: str | None = None, conn_params: Dict[str, Any] | None = None) -> List[Dict[str, Any]]:
-    """قيم مميزة لعمود جدول (مرجع [table.column]) — قراءة فقط بمعرفات مُتحقق منها.
+    """Ù‚ÙŠÙ… Ù…Ù…ÙŠØ²Ø© Ù„Ø¹Ù…ÙˆØ¯ Ø¬Ø¯ÙˆÙ„ (Ù…Ø±Ø¬Ø¹ [table.column]) â€” Ù‚Ø±Ø§Ø¡Ø© ÙÙ‚Ø· Ø¨Ù…Ø¹Ø±ÙØ§Øª Ù…ÙØªØ­Ù‚Ù‚ Ù…Ù†Ù‡Ø§.
 
-    display (اختياري): عمود العرض للتسمية — القيمة من column والتسمية منه.
-    conn_params (اختياري): وسائط psycopg2 للاتصال الصحيح (وإلا الاحتياطي القديم).
+    display (Ø§Ø®ØªÙŠØ§Ø±ÙŠ): Ø¹Ù…ÙˆØ¯ Ø§Ù„Ø¹Ø±Ø¶ Ù„Ù„ØªØ³Ù…ÙŠØ© â€” Ø§Ù„Ù‚ÙŠÙ…Ø© Ù…Ù† column ÙˆØ§Ù„ØªØ³Ù…ÙŠØ© Ù…Ù†Ù‡.
+    conn_params (Ø§Ø®ØªÙŠØ§Ø±ÙŠ): ÙˆØ³Ø§Ø¦Ø· psycopg2 Ù„Ù„Ø§ØªØµØ§Ù„ Ø§Ù„ØµØ­ÙŠØ­ (ÙˆØ¥Ù„Ø§ Ø§Ù„Ø§Ø­ØªÙŠØ§Ø·ÙŠ Ø§Ù„Ù‚Ø¯ÙŠÙ…).
     """
     if not _valid_table_ident(table) or not _valid_table_ident(column):
         raise ValueError("invalid table/column name")
@@ -147,7 +205,7 @@ def get_options_source(table: str, column: str, schema: str = "", limit: int = 5
 
 
 SQL_FUNCTIONS = [
-    # حسابية وتجميع — تُقبل في الصيغ مع مراجع [field]
+    # Ø­Ø³Ø§Ø¨ÙŠØ© ÙˆØªØ¬Ù…ÙŠØ¹ â€” ØªÙÙ‚Ø¨Ù„ ÙÙŠ Ø§Ù„ØµÙŠØº Ù…Ø¹ Ù…Ø±Ø§Ø¬Ø¹ [field]
     "ABS", "CEIL", "FLOOR", "ROUND", "TRUNC", "MOD", "POWER", "SQRT",
     "SUM", "AVG", "MIN", "MAX", "COUNT",
     "COALESCE", "NULLIF", "GREATEST", "LEAST",
@@ -158,14 +216,14 @@ SQL_FUNCTIONS = [
 
 
 def formula_refs(expr: str) -> List[str]:
-    """استخراج أسماء الحقول المرجعية من صيغة [field]."""
+    """Ø§Ø³ØªØ®Ø±Ø§Ø¬ Ø£Ø³Ù…Ø§Ø¡ Ø§Ù„Ø­Ù‚ÙˆÙ„ Ø§Ù„Ù…Ø±Ø¬Ø¹ÙŠØ© Ù…Ù† ØµÙŠØºØ© [field]."""
     if not expr:
         return []
     return re.findall(r"\[([A-Za-z_][A-Za-z0-9_]*)\]", expr)
 
 
 def formula_to_sql(expr: str) -> str:
-    """تحويل [field] إلى binds :field — تبقى دوال SQL كما هي."""
+    """ØªØ­ÙˆÙŠÙ„ [field] Ø¥Ù„Ù‰ binds :field â€” ØªØ¨Ù‚Ù‰ Ø¯ÙˆØ§Ù„ SQL ÙƒÙ…Ø§ Ù‡ÙŠ."""
     if not expr:
         return ""
     return re.sub(r"\[([A-Za-z_][A-Za-z0-9_]*)\]", r":\1", expr)
@@ -191,7 +249,7 @@ class FMLKFormEngine:
         # Map field name -> FMLKField for quick lookup
         self._field_map = {f.name: f for f in self.fields}
 
-    # ── Input Methods ─────────────────────────────────────────────────────
+    # â”€â”€ Input Methods â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     def input_types(self) -> Dict[str, List[str]]:
         """Group fields by input_type for UI rendering."""
@@ -203,8 +261,8 @@ class FMLKFormEngine:
     def validate(self, data: Dict[str, Any]) -> Dict[str, str]:
         """Validate required + types + Validation Engine (regex/min_length/max_length/min/max). Returns {field: error}.
 
-        الحقل المخفي (visibleIf غير محقق لقيم data) يُتجاهل تماماً —
-        خاصية required تسقط حال الإخفاء.
+        Ø§Ù„Ø­Ù‚Ù„ Ø§Ù„Ù…Ø®ÙÙŠ (visibleIf ØºÙŠØ± Ù…Ø­Ù‚Ù‚ Ù„Ù‚ÙŠÙ… data) ÙŠÙØªØ¬Ø§Ù‡Ù„ ØªÙ…Ø§Ù…Ø§Ù‹ â€”
+        Ø®Ø§ØµÙŠØ© required ØªØ³Ù‚Ø· Ø­Ø§Ù„ Ø§Ù„Ø¥Ø®ÙØ§Ø¡.
         """
         errors: Dict[str, str] = {}
         data = data or {}
@@ -218,32 +276,32 @@ class FMLKFormEngine:
             val = data.get(f.name)
             if f.required and not getattr(f, "display_only", False) and (val is None or str(val).strip() == ""):
                 if (getattr(f, "formula", None) or "").strip() and str(getattr(f, "calc_mode", "default") or "default").lower() == "computed":
-                    continue  # محسوب authoritative: يُملأ حسابياً قبل/أثناء الحفظ
+                    continue  # Ù…Ø­Ø³ÙˆØ¨ authoritative: ÙŠÙÙ…Ù„Ø£ Ø­Ø³Ø§Ø¨ÙŠØ§Ù‹ Ù‚Ø¨Ù„/Ø£Ø«Ù†Ø§Ø¡ Ø§Ù„Ø­ÙØ¸
                 if bool(getattr(f, "serial", False)):
-                    continue  # تسلسلي: تملؤه القاعدة (تسلسل) عند الإنشاء
-                errors[f.name] = f"{f.alias} مطلوب"
+                    continue  # ØªØ³Ù„Ø³Ù„ÙŠ: ØªÙ…Ù„Ø¤Ù‡ Ø§Ù„Ù‚Ø§Ø¹Ø¯Ø© (ØªØ³Ù„Ø³Ù„) Ø¹Ù†Ø¯ Ø§Ù„Ø¥Ù†Ø´Ø§Ø¡
+                errors[f.name] = f"{f.alias} Ù…Ø·Ù„ÙˆØ¨"
                 continue  # skip further checks if empty required
             if val is None or str(val).strip() == "":
                 continue
             sval = str(val)
             # basic type checks (keep first error)
             if f.input_type == "email" and "@" not in sval and f.name not in errors:
-                errors[f.name] = "بريد إلكتروني غير صالح"
+                errors[f.name] = "Ø¨Ø±ÙŠØ¯ Ø¥Ù„ÙƒØªØ±ÙˆÙ†ÙŠ ØºÙŠØ± ØµØ§Ù„Ø­"
             if f.input_type == "number" and f.name not in errors:
                 try: float(val)
-                except: errors[f.name] = "يجب أن يكون رقماً"
+                except: errors[f.name] = "ÙŠØ¬Ø¨ Ø£Ù† ÙŠÙƒÙˆÙ† Ø±Ù‚Ù…Ø§Ù‹"
             if f.input_type in ("phone", "phone_number") and f.name not in errors:
                 _digits = re.sub(r"\D", "", sval)
                 if len(_digits) < 6:
-                    errors[f.name] = f"{f.alias} رقم هاتف غير صالح"
-            # ── Validation Engine ──
+                    errors[f.name] = f"{f.alias} Ø±Ù‚Ù… Ù‡Ø§ØªÙ ØºÙŠØ± ØµØ§Ù„Ø­"
+            # â”€â”€ Validation Engine â”€â”€
             rules = f.validation or {}
             # regex / pattern
             pattern = rules.get("pattern") or rules.get("regex")
             if pattern and f.name not in errors:
                 try:
                     if not re.fullmatch(pattern, sval):
-                        errors[f.name] = f"{f.alias} صيغة غير صحيحة"
+                        errors[f.name] = f"{f.alias} ØµÙŠØºØ© ØºÙŠØ± ØµØ­ÙŠØ­Ø©"
                 except re.error:
                     pass  # invalid regex ignored
             # min_length / max_length (for strings)
@@ -251,30 +309,30 @@ class FMLKFormEngine:
             if min_len is not None and f.name not in errors:
                 try:
                     if len(sval) < int(min_len):
-                        errors[f.name] = f"{f.alias} يجب ألا يقل عن {min_len} حرف"
+                        errors[f.name] = f"{f.alias} ÙŠØ¬Ø¨ Ø£Ù„Ø§ ÙŠÙ‚Ù„ Ø¹Ù† {min_len} Ø­Ø±Ù"
                 except: pass
             max_len = rules.get("max_length")
             if max_len is not None and f.name not in errors:
                 try:
                     if len(sval) > int(max_len):
-                        errors[f.name] = f"{f.alias} يجب ألا يزيد عن {max_len} حرف"
+                        errors[f.name] = f"{f.alias} ÙŠØ¬Ø¨ Ø£Ù„Ø§ ÙŠØ²ÙŠØ¯ Ø¹Ù† {max_len} Ø­Ø±Ù"
                 except: pass
             # numeric min / max
             min_v = rules.get("min")
             if min_v is not None and f.name not in errors:
                 try:
                     if float(val) < float(min_v):
-                        errors[f.name] = f"{f.alias} يجب أن يكون ≥ {min_v}"
+                        errors[f.name] = f"{f.alias} ÙŠØ¬Ø¨ Ø£Ù† ÙŠÙƒÙˆÙ† â‰¥ {min_v}"
                 except: pass
             max_v = rules.get("max")
             if max_v is not None and f.name not in errors:
                 try:
                     if float(val) > float(max_v):
-                        errors[f.name] = f"{f.alias} يجب أن يكون ≤ {max_v}"
+                        errors[f.name] = f"{f.alias} ÙŠØ¬Ø¨ Ø£Ù† ÙŠÙƒÙˆÙ† â‰¤ {max_v}"
                 except: pass
         return errors
 
-    # ── Foreign Keys: dynamic lookup ────────────────────────────────────────
+    # â”€â”€ Foreign Keys: dynamic lookup â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     def get_field_lookup(self, field_name: str, limit: int = 100, search: str | None = None) -> Dict[str, Any]:
         """Fetch reference data for a field with ref_table/ref_fk/ref_display. Used by /api/fmlk/lookup."""
         f = self._field_map.get(field_name)
@@ -328,17 +386,17 @@ class FMLKFormEngine:
                 raise RuntimeError(f"Lookup failed for {field_name} ({f.ref_table}): {e} / {e2}") from e
 
     def list_lookups(self) -> List[Dict[str, Any]]:
-        """List all FK fields with their ref endpoints — for frontend to prefetch."""
+        """List all FK fields with their ref endpoints â€” for frontend to prefetch."""
         out = []
         for f in self.fields:
             if f.ref_table:
                 out.append({"field": f.name, "alias": f.alias, "refTable": f.ref_table, "refFk": f.ref_fk, "refDisplay": f.ref_display, "endpoint": f"/api/fmlk/lookup?field={f.name}"})
         return out
 
-    # ── SQL Builders (secure _q, binds) ───────────────────────────────────
+    # â”€â”€ SQL Builders (secure _q, binds) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     def apply_defaults(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """ملء القيم الافتراضية: ثابتة أولاً، ثم الصيغ لمن ترك فارغاً (يدوي إن لا صيغة)."""
+        """Ù…Ù„Ø¡ Ø§Ù„Ù‚ÙŠÙ… Ø§Ù„Ø§ÙØªØ±Ø§Ø¶ÙŠØ©: Ø«Ø§Ø¨ØªØ© Ø£ÙˆÙ„Ø§Ù‹ØŒ Ø«Ù… Ø§Ù„ØµÙŠØº Ù„Ù…Ù† ØªØ±Ùƒ ÙØ§Ø±ØºØ§Ù‹ (ÙŠØ¯ÙˆÙŠ Ø¥Ù† Ù„Ø§ ØµÙŠØºØ©)."""
         out = dict(data or {})
         for f in self.fields:
             v = out.get(f.name)
@@ -347,11 +405,11 @@ class FMLKFormEngine:
                 continue
             if f.default is not None and str(f.default) != "":
                 out[f.name] = f.default
-            # formula تُترك فارغة للإدخال اليدوي ما لم تُحسب في SQL
+            # formula ØªÙØªØ±Ùƒ ÙØ§Ø±ØºØ© Ù„Ù„Ø¥Ø¯Ø®Ø§Ù„ Ø§Ù„ÙŠØ¯ÙˆÙŠ Ù…Ø§ Ù„Ù… ØªÙØ­Ø³Ø¨ ÙÙŠ SQL
         return out
 
     def _table_columns_info(self) -> Dict[str, Dict[str, Any]]:
-        """أعمدة الجدول {name: {nullable, has_default, generic}} — مخزّن مؤقتاً، آمن الفشل."""
+        """Ø£Ø¹Ù…Ø¯Ø© Ø§Ù„Ø¬Ø¯ÙˆÙ„ {name: {nullable, has_default, generic}} â€” Ù…Ø®Ø²Ù‘Ù† Ù…Ø¤Ù‚ØªØ§Ù‹ØŒ Ø¢Ù…Ù† Ø§Ù„ÙØ´Ù„."""
         try:
             cache = self.__dict__.setdefault("_cols_info_cache", {})
             key = f"{self.metadata.get('schema')}.{self._table}".lower()
@@ -392,7 +450,7 @@ class FMLKFormEngine:
             return {}
 
     def _table_has_column(self, column: str) -> bool:
-        """هل يوجد عمود في جدول النموذج؟"""
+        """Ù‡Ù„ ÙŠÙˆØ¬Ø¯ Ø¹Ù…ÙˆØ¯ ÙÙŠ Ø¬Ø¯ÙˆÙ„ Ø§Ù„Ù†Ù…ÙˆØ°Ø¬ØŸ"""
         try:
             return column.lower() in self._table_columns_info()
         except Exception:
@@ -411,7 +469,7 @@ class FMLKFormEngine:
         computed-mode fields are ALWAYS recomputed (incoming values ignored);
         default-mode (legacy) fields are untouched here (old SQL-embed path).
         With require_refs=True (partial updates) a field is recomputed only
-        when all its refs exist in data — otherwise the stored value survives.
+        when all its refs exist in data â€” otherwise the stored value survives.
         Returns (data, failed): failed ones keep the legacy SQL-embed behavior.
         Never raises.
         """
@@ -448,9 +506,9 @@ class FMLKFormEngine:
         return data, failed
 
     def _build_insert(self, data: Dict[str, Any], calc_done: set | frozenset = frozenset()) -> Tuple[str, Dict[str, Any]]:
-        """Build INSERT with binds + fixed defaults + formula SQL ([refs] → binds).
+        """Build INSERT with binds + fixed defaults + formula SQL ([refs] â†’ binds).
 
-        calc_done: fields already evaluated in Python (even to None) — their
+        calc_done: fields already evaluated in Python (even to None) â€” their
         static value is stored, never re-embedded as SQL.
         """
         data = self.apply_defaults(data)
@@ -467,11 +525,11 @@ class FMLKFormEngine:
             _done = set()
         for f in self.fields:
             if f.name in _disp_ins:
-                continue  # عرض فقط — لا يُخزن
+                continue  # Ø¹Ø±Ø¶ ÙÙ‚Ø· â€” Ù„Ø§ ÙŠÙØ®Ø²Ù†
             formula = (getattr(f, "formula", None) or "").strip()
             has_val = f.name in data and not (data[f.name] is None or (isinstance(data[f.name], str) and data[f.name].strip() == ""))
             if f.name in _done and f.name not in _disp_ins:
-                # محسوب بايثون: يُخزن static (حتى None → NULL) بلا تضمين SQL
+                # Ù…Ø­Ø³ÙˆØ¨ Ø¨Ø§ÙŠØ«ÙˆÙ†: ÙŠÙØ®Ø²Ù† static (Ø­ØªÙ‰ None â†’ NULL) Ø¨Ù„Ø§ ØªØ¶Ù…ÙŠÙ† SQL
                 if f.name in data and data[f.name] is not None:
                     cols.append(_q(f.name))
                     binds.append(f":{f.name}")
@@ -483,7 +541,7 @@ class FMLKFormEngine:
                     continue
                 continue
             if formula and not has_val:
-                # صيغة حسابية: تُنفذ في DB بكل دوال SQL — مراجع [f] تصبح binds
+                # ØµÙŠØºØ© Ø­Ø³Ø§Ø¨ÙŠØ©: ØªÙÙ†ÙØ° ÙÙŠ DB Ø¨ÙƒÙ„ Ø¯ÙˆØ§Ù„ SQL â€” Ù…Ø±Ø§Ø¬Ø¹ [f] ØªØµØ¨Ø­ binds
                 cols.append(_q(f.name))
                 binds.append(f"({formula_to_sql(formula)})")
                 for ref in formula_refs(formula):
@@ -494,10 +552,10 @@ class FMLKFormEngine:
                 continue
             if f.name in data:
                 if data[f.name] is None:
-                    continue  # يُترك لملء الأعمدة التلقائي أو NULL/الافتراضي
+                    continue  # ÙŠÙØªØ±Ùƒ Ù„Ù…Ù„Ø¡ Ø§Ù„Ø£Ø¹Ù…Ø¯Ø© Ø§Ù„ØªÙ„Ù‚Ø§Ø¦ÙŠ Ø£Ùˆ NULL/Ø§Ù„Ø§ÙØªØ±Ø§Ø¶ÙŠ
                 if isinstance(data[f.name], str) and data[f.name].strip() == "" \
                         and _blank_incompatible(f):
-                    continue  # فارغ لرقمي/تاريخ/منطقي → يُحذف (NULL) بدل invalid input syntax
+                    continue  # ÙØ§Ø±Øº Ù„Ø±Ù‚Ù…ÙŠ/ØªØ§Ø±ÙŠØ®/Ù…Ù†Ø·Ù‚ÙŠ â†’ ÙŠÙØ­Ø°Ù (NULL) Ø¨Ø¯Ù„ invalid input syntax
                 cols.append(_q(f.name))
                 binds.append(f":{f.name}")
                 params[f.name] = data[f.name]
@@ -507,8 +565,8 @@ class FMLKFormEngine:
         schema = self.metadata.get("schema")
         if schema and "." not in self._table:
             table_q = f"{_q(schema)}.{table_q}"
-        # إكمال أعمدة الجدول الغائبة عن النموذج: طوابع زمنية → CURRENT_TIMESTAMP،
-        # ونص NOT NULL بلا افتراضي → '' ، ومنطقي → FALSE (يعمل على Postgres و Oracle)
+        # Ø¥ÙƒÙ…Ø§Ù„ Ø£Ø¹Ù…Ø¯Ø© Ø§Ù„Ø¬Ø¯ÙˆÙ„ Ø§Ù„ØºØ§Ø¦Ø¨Ø© Ø¹Ù† Ø§Ù„Ù†Ù…ÙˆØ°Ø¬: Ø·ÙˆØ§Ø¨Ø¹ Ø²Ù…Ù†ÙŠØ© â†’ CURRENT_TIMESTAMPØŒ
+        # ÙˆÙ†Øµ NOT NULL Ø¨Ù„Ø§ Ø§ÙØªØ±Ø§Ø¶ÙŠ â†’ '' ØŒ ÙˆÙ…Ù†Ø·Ù‚ÙŠ â†’ FALSE (ÙŠØ¹Ù…Ù„ Ø¹Ù„Ù‰ Postgres Ùˆ Oracle)
         try:
             covered = set()
             for _c in cols:
@@ -557,9 +615,9 @@ class FMLKFormEngine:
             if k in pk:
                 continue
             if k in _disp:
-                continue  # عرض فقط — لا يُكتب أبداً
+                continue  # Ø¹Ø±Ø¶ ÙÙ‚Ø· â€” Ù„Ø§ ÙŠÙÙƒØªØ¨ Ø£Ø¨Ø¯Ø§Ù‹
             if isinstance(v, str) and v.strip() == "" and _blank_incompatible(_fmap.get(k)):
-                sets.append(f"{_q(k)}=NULL")  # مسح رقمي/تاريخ/منطقي → NULL بدل invalid input syntax
+                sets.append(f"{_q(k)}=NULL")  # Ù…Ø³Ø­ Ø±Ù‚Ù…ÙŠ/ØªØ§Ø±ÙŠØ®/Ù…Ù†Ø·Ù‚ÙŠ â†’ NULL Ø¨Ø¯Ù„ invalid input syntax
                 continue
             sets.append(f"{_q(k)}=:{k}")
             params[k] = v
@@ -627,7 +685,7 @@ class FMLKFormEngine:
         sql = f"SELECT {select_clause} FROM {table_q}{where_sql}{order_sql}{paginate}"
         return sql, params
 
-    # ── Records CRUD ──────────────────────────────────────────────────────
+    # â”€â”€ Records CRUD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     @staticmethod
     def _missing_pk_error(e: Exception) -> bool:
@@ -637,11 +695,11 @@ class FMLKFormEngine:
         return has_id and any(k in msg for k in ("does not exist", "no such column", "invalid identifier", "ora-00904"))
 
     def list_records(self, filters: List[Dict[str, Any]] | None = None, page: int = 1, page_size: int = 50, order_by: str | None = None) -> Dict[str, Any]:
-        """List records with pagination — for Records showing."""
+        """List records with pagination â€” for Records showing."""
         limit = None if page_size == "all" else int(page_size)
         offset = (page - 1) * (limit or 0) if limit else 0
         # Stable order: without ORDER BY the DB returns heap order,
-        # so an edited row sinks last — default to PK (or first field).
+        # so an edited row sinks last â€” default to PK (or first field).
         auto_order = not order_by
         if auto_order:
             try:
@@ -662,7 +720,7 @@ class FMLKFormEngine:
                 sql, params = self._build_select(filters, order_by, limit, offset, include_pk=False)
                 return self._list_records_exec(sql, params, filters, page, limit)
             if auto_order:
-                # عمود الترتيب التلقائي غير موجود — أعد بدون ترتيب
+                # Ø¹Ù…ÙˆØ¯ Ø§Ù„ØªØ±ØªÙŠØ¨ Ø§Ù„ØªÙ„Ù‚Ø§Ø¦ÙŠ ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯ â€” Ø£Ø¹Ø¯ Ø¨Ø¯ÙˆÙ† ØªØ±ØªÙŠØ¨
                 try:
                     sql, params = self._build_select(filters, None, limit, offset, include_pk=True)
                     return self._list_records_exec(sql, params, filters, page, limit)
@@ -670,8 +728,10 @@ class FMLKFormEngine:
                     pass
             raise
 
-    # ── Secret masking (passwords never leave the list endpoint in cleartext) ──
-    SECRET_NAMES = {"password", "passwd", "pwd", "secret", "secret_key", "api_key", "token"}
+    # â”€â”€ Secret masking (passwords never leave the list endpoint in cleartext) â”€â”€
+    SECRET_NAMES = {"password", "passwd", "pwd", "password_hash", "pass_hash",
+                      "pass", "user_password", "pwd_hash",
+                      "secret", "secret_key", "api_key", "token"}
 
     def _secret_aliases(self) -> List[str]:
         """Lowercased output aliases of secret fields (inputType=password or secret name)."""
@@ -815,12 +875,12 @@ class FMLKFormEngine:
             raise ValueError("invalid table")
         db = getattr(self, "db", None)
         if db is None:
-            raise RuntimeError("لا اتصال قاعدة")
+            raise RuntimeError("Ù„Ø§ Ø§ØªØµØ§Ù„ Ù‚Ø§Ø¹Ø¯Ø©")
         try:
             if not getattr(db, "conn", None):
                 db.connect()
         except Exception as e:
-            raise RuntimeError("تعذر الاتصال (%s)" % (e,))
+            raise RuntimeError("ØªØ¹Ø°Ø± Ø§Ù„Ø§ØªØµØ§Ù„ (%s)" % (e,))
         try:
             cur = db._exec('SELECT COUNT(*) FROM "%s"."%s"' % (sch, tbl), {})
             try:
@@ -837,7 +897,7 @@ class FMLKFormEngine:
                     db.conn.rollback()
             except Exception:
                 pass
-            raise RuntimeError("تعذر حساب التسلسل — رحّل النموذج أولاً (%s)" % (e,))
+            raise RuntimeError("ØªØ¹Ø°Ø± Ø­Ø³Ø§Ø¨ Ø§Ù„ØªØ³Ù„Ø³Ù„ â€” Ø±Ø­Ù‘Ù„ Ø§Ù„Ù†Ù…ÙˆØ°Ø¬ Ø£ÙˆÙ„Ø§Ù‹ (%s)" % (e,))
 
     def _apply_serials(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Serial mains: fresh COUNT(*)+1 each (authoritative). Never raises."""
@@ -855,7 +915,7 @@ class FMLKFormEngine:
         return data
 
     def create_record(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Create record — Add button. Computes formulas + serials (static), validates, stores secrets HASHED."""
+        """Create record â€” Add button. Computes formulas + serials (static), validates, stores secrets HASHED."""
         _secrets = self._secret_names()
         data = self._drop_masked_secrets(data, _secrets)
         data = self._apply_serials(data)
@@ -870,7 +930,7 @@ class FMLKFormEngine:
                 self.db.connect()
             new_id = None
             try:
-                # Postgres: أعد المفتاح المُولّد لربط الجداول المتفرعة
+                # Postgres: Ø£Ø¹Ø¯ Ø§Ù„Ù…ÙØªØ§Ø­ Ø§Ù„Ù…ÙÙˆÙ„Ù‘Ø¯ Ù„Ø±Ø¨Ø· Ø§Ù„Ø¬Ø¯Ø§ÙˆÙ„ Ø§Ù„Ù…ØªÙØ±Ø¹Ø©
                 _pkf = next((f.name for f in self.fields if getattr(f, "primary_key", False)), None)
                 if _pkf is None and any(f.name == "id" for f in self.fields):
                     _pkf = "id"
@@ -907,12 +967,12 @@ class FMLKFormEngine:
             raise RuntimeError(f"Create failed: {e}\nSQL: {sql}") from e
 
     def update_record(self, pk: Dict[str, Any], data: Dict[str, Any]) -> Dict[str, Any]:
-        """Update record — Editing (stars-runs in secrets mean 'unchanged'; new secrets stored HASHED)."""
+        """Update record â€” Editing (stars-runs in secrets mean 'unchanged'; new secrets stored HASHED)."""
         # Validate only provided fields
         _secrets = self._secret_names()
         data = self._drop_masked_secrets(data, _secrets)
         for _sn in self._serial_names():
-            data.pop(_sn, None)  # تسلسلي ثابت بعد الإنشاء — لا يُكتب أبداً
+            data.pop(_sn, None)  # ØªØ³Ù„Ø³Ù„ÙŠ Ø«Ø§Ø¨Øª Ø¨Ø¹Ø¯ Ø§Ù„Ø¥Ù†Ø´Ø§Ø¡ â€” Ù„Ø§ ÙŠÙÙƒØªØ¨ Ø£Ø¨Ø¯Ø§Ù‹
         data, _ = self._apply_formulas(data, require_refs=True)
         errs = self.validate({**pk, **data})
         # Filter to only errors for data fields
@@ -939,7 +999,7 @@ class FMLKFormEngine:
             raise RuntimeError(f"Update failed: {e}\nSQL: {sql}") from e
 
     def delete_record(self, pk: Dict[str, Any]) -> Dict[str, Any]:
-        """Delete record — Delete button."""
+        """Delete record â€” Delete button."""
         sql, params = self._build_delete(pk)
         try:
             if not self.db.conn:
@@ -958,7 +1018,7 @@ class FMLKFormEngine:
             except: pass
             raise RuntimeError(f"Delete failed: {e}\nSQL: {sql}") from e
 
-    # ── Tabs & Positioning ────────────────────────────────────────────────
+    # â”€â”€ Tabs & Positioning â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     def tabs(self) -> List[Dict[str, Any]]:
         """Return tabs with their fields grouped."""
@@ -968,12 +1028,12 @@ class FMLKFormEngine:
             # Group by category within tab
             cats: Dict[str, List[Dict]] = {}
             for f in fields:
-                cats.setdefault(f["category"] or "عام", []).append(f)
+                cats.setdefault(f["category"] or "Ø¹Ø§Ù…", []).append(f)
             result.append({"tab": tab.to_dict(), "fields": fields, "categories": cats})
         # Handle fields without tab
         untabbed = [f.to_dict() for f in self.fields if not f.tab]
         if untabbed:
-            result.append({"tab": {"id": "general", "name": "عام", "alias": "عام"}, "fields": untabbed, "categories": {"عام": untabbed}})
+            result.append({"tab": {"id": "general", "name": "Ø¹Ø§Ù…", "alias": "Ø¹Ø§Ù…"}, "fields": untabbed, "categories": {"Ø¹Ø§Ù…": untabbed}})
         return result
 
     def preview_insert_sql(self, data: Dict[str, Any]) -> str:
@@ -992,7 +1052,7 @@ class FMLKFormEngine:
         sql, params = self._build_select(filters, order_by, limit)
         return f"{sql}\n-- Binds: {params}"
 
-    # ── Model designer: DDL ─────────────────────────────────────────────
+    # â”€â”€ Model designer: DDL â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     DATA_TYPE_MAP = {
         "VARCHAR": "VARCHAR(255)", "TEXT": "TEXT", "INTEGER": "INTEGER", "INT": "INTEGER",
         "BIGINT": "BIGINT", "NUMERIC": "NUMERIC(18,2)", "DECIMAL": "NUMERIC(18,2)",
@@ -1005,14 +1065,14 @@ class FMLKFormEngine:
         return pks or ["id"]
 
     def build_create_table_ddl(self, schema: str | None = None, table: str | None = None) -> str:
-        """بناء CREATE TABLE من تعريف الموديل: أنواع + PK + قيود + افتراضيات ثابتة."""
+        """Ø¨Ù†Ø§Ø¡ CREATE TABLE Ù…Ù† ØªØ¹Ø±ÙŠÙ Ø§Ù„Ù…ÙˆØ¯ÙŠÙ„: Ø£Ù†ÙˆØ§Ø¹ + PK + Ù‚ÙŠÙˆØ¯ + Ø§ÙØªØ±Ø§Ø¶ÙŠØ§Øª Ø«Ø§Ø¨ØªØ©."""
         sch = schema or self.metadata.get("schema") or "public"
         tbl = table or self.metadata.get("table") or "custom_model"
         col_defs: List[str] = []
         pk_explicit = [f.name for f in self.fields if getattr(f, "primary_key", False)]
         for f in self.fields:
             if getattr(f, "display_only", False):
-                continue  # عرض فقط — بلا عمود
+                continue  # Ø¹Ø±Ø¶ ÙÙ‚Ø· â€” Ø¨Ù„Ø§ Ø¹Ù…ÙˆØ¯
             dt = (f.data_type or "VARCHAR").upper().split("(")[0].strip()
             pg = self.DATA_TYPE_MAP.get(dt, "TEXT")
             parts = [_q(f.name), pg]

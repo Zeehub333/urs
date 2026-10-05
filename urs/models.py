@@ -358,15 +358,18 @@ class Connection(models.Model):
         ("zk", "ZK"),
         ("mysql", "MySQL"),
         ("postgres", "PostgreSQL"),
+        ("json", "JSON"),
     ]
 
     CONN_TYPE_CHOICES = [
         ("database", "قاعدة بيانات"),
         ("iot", "IoT"),
+        ("json", "JSON"),
     ]
 
     DB_ENGINES = ["postgres", "oracle", "sqlserver", "mysql"]
     IOT_ENGINES = ["zk"]
+    JSON_ENGINES = ["json"]
 
     name = models.CharField(max_length=100, unique=True, verbose_name="الاسم", help_text="معرف الاتصال")
     host = models.CharField(max_length=255, default="172.16.10.101", verbose_name="المضيف")
@@ -422,11 +425,12 @@ class Connection(models.Model):
 
         - IoT: قائمة `devices` فقط (IP:Port لكل جهاز) — حقولا host/port
           مخفيان لهذا النوع ولا يُستخدمان.
+        - json: مصدر ملف/رابط في host — بلا host/port.
         - database: الجهاز الرئيسي (host/port) + الأجهزة الإضافية.
         """
-        iot_only = str(getattr(self, "conn_type", "") or "") == "iot"
+        no_host_port = str(getattr(self, "conn_type", "") or "") in ("iot", "json")
         out = []
-        if not iot_only:
+        if not no_host_port:
             try:
                 if (self.host or "").strip():
                     out.append((str(self.host).strip(), int(self.port or 4370)))

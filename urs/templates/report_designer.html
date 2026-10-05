@@ -129,6 +129,7 @@
                 </div>
             </div>
             <div class="flex items-center gap-2">
+                <button onclick="fxOpen()" class="inline-flex items-center gap-1.5 px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-xs font-bold"><i class="fa-solid fa-square-root-variable"></i> <span>ƒx دالة مخصصة</span></button>
                 <button onclick="submitAddRmlQuick()" class="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold"><i class="fa-solid fa-floppy-disk"></i> <span>حفظ</span></button>
                 <button onclick="submitAddRml()" class="inline-flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold"><i class="fa-solid fa-vial"></i> <span>حفظ واختبار</span></button>
                 <button onclick="closeAddRmlModal()" class="inline-flex items-center gap-1.5 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold"><i class="fa-solid fa-xmark"></i> <span>إغلاق</span></button>
@@ -214,6 +215,132 @@
             if(tab === 'structure') showRmlStep(1);
             else if(tab === 'design') showRmlStep(4);
             else if(tab === 'doctemplate') showRmlStep(6);
+        }
+        // ── ƒx Custom functions: browse migratable formulas, migrate to PG,
+        // write custom CREATE OR REPLACE FUNCTION ──
+        async function fxOpen(){
+            let m = document.getElementById('fxModal');
+            if(!m){
+                m = document.createElement('div');
+                m.id = 'fxModal';
+                m.className = 'fixed inset-0 z-[70] flex items-center justify-center p-4 bg-slate-900/50';
+                m.setAttribute('onclick', 'if(event.target===this)fxClose()');
+                m.innerHTML = `
+                <div class="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[88vh] flex flex-col overflow-hidden">
+                    <div class="px-4 py-3 border-b border-slate-100 flex items-center gap-2">
+                        <span class="w-8 h-8 rounded-xl bg-violet-600 text-white flex items-center justify-center text-sm"><i class="fa-solid fa-square-root-variable"></i></span>
+                        <div class="flex-1"><div class="font-bold text-slate-800 text-sm">دالة مخصصة — دوال Postgres من الصيغ</div>
+                        <div class="text-[11px] text-slate-400">التعبيرات تقبل: دالة SQL مباشرة • صيغة <span class="font-mono" dir="ltr">=UPPER([name])</span> • <span class="font-mono" dir="ltr">XSQL: SELECT …</span></div></div>
+                        <button onclick="fxClose()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+                    </div>
+                    <div class="px-4 py-2 border-b border-slate-100 flex flex-wrap items-center gap-2 text-xs">
+                        <select id="fxConn" class="bg-slate-50 border border-slate-200 rounded-xl px-2 py-1.5 font-mono" dir="ltr"></select>
+                        <input id="fxSchema" value="public" dir="ltr" placeholder="schema" class="bg-slate-50 border border-slate-200 rounded-xl px-2 py-1.5 font-mono w-32">
+                        <button onclick="fxLoad()" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold">تحديث</button>
+                        <span id="fxMsg" class="text-[11px] text-slate-500 font-bold"></span>
+                    </div>
+                    <div class="px-4 py-1 border-b border-slate-100 flex gap-1 text-xs font-bold">
+                        <button onclick="fxTab('list')" id="fxTabList" class="px-3 py-1.5 rounded-lg">الدوال</button>
+                        <button onclick="fxTab('ddl')" id="fxTabDdl" class="px-3 py-1.5 rounded-lg">DDL مخصص</button>
+                    </div>
+                    <div class="p-4 overflow-y-auto custom-scroll flex-1 min-h-0 text-xs">
+                        <div id="fxPaneList"><p class="text-slate-400">...</p></div>
+                        <div id="fxPaneDdl" class="hidden space-y-2">
+                            <textarea id="fxDdl" rows="8" dir="ltr" placeholder="CREATE OR REPLACE FUNCTION public.fn_my(...) ..." class="w-full bg-slate-900 text-emerald-200 font-mono rounded-xl p-3"></textarea>
+                            <div class="flex gap-2">
+                                <button onclick="fxDdlRun()" class="px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white rounded-xl font-bold">تنفيذ create or replace</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="px-4 py-2 border-t border-slate-100 flex items-center gap-2 text-xs">
+                        <label class="flex items-center gap-1 text-slate-600 font-bold cursor-pointer"><input type="checkbox" id="fxAlias" checked class="accent-violet-600"> أسماء بدون <span class="font-mono" dir="ltr">fn_</span></label>
+                        <button onclick="fxMigrate(false)" class="px-3 py-1.5 bg-sky-600 hover:bg-sky-700 text-white rounded-xl font-bold">معاينة المحدد</button>
+                        <button onclick="fxMigrate(true)" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold">ترحيل وتنفيذ</button>
+                    </div>
+                    <div class="px-4 pb-3"><pre id="fxOut" dir="ltr" class="hidden bg-slate-900 text-emerald-200 font-mono rounded-xl p-3 text-[11px] overflow-auto custom-scroll" style="max-height:16rem"></pre></div>
+                </div>`;
+                document.body.appendChild(m);
+            }
+            m.classList.remove('hidden');
+            try{
+                const rc = await fetch('/api/connections/');
+                const rd = await rc.json();
+                const conns = (rd.connections || []).filter(c=>String(c.engine || '').toLowerCase() === 'postgres');
+                document.getElementById('fxConn').innerHTML = conns.map(c=>`<option value="${c.name}">${c.name}</option>`).join('') || '<option value="">— لا اتصال postgres —</option>';
+            }catch(e){}
+            fxTab('list');
+            fxLoad();
+        }
+        function fxClose(){ const m = document.getElementById('fxModal'); if(m) m.classList.add('hidden'); }
+        function fxTab(t){
+            document.getElementById('fxPaneList').classList.toggle('hidden', t !== 'list');
+            document.getElementById('fxPaneDdl').classList.toggle('hidden', t !== 'ddl');
+            document.getElementById('fxTabList').className = 'px-3 py-1.5 rounded-lg ' + (t === 'list' ? 'bg-violet-600 text-white' : 'text-slate-500');
+            document.getElementById('fxTabDdl').className = 'px-3 py-1.5 rounded-lg ' + (t === 'ddl' ? 'bg-violet-600 text-white' : 'text-slate-500');
+        }
+        function fxConnSchema(){
+            return {connection: (document.getElementById('fxConn') || {}).value || '',
+                    schema: ((document.getElementById('fxSchema') || {}).value || 'public').trim() || 'public'};
+        }
+        function fxShow(obj){
+            const o = document.getElementById('fxOut');
+            o.classList.remove('hidden');
+            o.textContent = typeof obj === 'string' ? obj : JSON.stringify(obj, null, 2);
+        }
+        async function fxLoad(){
+            const box = document.getElementById('fxPaneList');
+            const msg = document.getElementById('fxMsg');
+            box.innerHTML = '<p class="text-slate-400">...</p>';
+            try{
+                const res = await fetch('/api/formulas/');
+                const d = await res.json();
+                if(!res.ok) throw new Error(d.error || '');
+                const esc = (v)=>String(v ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;');
+                box.innerHTML = `<label class="flex items-center gap-2 bg-violet-50 border border-violet-200 rounded-xl px-2 py-1.5 mb-2 cursor-pointer font-bold text-violet-800"><input type="checkbox" id="fxAll" onchange="fxToggleAll(this)" class="w-4 h-4 accent-violet-600"><span class="flex-1">تحديد الكل (${(d.functions || []).length})</span></label>`
+                    + (d.functions || []).map(f=>`<label class="flex items-start gap-2 border border-slate-100 rounded-xl px-2 py-1.5 mb-1 hover:bg-slate-50 cursor-pointer"><input type="checkbox" data-fx-fn="${esc(f.name)}" onchange="fxSyncAll()" class="mt-1"><span class="flex-1"><span class="font-mono font-bold" dir="ltr">fn_${esc(f.name.toLowerCase())}(${(f.args || []).join(', ')}) → ${esc(f.returns)}</span><span class="block text-slate-400">${esc(f.note || '')}</span></span></label>`).join('')
+                    + ((d.skipped || []).length ? `<p class="text-slate-400 mt-2">متجاوَز (سياق استعلام — عبر XSQL): ${(d.skipped || []).map(s=>s.name).join(', ')}</p>` : '');
+                if(msg) msg.textContent = (d.total || 0) + ' دالة قابلة للترحيل';
+            }catch(e){ box.innerHTML = `<p class="text-rose-500">${String((e && e.message) || e)}</p>`; }
+        }
+        function fxPicked(){
+            return Array.from(document.querySelectorAll('#fxPaneList [data-fx-fn]:checked')).map(el=>el.getAttribute('data-fx-fn'));
+        }
+        function fxToggleAll(master){
+            const on = !!(master && master.checked);
+            document.querySelectorAll('#fxPaneList [data-fx-fn]').forEach(el=>{ el.checked = on; });
+        }
+        function fxSyncAll(){
+            const all = Array.from(document.querySelectorAll('#fxPaneList [data-fx-fn]'));
+            const m = document.getElementById('fxAll');
+            if(m) m.checked = all.length > 0 && all.every(el=>el.checked);
+        }
+        async function fxMigrate(exec){
+            const {connection, schema} = fxConnSchema();
+            if(!connection){ fxShow('اختر اتصال postgres أولاً'); return; }
+            const picked = fxPicked();
+            if(!picked.length){ fxShow('حدد دالة واحدة على الأقل — أو استخدم «تحديد الكل» لترحيلها جميعاً'); return; }
+            const aliasEl = document.getElementById('fxAlias');
+            const alias = !aliasEl || !!aliasEl.checked;
+            fxShow('...');
+            try{
+                const res = await fetch('/api/formulas/migrate/', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({connection, schema, functions: picked, execute: !!exec, alias: alias})});
+                const d = await res.json().catch(()=>({}));
+                if(!res.ok) throw new Error(d.error || 'فشل الترحيل');
+                fxShow(d);
+            }catch(e){ fxShow(String((e && e.message) || e)); }
+        }
+        async function fxDdlRun(){
+            const {connection} = fxConnSchema();
+            const ddl = (document.getElementById('fxDdl') || {}).value || '';
+            if(!connection){ fxShow('اختر اتصال postgres أولاً'); return; }
+            if(!ddl.trim()){ fxShow('الصق DDL أولاً'); return; }
+            fxShow('...');
+            try{
+                const res = await fetch('/api/formulas/ddl/', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({connection, ddl})});
+                const d = await res.json().catch(()=>({}));
+                if(!res.ok) throw new Error(d.error || 'فشل التنفيذ');
+                fxShow(d);
+            }catch(e){ fxShow(String((e && e.message) || e)); }
         }
         function paintDesignerTab(tab, silent){
             document.querySelectorAll('[data-dtab]').forEach(b=>{

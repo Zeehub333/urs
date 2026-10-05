@@ -363,8 +363,14 @@ def _write_ws_settings_py(ws, values):
     return merged
 
 
-def _write_ws_conf(ws, primary_connection="", users_table="", status="active"):
-    """Write <ws>/workspace.conf bindings (display keys live in settings.py)."""
+def _write_ws_conf(ws, primary_connection="", users_table="", status="active",
+                   user_column="", password_column=""):
+    """Write <ws>/workspace.conf bindings (display keys live in settings.py).
+
+    user_column/password_column pin the login username/password columns of
+    the users table (USERS_USER_COLUMN / USERS_PASSWORD_COLUMN); empty means
+    auto-detect from the known name lists.
+    """
     cp = ws / "workspace.conf"
     try:
         conf_lines = cp.read_text(encoding="utf-8").splitlines()
@@ -378,15 +384,43 @@ def _write_ws_conf(ws, primary_connection="", users_table="", status="active"):
             k = s.split("=", 1)[0].strip()
             if k in drop:
                 continue
-            if k in ("PRIMARY_CONNECTION", "USERS_TABLE", "STATUS"):
+            if k in ("PRIMARY_CONNECTION", "USERS_TABLE", "STATUS",
+                     "USERS_USER_COLUMN", "USERS_PASSWORD_COLUMN"):
                 continue
         out.append(ln)
     if primary_connection:
         out.append("PRIMARY_CONNECTION=%s" % primary_connection)
     if users_table:
         out.append("USERS_TABLE=%s" % users_table)
+    if user_column:
+        out.append("USERS_USER_COLUMN=%s" % user_column)
+    if password_column:
+        out.append("USERS_PASSWORD_COLUMN=%s" % password_column)
     out.append("STATUS=%s" % (status or "active"))
     cp.write_text("\n".join(out).rstrip("\n") + "\n", encoding="utf-8")
+
+
+def _ws_users_colmap(ws_id):
+    """Pinned (user_col, pass_col) for a workspace users table, lowercase.
+
+    '' means unset — callers fall back to auto-detect. Only valid
+    identifiers are returned. Never raises.
+    """
+    import re as _re_id
+    try:
+        from . import workspace as _wsm
+        ws_id = str(ws_id or "").strip()
+        for _w in _wsm.workspace_dirs():
+            if _w.name != ws_id:
+                continue
+            conf = _wsm.read_conf(_w / "workspace.conf")
+            _u = str(conf.get("USERS_USER_COLUMN") or "").strip().lower()
+            _p = str(conf.get("USERS_PASSWORD_COLUMN") or "").strip().lower()
+            _ok = lambda v: bool(v) and bool(_re_id.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", v))
+            return (_u if _ok(_u) else "", _p if _ok(_p) else "")
+    except Exception:
+        pass
+    return "", ""
 
 
 def _ws_ensure_connection(name, params):
@@ -606,7 +640,8 @@ def api_workspace_save(request, ws_id):
     Body (all optional, validated):
       settings.py WORKSPACE: name, brand, company, domain, logo, country,
         currency, brand_colors{primary,accent} (no fiscal year — resolved from schemas)
-      workspace.conf: primary_connection, users_table, status
+      workspace.conf: primary_connection, users_table, status,
+        users_user_column?, users_password_column? (pinned login columns)
       connection?: {host, port, user, password?, instance} → upserts the
         primary-connection row (blank password keeps stored value)
     Display props live ONLY in settings.py (overlapping conf keys are dropped).
@@ -660,13 +695,29 @@ def api_workspace_save(request, ws_id):
             },
         }
         _write_ws_settings_py(ws, new_ws)
+        import re as _re_col
+        def _colkey(key, fb):
+            # absent → keep old; present-but-empty → clear (auto-detect);
+            # present identifier → pin (invalid identifier → keep old).
+            if key not in data:
+                return fb
+            v = _s(data.get(key), 64).lower()
+            if not v:
+                return ""
+            if _re_col.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", v):
+                return v
+            return fb
         _old_conf = _wsm.read_conf(ws / "workspace.conf")
         _pc = _s(data.get("primary_connection"), 80) or _old_conf.get("PRIMARY_CONNECTION", "")
         _ut = _s(data.get("users_table"), 160) or _old_conf.get("USERS_TABLE", "")
         _st = _s(data.get("status"), 16).lower()
         if _st not in ("active", "archived", "disabled"):
             _st = _old_conf.get("STATUS", "active").strip().lower() or "active"
-        _write_ws_conf(ws, _pc, _ut, _st)
+        _uc = _colkey("users_user_column",
+                       _old_conf.get("USERS_USER_COLUMN", "").strip().lower())
+        _upc = _colkey("users_password_column",
+                        _old_conf.get("USERS_PASSWORD_COLUMN", "").strip().lower())
+        _write_ws_conf(ws, _pc, _ut, _st, _uc, _upc)
         _conn_saved = False
         if isinstance(data.get("connection"), dict):
             try:
@@ -724,6 +775,15 @@ def api_lookup_tables(request):
             obj = _effective_or_row(obj.id) or obj
         except Exception:
             pass
+        if str(getattr(obj, "engine", "") or "").lower() == "json":
+            from . import json_source as _jsrc
+            try:
+                doc, _mode = _jsrc.load(str(getattr(obj, "host", "") or ""), BASE_DIR)
+                rows = [{"schema": "", "table": t, "full": t} for t in _jsrc.tables(doc)]
+            except ValueError as ve:
+                return JsonResponse({"error": str(ve)}, status=400)
+            return JsonResponse({"tables": rows, "total": len(rows)},
+                                json_dumps_params={"ensure_ascii": False})
         try:
             conn = _ws_pg_connect(obj)
         except Exception as e:
@@ -936,6 +996,41 @@ _WS_USER_COLS = ("username", "user_name", "login", "login_name", "email", "mail"
 _WS_PASS_COLS = ("password", "passwd", "pwd", "password_hash", "pass_hash",
                  "pass", "user_password", "pwd_hash")
 _WS_SU_COLS = ("is_superuser", "superuser", "super_user", "is_admin")
+_WS_EMAIL_COLS = ("email", "mail", "email_address", "e_mail")
+_WS_FULL_COLS = ("full_name", "fullname", "name", "display_name")
+
+
+def _ws_user_handled_cols(cols, pin_u="", pin_p=""):
+    """Exactly the user-table columns the endpoints fill themselves.
+
+    Returns (ucol, pcol, fcol, sucol, accol); any may be None. Single source
+    of truth for both users-count (required skip) and superuser (extra skip).
+    pin_u/pin_p (lowercase, from workspace mapping) win when present.
+    """
+    try:
+        _c = cols or {}
+        _pu = str(pin_u or "").strip().lower()
+        _pp = str(pin_p or "").strip().lower()
+        _u = _pu if _pu and _pu in _c else next((c for c in _WS_USER_COLS if c in _c), None)
+        _p = _pp if _pp and _pp in _c else next((c for c in _WS_PASS_COLS if c in _c), None)
+        _f = next((c for c in _WS_FULL_COLS if c in _c), None)
+        _s = next((c for c in _WS_SU_COLS if c in _c), None)
+        _a = "is_active" if "is_active" in _c else ("active" if "active" in _c else None)
+        return _u, _p, _f, _s, _a
+    except Exception:
+        return None, None, None, None, None
+
+
+def _ws_compose_email(local_part, domain):
+    """username/local-part + '@' + workspace domain. '' when not composable."""
+    try:
+        _l = str(local_part or "").strip()
+        _d = str(domain or "").strip().lstrip("@")
+        if not _l or not _d or "@" in _l or " " in _l:
+            return ""
+        return "%s@%s" % (_l, _d)
+    except Exception:
+        return ""
 _SYS_SCHEMAS = ("pg_catalog", "information_schema")
 
 
@@ -989,6 +1084,38 @@ def _ws_user_table_candidates(cur, tbl):
     return out[:5]
 
 
+def _stored_is_hash(s):
+    """True when a stored value looks like a hash (not legacy plaintext).
+
+    Guards the plaintext-equality branch below so a leaked/stored hash
+    cannot itself be used as a password (pass-the-hash). Never raises.
+    """
+    try:
+        v = str(s or "")
+        if not v:
+            return False
+        try:
+            from fmlk_engine.engine import is_hashed_secret as _ih
+            if _ih(v):
+                return True
+        except Exception:
+            pass
+        low = v.lower()
+        if len(v) in (64, 40, 32) and all(ch in "0123456789abcdef" for ch in low):
+            return True
+        for _pfx in ("pbkdf2:", "scrypt:", "$2a$", "$2b$", "$2y$",
+                     "$argon2", "$pbkdf2"):
+            if low.startswith(_pfx):
+                return True
+        if v.startswith("*") and len(v) == 41:
+            return True  # MySQL old *SHA1
+        if low.startswith("md5") and len(v) == 35:
+            return True  # Postgres md5(password+user)
+    except Exception:
+        pass
+    return False
+
+
 def _verify_login_password(plain, stored, username=""):
     """Check a plain password against stored value across known hash types.
 
@@ -999,14 +1126,19 @@ def _verify_login_password(plain, stored, username=""):
     import hashlib as _hl
     import hmac as _hm
     p, s = str(plain or ""), str(stored or "")
-    if not p or not s:
+    # DB char(n) columns blank-pad values — hashes never carry meaningful
+    # surrounding whitespace, so compare against the stripped form too.
+    _s = s.strip()
+    if not p or not _s:
         return False
-    try:
-        if _hm.compare_digest(s, p):
-            return True
-    except Exception:
-        if s == p:
-            return True
+    s = _s
+    if not _stored_is_hash(s):
+        try:
+            if _hm.compare_digest(s, p):
+                return True
+        except Exception:
+            if s == p:
+                return True
     try:
         from fmlk_engine.engine import verify_secret as _vs
         if _vs(p, s):
@@ -1214,8 +1346,9 @@ def api_workspace_login(request, ws_id):
                     if len(_cands) > 1:
                         _msg += " (أو: %s)" % "، ".join(_cands[1:3])
                 return JsonResponse({"error": _msg, "candidates": _cands}, status=400)
-            ucol = next((c for c in _WS_USER_COLS if c in cols), None)
-            pcol = next((c for c in _WS_PASS_COLS if c in cols), None)
+            _map_u, _map_p = _ws_users_colmap(ws_id)
+            ucol = _map_u if _map_u and _map_u in cols else next((c for c in _WS_USER_COLS if c in cols), None)
+            pcol = _map_p if _map_p and _map_p in cols else next((c for c in _WS_PASS_COLS if c in cols), None)
             if not ucol:
                 return JsonResponse({"error": "لا عمود اسم مستخدم في جدول المستخدمين"}, status=400)
             if not pcol:
@@ -1384,6 +1517,58 @@ def _ws_users_table_info(cur, configured, schema_hint=""):
     return sch, tbl, cols, "", []
 
 
+def _ws_required_user_fields(cur, sch, tbl, skip=()):
+    """Columns the caller MUST supply: NOT NULL without default, minus handled.
+
+    skip: field names auto-filled by the endpoint (user/pass/full/su/active).
+    Returns [{name, data_type}]. Never raises.
+    """
+    import re as _re_id
+    out = []
+    try:
+        _skip = {str(s).lower() for s in (skip or [])}
+        cur.execute("SELECT column_name, data_type, is_nullable, column_default "
+                    "FROM information_schema.columns "
+                    "WHERE table_schema=%s AND table_name=%s ORDER BY ordinal_position",
+                    (sch, tbl))
+        for r in (cur.fetchall() or []):
+            try:
+                if r is None or len(r) < 2:
+                    continue
+                nm = str(r[0])
+                if nm.lower() in _skip:
+                    continue
+                if not _re_id.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", nm or ""):
+                    continue
+                nullable = (str(r[2]).upper() == "YES") if len(r) > 2 else True
+                has_def = bool(str(r[3] or "").strip()) if len(r) > 3 else False
+                if nullable or has_def:
+                    continue
+                out.append({"name": nm, "data_type": str(r[1] or "").lower()})
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return out
+
+
+def _ws_real_columns(cur, sch, tbl):
+    """lowercase → real column name map (for safe quoted writes). Never raises."""
+    out = {}
+    try:
+        cur.execute("SELECT column_name FROM information_schema.columns "
+                    "WHERE table_schema=%s AND table_name=%s", (sch, tbl))
+        for r in (cur.fetchall() or []):
+            try:
+                if r is not None and len(r) > 0 and str(r[0]).strip() != "":
+                    out.setdefault(str(r[0]).lower(), str(r[0]))
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return out
+
+
 def _ws_bool_val(dtype, on=True):
     """DB literal for a boolean-ish column by its data type."""
     d = str(dtype or "").lower()
@@ -1423,18 +1608,313 @@ def api_workspace_users_count(request, ws_id):
             cur.execute("SELECT count(*) FROM %s" % _tq)
             n = cur.fetchone()
             n = int(n[0]) if n else 0
+            _hc_map_u, _hc_map_p = _ws_users_colmap(ws_id)
+            _hcu, _hcp, _hcf, _hcs, _hca = _ws_user_handled_cols(_cols, _hc_map_u, _hc_map_p)
+            _handled = {_c for _c in (_hcu, _hcp, _hcf, _hcs, _hca) if _c}
+            _req = _ws_required_user_fields(cur, sch, tbl, skip=_handled) if n == 0 else []
         finally:
             try:
                 conn.close()
             except Exception:
                 pass
-        return JsonResponse({"count": n, "schema": sch, "table": "%s.%s" % (sch, tbl)},
+        try:
+            _dom = str(((_wsm.workspace_info(ws_id) or {}).get("domain")) or "").strip()
+        except Exception:
+            _dom = ""
+        return JsonResponse({"count": n, "schema": sch, "table": "%s.%s" % (sch, tbl),
+                             "required": _req, "domain": _dom},
                             json_dumps_params={"ensure_ascii": False})
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
 
 @csrf_exempt
+def api_workspace_users_columns(request, ws_id):
+    """GET /api/workspaces/<id>/users-columns/?table= → {columns:[{name,data_type}]}.
+
+    Real DB column names of the users table (for the workspace column-mapping
+    pickers). Requires master password. Never returns row data.
+    """
+    if not _ws_master_ok(request):
+        return JsonResponse({"error": "master password required", "master_required": True}, status=403)
+    try:
+        from . import workspace as _wsm
+        ws_id = (ws_id or "").strip()
+        if ws_id not in {w.name for w in _wsm.workspace_dirs()}:
+            return JsonResponse({"error": "unknown workspace"}, status=404)
+        obj, utable, err = _ws_login_connection(ws_id)
+        if err or obj is None:
+            return JsonResponse({"error": err or "no connection"}, status=400)
+        override = str(request.GET.get("table") or "").strip()
+        if override:
+            utable = override
+        try:
+            conn = _ws_pg_connect(obj)
+        except Exception as e:
+            return JsonResponse({"error": "تعذر الاتصال بقاعدة البيانات: %s" % str(e)[:200]}, status=400)
+        try:
+            cur = conn.cursor()
+            sch, tbl, cols, err, _cands = _ws_users_table_info(
+                cur, utable, str(request.GET.get("schema") or "").strip())
+            if err:
+                return JsonResponse({"error": err, "candidates": _cands}, status=400)
+            _realmap = _ws_real_columns(cur, sch, tbl)
+            _cols = [{"name": _realmap.get(c, c), "data_type": (cols.get(c) or "")}
+                     for c in cols]
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        _map_u, _map_p = _ws_users_colmap(ws_id)
+        return JsonResponse({"columns": _cols, "total": len(_cols),
+                             "schema": sch, "table": "%s.%s" % (sch, tbl),
+                             "user_column": _map_u, "password_column": _map_p},
+                            json_dumps_params={"ensure_ascii": False})
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+def _ws_hash_kind(stored):
+    """Classify a stored password value (never returns the value itself)."""
+    try:
+        from fmlk_engine.engine import _STD_HASH_PREFIX, is_hashed_secret as _ih
+        v = str(stored or "").strip()
+        if not v:
+            return "empty"
+        if v.startswith(_STD_HASH_PREFIX):
+            return "std-pbkdf2"
+        try:
+            _parts = v.split("$")
+            if (len(_parts) == 4 and _parts[0] == "pbkdf2_sha256"
+                    and _parts[3] and all(ch in "0123456789abcdefABCDEF" for ch in _parts[3])
+                    and len(_parts[3]) in (64, 128)):
+                return "foreign-hex-pbkdf2"
+        except Exception:
+            pass
+        try:
+            if _ih(v):
+                return "django-hash"
+        except Exception:
+            pass
+        _low = v.lower()
+        if len(v) in (64, 40, 32) and all(ch in "0123456789abcdef" for ch in _low):
+            return "hex-digest"
+        for _pfx, _name in (("pbkdf2:", "werkzeug-pbkdf2"), ("scrypt:", "werkzeug-scrypt"),
+                            ("$2a$", "bcrypt"), ("$2b$", "bcrypt"), ("$2y$", "bcrypt"),
+                            ("$argon2", "argon2"), ("$pbkdf2", "passlib-pbkdf2")):
+            if _low.startswith(_pfx):
+                return _name
+        if v.startswith("*") and len(v) == 41:
+            return "mysql-sha1"
+        if _low.startswith("md5") and len(v) == 35:
+            return "postgres-md5"
+        return "plaintext-or-unknown"
+    except Exception:
+        return "unknown"
+
+
+def _ws_login_diag_query(cur, sch, tbl, ucol, pcol, accol, sucol, username):
+    """Fetch one user row for diagnosis: (uname, phash, active, su, dupes)."""
+    _uq, _pq = _ws_quote_ident(ucol), _ws_quote_ident(pcol)
+    _tq = "%s.%s" % (_ws_quote_ident(sch), _ws_quote_ident(tbl))
+    _aq = (", %s" % _ws_quote_ident(accol)) if accol else ""
+    _sq = (", %s" % _ws_quote_ident(sucol)) if sucol else ""
+    cur.execute("SELECT %s, %s%s%s FROM %s WHERE %s = %%s LIMIT 1" % (_uq, _pq, _aq, _sq, _tq, _uq),
+                (username,))
+    row = cur.fetchone()
+    if row is None:
+        cur.execute("SELECT %s, %s%s%s FROM %s WHERE lower(%s) = lower(%%s) LIMIT 1" % (_uq, _pq, _aq, _sq, _tq, _uq),
+                    (username,))
+        row = cur.fetchone()
+    dupes = 0
+    try:
+        cur.execute("SELECT count(*) FROM %s WHERE lower(%s) = lower(%%s)" % (_tq, _uq), (username,))
+        _d = cur.fetchone()
+        dupes = int(_d[0] or 0) if _d else 0
+    except Exception:
+        pass
+    return row, dupes
+
+
+@csrf_exempt
+def api_workspace_login_diag(request, ws_id):
+    """POST /api/workspaces/<id>/login-diag/ {username, table?} — master only.
+
+    Diagnoses WHY a login fails without ever touching a password: resolved
+    table/columns (pinned vs auto), user found, duplicates, is_active,
+    stored-hash format + length, and a code self-test. Never returns hashes.
+    """
+    if request.method != "POST":
+        return JsonResponse({"error": "POST required"}, status=405)
+    if not _ws_master_ok(request):
+        return JsonResponse({"error": "master password required", "master_required": True}, status=403)
+    try:
+        from . import workspace as _wsm
+        ws_id = (ws_id or "").strip()
+        if ws_id not in {w.name for w in _wsm.workspace_dirs()}:
+            return JsonResponse({"error": "unknown workspace"}, status=404)
+        try:
+            data = json.loads(request.body.decode() or "{}")
+        except Exception:
+            return JsonResponse({"error": "invalid JSON"}, status=400)
+        if not isinstance(data, dict):
+            return JsonResponse({"error": "invalid JSON"}, status=400)
+        username = str(data.get("username") or "").strip()
+        if not username:
+            return JsonResponse({"error": "اسم المستخدم مطلوب"}, status=400)
+        obj, utable, err = _ws_login_connection(ws_id)
+        if err or obj is None:
+            return JsonResponse({"error": err or "no connection"}, status=400)
+        _ov = str(data.get("table") or "").strip()
+        if _ov:
+            utable = _ov
+        try:
+            conn = _ws_pg_connect(obj)
+        except Exception as e:
+            return JsonResponse({"error": "تعذر الاتصال بقاعدة البيانات: %s" % str(e)[:200]}, status=400)
+        try:
+            cur = conn.cursor()
+            sch, tbl, cols, err, _cands = _ws_users_table_info(
+                cur, utable, str(data.get("schema") or "").strip())
+            if err:
+                return JsonResponse({"error": err, "candidates": _cands}, status=400)
+            _map_u, _map_p = _ws_users_colmap(ws_id)
+            ucol = _map_u if _map_u and _map_u in cols else next((c for c in _WS_USER_COLS if c in cols), None)
+            pcol = _map_p if _map_p and _map_p in cols else next((c for c in _WS_PASS_COLS if c in cols), None)
+            if not ucol or not pcol:
+                return JsonResponse({
+                    "table": "%s.%s" % (sch, tbl),
+                    "user_column": {"name": ucol, "pinned": bool(_map_u)},
+                    "password_column": {"name": pcol, "pinned": bool(_map_p)},
+                    "verdict": "missing-column",
+                    "hint": "لا عمود اسم مستخدم/كلمة مرور — ثبّت الأعمدة من إعدادات المساحة"}, status=400)
+            accol = "is_active" if "is_active" in cols else ("active" if "active" in cols else None)
+            sucol = next((c for c in _WS_SU_COLS if c in cols), None)
+            row, dupes = _ws_login_diag_query(cur, sch, tbl, ucol, pcol, accol, sucol, username)
+            if row is None or not isinstance(row, (list, tuple)) or len(row) < 2:
+                return JsonResponse({
+                    "table": "%s.%s" % (sch, tbl),
+                    "user_column": {"name": ucol, "pinned": bool(_map_u and _map_u in cols)},
+                    "password_column": {"name": pcol, "pinned": bool(_map_p and _map_p in cols)},
+                    "found": False, "verdict": "unknown-user",
+                    "hint": "لا صف بهذا الاسم في %s.%s — تحقق من الجدول/السكيما" % (sch, tbl)})
+            _active = str(row[2] if len(row) > 2 else "").lower() if accol else ""
+            _off = accol and _active in ("0", "false", "f", "no", "n", "off")
+            _ph = str(row[1] or "")
+            try:
+                from fmlk_engine.engine import hash_secret as _hs, verify_secret as _vs
+                _probe = _hs("__diag_probe__")
+                _selftest = bool(_probe and _vs("__diag_probe__", _probe))
+            except Exception:
+                _selftest = False
+            if dupes > 1:
+                _verdict, _hint = ("duplicates",
+                    "الاسم مكرر %d مرات — الدخول يقرأ أول صف فقط؛ احذف/وحّد الزائد" % dupes)
+            elif _off:
+                _verdict, _hint = ("inactive", "الحساب موقوف (is_active=false)")
+            else:
+                _verdict, _hint = ("bad-password",
+                    "الصف موجود والحساب نشط — القيمة المخزنة ليست تشفير كلمة الدخول؛ أعد التعيين")
+            return JsonResponse({
+                "table": "%s.%s" % (sch, tbl),
+                "user_column": {"name": ucol, "pinned": bool(_map_u and _map_u in cols)},
+                "password_column": {"name": pcol, "pinned": bool(_map_p and _map_p in cols)},
+                "found": True, "duplicates": dupes,
+                "is_active": (not bool(_off)) if accol else None,
+                "hash_format": _ws_hash_kind(_ph), "hash_length": len(_ph.strip()),
+                "code_selftest": _selftest,
+                "verdict": _verdict, "hint": _hint},
+                json_dumps_params={"ensure_ascii": False})
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@csrf_exempt
+def api_workspace_login_reset(request, ws_id):
+    """POST /api/workspaces/<id>/login-reset/ {username, new_password, table?}.
+
+    Master only. Sets a fresh Django-format hash for an EXISTING user
+    (min 6 chars, like superuser creation). Never returns hashes.
+    """
+    if request.method != "POST":
+        return JsonResponse({"error": "POST required"}, status=405)
+    if not _ws_master_ok(request):
+        return JsonResponse({"error": "master password required", "master_required": True}, status=403)
+    try:
+        from . import workspace as _wsm
+        ws_id = (ws_id or "").strip()
+        if ws_id not in {w.name for w in _wsm.workspace_dirs()}:
+            return JsonResponse({"error": "unknown workspace"}, status=404)
+        try:
+            data = json.loads(request.body.decode() or "{}")
+        except Exception:
+            return JsonResponse({"error": "invalid JSON"}, status=400)
+        if not isinstance(data, dict):
+            return JsonResponse({"error": "invalid JSON"}, status=400)
+        username = str(data.get("username") or "").strip()
+        new_pw = str(data.get("new_password") or "")
+        if not username:
+            return JsonResponse({"error": "اسم المستخدم مطلوب"}, status=400)
+        if len(new_pw) < 6:
+            return JsonResponse({"error": "كلمة المرور 6 أحرف فأكثر"}, status=400)
+        obj, utable, err = _ws_login_connection(ws_id)
+        if err or obj is None:
+            return JsonResponse({"error": err or "no connection"}, status=400)
+        _ov = str(data.get("table") or "").strip()
+        if _ov:
+            utable = _ov
+        try:
+            conn = _ws_pg_connect(obj)
+        except Exception as e:
+            return JsonResponse({"error": "تعذر الاتصال بقاعدة البيانات: %s" % str(e)[:200]}, status=400)
+        try:
+            cur = conn.cursor()
+            sch, tbl, cols, err, _cands = _ws_users_table_info(
+                cur, utable, str(data.get("schema") or "").strip())
+            if err:
+                return JsonResponse({"error": err, "candidates": _cands}, status=400)
+            _map_u, _map_p = _ws_users_colmap(ws_id)
+            ucol = _map_u if _map_u and _map_u in cols else next((c for c in _WS_USER_COLS if c in cols), None)
+            pcol = _map_p if _map_p and _map_p in cols else next((c for c in _WS_PASS_COLS if c in cols), None)
+            if not ucol or not pcol:
+                return JsonResponse({"error": "جدول المستخدمين بلا عمودي اسم/كلمة مرور"}, status=400)
+            _tq = "%s.%s" % (_ws_quote_ident(sch), _ws_quote_ident(tbl))
+            cur.execute("SELECT 1 FROM %s WHERE %s = %%s LIMIT 1" % (_tq, _ws_quote_ident(ucol)),
+                        (username,))
+            if cur.fetchone() is None:
+                return JsonResponse({"error": "المستخدم غير موجود في %s.%s" % (sch, tbl)}, status=404)
+            try:
+                from fmlk_engine.engine import hash_secret as _hs
+                _hpw = _hs(new_pw)
+            except Exception:
+                return JsonResponse({"error": "تعذر تشفير كلمة المرور"}, status=500)
+            cur.execute("UPDATE %s SET %s = %%s WHERE %s = %%s" % (_tq, _ws_quote_ident(pcol), _ws_quote_ident(ucol)),
+                        (_hpw, username))
+            try:
+                conn.commit()
+            except Exception:
+                pass
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        try:
+            _ws_login_log.info("password reset ws=%s table=%s.%s user=%s", ws_id, sch, tbl, username[:64])
+        except Exception:
+            pass
+        return JsonResponse({"ok": True, "username": username, "table": "%s.%s" % (sch, tbl)},
+                            json_dumps_params={"ensure_ascii": False})
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
 def api_workspace_superuser(request, ws_id):
     """POST /api/workspaces/<id>/superuser/ {username, password, full_name?, schema?}.
 
@@ -1487,13 +1967,44 @@ def api_workspace_superuser(request, ws_id):
             _n = cur.fetchone()
             if _n and int(_n[0] or 0) > 0:
                 return JsonResponse({"error": "الجدول يحتوي مستخدمين بالفعل — الإنشاء للمشرف الأول فقط"}, status=400)
-            ucol = next((c for c in _WS_USER_COLS if c in cols), None)
-            pcol = next((c for c in _WS_PASS_COLS if c in cols), None)
+            _su_map_u, _su_map_p = _ws_users_colmap(ws_id)
+            ucol, pcol, _fcol, _sucol, _accol = _ws_user_handled_cols(
+                cols, _su_map_u, _su_map_p)
             if not ucol or not pcol:
                 return JsonResponse({"error": "جدول المستخدمين بلا عمودي اسم/كلمة مرور"}, status=400)
-            _fcol = next((c for c in ("full_name", "fullname", "name", "display_name") if c in cols), None)
-            _sucol = next((c for c in _WS_SU_COLS if c in cols), None)
-            _accol = "is_active" if "is_active" in cols else ("active" if "active" in cols else None)
+            _handled = {_c for _c in (ucol, pcol, _fcol, _sucol, _accol) if _c}
+            _realmap = _ws_real_columns(cur, sch, tbl)
+            _extra = data.get("extra") if isinstance(data.get("extra"), dict) else {}
+            _clean_extra = {}
+            for _k, _v in _extra.items():
+                _kl = str(_k or "").strip().lower()
+                if not _kl or _kl in _handled:
+                    continue
+                _real = _realmap.get(_kl)
+                if not _real:
+                    continue
+                _clean_extra[_real] = str(_v if _v is not None else "")
+            try:
+                _dom = str(((_wsm.workspace_info(ws_id) or {}).get("domain")) or "").strip()
+            except Exception:
+                _dom = ""
+            _ecol = next((c for c in _WS_EMAIL_COLS if c in cols), None)
+            _email_val = ""
+            if _ecol and _ecol not in _handled:
+                _ereal = _realmap.get(_ecol, _ecol)
+                _given = str(_clean_extra.get(_ereal, "")).strip()
+                if _given and "@" in _given:
+                    _email_val = _given
+                else:
+                    _email_val = _ws_compose_email(_given or username, _dom)
+                    if _email_val:
+                        _clean_extra[_ereal] = _email_val
+            _req = _ws_required_user_fields(cur, sch, tbl, skip=_handled)
+            _missing = [c["name"] for c in _req
+                        if not str(_clean_extra.get(c["name"], "")).strip()]
+            if _missing:
+                return JsonResponse({"error": "الحقول المطلوبة: %s" % "، ".join(_missing),
+                                     "required": _req}, status=400)
             try:
                 cur.execute("SELECT 1 FROM %s WHERE %s = %%s LIMIT 1" % (_tq, _ws_quote_ident(ucol)),
                             (username,))
@@ -1517,6 +2028,9 @@ def api_workspace_superuser(request, ws_id):
             if _accol:
                 _fields.append(_accol)
                 _vals.append(_ws_bool_val(cols.get(_accol), True))
+            for _ek in sorted(_clean_extra):
+                _fields.append(_ek)
+                _vals.append(_clean_extra[_ek])
             _ph = ", ".join(["%s"] * len(_fields))
             _cols_sql = ", ".join(_ws_quote_ident(c) for c in _fields)
             cur.execute("INSERT INTO %s (%s) VALUES (%s)" % (_tq, _cols_sql, _ph), tuple(_vals))
@@ -3717,6 +4231,14 @@ def _table_columns_obj(obj, schema: str, table: str):
         if t in _ZK_TABLES:
             return [{"name": n, "type": ty, "db_type": ty} for n, ty in _ZK_TABLES[t]]
         return []
+    if obj.engine == "json":
+        from . import json_source as _jsrc
+        try:
+            doc, _mode = _jsrc.load(str(getattr(obj, "host", "") or ""), BASE_DIR)
+            _t = (table or "").split(".")[-1]
+            return _jsrc.columns(doc, _t)
+        except ValueError as ve:
+            raise ValueError(str(ve))
     raise ValueError(f"محرك غير مدعوم: {obj.engine}")
 
 
@@ -4648,11 +5170,17 @@ def _query_detail_rows(comp, det, key, db):
 
 
 def _branch_password_cols(det, columns):
-    """Names of detail columns with input_type=password (stored HASHED)."""
+    """Names of detail columns stored HASHED: input_type=password OR a known
+    password column name (password, password_hash, ...). Same contract as
+    insert (hashed) / verify (plain) everywhere else."""
     names = set()
     for c in (columns or []):
         try:
-            if isinstance(c, dict) and str(c.get("input_type") or "").lower() == "password" and c.get("name"):
+            if not isinstance(c, dict) or not c.get("name"):
+                continue
+            _it = str(c.get("input_type") or "").lower()
+            _nm = str(c.get("name") or "").lower()
+            if _it == "password" or _nm in _WS_PASS_COLS:
                 names.add(c.get("name"))
         except Exception:
             continue
@@ -7703,6 +8231,18 @@ def _write_detail_el(rml, ET, detail):
             col_el.set("is_amount", "1")
         if col.get("currency_field") or col.get("currencyField"):
             col_el.set("currency_field", str(col.get("currency_field") or col.get("currencyField")))
+        _dcr = col.get("col_refname") or col.get("colRefname") or col.get("refname")
+        if _dcr and str(_dcr).strip():
+            col_el.set("col_refname", str(_dcr).strip())
+        if str(col.get("visible", True)).strip().lower() in (
+                "0", "false", "f", "no", "n", "off", "hidden"):
+            col_el.set("visible", "0")
+        try:
+            _dw = col.get("width")
+            if _dw not in (None, "") and int(float(_dw)) >= 40:
+                col_el.set("width", str(int(float(_dw))))
+        except Exception:
+            pass
         if col.get("icon"):
             col_el.set("icon", str(col.get("icon")))
 
@@ -7915,6 +8455,18 @@ def _render_rml_xml(prog_name, displayName, icon, category, schema, description,
             col_el.set("connection_id", str(cid_val))
         if col.get("where_clause") or col.get("whereClause") or col.get("where"):
             col_el.set("where_clause", str(col.get("where_clause") or col.get("whereClause") or col.get("where")))
+        _cr = col.get("col_refname") or col.get("colRefname") or col.get("refname")
+        if _cr and str(_cr).strip():
+            col_el.set("col_refname", str(_cr).strip())
+        if str(col.get("visible", True)).strip().lower() in (
+                "0", "false", "f", "no", "n", "off", "hidden"):
+            col_el.set("visible", "0")
+        try:
+            _w = col.get("width")
+            if _w not in (None, "") and int(float(_w)) >= 40:
+                col_el.set("width", str(int(float(_w))))
+        except Exception:
+            pass
         if col.get("icon"):
             col_el.set("icon", str(col.get("icon")))
         if col.get("is_amount") or col.get("isAmount"):
@@ -8528,6 +9080,68 @@ def api_rml_fetch_query(request, app_name):
 
 
 @csrf_exempt
+def api_rml_design_preview(request, app_name):
+    """POST /api/apps/<app>/rml/design-preview/ — wizard state → first 50 rows live.
+
+    Body: same shape as draft/fetch-query. Renders to a temp __preview_*.rml,
+    runs synchronously (pageSize 50), deletes the temp. Returns
+    {columns, rows, total, sql}. Errors (incl. @refname problems) surface here.
+    """
+    target = None
+    try:
+        data = json.loads(request.body.decode() or "{}")
+        data, derr = _rml_normalize_payload(data)
+        if derr:
+            return JsonResponse({"error": derr}, status=400)
+        if not data.get("connections"):
+            return JsonResponse({"error": "اختر اتصالاً واحداً على الأقل"}, status=400)
+        if not data.get("fields"):
+            return JsonResponse({"error": "أضف حقلاً واحداً على الأقل"}, status=400)
+        if not data.get("columns"):
+            return JsonResponse({"error": "أضف عموداً واحداً على الأقل"}, status=400)
+        prog_name = (data.get("name", "") or "").strip() or ("preview_" + _uuid.uuid4().hex[:8])
+        pretty = _render_rml_xml(
+            prog_name, data.get("displayName", "").strip() or prog_name,
+            data.get("icon", "").strip() or "fa-chart-bar",
+            data.get("category", "").strip() or "HR", data.get("_schema") or "HR_SYS",
+            data.get("description", "").strip(), data.get("namespace", "").strip() or None,
+            data.get("connections", []), data.get("fields", []), data.get("columns", []),
+            data.get("charts", []), data.get("rules", []),
+            (data.get("report_type", data.get("type", "master")) or "master"),
+            data.get("detail"), data.get("links", []),
+            data.get("doc_template", data.get("docTemplate", "")),
+            data.get("groups", []), bool(data.get("distinct")),
+            data.get("table_opts", data.get("tableOpts", [])),
+            data.get("group_levels", data.get("groupLevels", 1)),
+            data.get("general_where", data.get("generalWhere", "")), {})
+        fname = "__preview_%s.rml" % _uuid.uuid4().hex[:12]
+        _ad, target, err = _resolve_rml_target(app_name, fname)
+        if err or target is None:
+            return JsonResponse({"error": err or "bad app"}, status=400)
+        target.write_text(pretty, encoding="utf-8")
+        pipe = _rml_get_pipeline(fname, app_name)
+        try:
+            result = pipe.execute({"page": 1, "pageSize": 50})
+        except ValueError as ve:
+            return JsonResponse({"error": str(ve)[:500]}, status=400)
+        rows = result.get("rows") if isinstance(result, dict) else None
+        if isinstance(rows, list):
+            result["rows"] = rows[:50]
+        return JsonResponse(result if isinstance(result, dict) else {"rows": []},
+                            json_dumps_params={"ensure_ascii": False})
+    except ValueError as e:
+        return JsonResponse({"error": str(e)[:500]}, status=400)
+    except Exception as e:
+        return JsonResponse({"error": str(e)[:500]}, status=500)
+    finally:
+        try:
+            if target is not None and target.exists():
+                target.unlink()
+        except Exception:
+            pass
+
+
+@csrf_exempt
 def api_update_rml(request, app_name):
     """POST /api/apps/<app>/rml/update/ — overwrite an existing .rml file (report edit flow)."""
     if request.method != "POST":
@@ -8747,21 +9361,35 @@ def api_connection_create(request):
             v = data.get(r)
             if v is None or (isinstance(v, str) and not v.strip()):
                 return JsonResponse({"error": f"{r} required"}, status=400)
-        # Validate engine + connection type (نوع الاتصال: قاعدة بيانات | IoT)
+        # Validate engine + connection type (نوع الاتصال: قاعدة بيانات | IoT | JSON)
         engine = data.get("engine", "postgres")
         if engine not in [c[0] for c in Connection.ENGINE_CHOICES]:
             engine = "postgres"
         conn_type = str(data.get("conn_type", data.get("connType", "")) or "").strip().lower()
-        if conn_type not in ("database", "iot"):
-            conn_type = "iot" if engine in Connection.IOT_ENGINES else "database"
+        if conn_type not in ("database", "iot", "json"):
+            if engine in Connection.IOT_ENGINES:
+                conn_type = "iot"
+            elif engine in Connection.JSON_ENGINES:
+                conn_type = "json"
+            else:
+                conn_type = "database"
+        if conn_type == "json" and engine not in Connection.JSON_ENGINES:
+            engine = "json"
         # المضيف إلزامي لقواعد البيانات فقط — مخفي لاتصالات IoT (الأجهزة بقائمة devices)
+        # ولـ JSON يحمل المصدر (مسار ملف .json أو رابط http(s))
         _hv = data.get("host")
         if conn_type == "database" and (_hv is None or (isinstance(_hv, str) and not _hv.strip())):
             return JsonResponse({"error": "host required"}, status=400)
+        if conn_type == "json":
+            from . import json_source as _jsrc
+            if _hv is None or (isinstance(_hv, str) and not _hv.strip()):
+                return JsonResponse({"error": "JSON source required (مسار ملف .json أو رابط http(s))"}, status=400)
+            if not _jsrc.is_json_source(str(_hv).strip()):
+                return JsonResponse({"error": "JSON source must be a .json path or http(s) URL"}, status=400)
         if "is_queryable" in data:
             is_queryable = bool(data.get("is_queryable"))
         else:
-            is_queryable = (conn_type == "database")
+            is_queryable = (conn_type in ("database", "json"))
         try:
             port = int(data.get("port") or 5432)
         except (TypeError, ValueError):
@@ -8779,7 +9407,7 @@ def api_connection_create(request):
         obj = Connection.objects.create(
             name=data["name"],
             host=(data.get("host") or ("172.16.10.101" if conn_type == "database" else "")),
-            port=port,
+            port=(0 if conn_type == "json" else port),
             user=data.get("user") or "postgres",
             password=data.get("password") or "postgres",
             instance=data.get("instance") or "urs",
@@ -8825,8 +9453,17 @@ def api_connection_update(request, conn_id):
                             setattr(obj, "conn_type", "iot" if data[f] in Connection.IOT_ENGINES else "database")
                 elif f == "conn_type":
                     v = str(data.get("conn_type", data.get("connType", "")) or "").strip().lower()
-                    if v in ("database", "iot"):
+                    if v in ("database", "iot", "json"):
                         setattr(obj, f, v)
+                        if v == "json":
+                            obj.engine = "json"
+                elif f == "host" and str(getattr(obj, "conn_type", "") or "") == "json":
+                    from . import json_source as _jsrc
+                    _sv = str(data.get("host") or "").strip()
+                    if _sv:
+                        if not _jsrc.is_json_source(_sv):
+                            continue
+                        setattr(obj, f, _sv)
                 elif f == "endpoint":
                     v = str(data.get("endpoint") or "").strip().lower()
                     if v in ("att", "users", "attendance"):
@@ -9017,6 +9654,17 @@ def _test_connection_obj(obj):
                 return True, {"ok": True, "engine": obj.engine, "user": obj.user}, 200
             except Exception as e:
                 return False, {"ok": False, "error": str(e)}, 400
+        if obj.engine == "json":
+            from . import json_source as _jsrc
+            try:
+                doc, mode = _jsrc.load(str(getattr(obj, "host", "") or ""), BASE_DIR)
+                st = _jsrc.stats(doc)
+                return True, {"ok": True, "engine": obj.engine, "mode": mode,
+                              "note": "JSON %s: %d جدول / %d صف" % (
+                                  "ملف" if mode == "file" else "رابط",
+                                  st["tables"], st["rows"])}, 200
+            except Exception as e:
+                return False, {"ok": False, "error": str(e)[:220]}, 400
         if obj.engine == "zk":
             # أجهزة البصمة مستثناة من التحقق من كلمة المرور — فحص استجابة
             # المنفذ لكل أجهزة الاتصال (قائمة devices بصيغة IP:Port)
@@ -9343,6 +9991,13 @@ def _list_tables_obj(obj):
         return _mysql_tables(obj)
     if obj.engine == "zk":
         return [{"name": t, "schema": "", "full": t} for t in _ZK_TABLES]
+    if obj.engine == "json":
+        from . import json_source as _jsrc
+        try:
+            doc, _mode = _jsrc.load(str(getattr(obj, "host", "") or ""), BASE_DIR)
+            return [{"name": t, "schema": "", "full": t} for t in _jsrc.tables(doc)]
+        except ValueError as ve:
+            raise ValueError(str(ve))
     raise ValueError(f"محرك غير مدعوم: {obj.engine}")
 
 
@@ -9694,6 +10349,8 @@ def _mysql_columns(obj, schema, table):
 
 
 def _default_schema_for(obj) -> str:
+    if str(getattr(obj, "engine", "") or "").lower() == "json":
+        return ""
     if (obj.schema or "").strip():
         return obj.schema.strip()
     if obj.engine == "oracle":
@@ -9902,6 +10559,16 @@ def _table_preview_obj(obj, schema: str, table: str, limit: int, q=None, filters
     q: بحث عام (يحتوي) عبر كل الأعمدة. filters: [{col, op, val}] تُجمع بـ AND —
     op ∈ contains/equals/gt/lt. أسماء الأعمدة تُطابق ضد أعمدة الجدول الفعلية.
     """
+    if str(getattr(obj, "engine", "") or "").lower() == "json":
+        from . import json_source as _jsrc
+        try:
+            doc, _mode = _jsrc.load(str(getattr(obj, "host", "") or ""), BASE_DIR)
+            _t = (table or "").split(".")[-1]
+            _jcols, _jrows = _jsrc.preview(doc, _t, limit, q, filters)
+            _names = [c["name"] for c in _jcols]
+            return _names, [[_preview_cell(r.get(n)) for n in _names] for r in _jrows]
+        except ValueError as ve:
+            raise ValueError(str(ve))
     n = max(1, min(int(limit or 50), 200))
     cols_info = _table_columns_obj(obj, schema, table)
     names = [c["name"] for c in cols_info]
@@ -10134,6 +10801,14 @@ def api_connection_table_preview(request, conn_id, table):
                                  "total": len(rows), "limit": limit, "mirror": True,
                                  "local_connection_id": m.local_connection_id},
                                 json_dumps_params={"ensure_ascii": False})
+        if str(getattr(obj, "engine", "") or "").lower() == "json":
+            _t = (table or "").split(".")[-1]
+            if not _valid_table_ref(_t):
+                return JsonResponse({"error": "invalid table name"}, status=400)
+            cols, rows = _table_preview_obj(obj, "", _t, limit, q, filters)
+            return JsonResponse({"table": _t, "columns": cols, "rows": rows,
+                                 "total": len(rows), "limit": limit},
+                                json_dumps_params={"ensure_ascii": False})
         if "." in table:
             schema, tname = table.split(".", 1)
         else:
@@ -10182,6 +10857,12 @@ def api_connection_table_columns(request, conn_id, table):
             return JsonResponse({"table": f"{sch}.{m.table_name}", "columns": cols, "total": len(cols),
                                  "mirror": True, "local_connection_id": m.local_connection_id},
                                 json_dumps_params={"ensure_ascii": False})
+        if str(getattr(obj, "engine", "") or "").lower() == "json":
+            _t = (table or "").split(".")[-1]
+            if not _valid_table_ref(_t):
+                return JsonResponse({"error": "invalid table name"}, status=400)
+            cols = _table_columns_obj(obj, "", _t)
+            return JsonResponse({"table": _t, "columns": cols, "total": len(cols)})
         try:
             from . import custom_models as _cm
             _cs, _ct = (table.split(".", 1) if "." in table else ("", table))
@@ -10212,6 +10893,359 @@ def api_connection_table_columns(request, conn_id, table):
         return JsonResponse({"error": str(e)}, status=400)
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
+
+
+# ── JSON connection row writes ─────────────────────────────────────────
+def _json_conn_or_400(conn_id):
+    """(obj, error_response) — resolve a JSON connection or an error response."""
+    from .models import Connection
+    obj = _effective_or_row(conn_id)
+    if obj is None:
+        return None, JsonResponse({"error": "not found"}, status=404)
+    if str(getattr(obj, "engine", "") or "").lower() != "json":
+        return None, JsonResponse({"error": "الاتصال ليس من نوع JSON"}, status=400)
+    return obj, None
+
+
+@csrf_exempt
+def api_json_row_insert(request, conn_id, table):
+    """POST /api/connections/<id>/tables/<table>/rows/insert/ {row} — إضافة صف."""
+    if request.method != "POST":
+        return JsonResponse({"error": "POST required"}, status=405)
+    try:
+        obj, err = _json_conn_or_400(conn_id)
+        if err is not None:
+            return err
+        data = json.loads(request.body.decode() or "{}")
+        row = data.get("row")
+        if not isinstance(row, dict):
+            return JsonResponse({"error": "row {column: value} required"}, status=400)
+        from . import json_source as _jsrc
+        src = str(getattr(obj, "host", "") or "")
+        doc, mode = _jsrc.load(src, BASE_DIR)
+        stored = _jsrc.insert(doc, (table or "").split(".")[-1], row)
+        _jsrc.save(src, doc, BASE_DIR)
+        return JsonResponse({"ok": True, "row": stored, "mode": mode},
+                            json_dumps_params={"ensure_ascii": False})
+    except ValueError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+    except Exception as e:
+        return JsonResponse({"error": str(e)[:300]}, status=500)
+
+
+@csrf_exempt
+def api_json_row_update(request, conn_id, table):
+    """POST /api/connections/<id>/tables/<table>/rows/update/ {match, patch}."""
+    if request.method != "POST":
+        return JsonResponse({"error": "POST required"}, status=405)
+    try:
+        obj, err = _json_conn_or_400(conn_id)
+        if err is not None:
+            return err
+        data = json.loads(request.body.decode() or "{}")
+        match, patch = data.get("match"), data.get("patch")
+        if not isinstance(match, dict) or not isinstance(patch, dict):
+            return JsonResponse({"error": "match + patch {column: value} required"}, status=400)
+        from . import json_source as _jsrc
+        src = str(getattr(obj, "host", "") or "")
+        doc, mode = _jsrc.load(src, BASE_DIR)
+        n = _jsrc.update(doc, (table or "").split(".")[-1], match, patch)
+        if n:
+            _jsrc.save(src, doc, BASE_DIR)
+        return JsonResponse({"ok": True, "updated": n, "mode": mode},
+                            json_dumps_params={"ensure_ascii": False})
+    except ValueError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+    except Exception as e:
+        return JsonResponse({"error": str(e)[:300]}, status=500)
+
+
+@csrf_exempt
+def api_json_row_delete(request, conn_id, table):
+    """POST /api/connections/<id>/tables/<table>/rows/delete/ {match}."""
+    if request.method != "POST":
+        return JsonResponse({"error": "POST required"}, status=405)
+    try:
+        obj, err = _json_conn_or_400(conn_id)
+        if err is not None:
+            return err
+        data = json.loads(request.body.decode() or "{}")
+        match = data.get("match")
+        if not isinstance(match, dict):
+            return JsonResponse({"error": "match {column: value} required"}, status=400)
+        from . import json_source as _jsrc
+        src = str(getattr(obj, "host", "") or "")
+        doc, mode = _jsrc.load(src, BASE_DIR)
+        n = _jsrc.delete(doc, (table or "").split(".")[-1], match)
+        if n:
+            _jsrc.save(src, doc, BASE_DIR)
+        return JsonResponse({"ok": True, "deleted": n, "mode": mode},
+                            json_dumps_params={"ensure_ascii": False})
+    except ValueError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+    except Exception as e:
+        return JsonResponse({"error": str(e)[:300]}, status=500)
+
+
+# ── Formulas → Postgres functions ────────────────────────────────────
+def api_formulas_list(request):
+    """GET /api/formulas/ → migratable functions + skipped (context-bound)."""
+    try:
+        from rml_python import formulas_migrate as _fm
+        g = _fm.generate_ddl("public")
+        return JsonResponse({"functions": [
+            {"name": f["name"], "pg_name": f["pg_name"], "args": f["args"],
+             "returns": f["returns"], "note": f["note"]} for f in g["functions"]],
+            "skipped": g["skipped"], "total": g["total"],
+            "skipped_total": g["skipped_total"]},
+            json_dumps_params={"ensure_ascii": False})
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+def _formulas_resolve_conn(ref):
+    """Connection row by id or name (postgres only). Returns (obj, error)."""
+    from .models import Connection
+    obj = None
+    try:
+        if ref is not None and str(ref).strip().isdigit():
+            obj = _effective_or_row(int(str(ref).strip()))
+        else:
+            _row = Connection.objects.filter(name=str(ref or "").strip()).first()
+            if _row is not None:
+                obj = _effective_or_row(_row.id) or _row
+    except Exception:
+        obj = None
+    if obj is None:
+        return None, "unknown connection"
+    if str(getattr(obj, "engine", "") or "").lower() != "postgres":
+        return None, "formula functions migrate to PostgreSQL connections only (engine: %s)" % (
+            getattr(obj, "engine", "") or "?")
+    return obj, ""
+
+
+def _formulas_db_functions(obj, schema):
+    """(migrated, custom) entries from pg_proc. Never raises."""
+    from rml_python import formulas_migrate as _fm  # noqa (kept local like neighbors)
+    migrated, custom = [], []
+    try:
+        conn = _pg_conn_for(obj)
+    except Exception:
+        return migrated, custom
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT p.proname, pg_get_function_arguments(p.oid), "
+                    "pg_get_function_result(p.oid) FROM pg_proc p "
+                    "JOIN pg_namespace n ON n.oid = p.pronamespace "
+                    "WHERE n.nspname = %s AND p.prokind = 'f' ORDER BY 1",
+                    (schema,))
+        for _name, _args, _res in (cur.fetchall() or []):
+            try:
+                _n = str(_name or "")
+                if not _n:
+                    continue
+                _sig = "%s(%s)" % (_n, _args or "")
+                _arity = 0 if not (str(_args or "").strip()) else len(
+                    [a for a in str(_args).split(",") if a.strip()])
+                _tpl = "%s()" % _n.upper() if _arity == 0 else "%s(|%s)" % (
+                    _n.upper(), "".join(", " for _ in range(_arity - 1)))
+                _entry = {"fn": _n.upper(), "tpl": _tpl,
+                          "hint": "%s → %s" % (_sig, _res or "?"), "kind": "fn"}
+                if _n.lower().startswith("fn_"):
+                    migrated.append(_entry)
+                else:
+                    custom.append(_entry)
+            except Exception:
+                continue
+        cur.close()
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+    return migrated, custom
+
+
+def api_formulas_autocomplete(request):
+    """GET /api/formulas/autocomplete/?connection=&schema=&all= → every source.
+
+    defaults (formulas+XSQL) + natives (Postgres catalog) always;
+    migrated (fn_*) + custom from the given connection — or, with all=1,
+    from every local postgres connection (each guarded). Session gate,
+    read-only.
+    """
+    try:
+        from rml_python import formulas_migrate as _fm
+        out = {"defaults": _fm.autocomplete_defaults(), "natives": _fm.native_entries(),
+               "migrated": [], "custom": [], "connections_queried": 0}
+        ref = (request.GET.get("connection") or "").strip()
+        schema = (request.GET.get("schema") or "public").strip() or "public"
+        _targets = []
+        if str(request.GET.get("all") or "").strip().lower() in ("1", "true", "yes"):
+            try:
+                from .models import Connection
+                for _c in Connection.objects.filter(
+                        engine="postgres", is_local=True).order_by("name")[:20]:
+                    try:
+                        _sch = (getattr(_c, "schema", "") or "").strip() or schema
+                        _targets.append((_effective_or_row(_c.id) or _c, _sch))
+                    except Exception:
+                        continue
+            except Exception as e:
+                out["note"] = "connection discovery failed: %s" % str(e)[:120]
+        elif ref:
+            obj, err = _formulas_resolve_conn(ref)
+            if err or obj is None:
+                out["note"] = err or "unknown connection"
+                return JsonResponse(out, json_dumps_params={"ensure_ascii": False})
+            _targets.append((obj, schema))
+        for _obj, _sch in _targets:
+            try:
+                _m, _cu = _formulas_db_functions(_obj, _sch)
+            except Exception:
+                continue
+            _tag = " • %s/%s" % (getattr(_obj, "name", ""), _sch)
+            for _e in _m:
+                _e["hint"] = "%s%s" % (_e.get("hint", ""), _tag)
+            for _e in _cu:
+                _e["hint"] = "%s%s" % (_e.get("hint", ""), _tag)
+            out["migrated"].extend(_m)
+            out["custom"].extend(_cu)
+            out["connections_queried"] += 1
+        return JsonResponse(out, json_dumps_params={"ensure_ascii": False})
+    except Exception as e:
+        return JsonResponse({"error": str(e)[:300]}, status=500)
+
+
+@csrf_exempt
+def api_formulas_migrate(request):
+    """POST /api/formulas/migrate/ {connection, schema?, functions?, execute?}.
+
+    Always returns preview DDL. execute=true runs CREATE OR REPLACE on the
+    target connection and requires the master password.
+    """
+    if request.method != "POST":
+        return JsonResponse({"error": "POST required"}, status=405)
+    try:
+        data = json.loads(request.body.decode() or "{}")
+    except Exception:
+        return JsonResponse({"error": "invalid JSON"}, status=400)
+    if not isinstance(data, dict):
+        return JsonResponse({"error": "invalid JSON"}, status=400)
+    execute = bool(data.get("execute"))
+    if execute and not _ws_master_ok(request):
+        return JsonResponse({"error": "master password required", "master_required": True}, status=403)
+    try:
+        from rml_python import formulas_migrate as _fm
+        schema = str(data.get("schema") or "public").strip() or "public"
+        only = data.get("functions")
+        if only is not None and not isinstance(only, list):
+            return JsonResponse({"error": "functions must be a list"}, status=400)
+        _alias = data.get("alias", True)
+        _alias = False if _alias is False or str(_alias).strip().lower() in (
+            "0", "false", "no", "none") else True
+        try:
+            g = _fm.generate_ddl(schema, only, _alias)
+        except ValueError as ve:
+            return JsonResponse({"error": str(ve)}, status=400)
+        out = {"ddl": [f["sql"] for f in g["functions"]] + [a["sql"] for a in g["aliases"]],
+               "functions": [f["name"] for f in g["functions"]],
+               "aliases": [a["name"] for a in g["aliases"]],
+               "skipped": g["skipped"], "created": [], "aliases_created": [],
+               "aliases_skipped": [], "errors": [], "executed": False}
+        if not execute:
+            return JsonResponse(out, json_dumps_params={"ensure_ascii": False})
+        ref = data.get("connection") or data.get("connection_id") or data.get("conn")
+        obj, err = _formulas_resolve_conn(ref)
+        if err:
+            return JsonResponse({"error": err}, status=400)
+        try:
+            conn = _pg_conn_for(obj)
+        except Exception as e:
+            return JsonResponse({"error": "تعذر الاتصال: %s" % str(e)[:200]}, status=400)
+        try:
+            cur = conn.cursor()
+            for f in g["functions"]:
+                try:
+                    cur.execute(f["sql"])
+                    out["created"].append(f["name"])
+                except Exception as e:
+                    out["errors"].append({"name": f["name"], "error": str(e)[:200]})
+            for a in g["aliases"]:
+                try:
+                    cur.execute("SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
+                                "WHERE n.nspname = %s AND p.proname = %s LIMIT 1",
+                                (schema, a["name"]))
+                    if cur.fetchone() is not None:
+                        out["aliases_skipped"].append(
+                            {"name": a["name"], "reason": "function exists — kept as-is"})
+                        continue
+                    cur.execute(a["sql"])
+                    out["aliases_created"].append(a["name"])
+                except Exception as e:
+                    out["errors"].append({"name": a["name"], "error": str(e)[:200]})
+            try:
+                conn.commit()
+            except Exception:
+                pass
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        out["executed"] = True
+        out["connection"] = getattr(obj, "name", "")
+        return JsonResponse(out, json_dumps_params={"ensure_ascii": False})
+    except Exception as e:
+        return JsonResponse({"error": str(e)[:300]}, status=500)
+
+
+@csrf_exempt
+def api_formulas_ddl(request):
+    """POST /api/formulas/ddl/ {connection, ddl} — custom CREATE OR REPLACE
+    FUNCTION. Validated (single statement, no DDL/DML outside the body) and
+    master-gated. Returns {ok, schema, name}."""
+    if request.method != "POST":
+        return JsonResponse({"error": "POST required"}, status=405)
+    if not _ws_master_ok(request):
+        return JsonResponse({"error": "master password required", "master_required": True}, status=403)
+    try:
+        data = json.loads(request.body.decode() or "{}")
+    except Exception:
+        return JsonResponse({"error": "invalid JSON"}, status=400)
+    if not isinstance(data, dict):
+        return JsonResponse({"error": "invalid JSON"}, status=400)
+    try:
+        from rml_python import formulas_migrate as _fm
+        try:
+            meta = _fm.validate_ddl(str(data.get("ddl") or ""))
+        except ValueError as ve:
+            return JsonResponse({"error": str(ve)}, status=400)
+        ref = data.get("connection") or data.get("connection_id") or data.get("conn")
+        obj, err = _formulas_resolve_conn(ref)
+        if err:
+            return JsonResponse({"error": err}, status=400)
+        try:
+            conn = _pg_conn_for(obj)
+        except Exception as e:
+            return JsonResponse({"error": "تعذر الاتصال: %s" % str(e)[:200]}, status=400)
+        try:
+            cur = conn.cursor()
+            cur.execute(str(data.get("ddl") or ""))
+            try:
+                conn.commit()
+            except Exception:
+                pass
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        return JsonResponse({"ok": True, "schema": meta["schema"], "name": meta["name"],
+                             "connection": getattr(obj, "name", "")},
+                            json_dumps_params={"ensure_ascii": False})
+    except Exception as e:
+        return JsonResponse({"error": str(e)[:300]}, status=500)
 
 
 # ── Custom JSON table models (custom_models/<name>.json) ───────────────

@@ -629,6 +629,13 @@
                         </div>
                         <datalist id="wsTablesList"></datalist></div>
                     </div>
+                    <div class="rounded-xl border border-slate-200 p-3 space-y-2 bg-slate-50/50">
+                        <div class="text-[11px] font-bold text-slate-600">مطابقة أعمدة الدخول من قاعدة البيانات <span class="font-normal text-slate-400">— فارغ = كشف تلقائي</span></div>
+                        <div class="grid grid-cols-2 gap-3">
+                            <div><label class="block font-semibold text-slate-700 mb-1">عمود اسم المستخدم</label><select id="wsF_user_column" data-cur="${esc(w.users_user_column)}" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono" dir="ltr"><option value="">— تلقائي —</option></select><p id="wsF_user_col_hint" class="text-[10px] text-slate-400 mt-1"></p></div>
+                            <div><label class="block font-semibold text-slate-700 mb-1">عمود كلمة المرور</label><select id="wsF_password_column" data-cur="${esc(w.users_password_column)}" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono" dir="ltr"><option value="">— تلقائي —</option></select><p id="wsF_password_col_hint" class="text-[10px] text-slate-400 mt-1"></p></div>
+                        </div>
+                    </div>
                     <div class="rounded-xl border border-slate-200 p-3 space-y-3 bg-slate-50/50">
                         <div class="text-[11px] font-bold text-slate-600">بيانات الاتصال المحلي الأساسي</div>
                         <div class="grid grid-cols-2 gap-3">
@@ -651,9 +658,40 @@
                 wsSecGo(window._wsSec || 'general');
                 wsBrandPreview();
                 wsTablesFetch();
-                try{ const _ut = document.getElementById('wsF_users_table'); if(_ut && !(_ut.dataset.suBound)){ _ut.dataset.suBound = '1'; _ut.addEventListener('change', ()=>wsSuRefresh()); } }catch(e){}
+                wsColsFetch();
+                try{ const _ut = document.getElementById('wsF_users_table'); if(_ut && !(_ut.dataset.suBound)){ _ut.dataset.suBound = '1'; _ut.addEventListener('change', ()=>{ wsColsFetch(); wsSuRefresh(); }); } }catch(e){}
                 wsSuRefresh();
             }catch(e){ box.innerHTML = `<p class="text-rose-500 text-center py-6">${String((e && e.message) || e)}</p>`; }
+        }
+        async function wsColsFetch(){
+            const escC = (v)=>String(v ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+            const uSel = document.getElementById('wsF_user_column'), pSel = document.getElementById('wsF_password_column');
+            const uHint = document.getElementById('wsF_user_col_hint'), pHint = document.getElementById('wsF_password_col_hint');
+            if(!uSel || !pSel || !window._wsEditId) return;
+            const tEl = document.getElementById('wsF_users_table');
+            const t = tEl ? String(tEl.value || '').trim() : '';
+            const keepU = uSel.value || uSel.dataset.cur || '', keepP = pSel.value || pSel.dataset.cur || '';
+            const fill = (sel, cols, keep, known)=>{
+                const cur = String(keep || '').toLowerCase();
+                let auto = '';
+                for(const k of known){ if(cols.some(c=>String(c.name || '').toLowerCase() === k)){ auto = k; break; } }
+                sel.innerHTML = '<option value="">— تلقائي —</option>' + cols.map(c=>`<option value="${escC(c.name)}">${escC(c.name)} <span class="text-slate-400">${escC(c.data_type || '')}</span></option>`).join('');
+                sel.value = cols.some(c=>String(c.name || '').toLowerCase() === cur) ? cols.find(c=>String(c.name || '').toLowerCase() === cur).name : '';
+                return auto;
+            };
+            if(!t){ uSel.innerHTML = '<option value="">— تلقائي —</option>'; pSel.innerHTML = '<option value="">— تلقائي —</option>'; if(uHint) uHint.textContent = ''; if(pHint) pHint.textContent = ''; return; }
+            try{
+                const res = await fetch('/api/workspaces/' + encodeURIComponent(window._wsEditId) + '/users-columns/?table=' + encodeURIComponent(t));
+                const d = await res.json();
+                if(!res.ok) throw new Error(d.error || '');
+                const cols = Array.isArray(d.columns) ? d.columns : [];
+                const autoU = fill(uSel, cols, keepU || d.user_column, ['username','user_name','login','login_name','email','mail']);
+                const autoP = fill(pSel, cols, keepP || d.password_column, ['password','passwd','pwd','password_hash','pass_hash','pass','user_password','pwd_hash']);
+                if(uHint) uHint.textContent = uSel.value ? ('مثبت: ' + uSel.value) : (autoU ? ('تلقائي: ' + autoU) : 'لا عمود مطابق — حدد يدوياً');
+                if(pHint) pHint.textContent = pSel.value ? ('مثبت: ' + pSel.value) : (autoP ? ('تلقائي: ' + autoP) : 'لا عمود مطابق — حدد يدوياً');
+            }catch(e){
+                if(uHint) uHint.textContent = String((e && e.message) || e).slice(0, 120);
+            }
         }
         async function wsTablesFetch(){
             const escT = (v)=>String(v ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
@@ -680,9 +718,20 @@
                 const d = await res.json();
                 if(!res.ok) throw new Error(d.error || '');
                 if((d.count || 0) > 0){
-                    box.innerHTML = `<p class="text-[11px] text-slate-500">المستخدمون المسجلون: <b>${d.count}</b> <span class="font-mono" dir="ltr">${String(d.table || '').replace(/</g,'&lt;')}</span></p>`;
+                    box.innerHTML = `<p class="text-[11px] text-slate-500">المستخدمون المسجلون: <b>${d.count}</b> <span class="font-mono" dir="ltr">${String(d.table || '').replace(/</g,'&lt;')}</span></p>
+                    <div class="grid grid-cols-2 gap-2">
+                        <div><input id="wsDg_user" value="admin" placeholder="اسم المستخدم" autocomplete="off" class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 font-mono" dir="ltr"></div>
+                        <div><input id="wsDg_pw" type="password" placeholder="كلمة جديدة (للتعيين فقط)" autocomplete="new-password" class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 font-mono" dir="ltr"></div>
+                    </div>
+                    <div class="flex gap-2">
+                        <button onclick="wsMasterEnsure(wsLoginDiag)" class="px-3 py-1.5 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs font-bold"><i class="fa-solid fa-stethoscope"></i> فحص الدخول</button>
+                        <button onclick="wsMasterEnsure(wsLoginReset)" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold"><i class="fa-solid fa-key"></i> تعيين كلمة</button>
+                    </div>
+                    <p id="wsDgMsg" class="text-[11px] text-slate-600 font-bold whitespace-pre-line"></p>`;
                     return;
                 }
+                const _escA = (v)=>String(v ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+                const _req = Array.isArray(d.required) ? d.required.filter(c=>c && c.name) : [];
                 box.innerHTML = `<p class="text-[11px] text-slate-500">الجدول <span class="font-mono" dir="ltr">${String(d.table || '').replace(/</g,'&lt;')}</span> فارغ — أنشئ المشرف العام الأول:</p>
                 <div class="grid grid-cols-2 gap-2">
                     <div><input id="wsSu_user" placeholder="اسم المستخدم *" autocomplete="off" class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 font-mono" dir="ltr"></div>
@@ -692,6 +741,7 @@
                     <div><input id="wsSu_pw1" type="password" placeholder="كلمة المرور (6+)" autocomplete="new-password" class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 font-mono" dir="ltr"></div>
                     <div><input id="wsSu_pw2" type="password" placeholder="تأكيد كلمة المرور" autocomplete="new-password" class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 font-mono" dir="ltr"></div>
                 </div>
+                ${_req.map(c=>`<div><label class="block font-semibold text-slate-700 mb-1">${_escA(c.name)} *</label><input data-ws-su-extra="${_escA(c.name)}" placeholder="${_escA(c.name)}" class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 font-mono" dir="ltr"></div>`).join('')}
                 <p id="wsSuMsg" class="text-[11px] text-rose-600 font-bold"></p>
                 <button onclick="wsSuCreate()" class="px-4 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold"><i class="fa-solid fa-crown"></i> إنشاء مشرف عام</button>`;
             }catch(e){ box.innerHTML = `<p class="text-rose-500 text-[11px]">${String((e && e.message) || e).slice(0, 200)}</p>`; }
@@ -705,13 +755,60 @@
             if(pw1.length < 6){ if(msg) msg.textContent = 'كلمة المرور 6 أحرف فأكثر'; return; }
             if(pw1 !== pw2){ if(msg) msg.textContent = 'تأكيد كلمة المرور غير مطابق'; return; }
             const tEl = document.getElementById('wsF_users_table');
+            const extra = {};
             try{
-                const res = await fetch('/api/workspaces/' + encodeURIComponent(window._wsEditId) + '/superuser/', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({username, password: pw1, full_name: String(v('wsSu_name') || '').trim(), table: tEl ? String(tEl.value || '').trim() : ''})});
+                document.querySelectorAll('#wsSuBox [data-ws-su-extra]').forEach(el=>{
+                    const k = el.getAttribute('data-ws-su-extra') || '';
+                    if(k) extra[k] = el.value;
+                });
+            }catch(e){}
+            try{
+                const res = await fetch('/api/workspaces/' + encodeURIComponent(window._wsEditId) + '/superuser/', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({username, password: pw1, full_name: String(v('wsSu_name') || '').trim(), table: tEl ? String(tEl.value || '').trim() : '', extra})});
                 const d = await res.json().catch(()=>({}));
                 if(!res.ok) throw new Error(d.error || 'فشل الإنشاء');
                 try{ notify('أُنشئ المشرف العام ✓', 'success'); }catch(e){}
                 wsSuRefresh();
             }catch(e){ if(msg) msg.textContent = String((e && e.message) || e).slice(0, 200); }
+        }
+        async function wsLoginDiag(){
+            const msg = document.getElementById('wsDgMsg');
+            const uEl = document.getElementById('wsDg_user'), tEl = document.getElementById('wsF_users_table');
+            const u = uEl ? String(uEl.value || '').trim() : '';
+            if(!u){ if(msg) msg.textContent = 'اسم المستخدم مطلوب'; return; }
+            if(msg) msg.textContent = 'جارٍ الفحص...';
+            try{
+                const res = await fetch('/api/workspaces/' + encodeURIComponent(window._wsEditId) + '/login-diag/', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({username: u, table: tEl ? String(tEl.value || '').trim() : ''})});
+                const d = await res.json().catch(()=>({}));
+                if(!res.ok) throw new Error(d.error || 'فشل الفحص');
+                const L = [];
+                L.push('الجدول: ' + (d.table || '—'));
+                L.push('عمود المستخدم: ' + ((d.user_column||{}).name || '—') + (((d.user_column||{}).pinned) ? ' (مثبت)' : ' (تلقائي)'));
+                L.push('عمود كلمة المرور: ' + ((d.password_column||{}).name || '—') + (((d.password_column||{}).pinned) ? ' (مثبت)' : ' (تلقائي)'));
+                if(d.found === false){ L.push('النتيجة: المستخدم غير موجود'); }
+                else{
+                    L.push('الصف: موجود' + (d.duplicates > 1 ? (' — مكرر ' + d.duplicates + ' مرات!') : ''));
+                    L.push('نشط: ' + (d.is_active === false ? 'لا (موقوف)' : 'نعم'));
+                    L.push('صيغة المخزن: ' + (d.hash_format || '؟') + ' (الطول ' + (d.hash_length ?? '?') + ')');
+                    L.push('فحص الكود الذاتي: ' + (d.code_selftest ? 'سليم' : 'معطوب!'));
+                    L.push('التشخيص: ' + (d.hint || d.verdict || ''));
+                }
+                if(msg){ msg.textContent = L.join('\n'); msg.className = 'text-[11px] text-slate-700 font-bold whitespace-pre-line'; }
+            }catch(e){ if(msg){ msg.textContent = String((e && e.message) || e).slice(0, 300); msg.className = 'text-[11px] text-rose-600 font-bold whitespace-pre-line'; } }
+        }
+        async function wsLoginReset(){
+            const msg = document.getElementById('wsDgMsg');
+            const uEl = document.getElementById('wsDg_user'), pEl = document.getElementById('wsDg_pw'), tEl = document.getElementById('wsF_users_table');
+            const u = uEl ? String(uEl.value || '').trim() : '', pw = pEl ? String(pEl.value || '') : '';
+            if(!u){ if(msg) msg.textContent = 'اسم المستخدم مطلوب'; return; }
+            if(pw.length < 6){ if(msg) msg.textContent = 'الكلمة الجديدة 6 أحرف فأكثر'; return; }
+            if(msg) msg.textContent = 'جارٍ التعيين...';
+            try{
+                const res = await fetch('/api/workspaces/' + encodeURIComponent(window._wsEditId) + '/login-reset/', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({username: u, new_password: pw, table: tEl ? String(tEl.value || '').trim() : ''})});
+                const d = await res.json().catch(()=>({}));
+                if(!res.ok) throw new Error(d.error || 'فشل التعيين');
+                if(msg){ msg.textContent = 'تم تعيين كلمة ' + (d.username || u) + ' — ادخل بها الآن'; msg.className = 'text-[11px] text-emerald-600 font-bold whitespace-pre-line'; }
+                if(pEl) pEl.value = '';
+            }catch(e){ if(msg){ msg.textContent = String((e && e.message) || e).slice(0, 300); msg.className = 'text-[11px] text-rose-600 font-bold whitespace-pre-line'; } }
         }
         async function wsSettingsSave(){
             wsMasterEnsure(wsSettingsDo);
@@ -727,7 +824,9 @@
                 logo: v('logo'), country: v('country'), currency: v('currency'),
                 brand_colors: {primary: v('primary'), accent: v('accent')},
                 primary_connection: v('primary_connection'),
-                users_table: v('users_table'), status: v('status'), connection: conn};
+                users_table: v('users_table'),
+                users_user_column: v('user_column'), users_password_column: v('password_column'),
+                status: v('status'), connection: conn};
             if(!String(body.name).trim()){ if(msg) msg.textContent = 'اسم المساحة مطلوب'; return; }
             try{
                 const res = await fetch('/api/workspaces/' + encodeURIComponent(id) + '/save/', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});

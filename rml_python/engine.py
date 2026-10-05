@@ -957,10 +957,38 @@ def _build_where(filters: List[Dict[str, Any]], start_idx: int = 1, columns: Opt
     where = " WHERE " + f" {_join} ".join(clauses) if clauses else ""
     return where, params
 
+def _select_ordinal(matched, columns) -> int:
+    """1-based position of a matched column in the SELECT list (0 = unknown).
+
+    Reports often carry the same column twice (main + detail merge); the
+    first occurrence wins so ORDER BY stays deterministic.
+    """
+    try:
+        if matched is not None and columns:
+            return list(columns).index(matched) + 1
+    except Exception:
+        pass
+    return 0
+
+
+def _dedupe_select_items(items) -> list:
+    """Drop exact-duplicate SELECT items, keep first occurrence order."""
+    seen, out = set(), []
+    for it in (items or []):
+        if it not in seen:
+            seen.add(it)
+            out.append(it)
+    return out
+
+
 def _build_order_by(sort, columns=None) -> str:
     """Build ORDER BY from sort payload: {column, direction} or list thereof.
-    Orders by the SELECT-list alias (always valid in Oracle, even for
-    computed/aggregated expressions like DISTINCT/SUM..OVER)."""
+
+    Orders by SELECT-list ordinal (1-based position). Ordinals are immune
+    to duplicate aliases — e.g. MSSQL 209 "ambiguous column" when the same
+    alias (تاريخ الحوالة ×2) appears twice — and valid in PG/Oracle/MSSQL,
+    including computed/aggregated expressions. Falls back to the quoted
+    alias when the column isn't in the SELECT list (backward compat)."""
     if not sort:
         return ""
     if isinstance(sort, dict):
@@ -973,8 +1001,12 @@ def _build_order_by(sort, columns=None) -> str:
             direction = "ASC"
         if col:
             matched = _find_column_for_field(col, columns)
-            order_key = matched.alias if matched is not None and getattr(matched, "alias", None) else col
-            parts.append(f"{_q(order_key)} {direction}")
+            pos = _select_ordinal(matched, columns)
+            if pos > 0:
+                parts.append(f"{pos} {direction}")
+            else:
+                order_key = matched.alias if matched is not None and getattr(matched, "alias", None) else col
+                parts.append(f"{_q(order_key)} {direction}")
     return " ORDER BY " + ", ".join(parts) if parts else ""
 
 def _apply_column_where(expr_sql: str, where_clause: Optional[str]) -> str:
@@ -1186,6 +1218,7 @@ def _build_select(columns: List[RMLColumn], fields: Optional[List] = None,
                        default_tables=default_tables)
         base_sql = _apply_column_where(base_sql, wc)
         parts.append(f"{base_sql} AS {alias_q}")
+    parts = _dedupe_select_items(parts)
     return ", ".join(parts) if parts else "*"
 
 def _is_mssql_db(db) -> bool:
@@ -1861,6 +1894,148 @@ class RMLReportEngine:
                 by_alias[a] = c
         return by_name, by_alias
 
+    # ── col_refname value references (@refname = final row value) ──────
+    # Unlike @Alias/[...] (which splice the referenced column's EXPRESSION
+    # into the caller), @refname resolves to the referenced column's final
+    # per-row VALUE via nested derived tables. Columns without col_refname
+    # keep the old merging behavior untouched.
+    _REFNAME_TOKEN_RE = re.compile(r"@([A-Za-z_][A-Za-z0-9_]*)")
+    _REFNAME_SEG_RE = re.compile(r"('(?:[^']|'')*')")
+
+    @staticmethod
+    def _refname_of(col) -> str:
+        try:
+            v = str(getattr(col, "col_refname", "") or "").strip().lower()
+        except Exception:
+            return ""
+        return v if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", v or "") else ""
+
+    def _refname_map(self, columns) -> Dict[str, Any]:
+        """{refname_lower: column} — first wins on duplicates."""
+        out: Dict[str, Any] = {}
+        for c in (columns or []):
+            r = self._refname_of(c)
+            if r and r not in out:
+                out[r] = c
+        return out
+
+    def _value_tokens(self, text, refmap) -> set:
+        """@refname tokens in text that name a known col_refname (literals skipped)."""
+        found = set()
+        if not text or "@" not in str(text) or not refmap:
+            return found
+        for seg in re.split(self._REFNAME_SEG_RE, str(text))[0::2]:
+            for m in self._REFNAME_TOKEN_RE.finditer(seg):
+                if str(m.group(1)).lower() in refmap:
+                    found.add(str(m.group(1)).lower())
+        return found
+
+    def _rewrite_value_expr(self, text, alias_of) -> str:
+        """Replace @refname with the referenced column's quoted SELECT alias."""
+        segs = re.split(self._REFNAME_SEG_RE, str(text or ""))
+        for i in range(0, len(segs), 2):
+            def _rep(m):
+                key = str(m.group(1)).lower()
+                return alias_of.get(key, m.group(0))
+            segs[i] = re.sub(r"(?<![\w$#@.\"'])@([A-Za-z_][A-Za-z0-9_]*)(?![\w])",
+                             _rep, segs[i])
+        return "".join(segs)
+
+    def _plan_value_refs(self, columns, extra_aliases=None):
+        """Topo plan for @refname dependents. None when no value-refs exist.
+
+        Returns {base, levels, resolved, alias_of} where levels are
+        dependency-ordered column groups and resolved maps id(col) →
+        rewritten SQL (expr + where_clause applied). Raises ValueError
+        (Arabic) on self-reference, cycles, or non-SQL (python-eval)
+        referenced columns.
+        """
+        cols = list(columns or [])
+        refmap = self._refname_map(cols)
+        if not refmap:
+            return None
+        _ids = {id(c) for c in cols}
+        alias_of = {}
+        for r, c in refmap.items():
+            try:
+                alias_of[r] = _q(getattr(c, "alias", None) or getattr(c, "name", None) or r)
+            except Exception:
+                alias_of[r] = '"%s"' % r
+        for a in (extra_aliases or []):
+            try:
+                alias_of.setdefault(str(a or "").strip().lower(), _q(a))
+            except Exception:
+                pass
+        deps: Dict[int, set] = {}
+        uses = False
+        for c in cols:
+            toks = (self._value_tokens(getattr(c, "expr", "") or "", refmap)
+                    | self._value_tokens(getattr(c, "where_clause", "") or "", refmap))
+            mine = self._refname_of(c)
+            own = set()
+            for t in toks:
+                tgt = refmap[t]
+                if id(tgt) == id(c) or t == mine:
+                    raise ValueError("مرجع ذاتي للقيمة: @%s يشير لنفس العمود" % t)
+                own.add(t)
+            if own:
+                uses = True
+            deps[id(c)] = own
+        if not uses:
+            return None
+        # referenced columns must be SQL-materializable (no Python eval)
+        for r, tgt in refmap.items():
+            try:
+                _traw = "%s %s" % (getattr(tgt, "expr", "") or "", getattr(tgt, "where_clause", "") or "")
+            except Exception:
+                _traw = ""
+            if "__py_" in str(_traw) or re.search(
+                    r"(?i)\b(XLOOKUP|VLOOKUP|FILTER|GET|SUMIF|SUMIFS|COUNTIF|COUNTBLANK|COUNTBY|SUMBY|SERIAL|ROWNUM|ROW)\s*\(", str(_traw)):
+                using = sorted({getattr(c, "alias", None) or getattr(c, "name", "")
+                                for c in cols if r in deps.get(id(c), set())})
+                raise ValueError("المرجع @%s يحتاج تقييم Python (جدول %s) — القيمة المرجعية تعمل على أعمدة SQL فقط"
+                                 % (r, ("، ".join([u for u in using if u]) or "?")))
+        # Kahn levels (dependents after their dependencies)
+        _cid = {id(c): c for c in cols}
+        _indeg = {i: set(v) for i, v in deps.items()}
+        levels, _done = [], set()
+        while True:
+            # nodes whose refname-deps are all done, in report order
+            cand = [i for i in _indeg if i not in _done and all(
+                (id(refmap[d]) in _done) for d in _indeg[i])]
+            try:
+                cand.sort(key=lambda i: cols.index(_cid[i]))
+            except Exception:
+                pass
+            if not cand:
+                break
+            # only dependents form levels; base columns stay level-less
+            _lvl = [i for i in cand if _indeg[i]]
+            _done.update(cand)
+            if _lvl:
+                levels.append([_cid[i] for i in _lvl])
+        if any(i not in _done for i in _indeg):
+            _cyc = sorted({r for i, ds in _indeg.items() if i not in _done for r in ds})
+            raise ValueError("مرجع دائري بين قيم الأعمدة: %s" % (" ← ".join(_cyc) or "?"))
+        base = [c for c in cols if not deps.get(id(c))]
+        resolved = {}
+        for lvl in levels:
+            for c in lvl:
+                try:
+                    _raw = self._rewrite_value_expr(
+                        getattr(c, "expr", None) or getattr(c, "name", "") or "", alias_of)
+                    _wc = getattr(c, "where_clause", None) or ""
+                    if _wc and str(_wc).strip():
+                        _wc = self._rewrite_value_expr(str(_wc), alias_of)
+                        _raw = _apply_column_where(_raw, _wc)
+                    resolved[id(c)] = _raw
+                except ValueError:
+                    raise
+                except Exception as e:
+                    raise ValueError("تعذر حل مرجع القيمة في '%s': %s" % (
+                        getattr(c, "alias", None) or getattr(c, "name", ""), str(e)[:120]))
+        return {"base": base, "levels": levels, "resolved": resolved, "alias_of": alias_of}
+
     def _inline_col_ref(self, col, stack, by_name, by_alias):
         """Inline [column] refs in one column expr (recursive, cycle-loud)."""
         try:
@@ -1903,6 +2078,16 @@ class RMLReportEngine:
         alt = "|".join(re.escape(k) for k in keys)
 
         def _tgt(key):
+            # @refname (value reference) is owned by the derived-table pass —
+            # never inline-merge its expression. Everything else as before.
+            try:
+                _kl = str(key or "").lower()
+                for _d in (by_name, by_alias):
+                    for _cc in list((_d or {}).values()):
+                        if self._refname_of(_cc) == _kl:
+                            return None
+            except Exception:
+                pass
             return by_name.get(key) or by_alias.get(key)
 
         def _expand(tgt):
@@ -1947,6 +2132,29 @@ class RMLReportEngine:
             return text
         by_name, by_alias = self._at_column_maps()
         return self._sub_at_refs(str(text), by_name, by_alias, ())
+
+    def _wrap_value_levels(self, level0_select, from_q, where_clause, group_clause,
+                             order_clause, paginate_clause, report_aliases, levels, resolved):
+        """Nest derived tables for @refname dependents; outer keeps report order.
+
+        level0_select already holds base (+extra) items. Each level adds its
+        rewritten items over the previous level (SELECT prev.*, ...). The
+        final outer projects the report aliases in order, then ORDER
+        (ordinals — still valid) + pagination apply once, outermost.
+        """
+        inner = "%s FROM %s%s%s" % (level0_select, from_q, where_clause, group_clause)
+        for _li, _lvl in enumerate(levels):
+            _items = []
+            for _c in _lvl:
+                try:
+                    _items.append("%s AS %s" % (resolved[id(_c)], _q(
+                        getattr(_c, "alias", None) or getattr(_c, "name", None) or "")))
+                except Exception as e:
+                    raise ValueError("تعذر بناء '%s': %s" % (
+                        getattr(_c, "alias", None) or getattr(_c, "name", ""), str(e)[:120]))
+            inner = "SELECT _t%d.*, %s FROM (%s) _t%d" % (_li, ", ".join(_items), inner, _li)
+        outer_cols = ", ".join(_q(a) for a in report_aliases)
+        return "SELECT %s FROM (%s) _tv%s%s" % (outer_cols, inner, order_clause, paginate_clause)
 
     def _inline_column_refs(self, columns, scope_extra=None):
         """Return column copies with [column]/@Alias refs inlined (fields untouched)."""
@@ -6890,6 +7098,96 @@ class RMLReportEngine:
             return where_clause + f" AND ({gw})"
         return f" WHERE ({gw})"
 
+    def _reject_dependent_scope(self, filters, group_by, plan, valplan, columns):
+        """WHERE/GROUP BY run at the base level — dependent aliases (@refname
+        columns) don't exist there yet. Fail loudly with guidance instead of
+        a cryptic DB error. Sorting is fine (applies outermost)."""
+        try:
+            _dep = set()
+            for _lvl in (valplan or {}).get("levels") or []:
+                for _c in _lvl:
+                    for _k in (getattr(_c, "alias", None), getattr(_c, "name", None)):
+                        if _k and str(_k).strip():
+                            _dep.add(str(_k).strip().lower())
+            if not _dep:
+                return
+            _hits = set()
+
+            def _scan_fields(items):
+                for _f in (items or []):
+                    if isinstance(_f, dict):
+                        for _k in ("field", "column", "name", "expr"):
+                            _v = _f.get(_k)
+                            if isinstance(_v, str) and _v.strip().lower() in _dep:
+                                _hits.add(_v.strip())
+                        _scan_fields(_f.get("any") or [])
+                        _scan_fields(_f.get("all") or [])
+
+            _scan_fields(filters)
+            if isinstance(group_by, str) and group_by.strip().lower() in _dep:
+                _hits.add(group_by.strip())
+            _gw_texts = []
+            try:
+                _gw_texts.append(plan.get("gw_base") or "")
+            except Exception:
+                pass
+            try:
+                _gw_texts.append(self.compiler.general_where()
+                                 if hasattr(self.compiler, "general_where") else "")
+            except Exception:
+                pass
+            try:
+                _rm = self._refname_map(columns)
+                for _t in _gw_texts:
+                    for _tok in self._value_tokens(_t, _rm):
+                        _hits.add("@" + _tok)
+            except Exception:
+                pass
+            if _hits:
+                raise ValueError("الترشيح/التجميع على (%s) غير مدعوم هنا — هذه أعمدة محسوبة بقيم (@refname) تُبنى فوق النتائج؛ رشّح على الأعمدة الأساسية أو من فلاتر المشغل بعد الجلب"
+                                 % "، ".join(sorted(_hits)))
+        except ValueError:
+            raise
+        except Exception:
+            pass
+
+    def _compile_value_wrapped(self, plan, columns, table_map, where_clause, group_clause,
+                               order_clause, paginate_clause, params, page_size, valplan,
+                               extra_selects=None):
+        """Assemble the nested derived tables for @refname dependents."""
+        from_q = plan["from_q"]
+        base = valplan["base"]
+        select_clause = _build_select(base, getattr(self, "fields", []), table_map=table_map,
+                                        dialect=("pg" if _is_pg_db(plan.get("base_db"))
+                                                 else ("mssql" if _is_mssql_db(plan.get("base_db")) else "oracle")),
+                                        conn_map=self._conn_map(),
+                                        rules=getattr(self, "rules", []),
+                                        alias_by_table=self._plan_alias_map(plan),
+                                        default_tables=self._rx_defaults())
+        for _ex, _al in (extra_selects or []):
+            select_clause += f", {_ex} AS {_q(_al)}"
+        for _ex, _al in (plan.get("extra") or []):
+            select_clause += f", {_ex} AS {_q(_al)}"
+        _sel_kw = "SELECT DISTINCT" if self._report_distinct() else "SELECT"
+        _don_ord0 = ""
+        _don = []
+        if _is_pg_db(plan.get("base_db")):
+            try:
+                _abt = self._plan_alias_map(plan)
+                _don = self._distinct_on_keys(base, getattr(self, "fields", []),
+                                              table_map, self._conn_map(), _abt)
+            except Exception:
+                _don = []
+        if _don:
+            _sel_kw = f"DISTINCT ON ({', '.join(_don)})"
+            _don_ord0 = " ORDER BY " + ", ".join(f"{k} ASC" for k in _don)
+        _report_aliases = [(getattr(c, "alias", None) or getattr(c, "name", None) or "")
+                           for c in columns]
+        return self._wrap_value_levels(
+            "%s %s" % (_sel_kw, select_clause), from_q, where_clause,
+            "%s%s" % (group_clause, _don_ord0), order_clause, paginate_clause,
+            _report_aliases, valplan["levels"], valplan["resolved"]), params
+
     def _compile_sql2(self, plan, filters, sort, page, page_size, group_by, extra_selects=None):
         """Build SELECT from a routing plan (no re-planning)."""
         from_q = plan["from_q"]
@@ -6926,6 +7224,16 @@ class RMLReportEngine:
             # DISTINCT ON never applies to mssql so ORDER BY 1 is always safe.
             order_clause = " ORDER BY 1"
         paginate_clause, params = self._paginate_clause(page, page_size, dict(where_params), plan["base_db"])
+        # @refname value references → nested derived tables (final VALUES,
+        # not merged expressions). No dependents: today's path untouched.
+        _valplan = self._plan_value_refs(
+            columns, extra_aliases=[_al for _ex, _al in ((extra_selects or []) + list(plan.get("extra") or []))])
+        if _valplan is not None:
+            self._reject_dependent_scope(filters, group_by, plan, _valplan, columns)
+            return self._compile_value_wrapped(
+                plan, columns, table_map, where_clause, group_clause,
+                order_clause, paginate_clause, params, page_size, _valplan,
+                extra_selects=extra_selects)
         _sel_kw = "SELECT DISTINCT" if self._report_distinct() else "SELECT"
         _don = []
         if _is_pg_db(plan.get("base_db")):

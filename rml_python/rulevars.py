@@ -24,7 +24,7 @@ RULE_VAR_RE = re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)\
 # بتوسيع التوكن (فروعه النصية مقتبسة أصلاً). أي نص مركب ('a $r.v$') يُترك حرفياً.
 QUOTED_TOKEN_RE = re.compile(r"^'\s*(\$[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*\$)\s*'$")
 
-VAR_TYPES = ("text", "number", "date", "time", "expression", "boolean", "choice")
+VAR_TYPES = ("text", "number", "date", "time", "expression", "custom_function", "boolean", "choice")
 
 # حد ناعم: فوقه نحذر من تضخم SQL (كل سياسة = فرع WHEN واحد)
 POLICY_COUNT_WARN = 100
@@ -45,9 +45,25 @@ def _value_sql(var_type: str, value: Any, *, rule_name: str = "", var_name: str 
     val = "" if value is None else str(value).strip()
     ctx = f" (القاعدة {rule_name} — المتغير {var_name})" if rule_name else ""
     if var_type == "expression":
+        # SQL functions / =formula / XSQL: — translated + validated (rulevars
+        # used to strip = and inject raw). Errors carry rule context.
         if not val:
             return "NULL"
-        return val[1:] if val.startswith("=") else val  # بادئة = للتمييز تُجرد قبل الحقن
+        try:
+            from .formulas_migrate import expr_to_sql as _e2s
+            return _e2s(val)
+        except ValueError as ve:
+            raise ValueError(f"{ve}{ctx}")
+    if var_type == "custom_function":
+        # دالة مخصصة: [schema.]name(args) — validated call, injected as-is
+        # (migrate/create it first via /api/formulas/).
+        if not val:
+            return "NULL"
+        try:
+            from .formulas_migrate import validate_call as _vc
+            return _vc(val)
+        except ValueError as ve:
+            raise ValueError(f"{ve}{ctx}")
     if var_type == "number":
         if val == "":
             return "NULL"

@@ -5,6 +5,7 @@ Extracts <rpt_metadata> and <column> definitions with robust error handling.
 """
 from __future__ import annotations
 import pathlib
+import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any
@@ -135,6 +136,9 @@ class RMLColumn:
     ref_scope_table: Optional[str] = None  # scope table the key belongs to
     connection_id: Optional[str] = None  # link column to specific connection (compat)
     where_clause: Optional[str] = None  # per-column filter (where_clause / where)
+    col_refname: Optional[str] = None  # value-ref name: @refname in other columns
+    # resolves to THIS column's final row value (derived-table wrap), NOT to
+    # its expression merged in (@Alias/[...] keep the old merging behavior)
     icon: Optional[str] = None  # UI icon
     is_amount: bool = False  # amount column (is_amount) -> formatted with thousands separators
     currency_field: Optional[str] = None  # optional currency source column (currency_field)
@@ -147,6 +151,8 @@ class RMLColumn:
     wrap: bool = False  # text: wrap lines (else nowrap ellipsis)
     decimals: Optional[int] = None  # number: decimal places
     date_format: Optional[str] = None  # date/datetime/time: display pattern
+    visible: bool = True  # designer palette + player: shown by default, toggleable
+    width: Optional[int] = None  # display width in px (player honors, user-adjustable)
 
     def to_dict(self) -> Dict[str, Any]:
         base = {
@@ -163,6 +169,10 @@ class RMLColumn:
             "connectionId": self.connection_id,
             "where_clause": self.where_clause,
             "whereClause": self.where_clause,
+            "col_refname": self.col_refname,
+            "colRefname": self.col_refname,
+            "visible": self.visible,
+            "width": self.width,
             "icon": self.icon,
             "is_amount": self.is_amount,
             "isAmount": self.is_amount,
@@ -261,7 +271,7 @@ class RMLChart:
 @dataclass
 class RMLRuleVariable:
     """متغير قاعدة أعمال: <variable name display type options>
-    type ∈ {text, number, date, time, expression, boolean, choice}."""
+    type ∈ {text, number, date, time, expression, custom_function, boolean, choice}."""
     name: str
     display: str = ""
     type: str = "text"
@@ -578,6 +588,21 @@ class RMLReportCompiler:
             pass
         if status_map and not is_status:
             is_status = True
+        # Value-ref name: @refname in other columns resolves to this
+        # column's final row value (NULL when absent/invalid).
+        _refname = str(get("col_refname", "colRefname", "refname", "ref_name", default="") or "").strip()
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", _refname or ""):
+            _refname = ""
+        col_refname = _refname or None
+        _vis = str(get("visible", default="") or "").strip().lower()
+        visible = False if _vis in ("0", "false", "f", "no", "n", "off", "hidden") else True
+        width = None
+        try:
+            _w = str(get("width", default="") or "").strip()
+            if _w:
+                width = max(40, min(int(float(_w)), 1200))
+        except Exception:
+            width = None
         # Display formatting attrs (designer type modal)
         def _to_int(_v):
             try:
@@ -626,6 +651,9 @@ class RMLReportCompiler:
             join_type=join_type,
             connection_id=str(connection_id) if connection_id else None,
             where_clause=str(where_clause) if where_clause else None,
+            col_refname=col_refname,
+            visible=visible,
+            width=width,
             icon=str(icon) if icon else None,
             is_amount=is_amount,
             currency_field=str(currency_field) if currency_field else None,
@@ -1059,7 +1087,8 @@ class RMLReportCompiler:
                             continue
                         vtype = (vget.get("type") or "text").strip().lower()
                         if vtype not in ("text", "number", "date", "time",
-                                         "expression", "boolean", "choice"):
+                                         "expression", "custom_function",
+                                         "boolean", "choice"):
                             vtype = "text"
                         opts: List[str] = []
                         if (vget.get("options") or "").strip():

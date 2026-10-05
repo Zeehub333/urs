@@ -16,7 +16,7 @@ ALIASES: Dict[str, List[str]] = {
     "datetime": ["datetime", "date_time", "date", "time"],
     "boolean": ["boolean", "checkbox", "bool", "check"],
     "select": ["select", "dropdown", "choice", "list", "combobox"],
-    "password": ["password", "passwd", "pwd", "secret", "passcode"],
+    "password": ["password", "passwd", "pwd", "password_hash", "pass_hash", "secret", "passcode"],
     "phone_number": ["phone_number", "phone", "mobile", "mobile_number", "tel", "telephone"],
     "ip_address": ["ip_address", "ipaddress", "ip", "ipv4", "ip_address_field"],
     "port_picker": ["port_picker", "portpicker", "port", "port_number", "port_picker_field"],
