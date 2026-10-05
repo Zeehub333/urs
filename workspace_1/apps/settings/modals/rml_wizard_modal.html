@@ -1,6 +1,6 @@
     <!-- مصمم التقارير — شريط أوامر + شبكة عمل -->
-    <div id="addRmlModal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-start justify-center p-4 overflow-y-auto">
-        <div class="wb-shell bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+    <div id="addRmlModal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-2 sm:p-3 overflow-hidden">
+        <div class="wb-shell bg-white rounded-2xl shadow-2xl w-full max-w-[98vw] h-[96vh] max-h-[96vh] overflow-hidden flex flex-col flex-1 min-h-0">
             <div class="hidden">
                 <span id="rmlWizardTitle">تقرير جديد</span><span id="wbDirty">●</span>
                 <button onclick="rmlWizardPrev()" id="rmlPrevBtn">السابق</button>
@@ -9,7 +9,7 @@
                 <button onclick="submitAddRml()" id="rmlCreateBtn">حفظ</button>
             </div>
             <!-- الشريط المعلوماتي (الخطوة 1: بيانات التقرير) -->
-            <div id="wbInfoStrip" class="border-b border-slate-100 px-3 py-2 bg-slate-50/60">
+            <div id="wbInfoStrip" class="border-b border-slate-100 px-3 py-2 bg-slate-50/60 shrink-0">
                 <div id="rmlWizardStep1" class="grid grid-cols-2 lg:grid-cols-4 gap-2 text-xs">
                     <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">الاسم العربي *</label><input id="rmlDisplayName" placeholder="تقرير جديد" class="wb-inp"></div>
                     <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">الاسم الإنجليزي *</label><input id="rmlProgName" placeholder="my_report" class="wb-inp font-mono" dir="ltr" oninput="syncRmlFileName()"></div>
@@ -23,17 +23,17 @@
                 <div id="rmlError" class="hidden text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-3 py-1.5 text-xs mt-2"></div>
             </div>
             <!-- بيئة عمل المصمم: flex ثلاثي (سايدبار 10vw + لوحة التقرير 80vw + خصائص العمود المنزلقة بأنميشن) -->
-            <div id="wbSheets" class="flex-1 min-h-0 flex flex-row overflow-hidden text-xs relative rpt-flex">
+            <div id="wbSheets" class="flex-1 min-h-0 flex flex-row overflow-hidden text-xs relative rpt-flex h-full">
                 <!-- سايدبار 10vw: كل التبويبات عدا الأعمدة والتفاصيل -->
-                <aside id="rdSidebar" class="rd-sidebar shrink-0 bg-slate-50/90 border-l border-slate-200 p-2 flex flex-col gap-1 overflow-y-auto custom-scroll" style="width: 10vw; min-width: 130px; max-width: 200px;">
+                <aside id="rdSidebar" class="rd-sidebar shrink-0 bg-slate-50/90 border-l border-slate-200 p-2 flex flex-col gap-1 overflow-y-auto custom-scroll h-full" style="width: 10vw; min-width: 130px; max-width: 200px;">
                     <div class="text-[10px] font-extrabold text-slate-400 px-2 py-1 mb-1 tracking-wider uppercase">أقسام المصمم</div>
                     <div id="wbSheetTabs" class="flex flex-col gap-1 flex-1"></div>
                     <div id="rptSideCols" class="hidden"></div>
                     <div id="rptSideDet" class="hidden"></div>
                 </aside>
                 <!-- لوحة التقرير 80vw -->
-                <main id="rdMainPalette" class="rd-palette flex-1 min-w-0 flex flex-col overflow-hidden relative bg-white" style="width: 80vw;">
-                    <div id="wbSheetBody" class="flex-1 min-h-0 overflow-y-auto custom-scroll flex flex-col"></div>
+                <main id="rdMainPalette" class="rd-palette flex-1 min-w-0 flex flex-col overflow-hidden relative bg-white h-full" style="width: 80vw;">
+                    <div id="wbSheetBody" class="flex-1 min-h-0 flex flex-col h-full overflow-hidden"></div>
                     <div id="wbSheetFoot" class="shrink-0 border-t border-slate-200 bg-slate-50/70 px-3 py-1.5 flex items-center gap-2 hidden"></div>
                 </main>
                 <!-- لوحة خصائص العمود المتحركة بأنميشن -->

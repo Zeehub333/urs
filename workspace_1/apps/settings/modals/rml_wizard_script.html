@@ -1589,12 +1589,14 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
             if(document.getElementById('rptPalCss')) return;
             const st = document.createElement('style');
             st.id = 'rptPalCss';
-            st.textContent = `.rpt-flex{display:flex;height:100%;width:100%;overflow:hidden;position:relative}
-.rd-sidebar{width:10vw;min-width:130px;max-width:200px;background:#f8fafc;border-left:1px solid #e2e8f0;display:flex;flex-direction:column;gap:4px;padding:8px;flex-shrink:0;overflow-y:auto}
+            st.textContent = `.rpt-flex{display:flex;height:100%;width:100%;overflow:hidden;position:relative;flex:1;min-height:0}
+.rd-sidebar{width:10vw;min-width:130px;max-width:200px;background:#f8fafc;border-left:1px solid #e2e8f0;display:flex;flex-direction:column;gap:4px;padding:8px;flex-shrink:0;overflow-y:auto;height:100%}
 .rd-nav-btn{display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:9px;font-size:11px;font-weight:700;color:#475569;background:transparent;border:1px solid transparent;cursor:pointer;transition:all .16s ease;text-align:right;width:100%}
 .rd-nav-btn:hover{background:#f1f5f9;color:#0f172a}
 .rd-nav-btn.active{background:#ecfdf5;color:#065f46;border-color:#a7f3d0;box-shadow:0 1px 2px rgba(0,0,0,.04);font-weight:800}
-.rd-palette{width:80vw;flex:1;min-width:0;display:flex;flex-direction:column;background:#ffffff;position:relative;overflow:hidden}
+.rd-palette{width:80vw;flex:1;min-width:0;display:flex;flex-direction:column;background:#ffffff;position:relative;overflow:hidden;height:100%;min-height:0}
+.rd-palette #wbSheetBody{flex:1;min-height:0;height:100%;display:flex;flex-direction:column;overflow:hidden}
+#rptPrevBox{flex:1;min-height:0;height:100%;display:flex;flex-direction:column;overflow:hidden}
 .rd-props-drawer{position:absolute;top:0;bottom:0;left:0;width:340px;max-width:90vw;background:#ffffff;border-right:1px solid #cbd5e1;box-shadow:6px 0 25px rgba(15,23,42,.15);z-index:50;display:flex;flex-direction:column;transform:translateX(-105%);transition:transform .28s cubic-bezier(0.16,1,0.3,1),box-shadow .28s ease,opacity .2s ease;opacity:0;pointer-events:none}
 .rd-props-drawer.open{transform:translateX(0);opacity:1;pointer-events:auto}
 .rpt-side{display:none}
@@ -1606,7 +1608,7 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
 .rpt-eye{color:#94a3b8;background:none;border:0;cursor:pointer;padding:2px 4px;border-radius:4px;transition:color .15s ease}
 .rpt-eye:hover{background:#e2e8f0}
 .rpt-eye.no{color:#f43f5e}
-.rpt-gridwrap{flex:1;min-height:200px;overflow:auto;border:1px solid #e2e8f0;border-radius:10px;background:#ffffff;margin:6px 8px}
+.rpt-gridwrap{flex:1;min-height:0;height:100%;overflow:auto;border:1px solid #e2e8f0;border-radius:10px;background:#ffffff;margin:6px 8px}
 .rpt-grid{width:100%;border-collapse:separate;border-spacing:0;font-size:11px}
 .rpt-grid th{position:sticky;top:0;background:#f8fafc;z-index:5;border-bottom:2px solid #cbd5e1;border-left:1px solid #f1f5f9;padding:7px 10px;white-space:nowrap;user-select:none;cursor:grab;transition:background .15s ease}
 .rpt-grid th:hover{background:#eef2ff}
