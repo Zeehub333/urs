@@ -275,8 +275,13 @@ def read_conf(path):
 
 def load_workspace_settings(ws_path):
     """Load <ws>/settings.py WORKSPACE dict (safe defaults on any error)."""
+    ws = Path(ws_path)
+    if not (ws / "settings.py").is_file():
+        cand = BASE_DIR / str(ws_path)
+        if (cand / "settings.py").is_file():
+            ws = cand
     data = dict(DEFAULT_WORKSPACE)
-    name = Path(ws_path).name
+    name = ws.name
     data["name"] = name
     try:
         import re as _re_hex
@@ -311,6 +316,10 @@ def load_workspace_settings(ws_path):
 def workspace_info(ws_path):
     """One workspace summary for manager/API (never raises)."""
     ws = Path(ws_path)
+    if not (ws / "workspace.conf").is_file() and not (ws / APPS_DIRNAME).is_dir():
+        cand = BASE_DIR / str(ws_path)
+        if (cand / "workspace.conf").is_file() or (cand / APPS_DIRNAME).is_dir():
+            ws = cand
     conf = read_conf(ws / "workspace.conf")
     cfg = load_workspace_settings(ws)
     apps, forms, reports = 0, 0, 0

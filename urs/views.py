@@ -4179,7 +4179,32 @@ def api_fmlk_metadata(request):
             eng = _fmlk_get_engine(fml, app)
             comp = eng.compiler
             return JsonResponse({"metadata": comp.fml_metadata(), "tabs": [t.to_dict() for t in comp.tabs()], "fields": [f.to_dict() for f in comp.fields()], "details": [d.to_dict() for d in comp.details()], "actions": [a.to_dict() for a in comp.actions()]})
-        return JsonResponse({"metadata": comp.fml_metadata(), "tabs": [t.to_dict() for t in comp.tabs()], "fields": [f.to_dict() for f in comp.fields()], "details": [d.to_dict() for d in comp.details()], "actions": [a.to_dict() for a in comp.actions()]})
+        from . import workspace as _wsm
+        _sess_ws = request.session.get("workspace") if hasattr(request, "session") else None
+        _ws_id = _wsm.active_ws_id() or _sess_ws or request.GET.get("workspace")
+        if not _ws_id and path:
+            for _p in path.parents:
+                if (_p / "workspace.conf").exists() or (_p / "settings.py").exists():
+                    _ws_id = _p.name
+                    break
+        if not _ws_id:
+            _pw = _wsm.primary_workspace()
+            if _pw and _pw.exists():
+                _ws_id = _pw.name
+        if not _ws_id:
+            _dirs = _wsm.workspace_dirs()
+            if _dirs:
+                _ws_id = _dirs[0].name
+        _ws_info = _wsm.workspace_info(_ws_id) if _ws_id else None
+        _ws_dom = str((_ws_info or {}).get("domain") or "").strip().lstrip("@")
+        return JsonResponse({
+            "metadata": comp.fml_metadata(),
+            "tabs": [t.to_dict() for t in comp.tabs()],
+            "fields": [f.to_dict() for f in comp.fields()],
+            "details": [d.to_dict() for d in comp.details()],
+            "actions": [a.to_dict() for a in comp.actions()],
+            "workspace_domain": _ws_dom,
+        })
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=400)
 

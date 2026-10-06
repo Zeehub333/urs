@@ -471,7 +471,40 @@
     <script>
         // Injected by Django
         const WS_CAN_DESIGN = {% if ws_can_design %}true{% else %}false{% endif %};
-        const WS_DOMAIN = "{{ workspace_domain|default:''|escapejs }}";
+        window.WS_DOMAIN = ("{{ workspace_domain|default:''|escapejs }}" || "").replace(/^@+/, '').trim();
+        const WS_DOMAIN = window.WS_DOMAIN;
+        function syncEmailDomainBadges(){
+            const d = String(window.WS_DOMAIN || '').replace(/^@+/, '').trim();
+            if(!d) return;
+            document.querySelectorAll('input[data-email-dom]').forEach(el => {
+                if(!el.value || el.value === '@domain.com' || el.value === '@'){
+                    el.value = '@' + d;
+                    const fn = el.getAttribute('data-email-dom');
+                    if(fn && window.FMLK) FMLK.emailSync(fn);
+                }
+            });
+        }
+        async function ensureWsDomain() {
+            if(window.WS_DOMAIN) {
+                syncEmailDomainBadges();
+                return window.WS_DOMAIN;
+            }
+            try {
+                const res = await fetch('/api/workspaces/');
+                if(res.ok){
+                    const d = await res.json();
+                    const wsList = Array.isArray(d.workspaces) ? d.workspaces : [];
+                    const active = wsList.find(w => w.status === 'active') || wsList[0];
+                    if(active && active.domain){
+                        window.WS_DOMAIN = String(active.domain).replace(/^@+/, '').trim();
+                        syncEmailDomainBadges();
+                        return window.WS_DOMAIN;
+                    }
+                }
+            } catch(e){}
+            return '';
+        }
+        try{ ensureWsDomain(); }catch(e){}
         let currentFml = "{{ fml_file|escapejs }}";
         let currentApp = "{{ app_name|escapejs }}";
         let currentRecordId = null;
@@ -595,6 +628,9 @@
             try {
                 const {res, data} = await fwFetchJson(`/api/fmlk/metadata?fml=${encodeURIComponent(name)}&app=${encodeURIComponent(currentApp)}`);
                 if(!res.ok) throw new Error((data && data.error) || 'metadata fetch failed');
+                if(data && data.workspace_domain){
+                    window.WS_DOMAIN = String(data.workspace_domain).replace(/^@+/, '').trim();
+                }
                 fmlMeta = data;
                 customActions = Array.isArray(data.actions) ? data.actions : [];
                 renderFormActions();
@@ -986,6 +1022,8 @@
             try{ connTypeHook(); }catch(e){}
             try{ fmlkVisibleApply(); }catch(e){}
             try{ stackFormTabs(); }catch(e){}
+            try{ syncEmailDomainBadges(); }catch(e){}
+            try{ if(!window.WS_DOMAIN) ensureWsDomain(); }catch(e){}
         }
 
         // ── تبويبة التفاصيل: الجداول المتفرعة one-to-many كشبكة أسفل النموذج ──
@@ -2604,8 +2642,8 @@
                             _dPart = _rawV.slice(_ai + 1);
                         }
                         const _cfgDom = String(cfg(field, 'email_domain') || cfg(field, 'domain') || (window.WS_DOMAIN || '')).trim().replace(/^@+/, '');
-                        const _effDom = _dPart || _cfgDom;
-                        const _domDisp = _effDom ? ('@' + _effDom) : '@domain.com';
+                        const _effDom = _dPart || _cfgDom || (window.WS_DOMAIN || '');
+                        const _domDisp = _effDom ? ('@' + _effDom) : (window.WS_DOMAIN ? ('@' + window.WS_DOMAIN) : '@domain.com');
                         const _combVal = _rawV || (_uPart && _effDom ? (_uPart + '@' + _effDom) : '');
                         input = `<div class="space-y-1">`
                             + `<div class="flex items-stretch rounded-xl border border-slate-200 overflow-hidden bg-white shadow-xs focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-500/20 transition" dir="ltr">`
@@ -3101,6 +3139,7 @@
                         if(domInp) domInp.value = '@' + s.slice(idx + 1);
                     } else {
                         userInp.value = s;
+                        if(domInp && window.WS_DOMAIN) domInp.value = '@' + String(window.WS_DOMAIN).replace(/^@+/, '');
                     }
                 }
             },
