@@ -54,12 +54,25 @@ _STD_HASH_ITERS = 600_000
 
 def is_hashed_secret(value: Any) -> bool:
     """True if the value already looks like a password hash (any Django
-    hasher format or our stdlib fallback) â€” must NOT be re-hashed."""
+    hasher format, our stdlib fallback, or known cipher format) — must NOT be re-hashed."""
     s = str(value or "")
-    if not s or "$" not in s:
+    if not s:
         return False
     if s.startswith(_STD_HASH_PREFIX):
         return True
+    # Known prefixes for our 20 algorithms
+    _KNOWN_PFX = ("caesar$", "atbash$", "rot13$", "vigenere$", "morse$",
+                  "base64$", "crc32$", "md5$", "sha1$", "ripemd160$",
+                  "sha224$", "sha256$", "sha384$", "sha512$", "sha3_256$",
+                  "pbkdf2_sha1$", "pbkdf2_sha256$", "scrypt$")
+    if any(s.startswith(pfx) for pfx in _KNOWN_PFX):
+        return True
+    if s.startswith("*") and len(s) == 41:  # MySQL old PASSWORD
+        return True
+    if s.lower().startswith("md5") and len(s) == 35:  # Postgres md5+user
+        return True
+    if "$" not in s:
+        return False
     try:
         from django.contrib.auth.hashers import identify_hasher
         identify_hasher(s)
@@ -68,12 +81,26 @@ def is_hashed_secret(value: Any) -> bool:
         return False
 
 
-def hash_secret(value: Any) -> str:
-    """One-way hash for a new plaintext secret. Idempotent: existing
+def hash_secret(value: Any, algorithm: str = "pbkdf2_sha256", shift: int = 3, username: str = "") -> str:
+    """One-way hash or cipher for a new plaintext secret. Idempotent: existing
     hashes (and empty values) pass through unchanged."""
     s = "" if value is None else str(value)
-    if s == "" or is_hashed_secret(s):
+    if s == "":
         return s
+    algo = (algorithm or "pbkdf2_sha256").strip().lower()
+    if algo in ("none", "plain", "clear", "plaintext", "لا شيء"):
+        return s
+    if is_hashed_secret(s):
+        return s
+    try:
+        from .crypto import encrypt_or_hash_password
+        return encrypt_or_hash_password(s, algorithm=algo, shift=shift, username=username)
+    except Exception:
+        try:
+            from fmlk_engine.crypto import encrypt_or_hash_password
+            return encrypt_or_hash_password(s, algorithm=algo, shift=shift, username=username)
+        except Exception:
+            pass
     try:
         from django.contrib.auth.hashers import make_password
         return make_password(s)
@@ -124,6 +151,17 @@ def verify_secret(value: Any, hashed: Any) -> bool:
     s, h = str(value or ""), str(hashed or "")
     if not s or not h:
         return False
+    try:
+        from .crypto import verify_password_algorithm
+        if verify_password_algorithm(s, h):
+            return True
+    except Exception:
+        try:
+            from fmlk_engine.crypto import verify_password_algorithm
+            if verify_password_algorithm(s, h):
+                return True
+        except Exception:
+            pass
     try:
         from django.contrib.auth.hashers import check_password
         if check_password(s, h):
@@ -783,13 +821,20 @@ class FMLKFormEngine:
         """Replace new plaintext secrets with HASH (idempotent: hashes/empties pass through)."""
         if not data or not secret_names:
             return dict(data or {})
-        tbl = str(getattr(self, "table", "") or "").lower()
-        if tbl.endswith("urs_connection"):
+        tbl = str(getattr(self, "_table", "") or getattr(self, "table", "") or (self.metadata.get("table") if hasattr(self, "metadata") else "") or "").lower()
+        if "urs_connection" in tbl:
             return dict(data or {})
         out = dict(data)
+        fields_by_name = {getattr(f, "name", ""): f for f in (self.fields or [])}
         for k in secret_names:
             if k in out:
-                out[k] = hash_secret(out[k])
+                fld = fields_by_name.get(k)
+                cfg = getattr(fld, "config", {}) or {}
+                algo = cfg.get("hash_algo") or getattr(fld, "raw_attrs", {}).get("hash_algo") or "pbkdf2_sha256"
+                shift = cfg.get("shift") or getattr(fld, "raw_attrs", {}).get("shift") or 3
+                if str(algo).lower() in ("none", "plain", "clear", "plaintext", "لا شيء"):
+                    continue
+                out[k] = hash_secret(out[k], algorithm=algo, shift=shift)
         return out
 
     def _mask_secrets(self, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

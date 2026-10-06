@@ -8,6 +8,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             {id:'inputs', name:'المدخلات', icon:'fa-pen-to-square'},
             {id:'details', name:'التفاصيل', icon:'fa-table-list'},
             {id:'tabs', name:'التبويبات', icon:'fa-folder'},
+            {id:'actions', name:'الإجراءات المخصصة', icon:'fa-bolt'},
             {id:'docs', name:'المستندات', icon:'fa-file-lines'},
         ];
         // وجهات التفاصيل حصراً: حقل مخصص (يُخزَّن) + مرجع بحث (لا شيء — لا يُخزَّن)
@@ -63,6 +64,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
         let fwTabs = []; // {id,name,alias,order,visibleIf}
         let fwDetailsTab = 'التفاصيل'; // تسمية تبويبة التفاصيل في المشغل
         let fwTypes = []; // field-types registry
+        let fwPwAlgos = []; // 20 password algorithms registry
         let fwTypeIdx = -1, fwTypeSel = '', fwTypeOrig = '', fwSrcMode = 'fixed', fwTypeOpts = [], fwTypeSrcs = [];
         let fwBranchIdx = -1, fwBranchSel = [];
         let fwPrevState = {conn:'', table:''};
@@ -83,12 +85,14 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             if(/TEXT|CLOB|NTEXT/.test(t)) return {dataType:'TEXT', inputType:'textarea'};
             return {dataType:'VARCHAR', inputType:'text'};
         }
+        let fwActions = [];
+        let fwActionIdx = -1;
         function fwInputKey(table, name){ return (table || '') + '|||' + (name || ''); }
         function fwReset(){
             fwEditMode = null; fwSheet = 'tables';
             fwConnId = ''; fwConnName = ''; fwSchema = ''; fwTablesCache = [];
             fwMainTable = ''; fwMainColsCache = [];
-            fwInputs = []; fwBranches = [];
+            fwInputs = []; fwBranches = []; fwActions = []; fwActionIdx = -1;
             try{ fwNameLock0 = new Set(); }catch(e){}
             fwTabs = [{id:'البيانات الأساسية', name:'البيانات الأساسية', alias:'البيانات الأساسية', order:1, visibleIf:'', is_main:true}];
             fwDetailsTab = 'التفاصيل';
@@ -175,6 +179,17 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                         }
                     });
                 });
+                // الإجراءات المخصصة
+                fwActions = Array.isArray(data.actions) ? data.actions.map(a=>({
+                    name: a.name || '',
+                    label: a.label || a.name || '',
+                    endpoint: a.endpoint || '',
+                    icon: a.icon || 'fa-bolt',
+                    badge_color: a.badge_color || a.badgeColor || '#4f46e5',
+                    level: a.level || 'record',
+                    render: a.render || '',
+                    replace: a.replace || 'new'
+                })) : [];
             }catch(e){ fwErr(e.message); }
             try{ fwSnapNameLock(); }catch(e){} // تثبيت أسماء الملف المحمل (تُقفل المخصصة بعد أول إضافة)
             fwShowSheet('tables');
@@ -197,6 +212,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                 const res = await fetch('/api/fmlk/field-types');
                 const data = await res.json();
                 if(data.types) fwTypes = data.types;
+                if(data.password_algorithms) fwPwAlgos = data.password_algorithms;
             }catch(e){}
         }
         async function fwConnChanged(){
@@ -300,6 +316,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             set('fwStatTables', 'جداول: ' + (1 + fwBranches.length));
             set('fwStatInputs', 'مدخلات: ' + fwInputs.length);
             set('fwStatTabs', 'تبويبات: ' + fwTabs.length);
+            set('fwStatActions', 'إجراءات: ' + fwActions.length);
             set('fwStatConn', fwConnName ? ('محلي: ' + fwConnName) : 'محلي');
         }
         function fwRenderSheet(){
@@ -313,6 +330,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             else if(fwSheet === 'inputs') fwRenderInputs(body);
             else if(fwSheet === 'details') fwRenderDetailInputs(body);
             else if(fwSheet === 'tabs') fwRenderTabsSheet(body);
+            else if(fwSheet === 'actions') fwRenderActions(body);
             else if(fwSheet === 'docs') fwRenderDocs(body);
             fwStat();
             try{ if(sc) { sc.scrollTop = st; sc.scrollLeft = sl; } }catch(e){}
@@ -1465,12 +1483,15 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                 const _pr = gv('fwTypeParent'); if(_pr !== null){ r0.config = r0.config || {}; if(_pr) r0.config.parent_field = _pr; }
                 const _sp = gv('fwTypeSep'); if(_sp !== null){ r0.config = r0.config || {}; if(_sp) r0.config.separator = _sp; }
                 const _an = document.getElementById('fwTypeAllowNew'); if(_an){ r0.config = r0.config || {}; r0.config.allow_new = _an.checked ? 'true' : 'false'; }
+                const _ha = gv('fwTypeHashAlgo'); if(_ha !== null){ r0.config = r0.config || {}; r0.config.hash_algo = _ha; }
+                const _sh = gv('fwTypeShift'); if(_sh !== null){ r0.config = r0.config || {}; r0.config.shift = _sh; }
             }catch(e){}
             const box = document.getElementById('fwTypeConfig');
             const r = fwInputs[fwTypeIdx] || {};
             const needOpts = ['select','multiselect','status','radio','restricted_tags','reorder','badges'].includes(fwTypeSel);
             const needSrc = ['select','multiselect','status','datamodal','lookup','cascade_grid','restricted_tags'].includes(fwTypeSel);
             const needRef = ['select','lookup','datamodal'].includes(fwTypeSel);
+            const isPassword = (fwTypeSel === 'password');
             // وضع المصدر الصريح: إما خيارات ثابتة أو من جدول (الثلاثية) — بلا جمع بينهما
             // أنواع الثلاثية بلا قسم مصادر إطلاقاً (ثابتة=حرفية فقط، جدول=الثلاثية فقط)
             const srcModeTable = needRef && fwSrcMode === 'table';
@@ -1478,7 +1499,61 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             const showOpts = needOpts && !srcModeTable;
             const needParent = (fwTypeSel === 'cascading_select');
             const needExtra = ['list-input','multiselect','restricted_tags'].includes(fwTypeSel);
-            let h = `<div class="text-[11px] text-slate-500">النوع الحالي: <b>${fwEsc(fwTypeLabel(fwTypeSel))}</b> — يُرسم في المشغل ${fwTypeSel==='status' ? 'أزرار radio ملونة' : fwTypeSel==='datamodal' ? 'شبكة منبثقة قابلة للبحث' : fwTypeSel==='select' ? 'قائمة منسدلة' : fwTypeSel==='multiselect' ? 'اختيار متعدد' : 'مدخل ' + fwEsc(fwTypeSel)}</div>`;
+            let h = `<div class="text-[11px] text-slate-500">النوع الحالي: <b>${fwEsc(fwTypeLabel(fwTypeSel))}</b> — يُرسم في المشغل ${fwTypeSel==='status' ? 'أزرار radio ملونة' : fwTypeSel==='datamodal' ? 'شبكة منبثقة قابلة للبحث' : fwTypeSel==='select' ? 'قائمة منسدلة' : fwTypeSel==='multiselect' ? 'اختيار متعدد' : fwTypeSel==='password' ? 'إدخال كلمة مرور مع التشفير' : 'مدخل ' + fwEsc(fwTypeSel)}</div>`;
+            if(isPassword){
+                const _curAlgo = String((r.config||{}).hash_algo || 'pbkdf2_sha256').toLowerCase();
+                const _curShift = (r.config||{}).shift !== undefined ? (r.config||{}).shift : 3;
+                const _isCaesar = (_curAlgo === 'caesar' || _curAlgo === 'shift');
+                h += `<div class="bg-indigo-50/60 border border-indigo-200 rounded-xl p-3 space-y-2.5">
+                    <div class="flex items-center justify-between">
+                        <b class="text-xs text-indigo-950 flex items-center gap-1.5"><i class="fa-solid fa-key text-indigo-600"></i> طريقة التشفير والمطابقة (كلمة المرور)</b>
+                        <span class="text-[10px] text-indigo-700 font-semibold">20 طريقة مرتبة من الأقدم إلى الأحدث</span>
+                    </div>
+                    <div>
+                        <label class="block text-[10px] font-bold text-slate-500 mb-1">اختر خوارزمية التشفير / التجزئة:</label>
+                        <select id="fwTypeHashAlgo" onchange="fwPwAlgoChanged(this.value)" class="wb-inp !py-1.5 font-sans font-bold text-xs" dir="rtl">
+                            <option value="none" ${_curAlgo==='none'?'selected':''}>لا شيء — يتم إدخال ومطابقة الباسوورد كما هو (نص صريح)</option>
+                            <optgroup label="── 20 طريقة تشفير وتجزئة (من الأقدم إلى الأحدث) ──">
+                                ${(fwPwAlgos.length ? fwPwAlgos : [
+                                    {key:'caesar', ar:'1. إزاحة سيزر / يونيكود (Caesar / Shift Cipher - 100 ق.م)', era:'~100 BC'},
+                                    {key:'atbash', ar:'2. تشفير أتباش (Atbash Cipher - 500 ق.م)', era:'~500 BC'},
+                                    {key:'rot13', ar:'3. روت 13 (ROT13 - قيصر بنصف دورة)', era:'Classical'},
+                                    {key:'vigenere', ar:'4. تشفير فيجينير (Vigenère Cipher - 1553م)', era:'1553'},
+                                    {key:'morse', ar:'5. شفرة مورس (Morse Code - 1836م)', era:'1836'},
+                                    {key:'base64', ar:'6. ترميز بيس 64 (Base64 - RFC 4648)', era:'1987'},
+                                    {key:'crc32', ar:'7. فحص التكرار الدوري (CRC-32 - 1975م)', era:'1975'},
+                                    {key:'md5', ar:'8. إم دي 5 (MD5 - Rivest 1991م)', era:'1991'},
+                                    {key:'sha1', ar:'9. إس إتش إيه 1 (SHA-1 - NSA 1995م)', era:'1995'},
+                                    {key:'ripemd160', ar:'10. رايب إم دي (RIPEMD-160 - 1996م)', era:'1996'},
+                                    {key:'mysql_old_sha1', ar:'11. ماي إس كيو إل القديم (MySQL PASSWORD 4.1+)', era:'2000'},
+                                    {key:'postgres_md5', ar:'12. بوستجريس إم دي 5 (PostgreSQL md5+user)', era:'2001'},
+                                    {key:'sha224', ar:'13. إس إتش إيه 224 (SHA-224 - 2004م)', era:'2004'},
+                                    {key:'sha256', ar:'14. إس إتش إيه 256 (SHA-256 - 2001م/2004م)', era:'2001'},
+                                    {key:'sha384', ar:'15. إس إتش إيه 384 (SHA-384 - 2001م)', era:'2001'},
+                                    {key:'sha512', ar:'16. إس إتش إيه 512 (SHA-512 - 2001م)', era:'2001'},
+                                    {key:'sha3_256', ar:'17. إس إتش إيه 3 (SHA-3 / Keccak-256 - 2015م)', era:'2015'},
+                                    {key:'pbkdf2_sha1', ar:'18. بي بي كي دي إف 2 مع إس إتش إيه 1 (PBKDF2-SHA1 - PKCS#5)', era:'2000'},
+                                    {key:'pbkdf2_sha256', ar:'19. بي بي كي دي إف 2 مع إس إتش إيه 256 (PBKDF2-SHA256 - الافتراضي الحديث)', era:'2010+'},
+                                    {key:'scrypt', ar:'20. إس كربت (scrypt - Percival 2009م / RFC 7914)', era:'2009'}
+                                ]).map(a=>`<option value="${a.key}" ${_curAlgo===a.key?'selected':''}>${fwEsc(a.ar || a.key)}</option>`).join('')}
+                            </optgroup>
+                        </select>
+                    </div>
+                    <div id="fwTypeShiftBox" class="${_isCaesar ? '' : 'hidden'} bg-white border border-indigo-200 rounded-xl p-2.5">
+                        <div class="flex items-center justify-between gap-2">
+                            <div>
+                                <label class="block text-xs font-bold text-indigo-900 mb-0.5">مقدار إزاحة اليونيكود (Shift Offset):</label>
+                                <span class="text-[10px] text-slate-500">حدد عدد خانات اليونيكود للإزاحة موجبة (+) أو سالبة (-)</span>
+                            </div>
+                            <div class="flex items-center gap-1.5">
+                                <button type="button" onclick="fwAdjShift(-1)" class="w-7 h-7 rounded-lg bg-indigo-100 hover:bg-indigo-200 text-indigo-800 font-bold text-sm">-</button>
+                                <input id="fwTypeShift" type="number" value="${_curShift}" class="wb-inp !py-1 w-20 text-center font-mono font-bold text-sm" dir="ltr" placeholder="3">
+                                <button type="button" onclick="fwAdjShift(1)" class="w-7 h-7 rounded-lg bg-indigo-100 hover:bg-indigo-200 text-indigo-800 font-bold text-sm">+</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>`;
+            }
             if(showOpts){
                 h += `<div class="bg-slate-50 border border-slate-200 rounded-xl p-2.5 space-y-1.5">
                     <div class="flex items-center justify-between"><b class="text-[11px]">الخيارات ${fwTypeSel==='status' ? '(الحالات + اللون)' : ''}</b><button onclick="fwTypeOptAdd()" class="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg font-bold text-[11px]"><i class="fa-solid fa-plus"></i> خيار</button></div>
@@ -1602,6 +1677,12 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             });
             }
             r.config = r.config || {};
+            if(fwTypeSel === 'password'){
+                const ha = g('fwTypeHashAlgo');
+                if(ha) r.config.hash_algo = ha;
+                const sh = g('fwTypeShift');
+                if(sh !== '') r.config.shift = parseInt(sh, 10) || 0;
+            }
             if(fwTypeSel === 'cascading_select'){ const p = g('fwTypeParent'); if(p) r.config.parent_field = p; }
             if(['list-input','multiselect','restricted_tags'].includes(fwTypeSel)){
                 const s = g('fwTypeSep'); if(s) r.config.separator = s;
@@ -1610,6 +1691,25 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             if(fwTypeSel === 'calculated'){ r.computed = true; }
             closeFwTypeModal();
             fwRenderSheet();
+        }
+        function fwPwAlgoChanged(v){
+            const box = document.getElementById('fwTypeShiftBox');
+            if(box){
+                if(v === 'caesar' || v === 'shift') box.classList.remove('hidden');
+                else box.classList.add('hidden');
+            }
+            const r0 = fwInputs[fwTypeIdx];
+            if(r0){ r0.config = r0.config || {}; r0.config.hash_algo = v; }
+        }
+        function fwAdjShift(delta){
+            const inp = document.getElementById('fwTypeShift');
+            if(inp){
+                let cur = parseInt(inp.value, 10);
+                if(isNaN(cur)) cur = 0;
+                inp.value = cur + delta;
+                const r0 = fwInputs[fwTypeIdx];
+                if(r0){ r0.config = r0.config || {}; r0.config.shift = inp.value; }
+            }
         }
         // ── ورقة التبويبات ──
         function fwRenderTabsSheet(body){
@@ -1650,6 +1750,295 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
             fwTabs.splice(i,1);
             fwTabs.forEach((x, k)=>x.order = k+1);
             fwInputs.forEach(x=>{ if(x.tab === gone) x.tab = fwTabs[0].id; });
+            fwRenderSheet();
+        }
+        // ── ورقة الإجراءات المخصصة (<custom_actions>) ──
+        const FW_ACTION_PRESETS = [
+            {
+                name: 'test_connection',
+                label: 'اختبار الاتصال',
+                level: 'record',
+                endpoint: '/api/connections/test/',
+                icon: 'fa-plug-circle-check',
+                badge_color: '#059669',
+                description: 'فحص فوري لصحة الاتصال بقاعدة البيانات وحالة الخادم واستجابة الشبكة'
+            },
+            {
+                name: 'conn_stats',
+                label: 'إحصائيات الاتصال',
+                level: 'record',
+                endpoint: '/api/connections/stats/',
+                render: 'modals/conn_stats.html',
+                icon: 'fa-chart-simple',
+                badge_color: '#4f46e5',
+                description: 'عرض إحصائيات الجداول وحجم البيانات في نافذة منبثقة تفاعلية'
+            },
+            {
+                name: 'sync_schema',
+                label: 'مزامنة السكيما',
+                level: 'record',
+                endpoint: '/api/connections/sync/',
+                icon: 'fa-rotate',
+                badge_color: '#0284c7',
+                description: 'تحديث كاش الجداول والأعمدة من قاعدة البيانات مباشرة'
+            },
+            {
+                name: 'export_excel',
+                label: 'تصدير إكسل',
+                level: 'view',
+                endpoint: '/api/fmlk/export/',
+                icon: 'fa-file-excel',
+                badge_color: '#16a34a',
+                description: 'تصدير بيانات السجلات المعروضة إلى ملف إكسل'
+            },
+            {
+                name: 'print_record',
+                label: 'طباعة سجل',
+                level: 'record',
+                endpoint: '/api/dml/print/',
+                icon: 'fa-print',
+                badge_color: '#7c3aed',
+                description: 'طباعة بيانات السجل المحدد في قالب تقرير DML'
+            }
+        ];
+
+        function fwRenderActions(body){
+            const levelLabels = {
+                'record': {label: 'على السجل', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200'},
+                'form': {label: 'في النموذج', cls: 'bg-indigo-50 text-indigo-700 border-indigo-200'},
+                'view': {label: 'عام للواجهة', cls: 'bg-sky-50 text-sky-700 border-sky-200'}
+            };
+
+            const presetCardsHtml = FW_ACTION_PRESETS.map((p, idx)=>{
+                const isEnabled = (fwActions || []).some(a=>a.name === p.name);
+                const lvl = levelLabels[p.level] || {label: p.level, cls: 'bg-slate-100 text-slate-700 border-slate-200'};
+                return `
+                <div class="bg-white border ${isEnabled ? 'border-amber-300 ring-2 ring-amber-100' : 'border-slate-200'} rounded-xl p-3 flex flex-col justify-between hover:shadow-sm transition-all">
+                    <div>
+                        <div class="flex items-center justify-between gap-2 mb-2">
+                            <div class="flex items-center gap-2 min-w-0">
+                                <span class="w-8 h-8 rounded-lg flex items-center justify-center text-white shrink-0 shadow-sm" style="background-color: ${p.badge_color};">
+                                    <i class="fa-solid ${p.icon}"></i>
+                                </span>
+                                <div class="min-w-0">
+                                    <h4 class="text-xs font-bold text-slate-800 truncate">${fwEsc(p.label)}</h4>
+                                    <div class="text-[10px] text-slate-400 font-mono" dir="ltr">${fwEsc(p.name)}</div>
+                                </div>
+                            </div>
+                            <span class="px-2 py-0.5 rounded-full text-[10px] font-bold border ${lvl.cls} shrink-0">${lvl.label}</span>
+                        </div>
+                        <p class="text-[11px] text-slate-500 mb-2 leading-relaxed">${fwEsc(p.description)}</p>
+                        <div class="text-[10px] text-slate-400 font-mono truncate mb-3" dir="ltr"><i class="fa-solid fa-link text-[9px] text-slate-300"></i> ${fwEsc(p.endpoint)}</div>
+                    </div>
+                    <div class="pt-2 border-t border-slate-100 flex items-center justify-between">
+                        <button type="button" onclick="fwToggleActionPreset(${idx})" class="w-full py-1.5 px-3 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-1.5 ${isEnabled ? 'bg-amber-100 hover:bg-amber-200 text-amber-800' : 'bg-slate-100 hover:bg-indigo-50 hover:text-indigo-700 text-slate-700'}">
+                            <i class="fa-solid ${isEnabled ? 'fa-check' : 'fa-plus'}"></i>
+                            ${isEnabled ? 'مفعّل في النموذج (إلغاء)' : 'تفعيل الإجراء'}
+                        </button>
+                    </div>
+                </div>`;
+            }).join('');
+
+            const activeActionsHtml = (fwActions || []).length ? `
+                <div class="space-y-2">
+                    ${fwActions.map((a, i)=>{
+                        const lvl = levelLabels[a.level] || {label: a.level, cls: 'bg-slate-100 text-slate-700 border-slate-200'};
+                        return `
+                        <div class="flex items-center gap-3 bg-white border border-slate-200 hover:border-slate-300 rounded-xl p-2.5 transition-all">
+                            <span class="w-6 h-6 rounded-full bg-slate-100 text-slate-600 flex items-center justify-center text-[11px] font-bold shrink-0">${i+1}</span>
+                            <span class="w-8 h-8 rounded-lg flex items-center justify-center text-white shrink-0 shadow-sm" style="background-color: ${a.badge_color || '#4f46e5'};">
+                                <i class="fa-solid ${fwEsc(a.icon || 'fa-bolt')}"></i>
+                            </span>
+                            <div class="min-w-0 flex-1">
+                                <div class="flex items-center gap-2 flex-wrap">
+                                    <span class="text-xs font-bold text-slate-800 truncate">${fwEsc(a.label || a.name)}</span>
+                                    <span class="text-[10px] font-mono text-slate-400" dir="ltr">(${fwEsc(a.name)})</span>
+                                    <span class="px-2 py-0.5 rounded-full text-[10px] font-bold border ${lvl.cls}">${lvl.label}</span>
+                                    ${a.render ? `<span class="px-1.5 py-0.5 rounded text-[10px] font-mono bg-violet-50 text-violet-700 border border-violet-200"><i class="fa-solid fa-window-maximize"></i> ${fwEsc(a.render)}</span>` : ''}
+                                    ${(a.replace && a.replace !== 'new') ? `<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">بدل: ${fwEsc(a.replace)}</span>` : ''}
+                                </div>
+                                <div class="text-[10px] font-mono text-slate-500 truncate" dir="ltr">${fwEsc(a.endpoint || '')}</div>
+                            </div>
+                            <div class="flex items-center gap-1 shrink-0">
+                                <button type="button" onclick="fwMoveAction(${i},-1)" class="w-7 h-7 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 flex items-center justify-center text-xs" title="تحريك لأعلى">▲</button>
+                                <button type="button" onclick="fwMoveAction(${i},1)" class="w-7 h-7 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 flex items-center justify-center text-xs" title="تحريك لأسفل">▼</button>
+                                <button type="button" onclick="fwOpenActionModal(${i})" class="px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-xs font-bold flex items-center gap-1" title="تعديل"><i class="fa-solid fa-pen"></i> تعديل</button>
+                                <button type="button" onclick="fwDeleteAction(${i})" class="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg text-xs" title="حذف"><i class="fa-solid fa-trash"></i></button>
+                            </div>
+                        </div>`;
+                    }).join('')}
+                </div>` : `
+                <div class="text-center py-8 bg-slate-50 border border-dashed border-slate-200 rounded-xl">
+                    <i class="fa-solid fa-bolt text-3xl text-slate-300 mb-2"></i>
+                    <p class="text-xs font-bold text-slate-600">لا توجد إجراءات مخصصة مفعلة حالياً</p>
+                    <p class="text-[11px] text-slate-400 mt-1">اختر من الإجراءات المتاحة للتفعيل السريع أعلاه، أو اضغط زر «إضافة إجراء مخصص جديد» لإنشاء إجراء خاص بك.</p>
+                </div>`;
+
+            body.innerHTML = `
+                <div class="wb-panel mb-4">
+                    <div class="flex items-center justify-between mb-2">
+                        <div class="wb-panel-title !mb-0">
+                            <i class="fa-solid fa-bolt text-amber-500"></i> الإجراءات المتاحة للتفعيل السريع (Presets)
+                        </div>
+                    </div>
+                    <p class="text-[11px] text-slate-500 mb-3">إجراءات مدمجة جاهزة يمكن تفعيلها أو تعطيلها بنقرة واحدة لربط واجهة النموذج بالخادم مباشرة.</p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                        ${presetCardsHtml}
+                    </div>
+                </div>
+                <div class="wb-panel">
+                    <div class="flex items-center justify-between mb-3">
+                        <div>
+                            <div class="wb-panel-title !mb-0">
+                                <i class="fa-solid fa-list-check text-indigo-600"></i> الإجراءات المخصصة للنموذج (&lt;custom_actions&gt;)
+                            </div>
+                            <div class="text-[11px] text-slate-400 mt-0.5">تُحفظ داخل كتلة &lt;custom_actions&gt; في ملف النموذج وتظهر كأزرار وشارات في المشغل والجدول.</div>
+                        </div>
+                        <button type="button" onclick="fwOpenActionModal(-1)" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-xs shadow-sm flex items-center gap-1.5">
+                            <i class="fa-solid fa-plus"></i> إضافة إجراء مخصص
+                        </button>
+                    </div>
+                    ${activeActionsHtml}
+                </div>`;
+        }
+
+        function fwOpenActionModal(i){
+            fwActionIdx = i;
+            const modal = document.getElementById('fwActionModal');
+            if(!modal) return;
+            const title = document.getElementById('fwActionModalTitle');
+            const delBtn = document.getElementById('fwActDelBtn');
+            
+            if(i >= 0 && fwActions[i]){
+                const a = fwActions[i];
+                if(title) title.innerHTML = '<i class="fa-solid fa-bolt text-amber-500"></i> تعديل إجراء: ' + fwEsc(a.label || a.name);
+                document.getElementById('fwActName').value = a.name || '';
+                document.getElementById('fwActLabel').value = a.label || '';
+                document.getElementById('fwActLevel').value = a.level || 'record';
+                document.getElementById('fwActEndpoint').value = a.endpoint || '';
+                document.getElementById('fwActIcon').value = a.icon || 'fa-bolt';
+                document.getElementById('fwActColor').value = a.badge_color || '#059669';
+                document.getElementById('fwActColorPicker').value = a.badge_color || '#059669';
+                document.getElementById('fwActRender').value = a.render || '';
+                document.getElementById('fwActReplace').value = a.replace || 'new';
+                if(delBtn) delBtn.classList.remove('hidden');
+            } else {
+                if(title) title.innerHTML = '<i class="fa-solid fa-bolt text-amber-500"></i> إضافة إجراء مخصص جديد';
+                document.getElementById('fwActName').value = '';
+                document.getElementById('fwActLabel').value = '';
+                document.getElementById('fwActLevel').value = 'record';
+                document.getElementById('fwActEndpoint').value = '';
+                document.getElementById('fwActIcon').value = 'fa-bolt';
+                document.getElementById('fwActColor').value = '#059669';
+                document.getElementById('fwActColorPicker').value = '#059669';
+                document.getElementById('fwActRender').value = '';
+                document.getElementById('fwActReplace').value = 'new';
+                if(delBtn) delBtn.classList.add('hidden');
+            }
+            fwActUpdateIconPreview();
+            modal.classList.remove('hidden');
+        }
+
+        function closeFwActionModal(){
+            const modal = document.getElementById('fwActionModal');
+            if(modal) modal.classList.add('hidden');
+            fwActionIdx = -1;
+        }
+
+        function fwActSetIcon(ic){
+            const inp = document.getElementById('fwActIcon');
+            if(inp){ inp.value = ic; fwActUpdateIconPreview(); }
+        }
+
+        function fwActSetColor(col){
+            const inp = document.getElementById('fwActColor');
+            const pick = document.getElementById('fwActColorPicker');
+            if(inp) inp.value = col;
+            if(pick) pick.value = col;
+        }
+
+        function fwActUpdateIconPreview(){
+            const ic = (document.getElementById('fwActIcon') || {}).value || 'fa-bolt';
+            const prev = document.getElementById('fwActIconPrev');
+            if(prev) prev.innerHTML = '<i class="fa-solid ' + fwEsc(ic) + '"></i>';
+        }
+
+        function fwDeleteAction(i){
+            if(i < 0 || i >= fwActions.length) return;
+            if(!confirm('هل أنت متأكد من حذف الإجراء «' + (fwActions[i].label || fwActions[i].name) + '»؟')) return;
+            fwActions.splice(i, 1);
+            closeFwActionModal();
+            fwRenderSheet();
+        }
+
+        function saveFwActionModal(){
+            const name = (document.getElementById('fwActName').value || '').trim();
+            const label = (document.getElementById('fwActLabel').value || '').trim();
+            const level = document.getElementById('fwActLevel').value || 'record';
+            const endpoint = (document.getElementById('fwActEndpoint').value || '').trim();
+            const icon = (document.getElementById('fwActIcon').value || '').trim() || 'fa-bolt';
+            const badge_color = (document.getElementById('fwActColor').value || '').trim() || '#059669';
+            const render = (document.getElementById('fwActRender').value || '').trim();
+            const replace = document.getElementById('fwActReplace').value || 'new';
+
+            if(!name || !/^[A-Za-z0-9_]+$/.test(name)){
+                alert('الاسم البرمجي مطلوب (أحرف إنجليزية وأرقام و _ فقط)');
+                return;
+            }
+            if(!label){
+                alert('اسم العرض مطلوب');
+                return;
+            }
+            if(!endpoint){
+                alert('المسار البرمجي (endpoint) مطلوب');
+                return;
+            }
+
+            const item = { name, label, level, endpoint, icon, badge_color };
+            if(render) item.render = render;
+            if(replace && replace !== 'new') item.replace = replace;
+
+            if(fwActionIdx >= 0 && fwActionIdx < fwActions.length){
+                fwActions[fwActionIdx] = item;
+            } else {
+                if(fwActions.some(a=>a.name === name)){
+                    alert('يوجد إجراء بنفس الاسم البرمجي بالفعل');
+                    return;
+                }
+                fwActions.push(item);
+            }
+            closeFwActionModal();
+            fwRenderSheet();
+        }
+
+        function fwToggleActionPreset(presetIdx){
+            const p = FW_ACTION_PRESETS[presetIdx];
+            if(!p) return;
+            const existingIdx = fwActions.findIndex(a=>a.name === p.name);
+            if(existingIdx >= 0){
+                fwActions.splice(existingIdx, 1);
+            } else {
+                const item = {
+                    name: p.name,
+                    label: p.label,
+                    level: p.level,
+                    endpoint: p.endpoint,
+                    icon: p.icon,
+                    badge_color: p.badge_color
+                };
+                if(p.render) item.render = p.render;
+                if(p.replace) item.replace = p.replace;
+                fwActions.push(item);
+            }
+            fwRenderSheet();
+        }
+
+        function fwMoveAction(i, dir){
+            const j = i + dir;
+            if(j < 0 || j >= fwActions.length) return;
+            const tmp = fwActions[i];
+            fwActions[i] = fwActions[j];
+            fwActions[j] = tmp;
             fwRenderSheet();
         }
         // ── حقل الاسم: name (مفتاح @) + default/single/plural لكل locale ──
@@ -2083,7 +2472,7 @@ function fwApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof c
                 description: document.getElementById('fmlDescription').value.trim(),
                 icon: document.getElementById('fmlIcon').value,
                 tabs: fwTabs.map((t, i)=>({id: t.id, name: t.alias || t.name, alias: t.alias || t.name, sort_order: i + 1, visibleIf: t.visibleIf || '', is_main: !!t.is_main})),
-                fields, details, overwrite: !!fwEditMode
+                fields, details, actions: fwActions, overwrite: !!fwEditMode
             };
         }
         function fwIsMainInput(x){

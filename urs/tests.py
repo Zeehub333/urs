@@ -1198,3 +1198,73 @@ class OracleClientUtilTests(SimpleTestCase):
             })
             self.assertEqual(obj.name, "اونكس تعافي")
             m_filter.assert_called_with(name="اونكس تعافي")
+
+    def test_password_encryption_algorithms_and_shift(self):
+        from fmlk_engine.crypto import list_password_algorithms, encrypt_or_hash_password, verify_password_algorithm
+        from fmlk_engine.field_types import get_type, CONFIG_ATTRS
+        # 1. Config attributes & registry
+        self.assertIn("hash_algo", CONFIG_ATTRS["password"])
+        self.assertIn("shift", CONFIG_ATTRS["password"])
+        pw_t = get_type("password")
+        self.assertIn("hash_algo", pw_t.get("attrs", []))
+        self.assertIn("shift", pw_t.get("attrs", []))
+
+        # 2. 20 algorithms count & order
+        algos = list_password_algorithms()
+        self.assertEqual(len(algos), 20)
+        self.assertEqual(algos[0]["key"], "caesar")
+        self.assertEqual(algos[-1]["key"], "scrypt")
+
+        # 3. Plaintext ("none" / "لا شيء")
+        pw = "MyPass123_@#!"
+        self.assertEqual(encrypt_or_hash_password(pw, "none"), pw)
+        self.assertTrue(verify_password_algorithm(pw, pw, "none"))
+
+        # 4. Caesar with positive & negative unicode shift
+        enc_pos = encrypt_or_hash_password(pw, "caesar", shift=4)
+        self.assertTrue(enc_pos.startswith("caesar$4$"))
+        self.assertTrue(verify_password_algorithm(pw, enc_pos))
+        self.assertFalse(verify_password_algorithm("wrong_password", enc_pos))
+
+        enc_neg = encrypt_or_hash_password(pw, "caesar", shift=-5)
+        self.assertTrue(enc_neg.startswith("caesar$-5$"))
+        self.assertTrue(verify_password_algorithm(pw, enc_neg))
+
+        # 5. All 20 algorithms encrypt and verify properly
+        for a in algos:
+            k = a["key"]
+            enc = encrypt_or_hash_password(pw, k)
+            self.assertTrue(verify_password_algorithm(pw, enc, k), f"Failed for algo {k}")
+
+        # 6. Engine integration
+        from fmlk_engine.engine import hash_secret, verify_secret
+        eng_enc = hash_secret(pw, algorithm="caesar", shift=7)
+        self.assertTrue(eng_enc.startswith("caesar$7$"))
+        self.assertTrue(verify_secret(pw, eng_enc))
+
+    def test_custom_actions_roundtrip_and_compiler(self):
+        from fmlk_engine.compiler import FMLKFormCompiler
+        xml = """<fml>
+          <fml_metadata name="test" displayName="Test" table="t"/>
+          <fields><field name="id" dataType="INTEGER" primary_key="true"/></fields>
+          <custom_actions>
+            <action name="test_connection" label="اختبار الاتصال" endpoint="/api/connections/test/" icon="fa-plug-circle-check" badge_color="#059669" level="record"/>
+            <action name="conn_stats" label="إحصائيات الاتصال" endpoint="/api/connections/stats/" render="modals/conn_stats.html" icon="fa-chart-simple" badge_color="#4f46e5" level="record"/>
+            <action name="export_data" label="تصدير" endpoint="/api/fmlk/export/" icon="fa-file-excel" badge_color="#16a34a" level="view"/>
+          </custom_actions>
+        </fml>"""
+        comp = FMLKFormCompiler.from_string(xml)
+        actions = comp.actions()
+        self.assertEqual(len(actions), 3)
+        self.assertEqual(actions[0].name, "test_connection")
+        self.assertEqual(actions[0].label, "اختبار الاتصال")
+        self.assertEqual(actions[0].badge_color, "#059669")
+        self.assertEqual(actions[0].level, "record")
+        self.assertEqual(actions[1].render, "modals/conn_stats.html")
+        self.assertEqual(actions[2].level, "view")
+
+        # Test dictionary export format
+        dicts = [a.to_dict() for a in actions]
+        self.assertEqual(dicts[0]["endpoint"], "/api/connections/test/")
+        self.assertEqual(dicts[1]["render"], "modals/conn_stats.html")
+        self.assertEqual(dicts[2]["badge_color"], "#16a34a")

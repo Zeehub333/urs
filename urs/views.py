@@ -4379,11 +4379,13 @@ def api_fmlk_lookups(request):
         return JsonResponse({"error": str(e)}, status=400)
 
 def api_fmlk_field_types(request):
-    """GET /api/fmlk/field-types/ → registry of supported field types."""
+    """GET /api/fmlk/field-types/ → registry of supported field types and password encryption algorithms."""
     try:
         from fmlk_engine.field_types import list_types
+        from fmlk_engine.crypto import list_password_algorithms
         types = list_types()
-        return JsonResponse({"types": types, "total": len(types)})
+        pw_algos = list_password_algorithms()
+        return JsonResponse({"types": types, "total": len(types), "password_algorithms": pw_algos})
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=400)
 
@@ -4686,7 +4688,8 @@ def api_models_design_save(request, app_name):
                 _has_fx = bool((f.get("formula") or f.get("calc_expr") or "").strip())
                 for _ck in ("parent_field", "sync_source", "auto_condition", "calc_expr", "poly_types",
                             "tree_parent", "sub_fields", "grid_columns", "grid_rows",
-                            "matrix_rows", "matrix_cols", "separator", "placeholder_add", "allow_new"):
+                            "matrix_rows", "matrix_cols", "separator", "placeholder_add", "allow_new",
+                            "hash_algo", "shift"):
                     if _ck == "calc_expr" and not _has_fx:
                         continue  # شبح صيغة قديمة بعد إلغاء المحسوب — لا تُحفظ
                     if _cfg.get(_ck) not in (None, ""):
@@ -4825,7 +4828,17 @@ def api_models_design_save(request, app_name):
                         if _cfx:
                             ce.set("formula", _cfx)
                             ce.set("calc_mode", "computed")
-        acts = data.get("actions") or []
+        acts = data.get("actions") if "actions" in data else data.get("custom_actions")
+        if acts is None and target.exists():
+            try:
+                from fmlk_engine.compiler import FMLKFormCompiler
+                _old_comp = FMLKFormCompiler(path=target)
+                _old_acts = [a.to_dict() for a in _old_comp.actions()]
+                if _old_acts:
+                    acts = _old_acts
+            except Exception:
+                pass
+        acts = acts or []
         if acts:
             ca_el = ET.SubElement(fml, "custom_actions")
             for a in acts:
@@ -4843,7 +4856,7 @@ def api_models_design_save(request, app_name):
                 if rn and rn.endswith(".html") and ".." not in rn and not rn.startswith("/") and ":" not in rn:
                     a_el.set("render", rn)
                 lv = (a.get("level") or "record").strip().lower()
-                a_el.set("level", lv if lv in ("record", "form") else "record")
+                a_el.set("level", lv if lv in ("record", "form", "view") else "record")
                 rp = (a.get("replace") or "new").strip().lower()
                 a_el.set("replace", rp if rp in ("new", "add", "edit", "delete", "save") else "new")
         raw = ET.tostring(fml, encoding="utf-8")
@@ -5837,6 +5850,47 @@ def api_fmlk_display_map(request):
         return JsonResponse({"error": str(e)}, status=500)
 
 
+def _sync_fmlk_conn_to_django(payload: dict, rid: Any = None):
+    """Sync values saved via FMLK for urs_connection into Django's Connection model immediately."""
+    from .models import Connection
+    from fmlk_engine.crypto import decrypt_if_reversible
+    import re as _re_s
+    if not isinstance(payload, dict):
+        return
+    nm = str(payload.get("name") or "").strip()
+    c = None
+    if rid and str(rid).isdigit():
+        c = Connection.objects.filter(id=int(rid)).first()
+    if not c and nm:
+        c = Connection.objects.filter(name=nm).first()
+    if not c and nm:
+        c = Connection(name=nm)
+    if not c:
+        return
+    for k in ("host", "user", "instance", "instance_name", "schema", "endpoint", "description", "conn_type"):
+        if k in payload and payload[k] is not None:
+            setattr(c, k, str(payload[k]))
+    if "engine" in payload and payload["engine"]:
+        c.engine = str(payload["engine"])
+    if "port" in payload and payload["port"] is not None and str(payload["port"]).strip() != "":
+        try:
+            c.port = int(payload["port"])
+        except Exception:
+            pass
+    if "is_local" in payload:
+        c.is_local = bool(payload["is_local"])
+    if "is_queryable" in payload:
+        c.is_queryable = bool(payload["is_queryable"])
+    if "password" in payload and payload["password"] is not None:
+        pw = str(payload["password"])
+        if not _re_s.fullmatch(r"\*+", pw):
+            c.password = decrypt_if_reversible(pw)
+    try:
+        c.save()
+    except Exception:
+        pass
+
+
 @csrf_exempt
 def api_fmlk_create(request):
     try:
@@ -5846,6 +5900,11 @@ def api_fmlk_create(request):
         payload = data.get("data", {})
         eng = _fmlk_get_engine(fml, app)
         res = eng.create_record(payload)
+        if eng and "urs_connection" in str(getattr(eng, "_table", "")).lower():
+            try:
+                _sync_fmlk_conn_to_django(payload, res.get("id"))
+            except Exception:
+                pass
         return JsonResponse(res)
     except Exception as e:
         _r = _fmlk_records_err(e, locals().get("eng"), lambda: eng.create_record(payload))
@@ -5862,6 +5921,11 @@ def api_fmlk_update(request):
         eng = _fmlk_get_engine(fml, app)
         pk = {"id": rid}
         res = eng.update_record(pk, payload)
+        if eng and "urs_connection" in str(getattr(eng, "_table", "")).lower():
+            try:
+                _sync_fmlk_conn_to_django(payload, rid)
+            except Exception:
+                pass
         return JsonResponse(res)
     except Exception as e:
         _r = _fmlk_records_err(e, locals().get("eng"), lambda: eng.update_record(pk, payload))
@@ -11497,6 +11561,44 @@ def api_connection_test_record(request):
                         except Exception:
                             v = getattr(obj, "port", 5432)
                     setattr(obj, k, v)
+
+        from fmlk_engine.crypto import decrypt_if_reversible
+        import re as _re_pw
+        raw_pw = (data.get("form") or {}).get("password") or (data.get("record") or {}).get("password") or rec.get("password")
+        if raw_pw and not str(raw_pw).startswith("pbkdf2_sha256$") and not _re_pw.fullmatch(r"\*+", str(raw_pw)):
+            setattr(obj, "password", decrypt_if_reversible(str(raw_pw)))
+            if getattr(obj, "id", None) and hasattr(obj, "save"):
+                try:
+                    obj.save()
+                except Exception:
+                    pass
+        elif getattr(obj, "password", None):
+            setattr(obj, "password", decrypt_if_reversible(str(obj.password)))
+
+        if str(getattr(obj, "password", "")).startswith("pbkdf2_sha256$"):
+            try:
+                eff = _wizard_effective_conn()
+                if eff and getattr(eff, "engine", "") == "postgres":
+                    sch = getattr(obj, "schema", "") or getattr(eff, "schema", "") or "main_hq_2026"
+                    import psycopg2
+                    from config.dbconf import dbpass_resolve
+                    _pwp = dbpass_resolve(eff.password) or eff.password
+                    _pgc = psycopg2.connect(dbname=(eff.instance or "urs"), user=eff.user,
+                                           password=_pwp, host=eff.host, port=int(eff.port or 5432), connect_timeout=3)
+                    _pgc.autocommit = True
+                    _cur = _pgc.cursor()
+                    _cur.execute(f'SELECT password FROM "{sch}"."urs_connection" WHERE name=%s LIMIT 1', (obj.name,))
+                    _row = _cur.fetchone()
+                    _pgc.close()
+                    if _row and _row[0] and not str(_row[0]).startswith("pbkdf2_sha256$"):
+                        setattr(obj, "password", decrypt_if_reversible(str(_row[0])))
+                        if hasattr(obj, "save"):
+                            try:
+                                obj.save()
+                            except Exception:
+                                pass
+            except Exception:
+                pass
 
         ok, payload, status = _test_connection_obj(obj)
         _err2 = ""
