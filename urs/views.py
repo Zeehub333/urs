@@ -11296,12 +11296,21 @@ def api_iot_mirror_sync(request):
 
 
 def _resolve_connection_record(rec):
-    """مطابقة سجل اتصال من صف شبكة (id/__pk_id/الاسم)."""
+    """مطابقة سجل اتصال من صف شبكة (الاسم أولاً ثم id لتجنب تعارض معرفات PG مع Django)."""
     from .models import Connection
+    nm = ((rec or {}).get("name") or (rec or {}).get("الاسم") or "").strip()
+    if nm:
+        obj = Connection.objects.filter(name=nm).first()
+        if obj is not None:
+            return obj
     rid = (rec or {}).get("id") or (rec or {}).get("__pk_id") or (rec or {}).get("ID")
     if rid and str(rid).isdigit():
-        return Connection.objects.get(id=int(rid))
-    return Connection.objects.get(name=((rec or {}).get("name") or (rec or {}).get("الاسم") or ""))
+        obj = Connection.objects.filter(id=int(rid)).first()
+        if obj is not None:
+            return obj
+    if nm:
+        return Connection.objects.get(name=nm)
+    raise Connection.DoesNotExist("الاتصال غير محدد")
 
 
 def _list_tables_obj(obj, schema_override=None):
@@ -11351,7 +11360,9 @@ def api_connection_stats(request):
         return JsonResponse({"error": "POST required"}, status=405)
     try:
         data = json.loads(request.body.decode() or "{}")
-        rec = data.get("record") or {}
+        rec = data.get("record") or data.get("form") or {}
+        if not rec.get("id") and data.get("record_id"):
+            rec["id"] = data["record_id"]
         from .models import Connection
         try:
             obj = _resolve_connection_record(rec)

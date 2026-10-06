@@ -1170,3 +1170,15 @@ class OracleClientUtilTests(SimpleTestCase):
         self.assertEqual(tc.label, "اختبار الاتصال")
         self.assertEqual(tc.endpoint, "/api/connections/test/")
         self.assertEqual(tc.level, "record")
+
+    def test_resolve_connection_record_prefers_name_over_conflicting_id(self):
+        from urs.views import _resolve_connection_record
+        from urs.models import Connection
+        with mock.patch("urs.models.Connection.objects.filter") as m_filter:
+            m_target = mock.Mock(spec=Connection)
+            m_target.id = 16
+            m_target.name = "اونكس تعافي"
+            m_filter.return_value.first.return_value = m_target
+            obj = _resolve_connection_record({"id": 2, "name": "اونكس تعافي"})
+            self.assertEqual(obj.name, "اونكس تعافي")
+            m_filter.assert_called_with(name="اونكس تعافي")
