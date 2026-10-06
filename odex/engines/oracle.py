@@ -31,6 +31,11 @@ class OracleEngine:
         self.dsn, self.user, self.password, self.conn = dsn, user, password, None
     def connect(self):
         if oracledb is None: raise RuntimeError("pip install oracledb")
+        try:
+            from urs.oracle_util import ensure_oracle_client
+            ensure_oracle_client()
+        except Exception:
+            pass
         self.conn = oracledb.connect(user=self.user, password=self.password, dsn=self.dsn); return self.conn
     def disconnect(self):
         if self.conn: self.conn.close(); self.conn=None

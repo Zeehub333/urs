@@ -779,10 +779,12 @@ class FMLKFormEngine:
             out[k] = v
         return out
 
-    @staticmethod
-    def _hash_secrets(data: Dict[str, Any], secret_names: set) -> Dict[str, Any]:
+    def _hash_secrets(self, data: Dict[str, Any], secret_names: set) -> Dict[str, Any]:
         """Replace new plaintext secrets with HASH (idempotent: hashes/empties pass through)."""
         if not data or not secret_names:
+            return dict(data or {})
+        tbl = str(getattr(self, "table", "") or "").lower()
+        if tbl.endswith("urs_connection"):
             return dict(data or {})
         out = dict(data)
         for k in secret_names:

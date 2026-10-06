@@ -10852,34 +10852,33 @@ def api_connection_delete(request, conn_id):
         return JsonResponse({"error": str(e)}, status=500)
 
 
-_oracle_thick_done = False
-
-
 def _oracle_connect_obj(obj):
-    """اتصال أوراكل: خفيف أولاً، ثم سميك تلقائياً عند DPY-3015 (مدقق قديم) — بعزل عن ERP."""
+    """اتصال أوراكل: تفعيل الوضع السميك (thick mode) تلقائياً عند توفر عميل أوراكل أو عند DPY-3015."""
     import oracledb
-    global _oracle_thick_done
+    from .oracle_util import ensure_oracle_client, oracle_error_hint
+    ensure_oracle_client()
     dsn = f"{obj.host}:{int(obj.port or 1521)}/{obj.instance or 'XEPDB1'}"
+    pw = getattr(obj, "password", "") or ""
     try:
-        return oracledb.connect(user=obj.user, password=obj.password or "", dsn=dsn)
+        from config.dbconf import dbpass_resolve
+        pw = dbpass_resolve(pw) or pw
+    except Exception:
+        pass
+    try:
+        return oracledb.connect(user=obj.user, password=pw, dsn=dsn)
     except Exception as e:
-        if "3015" not in str(e):
-            raise
-        if not _oracle_thick_done:
-            cfg = BASE_DIR / "oracle_config"
-            cfg.mkdir(exist_ok=True)
-            sqlnet = cfg / "sqlnet.ora"
-            if not sqlnet.exists():
-                sqlnet.write_text("SQLNET.AUTHENTICATION_SERVICES=(NONE)\n", encoding="utf-8")
-            try:
-                oracledb.init_oracle_client(config_dir=str(cfg))
-            except Exception:
+        msg = str(e)
+        if "3015" in msg:
+            if ensure_oracle_client():
                 try:
-                    oracledb.init_oracle_client()
-                except Exception:
-                    pass
-            _oracle_thick_done = True
-        return oracledb.connect(user=obj.user, password=obj.password or "", dsn=dsn)
+                    return oracledb.connect(user=obj.user, password=pw, dsn=dsn)
+                except Exception as e2:
+                    hint = oracle_error_hint(e2, user=getattr(obj, "user", ""), password=pw)
+                    raise RuntimeError(hint) from e2
+        hint = oracle_error_hint(e, user=getattr(obj, "user", ""), password=pw)
+        if hint != msg:
+            raise RuntimeError(hint) from e
+        raise
 
 
 def _sqlserver_error_hint(msg):
@@ -10943,31 +10942,22 @@ def _test_connection_obj(obj):
                 import oracledb
             except ImportError:
                 return False, {"ok": False, "error": "تعذر التحقق: oracledb غير مثبت"}, 400
+            from .oracle_util import is_thick_mode, oracle_error_hint
             try:
                 conn = _oracle_connect_obj(obj)
                 cur = conn.cursor()
                 cur.execute("SELECT 1 FROM DUAL")
                 cur.fetchone()
                 conn.close()
-                note = "تم عبر Oracle Client (thick mode)" if _oracle_thick_done else ""
+                note = "تم عبر Oracle Client (thick mode)" if is_thick_mode() else ""
                 out = {"ok": True, "engine": obj.engine, "user": obj.user}
                 if note:
                     out["note"] = note
                 return True, out, 200
             except Exception as e:
-                msg = str(e)
-                if "ORA-12638" in msg:
-                    return False, {"ok": False, "error": (
-                        "فشل جلب بيانات اعتماد Windows (NTS). "
-                        "الحلول: 1) أدخل مستخدم وكلمة مرور قاعدة البيانات صراحةً في الاتصال (وليس مصادقة Windows)، "
-                        "2) اضبط ملف sqlnet.ora بوضع SQLNET.AUTHENTICATION_SERVICES=(NONE)، "
-                        "3) راجع DBA للتأكد من السماح بالمصادقة بكلمة المرور")}, 400
-                if "3015" in msg:
-                    return False, {"ok": False, "error": (
-                        "نوع مدقق كلمة المرور (0x939) غير مدعوم حتى بالوضع السميك هنا. "
-                        "الحل الجذري (مرة واحدة من DBA): ALTER USER " + (obj.user or "?") + " IDENTIFIED BY <password>; "
-                        "ثم أعد الاختبار")}, 400
-                return False, {"ok": False, "error": msg}, 400
+                pw = getattr(obj, "password", "") or ""
+                hint = oracle_error_hint(e, user=getattr(obj, "user", ""), password=pw)
+                return False, {"ok": False, "error": hint}, 400
         if obj.engine == "sqlserver":
             try:
                 import pyodbc

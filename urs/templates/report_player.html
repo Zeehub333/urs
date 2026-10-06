@@ -1533,7 +1533,7 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
         }
         // ── الأخطاء: SQL/Python ← مودال (نسخ + اسأل AI) | RML ← توست ──
         function isSqlPyError(msg){
-            return /syntax error|relation .*does not exist|column .*does not exist|schema .*does not exist|does not exist|LINE \d+|SELECT\s|Traceback|File ".*", line \d+|psycopg2|oracledb|ORA-\d+|permission denied|timed out|timeout|connection (refused|failed|was closed)|duplicate key|violates .*constraint|current transaction is aborted|Table .*doesn't exist|Unknown column|SQL/i.test(String(msg || ''));
+            return /syntax error|relation .*does not exist|column .*does not exist|schema .*does not exist|does not exist|LINE \d+|SELECT\s|Traceback|File ".*", line \d+|psycopg2|oracledb|ORA-\d+|DPY-\d+|permission denied|timed out|timeout|connection (refused|failed|was closed)|duplicate key|violates .*constraint|current transaction is aborted|Table .*doesn't exist|Unknown column|SQL/i.test(String(msg || ''));
         }
         function errCopyText(txt, okMsg){
             const done = ()=>{ try{ notify(okMsg || 'تم النسخ', 'success'); }catch(e){} };

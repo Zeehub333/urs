@@ -1139,3 +1139,22 @@ class UserProfileAndHeaderTests(SimpleTestCase):
             data = json.loads(res.content)
             self.assertEqual(data.get("full_name"), "Ahmed Mohamed")
             self.assertEqual(req.session["ws_user"]["full_name"], "Ahmed Mohamed")
+
+
+class OracleClientUtilTests(SimpleTestCase):
+    def test_oracle_error_hints(self):
+        from urs.oracle_util import oracle_error_hint
+        h3015 = oracle_error_hint("DPY-3015: password verifier type 0x939 is not supported", user="rpt")
+        self.assertIn("0x939", h3015)
+        self.assertIn("rpt", h3015)
+
+        h1017 = oracle_error_hint("ORA-01017: invalid username/password", user="rpt", password="pbkdf2_sha256$600000$test")
+        self.assertIn("ORA-01017", h1017)
+        self.assertIn("hash", h1017)
+
+    def test_fmlk_engine_does_not_hash_connection_passwords(self):
+        from fmlk_engine.engine import FMLKFormEngine
+        eng = mock.Mock(spec=FMLKFormEngine)
+        eng.table = "urs_connection"
+        out = FMLKFormEngine._hash_secrets(eng, {"password": "plain_password_123"}, {"password"})
+        self.assertEqual(out.get("password"), "plain_password_123")
