@@ -804,15 +804,24 @@
                         </div>`;
                     }
                     if(it === 'email'){
-                        const ph = d.domain ? `admin@${d.domain}` : 'user@example.com';
+                        const domRaw = (document.getElementById('wsF_domain')?.value || d.domain || '').trim().replace(/^@+/, '');
+                        const domDisplay = domRaw ? ('@' + domRaw) : '@domain.com';
                         return `<div class="col-span-2 sm:col-span-1">
                             <div class="flex items-center justify-between mb-1">
                                 <label class="block font-semibold text-slate-700">${fl} ${reqBadge}</label>
                                 <span class="text-[9px] text-slate-400 font-mono">${fn} (${dt})</span>
                             </div>
-                            <div class="relative">
-                                <input type="email" id="su_f_${fn}" data-ws-su-extra="${fn}" data-ws-su-type="email" placeholder="${_escA(ph)}" dir="ltr" ${reqAttr} class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 font-mono text-xs pr-3 pl-8">
-                                <span class="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs pointer-events-none"><i class="fa-solid fa-envelope"></i></span>
+                            <div class="flex items-stretch rounded-xl border border-slate-200 overflow-hidden bg-white shadow-xs focus-within:ring-2 focus-within:ring-amber-500/20 focus-within:border-amber-500" dir="ltr">
+                                <div class="relative flex-1 min-w-0">
+                                    <input type="text" id="su_f_${fn}" data-ws-su-email-local="${fn}" data-ws-su-label="${fl}" placeholder="admin" dir="ltr" ${reqAttr} oninput="this.dataset.userEdited='1'" class="w-full h-full bg-transparent px-3 py-2 font-mono text-xs text-slate-800 outline-none border-0">
+                                </div>
+                                <div class="flex items-center bg-slate-100 border-l border-slate-200 px-2 select-none">
+                                    <input type="text" id="su_f_${fn}_dom" data-ws-su-email-domain="${fn}" value="${_escA(domDisplay)}" readonly tabindex="-1" title="دومين مساحة العمل (غير قابل للتعديل إلا من إعدادات مساحة العمل)" dir="ltr" class="w-32 sm:w-40 bg-transparent font-mono text-xs font-bold text-slate-600 outline-none border-0 cursor-not-allowed select-none">
+                                </div>
+                            </div>
+                            <div class="flex items-center justify-between mt-1 text-[10px] text-slate-400">
+                                <span class="flex items-center gap-1"><i class="fa-solid fa-lock text-[9px] text-slate-400"></i> دومين مساحة العمل (غير قابل للتعديل إلا من الإعدادات)</span>
+                                <button type="button" onclick="wsSecGo('general'); try{document.getElementById('wsF_domain').focus();}catch(e){}" class="text-amber-600 hover:text-amber-700 font-bold hover:underline cursor-pointer">تعديل الدومين &larr;</button>
                             </div>
                         </div>`;
                     }
@@ -880,6 +889,33 @@
                 </div>
                 <p id="wsSuMsg" class="text-[11px] text-rose-600 font-bold min-h-[16px] mt-2"></p>
                 <button onclick="wsSuCreate()" class="mt-1 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition cursor-pointer"><i class="fa-solid fa-crown"></i> إنشاء مشرف عام</button>`;
+                try{
+                    const _domInput = document.getElementById('wsF_domain');
+                    if(_domInput && !(_domInput.dataset.suDomBound)){
+                        _domInput.dataset.suDomBound = '1';
+                        _domInput.addEventListener('input', ()=>{
+                            const raw = String(_domInput.value || '').trim().replace(/^@+/, '');
+                            const disp = raw ? ('@' + raw) : '@domain.com';
+                            document.querySelectorAll('#wsSuBox [data-ws-su-email-domain]').forEach(inp=>{
+                                inp.value = disp;
+                            });
+                        });
+                    }
+                }catch(e){}
+                try{
+                    const _uInp = document.getElementById('wsSu_user');
+                    if(_uInp && !(_uInp.dataset.suSyncBound)){
+                        _uInp.dataset.suSyncBound = '1';
+                        _uInp.addEventListener('input', ()=>{
+                            const uval = _uInp.value.trim();
+                            document.querySelectorAll('#wsSuBox [data-ws-su-email-local]').forEach(emInp=>{
+                                if(!emInp.dataset.userEdited){
+                                    emInp.value = uval;
+                                }
+                            });
+                        });
+                    }
+                }catch(e){}
             }catch(e){ box.innerHTML = `<p class="text-rose-500 text-[11px]">${String((e && e.message) || e).slice(0, 200)}</p>`; }
         }
         async function wsSuCreate(){
@@ -890,6 +926,14 @@
             if(!username){ if(msg) msg.textContent = 'اسم المستخدم مطلوب'; return; }
             if(pw1.length < 6){ if(msg) msg.textContent = 'كلمة المرور 6 أحرف فأكثر'; return; }
             if(pw1 !== pw2){ if(msg) msg.textContent = 'تأكيد كلمة المرور غير مطابق'; return; }
+            for(const el of document.querySelectorAll('#wsSuBox [data-ws-su-email-local][required]')){
+                if(!String(el.value || '').trim()){
+                    const lbl = el.getAttribute('data-ws-su-label') || 'البريد الإلكتروني';
+                    if(msg) msg.textContent = `حقل "${lbl}" مطلوب`;
+                    el.focus();
+                    return;
+                }
+            }
             const tEl = document.getElementById('wsF_users_table');
             const extra = {};
             try{
@@ -902,6 +946,22 @@
                     } else {
                         const val = String(el.value || '').trim();
                         if(val !== '') extra[k] = val;
+                    }
+                });
+                document.querySelectorAll('#wsSuBox [data-ws-su-email-local]').forEach(el=>{
+                    const k = el.getAttribute('data-ws-su-email-local') || '';
+                    if(!k) return;
+                    const local = String(el.value || '').trim();
+                    if(!local) return;
+                    const domEl = document.querySelector(`#wsSuBox [data-ws-su-email-domain="${k}"]`);
+                    let dom = domEl ? String(domEl.value || '').trim().replace(/^@+/, '') : '';
+                    if(!dom) dom = String(document.getElementById('wsF_domain')?.value || '').trim().replace(/^@+/, '');
+                    if(local.includes('@')){
+                        extra[k] = local;
+                    } else if(dom){
+                        extra[k] = local + '@' + dom;
+                    } else {
+                        extra[k] = local;
                     }
                 });
             }catch(e){}
