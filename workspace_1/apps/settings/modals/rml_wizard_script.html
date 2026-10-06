@@ -18,6 +18,7 @@ function wizApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof 
         let wizardTableOpts = {}; // أدوار الجداول {conn||table: {is_default, is_sub}}
         let wizardGroups = []; // {id, name, order, level, columns:[alias]} — header spanning
         let wizardGroupLevels = 1; // عدد مستويات المجموعات (1 = رئيسية فقط، 2+ = فرعية)
+        let wizardDocParams = []; // [{id, column, label, type, op, required, default_value}] — المدخلات المطلوبة للمستندي
         function showRmlStep(n){
             rmlWizardStep = n;
             const _num = document.getElementById('rmlCurrentStepNum') || document.getElementById('wbCompatStepNum');
@@ -95,6 +96,7 @@ function wizApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof 
             wizardGeneralWhere = '';
             wizardGroups = [];
             wizardGroupLevels = 1;
+            wizardDocParams = [];
             const _dtEl = document.getElementById('wizardDocTemplate');
             if(_dtEl) _dtEl.value = '';
             const _dtPrev = document.getElementById('wizardDocTemplatePreview');
@@ -162,6 +164,7 @@ function wizApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof 
                 wizardRules = (data.rules || []).map((r,i)=>({id:String(r.id||i+1), name:r.name||'', display:r.display||r.name||'', icon:r.icon||'', description:r.description||'', expr:r.expr||'', connection_id:String(r.connection_id||''), sources:(r.sources||[]).map(String), variables:(r.variables||[]).map(v=>({name:v.name||'', display:v.display||v.name||'', type:v.type||'text', options:(v.options||[]).map(String)})), policies:(r.policies||[]).map(p=>({id:String(p.id||''), name:p.name||'', priority:(p.priority ?? 100), is_default:!!p.is_default, match:p.match||{}, values:p.values||{}}))}));
                 wizardGroups = (data.groups || []).map((g,i)=>({id:String(g.id||i+1), name:g.name||'', order:parseInt(g.order)||i+1, level:Math.max(1, Math.min(parseInt(g.level)||1, 5)), columns:(g.columns||[]).map(a=>String(a))}));
                 try{ wizardGroupLevels = Math.max(1, Math.min(parseInt(md.group_levels ?? md.groupLevels ?? 1) || 1, 5)); }catch(e){ wizardGroupLevels = 1; }
+                wizardDocParams = (data.doc_params || data.docParams || (md.doc_params || md.docParams) || []).map((p,i)=>({id:String(p.id||'dp_'+(i+1)), column:String(p.column||p.field||p.name||''), label:String(p.label||p.display||p.column||''), type:String(p.type||p.dataType||p.data_type||'text'), op:String(p.op||p.operator||'equals'), required:(p.required===undefined ? true : !!(p.required && p.required!=='false' && p.required!=='0')), default_value:String(p.default_value||p.defaultValue||'')}));
                 wizardDocTemplate = data.doc_template || data.docTemplate || (md.doc_template || md.docTemplate) || '';
                 wizardGeneralWhere = data.general_where || data.generalWhere || (md.general_where || md.generalWhere) || '';
                 const _dtEl2 = document.getElementById('wizardDocTemplate');
@@ -766,6 +769,7 @@ function wizApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof 
                 const mb = document.getElementById('wizardMainColsBox');
                 if(mb) mb.classList.remove('hidden');
             }
+            if(typeof rdRenderElementsTree === 'function') rdRenderElementsTree();
         }
         function setColSubTab(tab){
             colSubTab = (tab === 'sub') ? 'sub' : 'main';
@@ -776,6 +780,7 @@ function wizApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof 
             const nav = document.getElementById('colSubNav');
             const mb = document.getElementById('wizardMainColsBox');
             const box = document.getElementById('wizardDetailBox');
+            if(typeof rdRenderElementsTree === 'function') rdRenderElementsTree();
             if(!nav || t === 'master'){ if(mb) mb.classList.remove('hidden'); if(box && t === 'master') box.classList.add('hidden'); return; }
             const isSub = colSubTab === 'sub';
             if(mb) mb.classList.toggle('hidden', isSub);
@@ -1607,7 +1612,7 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
         let rptSel = {kind: null, idx: -1};
         let rptPrev = {cols: [], rows: [], loading: false, error: '', sql: ''};
         let rptPrevTimer = null;
-        let rdTreeOpen = {cols: true, det: true, groups: true};
+        let rdTreeOpen = {cols: true, det: true, groups: true, docParams: true};
         let rptExpandedRows = new Set();
         function rdTreeToggle(branch){
             rdTreeOpen[branch] = !rdTreeOpen[branch];
@@ -1637,6 +1642,10 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
         function rdRenderElementsTree(){
             const host = document.getElementById('rdElementsTree');
             if(!host) return;
+
+            const rtype = ((document.getElementById('rmlReportType') || {}).value || 'master');
+            const showDetail = (rtype === 'detail' || rtype === 'doc');
+            const isDoc = (rtype === 'doc');
 
             const cols = wizardColumns || [];
             const colsHtml = cols.map((c, i)=>{
@@ -1673,6 +1682,18 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                 </div>`;
             }).join('') || '<p class="text-[10px] text-slate-400 px-2 py-1">لا توجد مجموعات بعد</p>';
 
+            const dparams = wizardDocParams || [];
+            const docParamsHtml = dparams.map((p, i)=>{
+                const isSel = rptSel.kind === 'doc_param' && rptSel.idx === i;
+                return `<div class="rd-tree-leaf flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs cursor-pointer transition select-none ${isSel ? 'bg-sky-50 border border-sky-200 text-sky-900 font-bold' : 'hover:bg-slate-100 text-slate-700'}" onclick="rptSelectCol('doc_param', ${i})">
+                    <i class="fa-solid fa-filter text-[10px] text-sky-500"></i>
+                    <span class="flex-1 truncate" title="${rptEsc(p.label || p.column)}">${rptEsc(p.label || p.column || ('مدخل ' + (i+1)))}</span>
+                    <span class="text-[9px] bg-sky-100 text-sky-800 px-1 rounded font-mono">${rptEsc(p.type || 'text')}</span>
+                    ${p.required ? '<span class="text-[9px] text-rose-500 font-bold" title="إلزامي">*</span>' : ''}
+                    <button type="button" class="text-slate-400 hover:text-rose-600 p-0.5" title="حذف" onclick="event.stopPropagation();deleteWizardDocParam(${i})"><i class="fa-solid fa-trash text-[10px]"></i></button>
+                </div>`;
+            }).join('') || '<p class="text-[10px] text-slate-400 px-2 py-1">لا توجد مدخلات مطلوبة بعد — اضغط + للاستيراد</p>';
+
             host.innerHTML = `
             <!-- فرع الأعمدة الرئيسية -->
             <div class="rd-tree-branch">
@@ -1690,7 +1711,8 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                 </div>
             </div>
 
-            <!-- فرع التفاصيل -->
+            <!-- فرع التفاصيل (يظهر فقط في التقرير التحليلي أو المستندي) -->
+            ${showDetail ? `
             <div class="rd-tree-branch">
                 <div class="rd-tree-head flex items-center justify-between p-1.5 rounded-lg select-none cursor-pointer" onclick="rdTreeToggle('det')">
                     <div class="flex items-center gap-1.5 min-w-0">
@@ -1704,7 +1726,24 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                 <div class="rd-tree-children ${rdTreeOpen.det ? '' : 'hidden'} pr-2 pl-1 py-1 space-y-0.5">
                     ${detHtml}
                 </div>
-            </div>
+            </div>` : ''}
+
+            <!-- فرع المدخلات المطلوبة (المستندي فقط) -->
+            ${isDoc ? `
+            <div class="rd-tree-branch">
+                <div class="rd-tree-head flex items-center justify-between p-1.5 rounded-lg select-none cursor-pointer" onclick="rdTreeToggle('docParams')">
+                    <div class="flex items-center gap-1.5 min-w-0">
+                        <i class="fa-solid ${rdTreeOpen.docParams ? 'fa-chevron-down' : 'fa-chevron-left'} text-[10px] text-slate-400"></i>
+                        <i class="fa-solid fa-filter text-sky-600 text-xs"></i>
+                        <span class="font-bold text-xs text-slate-700 truncate">المدخلات المطلوبة</span>
+                        <span class="text-[10px] bg-slate-200/80 text-slate-600 px-1.5 py-0.2 rounded-full font-bold">${dparams.length}</span>
+                    </div>
+                    <button type="button" onclick="event.stopPropagation();openAddDocParamModal()" class="w-5 h-5 rounded hover:bg-sky-100 text-sky-700 flex items-center justify-center text-xs transition" title="استيراد عمود من واقع التقرير كمدخل مطلوب"><i class="fa-solid fa-plus text-[10px]"></i></button>
+                </div>
+                <div class="rd-tree-children ${rdTreeOpen.docParams ? '' : 'hidden'} pr-2 pl-1 py-1 space-y-0.5">
+                    ${docParamsHtml}
+                </div>
+            </div>` : ''}
 
             <!-- فرع المجموعات -->
             <div class="rd-tree-branch">
@@ -1791,6 +1830,7 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                 if(rptSel.kind === 'col') return wizardColumns[rptSel.idx] || null;
                 if(rptSel.kind === 'dcol') return (wizardDetail.columns || [])[rptSel.idx] || null;
                 if(rptSel.kind === 'group') return wizardGroups[rptSel.idx] || null;
+                if(rptSel.kind === 'doc_param') return (wizardDocParams || [])[rptSel.idx] || null;
             }catch(e){}
             return null;
         }
@@ -1810,6 +1850,130 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
             rptPropsRender();
             document.querySelectorAll('.onsel').forEach(el=>el.classList.remove('onsel'));
             rdRenderElementsTree();
+        }
+        /* ── Document Report Required Parameters (المدخلات المطلوبة للمستندي) ── */
+        function deleteWizardDocParam(idx){
+            if(idx < 0 || idx >= wizardDocParams.length) return;
+            wizardDocParams.splice(idx, 1);
+            if(rptSel.kind === 'doc_param' && rptSel.idx === idx){
+                rptCloseProps();
+            } else if(rptSel.kind === 'doc_param' && rptSel.idx > idx){
+                rptSel.idx--;
+            }
+            rdRenderElementsTree();
+            rptPropsRender();
+        }
+        function updateWizardDocParam(idx, key, val){
+            if(!wizardDocParams[idx]) return;
+            wizardDocParams[idx][key] = val;
+            rdRenderElementsTree();
+        }
+        function openAddDocParamModal(){
+            const modal = document.getElementById('docParamPickerModal');
+            if(!modal) return;
+            const inp = document.getElementById('docParamPickerSearch');
+            if(inp) inp.value = '';
+            modal.classList.remove('hidden');
+            renderDocParamPickerList();
+            setTimeout(()=>{ if(inp) inp.focus(); }, 60);
+        }
+        function closeAddDocParamModal(){
+            const modal = document.getElementById('docParamPickerModal');
+            if(modal) modal.classList.add('hidden');
+        }
+        function renderDocParamPickerList(){
+            const list = document.getElementById('docParamPickerList');
+            if(!list) return;
+            const q = ((document.getElementById('docParamPickerSearch') || {}).value || '').trim().toUpperCase();
+            const cols = wizardColumns || [];
+            if(!cols.length){
+                list.innerHTML = '<div class="text-center py-8 text-slate-400 text-xs">لا توجد أعمدة في التقرير بعد — أضف أعمدة من شاشة التقرير أولاً</div>';
+                return;
+            }
+            const filtered = cols.map((c, i)=>({c, i})).filter(({c})=>{
+                if(!q) return true;
+                const al = (c.alias || '').toUpperCase();
+                const nm = (c.name || '').toUpperCase();
+                const ex = (c.expr || '').toUpperCase();
+                return al.includes(q) || nm.includes(q) || ex.includes(q);
+            });
+            if(!filtered.length){
+                list.innerHTML = '<div class="text-center py-6 text-slate-400 text-xs">لا توجد أعمدة مطابقة للبحث</div>';
+                return;
+            }
+            const currentCols = new Set((wizardDocParams || []).map(p => String(p.column || '').trim().toLowerCase()));
+            list.innerHTML = filtered.map(({c, i})=>{
+                const name = c.alias || c.name || ('عمود ' + (i+1));
+                const dt = c.dataType || c.data_type || 'text';
+                const already = currentCols.has(String(name).trim().toLowerCase());
+                return `<div class="p-2.5 rounded-xl border border-slate-200 hover:border-sky-300 hover:bg-sky-50/50 flex items-center justify-between gap-3 transition">
+                    <div class="flex items-center gap-2 min-w-0">
+                        <span class="w-7 h-7 rounded-lg bg-slate-100 text-slate-500 flex items-center justify-center text-xs shrink-0"><i class="fa-solid ${rptEsc(c.icon || 'fa-hashtag')}"></i></span>
+                        <div class="min-w-0">
+                            <div class="font-bold text-slate-800 text-xs truncate">${rptEsc(name)}</div>
+                            <div class="text-[10px] text-slate-400 font-mono" dir="ltr">${rptEsc(c.expr || c.name || '')} • <span class="text-sky-600 font-bold">${rptEsc(dt)}</span></div>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2 shrink-0">
+                        ${already ? '<span class="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-md font-semibold">مضاف</span>' : ''}
+                        <button type="button" onclick="importColumnToDocParam(${i})" class="px-3 py-1 bg-sky-600 hover:bg-sky-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-2xs">
+                            <i class="fa-solid fa-plus text-[10px]"></i>
+                            <span>استيراد</span>
+                        </button>
+                    </div>
+                </div>`;
+            }).join('');
+        }
+        function importColumnToDocParam(colIdx){
+            const col = (wizardColumns || [])[colIdx];
+            if(!col) return;
+            const name = col.alias || col.name;
+            const dt = col.dataType || col.data_type || 'text';
+            const op = (dt === 'date' || dt === 'datetime') ? 'between' : (dt === 'number' ? 'equals' : 'contains');
+            wizardDocParams.push({
+                id: 'dp_' + Date.now() + '_' + Math.floor(Math.random()*1000),
+                column: name,
+                label: name,
+                type: (dt === 'datetime' ? 'date' : dt),
+                op: op,
+                required: true,
+                default_value: ''
+            });
+            rdTreeOpen.docParams = true;
+            closeAddDocParamModal();
+            rdRenderElementsTree();
+            rptSelectCol('doc_param', wizardDocParams.length - 1);
+            try{ notify('تم استيراد «' + name + '» كمدخل مطلوب ✓', 'success'); }catch(e){}
+        }
+        function importAllColumnsToDocParams(){
+            const cols = wizardColumns || [];
+            if(!cols.length){ notify('لا توجد أعمدة في التقرير', 'info'); return; }
+            const currentCols = new Set((wizardDocParams || []).map(p => String(p.column || '').trim().toLowerCase()));
+            let added = 0;
+            cols.forEach(col=>{
+                const name = col.alias || col.name;
+                if(currentCols.has(String(name).trim().toLowerCase())) return;
+                const dt = col.dataType || col.data_type || 'text';
+                const op = (dt === 'date' || dt === 'datetime') ? 'between' : (dt === 'number' ? 'equals' : 'contains');
+                wizardDocParams.push({
+                    id: 'dp_' + Date.now() + '_' + Math.floor(Math.random()*1000),
+                    column: name,
+                    label: name,
+                    type: (dt === 'datetime' ? 'date' : dt),
+                    op: op,
+                    required: true,
+                    default_value: ''
+                });
+                currentCols.add(String(name).trim().toLowerCase());
+                added++;
+            });
+            rdTreeOpen.docParams = true;
+            closeAddDocParamModal();
+            rdRenderElementsTree();
+            if(wizardDocParams.length){
+                rptSelectCol('doc_param', wizardDocParams.length - 1);
+            }
+            try{ notify('تم استيراد ' + added + ' عمود كمدخلات مطلوبة ✓', 'success'); }catch(e){}
         }
         /* ── Report Properties Panel & Displacing Sidebar Helpers ── */
         function rdSetReportTab(tab){
@@ -1963,6 +2127,87 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                                 </label>`;
                             }).join('') || '<p class="text-[10px] text-slate-400 p-2 text-center">لا توجد أعمدة رئيسية بعد</p>'}
                         </div>
+                    </div>
+                </div>`;
+                return;
+            }
+            if(rptSel.kind === 'doc_param'){
+                const p = (wizardDocParams || [])[rptSel.idx];
+                if(!p){
+                    drawer.className = 'rd-props-drawer';
+                    drawer.innerHTML = '';
+                    return;
+                }
+                const i = rptSel.idx;
+                const typeOpts = [
+                    ['text', 'نص (Text)'],
+                    ['number', 'رقم (Number)'],
+                    ['date', 'تاريخ (Date)'],
+                    ['time', 'وقت (Time)']
+                ].map(([v, l])=>`<option value="${v}" ${p.type === v ? 'selected' : ''}>${l}</option>`).join('');
+
+                const opOpts = [
+                    ['equals', 'يساوي (=)'],
+                    ['contains', 'يحتوي على'],
+                    ['startswith', 'يبدأ بـ'],
+                    ['endswith', 'ينتهي بـ'],
+                    ['between', 'بين قيمتين (Between)'],
+                    ['gt', 'أكبر من (>)'],
+                    ['gte', 'أكبر أو يساوي (≥)'],
+                    ['lt', 'أصغر من (<)'],
+                    ['lte', 'أصغر أو يساوي (≤)'],
+                    ['not_equals', 'لا يساوي (≠)']
+                ].map(([v, l])=>`<option value="${v}" ${p.op === v ? 'selected' : ''}>${l}</option>`).join('');
+
+                const colOpts = (wizardColumns || []).map(c=>{
+                    const nm = c.alias || c.name;
+                    return `<option value="${rptEsc(nm)}" ${p.column === nm ? 'selected' : ''}>${rptEsc(nm)} (${c.dataType || c.data_type || 'text'})</option>`;
+                }).join('');
+
+                elPanel.innerHTML = `
+                <div class="p-3 border-b border-sky-200 bg-sky-50/70 flex items-center justify-between shrink-0">
+                    <div class="flex items-center gap-2 min-w-0">
+                        <span class="w-7 h-7 rounded-lg bg-sky-100 text-sky-700 flex items-center justify-center text-xs shrink-0"><i class="fa-solid fa-filter"></i></span>
+                        <div class="min-w-0">
+                            <div class="font-bold text-slate-800 text-xs truncate">خصائص المدخل: ${rptEsc(p.label || p.column)}</div>
+                            <div class="text-[10px] text-sky-700">مدخل إلزامي للتقرير المستندي #${i + 1}</div>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-1 shrink-0">
+                        <button type="button" onclick="rdOpenReportProps()" class="px-2 py-1 rounded-lg text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-[10px] font-bold flex items-center gap-1" title="خصائص التقرير"><i class="fa-solid fa-sliders text-[9px]"></i> التقرير</button>
+                        <button type="button" onclick="deleteWizardDocParam(${i});" class="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50" title="حذف المدخل"><i class="fa-solid fa-trash-can text-xs"></i></button>
+                        <button type="button" onclick="rptCloseProps()" class="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-200" title="إغلاق"><i class="fa-solid fa-xmark text-sm"></i></button>
+                    </div>
+                </div>
+                <div class="flex-1 min-h-0 overflow-y-auto custom-scroll p-3 space-y-3 text-xs">
+                    <div>
+                        <label class="rpt-fl">تسمية المدخل المعروضة للمستخدم *</label>
+                        <input value="${rptEsc(p.label || '')}" oninput="updateWizardDocParam(${i},'label',this.value)" class="rpt-in font-bold text-slate-800" placeholder="مثال: رقم الحوالة">
+                    </div>
+                    <div>
+                        <label class="rpt-fl">العمود المرتبط من واقع التقرير *</label>
+                        <select onchange="updateWizardDocParam(${i},'column',this.value)" class="rpt-in font-bold">${colOpts}</select>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2">
+                        <div>
+                            <label class="rpt-fl">نوع البيانات</label>
+                            <select onchange="updateWizardDocParam(${i},'type',this.value)" class="rpt-in font-bold">${typeOpts}</select>
+                        </div>
+                        <div>
+                            <label class="rpt-fl">عملية المقارنة</label>
+                            <select onchange="updateWizardDocParam(${i},'op',this.value)" class="rpt-in font-bold">${opOpts}</select>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="rpt-fl">القيمة الافتراضية (اختياري)</label>
+                        <input value="${rptEsc(p.default_value || '')}" oninput="updateWizardDocParam(${i},'default_value',this.value)" class="rpt-in" placeholder="قيمة مبدئية...">
+                    </div>
+                    <div class="p-2.5 rounded-xl border border-slate-200 bg-slate-50/70">
+                        <label class="flex items-center gap-2 cursor-pointer font-bold text-slate-700">
+                            <input type="checkbox" ${p.required ? 'checked' : ''} onchange="updateWizardDocParam(${i},'required',this.checked)" class="rounded text-sky-600">
+                            <span>مدخل إلزامي لجلب البيانات</span>
+                        </label>
+                        <p class="text-[10px] text-slate-400 mt-1 mr-6">إذا كان محدداً، لن يجلب التقرير أي بيانات حتى يقوم المستخدم بإدخال هذا المعيار في المشغل.</p>
                     </div>
                 </div>`;
                 return;
@@ -2998,7 +3243,8 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                 charts: wizardCharts,
                 rules: wizardRules,
                 general_where: wizardGeneralWhere || '',
-                doc_template: ((document.getElementById('wizardDocTemplate') || {}).value || wizardDocTemplate || '')
+                doc_template: ((document.getElementById('wizardDocTemplate') || {}).value || wizardDocTemplate || ''),
+                doc_params: wizardDocParams || []
             };
             const _rtype = ((document.getElementById('rmlReportType') || {}).value || 'master');
             if(_rtype === 'detail'){
@@ -3072,7 +3318,8 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                     charts: wizardCharts,
                     rules: wizardRules,
                     general_where: wizardGeneralWhere || '',
-                    doc_template: ((document.getElementById('wizardDocTemplate') || {}).value || wizardDocTemplate || '')
+                    doc_template: ((document.getElementById('wizardDocTemplate') || {}).value || wizardDocTemplate || ''),
+                    doc_params: wizardDocParams || []
                 };
                 const _rtype = ((document.getElementById('rmlReportType') || {}).value || 'master');
                 if(_rtype === 'detail'){
@@ -3430,7 +3677,6 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
         let wbExprTarget = -1;       // عمود محدد في شريط الصيغة
         const WB_SHEETS = [
             ['palette','لوحة التقرير','fa-table-cells'],
-            ['conns','الاتصالات','fa-plug'],
             ['fields','الحقول والمخطط','fa-database'],
             ['rules','القواعد','fa-square-root-variable'],
             ['charts','المخططات','fa-chart-column'],

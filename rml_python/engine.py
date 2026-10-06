@@ -7505,6 +7505,52 @@ class RMLReportEngine:
         group_by = payload.get("groupBy") or payload.get("group_by") or payload.get("activeGroupColumn")
         active_table = payload.get("activeTable") or payload.get("table")
 
+        # Document Report Guard: لا يجلب التقرير شيئاً إلا بعد إدخال/اختيار عوامل تصفية مخصصة
+        _is_doc = str((self.metadata or {}).get("report_type") or (self.metadata or {}).get("type") or "").strip().lower() == "doc"
+        if _is_doc:
+            doc_params = getattr(self.compiler, "doc_params", lambda: [])() if hasattr(self, "compiler") else []
+            req_params = [p for p in doc_params if getattr(p, "required", True)]
+
+            def _filter_has_val(f):
+                if not isinstance(f, dict):
+                    return False
+                v = f.get("value")
+                if v is not None and str(v).strip() != "":
+                    return True
+                vf, vt = f.get("valFrom"), f.get("valTo")
+                if (vf is not None and str(vf).strip() != "") or (vt is not None and str(vt).strip() != ""):
+                    return True
+                vals = f.get("values")
+                if isinstance(vals, (list, tuple)) and any(x is not None and str(x).strip() != "" for x in vals):
+                    return True
+                return False
+
+            active_val_filters = [f for f in filters if _filter_has_val(f)]
+            missing_required = False
+            if req_params:
+                for rp in req_params:
+                    rp_col = str(getattr(rp, "column", None) or (rp.get("column") if isinstance(rp, dict) else "") or "").strip().lower()
+                    matched = any(str(f.get("field", "")).strip().lower() == rp_col for f in active_val_filters)
+                    if not matched:
+                        missing_required = True
+                        break
+            else:
+                if not active_val_filters:
+                    missing_required = True
+
+            if missing_required:
+                return {
+                    "rows": [],
+                    "total": 0,
+                    "page": 1,
+                    "pageSize": page_size,
+                    "columns": [c.to_dict() if hasattr(c, "to_dict") else c for c in (self.columns or [])],
+                    "sql": "-- تقرير مستندي: بانتظار إدخال عوامل التصفية المطلوبة",
+                    "required_inputs_missing": True,
+                    "message": "تقرير مستندي: يرجى تحديد عوامل التصفية المطلوبة لجلب البيانات",
+                    "metadata": self.metadata or {},
+                }
+
         # Compile SQL (computed-column filters wrapped in an outer query)
         _t_plan = _tmod.time()
         exec_plan = self._plan_structure(active_table, filters, sort, group_by)

@@ -6071,7 +6071,8 @@ def api_rml_metadata(request):
         _det = comp.detail()
         _doct = comp.doc_template() if hasattr(comp, "doc_template") else ""
         _gw = comp.general_where() if hasattr(comp, "general_where") else ""
-        return JsonResponse({"metadata": comp.rpt_metadata(), "columns": [c.to_dict() for c in comp.columns()], "fields": [f.to_dict() for f in comp.fields()], "connections": [c.to_dict() for c in comp.connections()], "charts": [c.to_dict() for c in comp.charts()], "rules": [r.to_dict() for r in comp.rules()], "groups": [g.to_dict() for g in comp.groups()], "detail": (_det.to_dict() if _det else None), "links": comp.links(), "table_opts": comp.table_opts(), "doc_template": _doct, "docTemplate": _doct, "general_where": _gw, "generalWhere": _gw})
+        _dparams = [p.to_dict() if hasattr(p, "to_dict") else p for p in (comp.doc_params() if hasattr(comp, "doc_params") else [])]
+        return JsonResponse({"metadata": comp.rpt_metadata(), "columns": [c.to_dict() for c in comp.columns()], "fields": [f.to_dict() for f in comp.fields()], "connections": [c.to_dict() for c in comp.connections()], "charts": [c.to_dict() for c in comp.charts()], "rules": [r.to_dict() for r in comp.rules()], "groups": [g.to_dict() for g in comp.groups()], "detail": (_det.to_dict() if _det else None), "links": comp.links(), "table_opts": comp.table_opts(), "doc_template": _doct, "docTemplate": _doct, "doc_params": _dparams, "docParams": _dparams, "general_where": _gw, "generalWhere": _gw})
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=400)
 
@@ -8339,8 +8340,39 @@ def _write_rule_element(r_el, r, idx=1):
     return True
 
 
+def _write_doc_params_el(rml, _ET3, doc_params):
+    if not doc_params or not isinstance(doc_params, (list, tuple)):
+        return False
+    valid = [p for p in doc_params if isinstance(p, dict) and str(p.get("column") or p.get("field") or p.get("name") or "").strip()]
+    if not valid:
+        return False
+    dp_el = _ET3.SubElement(rml, "doc_params")
+    for idx, p in enumerate(valid, start=1):
+        c_el = _ET3.SubElement(dp_el, "doc_param")
+        c_el.set("column", str(p.get("column") or p.get("field") or p.get("name") or "").strip())
+        if p.get("id"):
+            c_el.set("id", str(p["id"]).strip())
+        else:
+            c_el.set("id", f"dp_{idx}")
+        lbl = str(p.get("label") or p.get("display") or "").strip()
+        if lbl:
+            c_el.set("label", lbl)
+        ptype = str(p.get("type") or p.get("dataType") or p.get("data_type") or "").strip()
+        if ptype:
+            c_el.set("type", ptype)
+        op = str(p.get("op") or p.get("operator") or "").strip()
+        if op:
+            c_el.set("op", op)
+        if "required" in p:
+            c_el.set("required", "1" if p["required"] and str(p["required"]).lower() not in ("0", "false", "no") else "0")
+        def_val = str(p.get("default_value") or p.get("defaultValue") or "").strip()
+        if def_val:
+            c_el.set("default_value", def_val)
+    return True
+
+
 def _render_rml_xml(prog_name, displayName, icon, category, schema, description, namespace,
-                    connections, fields, columns, charts, rules, report_type="master", detail=None, links=None, doc_template=None, groups=None, distinct=False, table_opts=None, group_levels=1, general_where=None, extra_meta=None):
+                    connections, fields, columns, charts, rules, report_type="master", detail=None, links=None, doc_template=None, groups=None, distinct=False, table_opts=None, group_levels=1, general_where=None, extra_meta=None, doc_params=None):
     """Build pretty RML XML from wizard payload (shared by create/update)."""
     import xml.etree.ElementTree as ET, xml.dom.minidom
     rml = ET.Element("rml")
@@ -8480,6 +8512,8 @@ def _render_rml_xml(prog_name, displayName, icon, category, schema, description,
     _write_table_opts_el(rml, ET, table_opts)
     # groups — column header spanning: <groups><group name order><column alias/>
     _write_groups_el(rml, ET, groups)
+    # doc_params — required filter inputs for document reports
+    _write_doc_params_el(rml, ET, doc_params)
     # doc_template — print layout for doc-type reports ({{column_alias}} vars)
     if doc_template and str(doc_template).strip():
         dt_el = ET.SubElement(rml, "doc_template")
@@ -8831,6 +8865,7 @@ def api_create_rml(request, app_name):
         _write_links_el(rml, ET, data.get("links", []))
         _write_table_opts_el(rml, ET, data.get("table_opts", data.get("tableOpts", [])))
         _write_groups_el(rml, ET, data.get("groups", []))
+        _write_doc_params_el(rml, ET, data.get("doc_params", data.get("docParams", [])))
         _dt = data.get("doc_template", data.get("docTemplate", ""))
         if _dt and str(_dt).strip():
             _dt_el = ET.SubElement(rml, "doc_template")
@@ -8952,7 +8987,8 @@ def api_rml_draft(request, app_name):
             data.get("groups", []), bool(data.get("distinct")),
             data.get("table_opts", data.get("tableOpts", [])),
             data.get("group_levels", data.get("groupLevels", 1)),
-            data.get("general_where", data.get("generalWhere", "")), _keep)
+            data.get("general_where", data.get("generalWhere", "")), _keep,
+            data.get("doc_params", data.get("docParams", [])))
         target.write_text(pretty, encoding="utf-8")
         job = _uuid.uuid4().hex[:16]
         with _RML_JOBS_LOCK:
@@ -9058,7 +9094,8 @@ def api_rml_fetch_query(request, app_name):
             data.get("groups", []), bool(data.get("distinct")),
             data.get("table_opts", data.get("tableOpts", [])),
             data.get("group_levels", data.get("groupLevels", 1)),
-            data.get("general_where", data.get("generalWhere", "")), {})
+            data.get("general_where", data.get("generalWhere", "")), {},
+            data.get("doc_params", data.get("docParams", [])))
         fname = "__fetchq_%s.rml" % _uuid.uuid4().hex[:12]
         _ad, target, err = _resolve_rml_target(app_name, fname)
         if err or target is None:
@@ -9113,7 +9150,8 @@ def api_rml_design_preview(request, app_name):
             data.get("groups", []), bool(data.get("distinct")),
             data.get("table_opts", data.get("tableOpts", [])),
             data.get("group_levels", data.get("groupLevels", 1)),
-            data.get("general_where", data.get("generalWhere", "")), {})
+            data.get("general_where", data.get("generalWhere", "")), {},
+            data.get("doc_params", data.get("docParams", [])))
         fname = "__preview_%s.rml" % _uuid.uuid4().hex[:12]
         _ad, target, err = _resolve_rml_target(app_name, fname)
         if err or target is None:
@@ -9216,7 +9254,8 @@ def api_update_rml(request, app_name):
                                  bool(data.get("distinct")),
                                  data.get("table_opts", data.get("tableOpts", [])),
                                  data.get("group_levels", data.get("groupLevels", 1)),
-                                 general_where, _rml_extra_meta_attrs(target))
+                                 general_where, _rml_extra_meta_attrs(target),
+                                 data.get("doc_params", data.get("docParams", [])))
         target.write_text(pretty, encoding="utf-8")
         return JsonResponse({"ok": True, "file": target.name, "path": str(target), "updated": True})
     except Exception as e:

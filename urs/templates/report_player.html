@@ -202,6 +202,26 @@
                 </div>
             </div>
 
+            <!-- Permanent Sub-Header for Document Reports (هيدر فرعي دائم للتقرير المستندي) -->
+            <div id="docRequiredHeader" class="hidden bg-slate-50 border-b border-slate-200 px-4 py-2 text-xs shrink-0 z-10 transition-all shadow-2xs">
+                <div class="flex flex-wrap items-center justify-between gap-2.5">
+                    <div class="flex items-center gap-2 text-xs font-bold text-slate-800 shrink-0">
+                        <span class="w-6 h-6 rounded-lg bg-sky-100 text-sky-700 flex items-center justify-center text-[11px]"><i class="fa-solid fa-file-invoice"></i></span>
+                        <span>معايير المستند:</span>
+                    </div>
+                    <div id="docHeaderControls" class="flex flex-wrap items-center gap-2 flex-1 max-w-5xl"></div>
+                    <div class="flex items-center gap-1.5 shrink-0 mr-auto">
+                        <button type="button" onclick="docHeaderFetch()" id="docHeaderFetchBtn" class="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-2xs transition">
+                            <i class="fa-solid fa-magnifying-glass text-[10px]"></i>
+                            <span>جلب البيانات</span>
+                        </button>
+                        <button type="button" onclick="docHeaderClear()" class="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-200 transition" title="مسح المعايير">
+                            <i class="fa-solid fa-rotate-right text-xs"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
             <!-- Excel-Like Data Table + Left Panel (splits the table screen) -->
             <div class="flex-1 flex overflow-hidden min-h-0">
             <div id="tableScrollContainer" class="flex-1 overflow-auto custom-scroll bg-white relative min-w-0">
@@ -209,6 +229,13 @@
                     <thead id="tableHeader" class="bg-slate-50 text-slate-700 font-semibold sticky top-0 z-20 shadow-xs"></thead>
                     <tbody id="tableBody" class="divide-y divide-slate-100"></tbody>
                 </table>
+                <div id="docWaitingPrompt" class="hidden py-16 px-4 text-center">
+                    <div class="w-14 h-14 rounded-2xl bg-sky-50 text-sky-600 mx-auto flex items-center justify-center text-xl mb-3 shadow-2xs">
+                        <i class="fa-solid fa-file-invoice"></i>
+                    </div>
+                    <h3 class="text-sm font-bold text-slate-800 mb-1">تقرير مستندي</h3>
+                    <p class="text-xs text-slate-500 max-w-md mx-auto">أدخل المعايير المطلوبة في الشريط الدائم أعلاه واضغط على «جلب البيانات» لعرض السجلات والمستندات.</p>
+                </div>
                 <div id="scrollSentinel" class="h-1"></div>
             </div>
             <aside id="blankPanel" class="hidden w-[34rem] max-w-[92vw] shrink-0 bg-white border-r border-slate-200 flex-col overflow-hidden">
@@ -804,6 +831,18 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
             }catch(e){ return String((typeof DJANGO_RML_LAYOUT !== 'undefined' ? DJANGO_RML_LAYOUT : '') || '').toLowerCase() === 'table'; }
         }
         function docSearchFields(){
+            const md = (lastApiData && lastApiData.metadata) || {};
+            const dparams = md.doc_params || md.docParams || [];
+            if(dparams && dparams.length){
+                return dparams.map(p=>({
+                    alias: p.column || p.field || p.name,
+                    label: p.label || p.display || p.column || p.name,
+                    kind: (p.type === 'datetime' ? 'date' : (p.type || 'text')),
+                    op: p.op || (p.type === 'date' ? 'between' : p.type === 'number' ? 'equals' : 'contains'),
+                    required: (p.required === undefined ? true : !!(p.required && p.required !== 'false' && p.required !== '0')),
+                    defaultValue: p.default_value || p.defaultValue || ''
+                }));
+            }
             // كل أعمدة التقرير حقول تصفية للمستندي (لا أول عمود فقط)
             const cols = (typeof queryColumns !== 'undefined' ? queryColumns : []) || [];
             const out = [];
@@ -813,9 +852,139 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                 let k = kindOf(c.alias);
                 if(k === 'datetime') k = 'date';
                 if(['text', 'date', 'number', 'time'].indexOf(k) < 0) k = 'text';
-                out.push({alias: c.alias, kind: k});
+                out.push({alias: c.alias, label: c.alias, kind: k, op: docDefOp(k), required: true, defaultValue: ''});
             });
             return out;
+        }
+        function hasActiveDocFilters(){
+            if(!activeFilters || !activeFilters.length) return false;
+            return activeFilters.some(f => (f.value !== undefined && f.value !== null && String(f.value).trim() !== '') ||
+                                           (f.valFrom !== undefined && String(f.valFrom).trim() !== '') ||
+                                           (f.valTo !== undefined && String(f.valTo).trim() !== '') ||
+                                           (Array.isArray(f.values) && f.values.length > 0));
+        }
+        function showDocWaitingPrompt(show, msg){
+            const prompt = document.getElementById('docWaitingPrompt');
+            const table = document.getElementById('dataTable');
+            if(prompt){
+                prompt.classList.toggle('hidden', !show);
+                if(msg){
+                    const p = prompt.querySelector('p');
+                    if(p) p.textContent = msg;
+                }
+            }
+            if(table){
+                table.classList.toggle('hidden', !!show);
+            }
+        }
+        function docHeaderOpChanged(alias, op){
+            docFieldOps[alias] = op;
+            renderDocRequiredHeader();
+        }
+        function docHeaderClear(){
+            document.querySelectorAll('#docHeaderControls input').forEach(inp=>{ inp.value = ''; });
+            resetAllFilters();
+            if(isDocType()){
+                showDocWaitingPrompt(true);
+            }
+        }
+        function renderDocRequiredHeader(){
+            const bar = document.getElementById('docRequiredHeader');
+            const wrap = document.getElementById('docHeaderControls');
+            if(!bar || !wrap) return;
+            if(!isDocType()){
+                bar.classList.add('hidden');
+                return;
+            }
+            bar.classList.remove('hidden');
+            const fields = docSearchFields();
+            if(!fields.length){
+                wrap.innerHTML = '<span class="text-slate-400 text-xs py-1">لا توجد معايير محددة — سيُعرض المستند</span>';
+                return;
+            }
+            const keep = {};
+            try{
+                document.querySelectorAll('#docHeaderControls [data-dhf]').forEach(el=>{
+                    keep[el.getAttribute('data-dhf') + '||' + el.getAttribute('data-dht')] = el.value;
+                });
+            }catch(e){}
+
+            wrap.innerHTML = fields.map((f)=>{
+                const op = docFieldOps[f.alias] || f.op || docDefOp(f.kind);
+                docFieldOps[f.alias] = op;
+                const opts = (DOC_OPS[f.kind] || DOC_OPS.text).map(([v, l])=>`<option value="${v}" ${op === v ? 'selected' : ''}>${l}</option>`).join('');
+                let valInput = '';
+                if(f.kind === 'date' && op === 'between'){
+                    const vFrom = keep[f.alias + '||from'] ?? '';
+                    const vTo = keep[f.alias + '||to'] ?? '';
+                    valInput = `<div class="flex items-center gap-1">
+                        <input data-dhf="${f.alias}" data-dht="from" value="${String(vFrom).replace(/"/g, '&quot;')}" type="date" class="bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-indigo-500 w-32" onkeydown="if(event.key==='Enter') docHeaderFetch()">
+                        <span class="text-slate-400 text-[10px]">إلى</span>
+                        <input data-dhf="${f.alias}" data-dht="to" value="${String(vTo).replace(/"/g, '&quot;')}" type="date" class="bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-indigo-500 w-32" onkeydown="if(event.key==='Enter') docHeaderFetch()">
+                    </div>`;
+                } else if(f.kind === 'number' && op === 'between'){
+                    const vFrom = keep[f.alias + '||from'] ?? '';
+                    const vTo = keep[f.alias + '||to'] ?? '';
+                    valInput = `<div class="flex items-center gap-1">
+                        <input data-dhf="${f.alias}" data-dht="from" value="${String(vFrom).replace(/"/g, '&quot;')}" type="text" inputmode="numeric" placeholder="من" class="bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-indigo-500 w-20 text-center" onkeydown="if(event.key==='Enter') docHeaderFetch()">
+                        <span class="text-slate-400 text-[10px]">-</span>
+                        <input data-dhf="${f.alias}" data-dht="to" value="${String(vTo).replace(/"/g, '&quot;')}" type="text" inputmode="numeric" placeholder="إلى" class="bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-indigo-500 w-20 text-center" onkeydown="if(event.key==='Enter') docHeaderFetch()">
+                    </div>`;
+                } else {
+                    const ph = f.kind === 'number' ? 'القيمة...' : (op === 'inyear' ? 'YYYY' : op === 'inmonth' ? 'YYYY-MM' : 'القيمة...');
+                    const curV = keep[f.alias + '||single'] ?? f.defaultValue ?? '';
+                    valInput = `<input data-dhf="${f.alias}" data-dht="single" value="${String(curV).replace(/"/g, '&quot;')}" type="${f.kind==='date'?'date':'text'}" ${f.kind==='number'?'inputmode="numeric"':''} placeholder="${ph}" class="bg-white border border-slate-200 rounded-lg px-2.5 py-1 text-xs focus:outline-none focus:border-indigo-500 min-w-[130px]" onkeydown="if(event.key==='Enter') docHeaderFetch()">`;
+                }
+                return `<div class="flex items-center gap-1.5 bg-white border border-slate-200/90 rounded-xl px-2.5 py-1 shadow-2xs">
+                    <span class="font-bold text-slate-700 whitespace-nowrap text-xs">${f.label || f.alias}${f.required ? '<span class="text-rose-500 mr-0.5">*</span>' : ''}</span>
+                    <select data-dhop="${f.alias}" onchange="docHeaderOpChanged('${f.alias}', this.value)" class="bg-slate-50 border border-slate-200 text-[11px] text-slate-600 rounded px-1 py-0.5 focus:outline-none">${opts}</select>
+                    <div class="min-w-0">${valInput}</div>
+                </div>`;
+            }).join('');
+        }
+        function docHeaderFetch(){
+            const fields = docSearchFields();
+            const newFilters = [];
+            let missingRequired = false;
+            let missingName = '';
+
+            fields.forEach(f=>{
+                const op = docFieldOps[f.alias] || f.op || docDefOp(f.kind);
+                const gv = (t)=>{
+                    const el = document.querySelector(`#docHeaderControls [data-dhf="${f.alias}"][data-dht="${t}"]`);
+                    return el ? (el.value || '').trim() : '';
+                };
+                if(op === 'between'){
+                    const a = gv('from'), b = gv('to');
+                    if(a && b) newFilters.push({field: f.alias, op: 'between', valFrom: a, valTo: b});
+                    else if(a) newFilters.push({field: f.alias, op: 'gte', value: a});
+                    else if(b) newFilters.push({field: f.alias, op: 'lte', value: b});
+                    else if(f.required && !missingRequired){ missingRequired = true; missingName = f.label || f.alias; }
+                } else {
+                    const v = gv('single');
+                    if(v) newFilters.push({field: f.alias, op: op, value: v});
+                    else if(f.required && !v && !missingRequired){ missingRequired = true; missingName = f.label || f.alias; }
+                }
+            });
+
+            if(missingRequired){
+                notify('يرجى إدخال الحقل الإلزامي: ' + missingName, 'warning');
+                return;
+            }
+            if(!newFilters.length){
+                notify('يرجى إدخال عوامل التصفية أولاً', 'info');
+                return;
+            }
+
+            activeFilters = newFilters;
+            showDocWaitingPrompt(false);
+            setTableRowVisible(true);
+            const p = document.getElementById('docSearchFirst');
+            if(p) p.classList.add('hidden');
+            syncUrlFilters();
+            renderSearchTags();
+            resetLazyState();
+            refreshApiData();
         }
         const DOC_OPS = {
             text: [['contains','يحتوي'],['equals','يساوي'],['startswith','يبدأ بـ'],['endswith','ينتهي بـ'],['not_contains','لا يحتوي'],['not_equals','لا يساوي']],
@@ -992,11 +1161,16 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
             restoreLastSort();
             renderSearchTags();
             try{ paintDocViewToggle(); }catch(e){}
-            if(isDocType() && !effDocTable() && !hasActiveFilters()){
-                // مستندي (بطاقة): لوحة بحث ديناميكية من أعمدة التقرير — بلا أعمدة يُجلب أول مستند مباشرة
-                const _df = renderDocSearchFirst();
-                if(!_df.length){ resetLazyState(); fetchReportFromAPI(); }
-                else { showDocSearchFirst(true); updateLazyStats(); }
+            if(isDocType()){
+                renderDocRequiredHeader();
+                if(!hasActiveDocFilters()){
+                    showDocWaitingPrompt(true);
+                    updateLazyStats();
+                } else {
+                    showDocWaitingPrompt(false);
+                    resetLazyState();
+                    fetchReportFromAPI();
+                }
             } else {
                 resetLazyState();
                 fetchReportFromAPI();
@@ -1260,14 +1434,16 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
         async function fetchReportFromAPI(append){
             if(lazyLoading) return;
             if(append && lazyDone) return;
-            if(isDocType() && !effDocTable() && !hasActiveFilters() && !append){
-                // مستندي (بطاقة) بدون معايير: لا تجلب شيئاً — أظهر شاشة البحث فقط
-                showDocSearchFirst(true);
+            if(isDocType() && !hasActiveDocFilters() && !append){
+                // مستندي بدون معايير: لا تجلب شيئاً — أظهر الهيدر الدائم ورسالة بانتظار الإدخال
+                renderDocRequiredHeader();
+                showDocWaitingPrompt(true);
                 const sp0 = document.getElementById('lazyLoadSpinner');
                 if(sp0) sp0.classList.add('hidden');
                 updateLazyStats();
                 return;
             }
+            showDocWaitingPrompt(false);
             showDocSearchFirst(false);
             try{ docFilterView = false; }catch(e){}
             lazyLoading = true;
@@ -1295,6 +1471,15 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                 if(_ok){
                     const data = _ex.data;
                     if(data && data.error) throw new Error(data.error);
+                    if(data && data.required_inputs_missing){
+                        renderDocRequiredHeader();
+                        showDocWaitingPrompt(true, data.message);
+                        lazyLoading = false;
+                        if(spinner) spinner.classList.add('hidden');
+                        updateLazyStats();
+                        return;
+                    }
+                    showDocWaitingPrompt(false);
                     lastApiData = data;
                     // total = -1 عند skipTotal: الإجمالي معروف من الصفحة الأولى — لا تصفّره
                     if(typeof data.total === 'number' && data.total >= 0){

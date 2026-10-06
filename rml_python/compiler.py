@@ -27,6 +27,7 @@ class RMLMetadata:
     doc_layout: Optional[str] = None  # doc only: card (default, one record) | table (كشف واحد)
     distinct: bool = False  # صفوف مميزة فقط (SELECT DISTINCT) — يُضبط من المصمم
     group_levels: int = 1  # عدد مستويات المجموعات (رئيسية/فرعية) — يُضبط من المصمم
+    doc_params: List[Dict[str, Any]] = field(default_factory=list)  # مدخلات / عوامل تصفية مطلوبة للمستندي
     raw_attrs: Dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -47,7 +48,36 @@ class RMLMetadata:
             "distinct": self.distinct,
             "group_levels": self.group_levels,
             "groupLevels": self.group_levels,
+            "doc_params": list(self.doc_params or []),
+            "docParams": list(self.doc_params or []),
             "raw_attrs": dict(self.raw_attrs or {}),
+        }
+
+
+@dataclass
+class RMLDocParam:
+    """معلمة / مدخل مطلوب لتقرير المستند:
+    <doc_params><doc_param id column label type op required default_value /></doc_params>
+    """
+    id: str
+    column: str
+    label: str = ""
+    type: str = "text"
+    op: str = "equals"
+    required: bool = True
+    default_value: str = ""
+    raw_attrs: Dict[str, str] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "column": self.column,
+            "label": self.label or self.column,
+            "type": self.type or "text",
+            "op": self.op or "equals",
+            "required": self.required,
+            "default_value": self.default_value,
+            "defaultValue": self.default_value,
         }
 
 
@@ -373,6 +403,7 @@ class RMLReportCompiler:
         self._groups: Optional[List[RMLGroup]] = None
         self._detail: Optional[RMLDetail] = None
         self._doc_template: Optional[str] = None
+        self._doc_params: Optional[List[RMLDocParam]] = None
         self._general_where: Optional[str] = None
         if path or xml_text:
             self._parse()
@@ -487,6 +518,7 @@ class RMLReportCompiler:
             doc_layout=doc_layout,
             distinct=distinct,
             group_levels=group_levels,
+            doc_params=[p.to_dict() for p in self.doc_params()],
             raw_attrs=dict(el.attrib),
         )
         self._metadata = meta
@@ -711,6 +743,49 @@ class RMLReportCompiler:
                     self._doc_template = (e.text or "").strip()
                     break
         return self._doc_template
+
+    def doc_params(self) -> List[RMLDocParam]:
+        """Extract <doc_params><doc_param id column label type op required default_value/> (document report inputs)."""
+        if self._doc_params is not None:
+            return self._doc_params
+        result: List[RMLDocParam] = []
+        if self._root is None:
+            self._doc_params = result
+            return result
+
+        def get(el, *names: str, default: str = "") -> str:
+            for k, v in (el.attrib or {}).items():
+                if k.lower() in [n.lower() for n in names]:
+                    return v.strip() if isinstance(v, str) else v
+            return default
+
+        for container in self._root.iter():
+            if container.tag.lower() in ("doc_params", "docparams"):
+                for idx, el in enumerate(list(container), start=1):
+                    if el.tag.lower() in ("doc_param", "docparam", "param"):
+                        col = get(el, "column", "field", "name")
+                        if not col:
+                            continue
+                        pid = get(el, "id", default=f"dp_{idx}")
+                        lbl = get(el, "label", "display", default=col)
+                        ptype = get(el, "type", "dataType", "data_type", default="text")
+                        op = get(el, "op", "operator", default="equals")
+                        req_raw = get(el, "required", default="1").lower()
+                        req = req_raw not in ("0", "false", "no")
+                        def_val = get(el, "default_value", "defaultValue", default="")
+                        result.append(RMLDocParam(
+                            id=pid,
+                            column=col,
+                            label=lbl,
+                            type=ptype,
+                            op=op,
+                            required=req,
+                            default_value=def_val,
+                            raw_attrs=dict(el.attrib or {})
+                        ))
+                break
+        self._doc_params = result
+        return result
 
     def general_where(self) -> str:
         """Extract report-level <general_where> filter (ANDed into master WHERE)."""

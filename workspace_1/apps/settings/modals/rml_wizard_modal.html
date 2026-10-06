@@ -356,3 +356,21 @@
         </div>
     </div>
 
+    <!-- Doc Param Import Modal (استيراد عمود من واقع التقرير كمدخل مطلوب) -->
+    <div id="docParamPickerModal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[80] overflow-y-auto p-4 flex items-center justify-center" onclick="if(event.target===this) closeAddDocParamModal()">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg m-auto overflow-hidden flex flex-col max-h-[85vh]">
+            <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-slate-50 gap-2 shrink-0">
+                <h3 class="text-sm font-bold text-slate-800 flex items-center gap-2">
+                    <i class="fa-solid fa-file-import text-sky-600"></i>
+                    <span>استيراد عمود من واقع التقرير كمدخل مطلوب</span>
+                </h3>
+                <button type="button" onclick="closeAddDocParamModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="px-5 py-2.5 bg-slate-50/50 border-b border-slate-100 flex items-center justify-between gap-2 shrink-0">
+                <input id="docParamPickerSearch" oninput="renderDocParamPickerList()" placeholder="بحث في أعمدة التقرير..." autocomplete="off" class="flex-1 bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs focus:outline-none focus:border-sky-500">
+                <button type="button" onclick="importAllColumnsToDocParams()" class="px-3 py-1.5 bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 rounded-xl text-xs font-bold whitespace-nowrap transition">استيراد الكل</button>
+            </div>
+            <div id="docParamPickerList" class="flex-1 min-h-0 overflow-y-auto custom-scroll p-4 space-y-1.5 text-xs"></div>
+        </div>
+    </div>
+
