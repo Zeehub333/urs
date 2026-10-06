@@ -1,0 +1,13 @@
+{
+  "name": "sales_rpts",
+  "ar": "تقارير الانحرافات والخطط",
+  "en": "sales_rpts",
+  "icon": "fa-boxes-stacked",
+  "icon_bg": "bg-emerald-50",
+  "icon_color": "text-emerald-600",
+  "version": "1.0.0",
+  "category": "عام",
+  "description": "",
+  "sort_order": 1000,
+  "is_new": true
+}

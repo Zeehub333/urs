@@ -1855,10 +1855,6 @@ def _ws_login_connection(ws_id):
         obj = Connection.objects.filter(name=cname).first()
         if obj is None:
             return None, "", "الاتصال '%s' غير موجود" % cname
-        try:
-            obj = _effective_or_row(obj.id) or obj
-        except Exception:
-            pass
         return obj, (conf.get("USERS_TABLE") or "").strip() or "users", ""
     except Exception as e:
         return None, "", str(e)
@@ -1868,9 +1864,15 @@ def _ws_pg_connect(obj):
     """psycopg2 connection from a Connection row (PostgreSQL only)."""
     if (getattr(obj, "engine", "") or "").strip().lower() not in ("postgres", ""):
         raise ValueError("السنوات والمستخدمون يُقرؤون من PostgreSQL فقط")
+    from config.dbconf import dbpass_resolve
+    pw = getattr(obj, "password", "") or ""
+    try:
+        pw = dbpass_resolve(pw) or pw
+    except Exception:
+        pass
     import psycopg2
     return psycopg2.connect(dbname=obj.instance or "urs", user=obj.user,
-                            password=obj.password, host=obj.host,
+                            password=pw, host=obj.host,
                             port=obj.port, connect_timeout=5)
 
 
