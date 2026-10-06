@@ -3733,6 +3733,10 @@ def app_form_player(request, app_name, fml_file):
         _t = (((_f.get("metadata") or {}).get("table")) or "").strip()
         if _t:
             _tbl_map.setdefault(_t.split(".")[-1], _f.get("file"))
+    ws_id = request.session.get("workspace") or request.GET.get("workspace")
+    from . import workspace as _wsm
+    ws_info = _wsm.workspace_info(ws_id) if ws_id else None
+    ws_domain = str((ws_info or {}).get("domain") or "").strip()
     return render(request, "forms_player.html", {
         "app": app_meta,
         "app_name": app_name,
@@ -3746,6 +3750,8 @@ def app_form_player(request, app_name, fml_file):
         "rml_by_category": _group_files_by_category(rml_files),
         "side_groups": _unified_side_groups(fml_files, rml_files),
         "fml_table_map_json": _json2.dumps(_tbl_map, ensure_ascii=False),
+        "workspace": ws_info,
+        "workspace_domain": ws_domain,
     })
 
 def app_report_player(request, app_name, rml_file):

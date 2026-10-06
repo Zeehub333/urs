@@ -336,8 +336,14 @@ class PasswordHashColumnTests(SimpleTestCase):
         self.assertIn("password_hash", FMLKFormEngine.SECRET_NAMES)
 
     def test_designer_alias_maps_password_hash(self):
-        from fmlk_engine.field_types import normalize_input_type
+        from fmlk_engine.field_types import normalize_input_type, get_type
         self.assertEqual(normalize_input_type("password_hash"), "password")
+        self.assertEqual(normalize_input_type("email"), "email")
+        self.assertEqual(normalize_input_type("email_field"), "email")
+        self.assertEqual(normalize_input_type("mail"), "email")
+        em_type = get_type("email")
+        self.assertIsNotNone(em_type)
+        self.assertIn("email_domain", em_type.get("attrs", []))
 
 
 class UsersColumnMappingTests(SimpleTestCase):

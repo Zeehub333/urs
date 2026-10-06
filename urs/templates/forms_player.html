@@ -471,6 +471,7 @@
     <script>
         // Injected by Django
         const WS_CAN_DESIGN = {% if ws_can_design %}true{% else %}false{% endif %};
+        const WS_DOMAIN = "{{ workspace_domain|default:''|escapejs }}";
         let currentFml = "{{ fml_file|escapejs }}";
         let currentApp = "{{ app_name|escapejs }}";
         let currentRecordId = null;
@@ -2593,7 +2594,32 @@
                         break;
                     }
                     case 'email':
-                        input = `<div class="fx-wrap"><span class="fx-ic"><i class="fa-solid fa-envelope"></i></span><input type="email" data-field="${field.name}" value="${escAttr(val)}" placeholder="example@domain.com" ${patternAttr} ${minLenAttr} ${maxLenAttr} class="fx-inp font-mono" dir="ltr"/></div>`;
+                    case 'email_field': {
+                        const _rawV = String(val ?? '').trim();
+                        let _uPart = _rawV;
+                        let _dPart = '';
+                        if(_rawV.includes('@')){
+                            const _ai = _rawV.indexOf('@');
+                            _uPart = _rawV.slice(0, _ai);
+                            _dPart = _rawV.slice(_ai + 1);
+                        }
+                        const _cfgDom = String(cfg(field, 'email_domain') || cfg(field, 'domain') || (window.WS_DOMAIN || '')).trim().replace(/^@+/, '');
+                        const _effDom = _dPart || _cfgDom;
+                        const _domDisp = _effDom ? ('@' + _effDom) : '@domain.com';
+                        const _combVal = _rawV || (_uPart && _effDom ? (_uPart + '@' + _effDom) : '');
+                        input = `<div class="space-y-1">`
+                            + `<div class="flex items-center" dir="ltr">`
+                            + `<div class="relative flex-1 min-w-0">`
+                            + `<input type="text" data-email-user="${escAttr(field.name)}" value="${escAttr(_uPart)}" placeholder="${escAttr(ph || 'username')}" ${patternAttr} ${minLenAttr} ${maxLenAttr} autocomplete="off" spellcheck="false" oninput="FMLK.emailSync('${field.name}')" class="fx-inp font-mono !rounded-r-none !border-r-0" dir="ltr"/>`
+                            + `</div>`
+                            + `<div class="relative shrink-0">`
+                            + `<input type="text" data-email-dom="${escAttr(field.name)}" value="${escAttr(_domDisp)}" readonly tabindex="-1" title="دومين مساحة العمل (غير قابل للتعديل إلا من الإعدادات)" class="w-36 sm:w-44 fx-inp font-mono text-xs font-bold !bg-slate-100 !text-slate-600 !rounded-l-none cursor-not-allowed select-none" dir="ltr"/>`
+                            + `</div>`
+                            + `</div>`
+                            + `<div class="text-[10px] text-slate-400 flex items-center gap-1"><i class="fa-solid fa-lock text-[9px]"></i> دومين مساحة العمل (غير قابل للتعديل إلا من الإعدادات)</div>`
+                            + `</div>`
+                            + hiddenField(field, _combVal);
+                    }
                         break;
                     case 'ip_address': {
                         const _parts = String(val ?? '').split('.');
@@ -3040,6 +3066,43 @@
                 const wrap = h ? h.closest('div') : null;
                 const lbl = wrap ? wrap.querySelector('span.text-xs') : null;
                 if(lbl){ lbl.textContent = checked ? 'مفعّل' : 'معطّل'; lbl.className = 'text-xs font-bold ' + (checked ? 'text-emerald-600' : 'text-slate-400'); }
+            },
+            emailSync(name){
+                const userInp = document.querySelector(`input[data-email-user="${CSS.escape(name)}"]`);
+                const domInp = document.querySelector(`input[data-email-dom="${CSS.escape(name)}"]`);
+                const hidInp = document.querySelector(`input[type="hidden"][data-field="${CSS.escape(name)}"]`);
+                if(!userInp || !hidInp) return;
+                const u = String(userInp.value || '').trim();
+                const d = domInp ? String(domInp.value || '').trim().replace(/^@+/, '') : '';
+                if(!u){
+                    hidInp.value = '';
+                } else if(u.includes('@')){
+                    hidInp.value = u;
+                } else if(d){
+                    hidInp.value = u + '@' + d;
+                } else {
+                    hidInp.value = u;
+                }
+                try{
+                    hidInp.dispatchEvent(new Event('input', {bubbles: true}));
+                    hidInp.dispatchEvent(new Event('change', {bubbles: true}));
+                }catch(e){}
+            },
+            emailSet(name, fullVal){
+                const userInp = document.querySelector(`input[data-email-user="${CSS.escape(name)}"]`);
+                const domInp = document.querySelector(`input[data-email-dom="${CSS.escape(name)}"]`);
+                const hidInp = document.querySelector(`input[type="hidden"][data-field="${CSS.escape(name)}"]`);
+                const s = String(fullVal ?? '').trim();
+                if(hidInp) hidInp.value = s;
+                if(userInp){
+                    if(s.includes('@')){
+                        const idx = s.indexOf('@');
+                        userInp.value = s.slice(0, idx);
+                        if(domInp) domInp.value = '@' + s.slice(idx + 1);
+                    } else {
+                        userInp.value = s;
+                    }
+                }
             },
             ipBoxes(name){
                 const boxes = Array.prototype.slice.call(document.querySelectorAll(`input[data-ip-octet="${CSS.escape(name)}"]`));
@@ -4140,6 +4203,12 @@
             fmlkMediaPaint(name);
         }
         function collectData() {
+            try {
+                document.querySelectorAll('#formRoot [data-email-user]').forEach(uInp => {
+                    const fn = uInp.getAttribute('data-email-user');
+                    if(fn && window.FMLK) FMLK.emailSync(fn);
+                });
+            } catch(e) {}
             const data = {};
             // نطاق النموذج فقط — مدخلات مودال الاستيراد (xl_*) خارج formRoot فلا تلوث الحفظ
             document.querySelectorAll('#formRoot [data-field]').forEach(el => {
@@ -4201,6 +4270,8 @@
                     if(el.type === 'checkbox' && (f.inputType === 'boolean' || el.hasAttribute('onchange') && el.getAttribute('onchange').includes('boolSync'))) {
                         el.checked = (String(v).toLowerCase() === 'true' || v === '1' || v === 1 || v === true);
                         if(window.FMLK) FMLK.boolSync(k, el.checked);
+                    } else if(f.inputType === 'email' || f.inputType === 'email_field') {
+                        if(window.FMLK) FMLK.emailSet(k, v);
                     } else if(el.tagName === 'SELECT') {
                         el.value = String(v);
                     } else if(el.type !== 'hidden') {

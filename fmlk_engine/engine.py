@@ -1,4 +1,4 @@
-﻿"""
+"""
 FMLK Form Engine â€” Production Ready
 Inputting methods, SQL INSERT/UPDATE/DELETE builders, tabs/categories/positioning, records CRUD.
 """
@@ -285,8 +285,15 @@ class FMLKFormEngine:
                 continue
             sval = str(val)
             # basic type checks (keep first error)
-            if f.input_type == "email" and "@" not in sval and f.name not in errors:
-                errors[f.name] = "Ø¨Ø±ÙŠØ¯ Ø¥Ù„ÙƒØªØ±ÙˆÙ†ÙŠ ØºÙŠØ± ØµØ§Ù„Ø­"
+            if f.input_type == "email" and f.name not in errors:
+                _cfg_dom = str(((getattr(f, "config", {}) or {}).get("email_domain")) or "").strip().lstrip("@")
+                if "@" not in sval and _cfg_dom:
+                    sval = f"{sval}@{_cfg_dom}"
+                    data[f.name] = sval
+                if "@" not in sval:
+                    errors[f.name] = "بريد إلكتروني غير صالح"
+                elif not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", sval):
+                    errors[f.name] = "صيغة البريد الإلكتروني غير صالحة"
             if f.input_type == "number" and f.name not in errors:
                 try: float(val)
                 except: errors[f.name] = "ÙŠØ¬Ø¨ Ø£Ù† ÙŠÙƒÙˆÙ† Ø±Ù‚Ù…Ø§Ù‹"
