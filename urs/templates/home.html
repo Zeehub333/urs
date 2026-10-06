@@ -762,19 +762,124 @@
                     return;
                 }
                 const _escA = (v)=>String(v ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
-                const _req = Array.isArray(d.required) ? d.required.filter(c=>c && c.name) : [];
-                box.innerHTML = `<p class="text-[11px] text-slate-500">الجدول <span class="font-mono" dir="ltr">${String(d.table || '').replace(/</g,'&lt;')}</span> فارغ — أنشئ المشرف العام الأول:</p>
-                <div class="grid grid-cols-2 gap-2">
-                    <div><input id="wsSu_user" placeholder="اسم المستخدم *" autocomplete="off" class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 font-mono" dir="ltr"></div>
-                    <div><input id="wsSu_name" placeholder="الاسم الكامل" class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2"></div>
+                const _fList = Array.isArray(d.fields) && d.fields.length ? d.fields : (Array.isArray(d.required) ? d.required : []);
+                const renderField = (c)=>{
+                    const fn = _escA(c.name);
+                    const fl = _escA(c.label || c.name);
+                    const isReq = !!c.is_required;
+                    const reqBadge = isReq ? '<span class="text-rose-500 font-bold">*</span>' : '<span class="text-slate-400 text-[10px] font-normal">(اختياري)</span>';
+                    const reqAttr = isReq ? 'required' : '';
+                    const dt = _escA(c.data_type || '');
+                    const it = c.input_type || 'text';
+
+                    if(it === 'checkbox'){
+                        const isDefTrue = /true|1/i.test(String(c.default_value || '')) || c.name.toLowerCase() === 'is_active';
+                        return `<div class="col-span-2 sm:col-span-1 bg-white border border-slate-200 rounded-xl p-2.5 flex items-center justify-between">
+                            <div>
+                                <label class="block font-semibold text-slate-700 text-xs cursor-pointer" for="su_f_${fn}">${fl} ${reqBadge}</label>
+                                <span class="text-[9px] text-slate-400 font-mono">${fn} (${dt})</span>
+                            </div>
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" id="su_f_${fn}" data-ws-su-extra="${fn}" data-ws-su-type="checkbox" class="sr-only peer" ${isDefTrue ? 'checked' : ''}>
+                                <div class="w-8 h-4.5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3.5 after:w-3.5 after:transition-all peer-checked:bg-emerald-600"></div>
+                            </label>
+                        </div>`;
+                    }
+                    if(it === 'date'){
+                        return `<div class="col-span-2 sm:col-span-1">
+                            <div class="flex items-center justify-between mb-1">
+                                <label class="block font-semibold text-slate-700">${fl} ${reqBadge}</label>
+                                <span class="text-[9px] text-slate-400 font-mono">${fn} (${dt})</span>
+                            </div>
+                            <input type="date" id="su_f_${fn}" data-ws-su-extra="${fn}" data-ws-su-type="date" ${reqAttr} class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs">
+                        </div>`;
+                    }
+                    if(it === 'datetime-local'){
+                        return `<div class="col-span-2 sm:col-span-1">
+                            <div class="flex items-center justify-between mb-1">
+                                <label class="block font-semibold text-slate-700">${fl} ${reqBadge}</label>
+                                <span class="text-[9px] text-slate-400 font-mono">${fn} (${dt})</span>
+                            </div>
+                            <input type="datetime-local" id="su_f_${fn}" data-ws-su-extra="${fn}" data-ws-su-type="datetime" ${reqAttr} class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs">
+                        </div>`;
+                    }
+                    if(it === 'email'){
+                        const ph = d.domain ? `admin@${d.domain}` : 'user@example.com';
+                        return `<div class="col-span-2 sm:col-span-1">
+                            <div class="flex items-center justify-between mb-1">
+                                <label class="block font-semibold text-slate-700">${fl} ${reqBadge}</label>
+                                <span class="text-[9px] text-slate-400 font-mono">${fn} (${dt})</span>
+                            </div>
+                            <div class="relative">
+                                <input type="email" id="su_f_${fn}" data-ws-su-extra="${fn}" data-ws-su-type="email" placeholder="${_escA(ph)}" dir="ltr" ${reqAttr} class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 font-mono text-xs pr-3 pl-8">
+                                <span class="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs pointer-events-none"><i class="fa-solid fa-envelope"></i></span>
+                            </div>
+                        </div>`;
+                    }
+                    if(it === 'tel'){
+                        return `<div class="col-span-2 sm:col-span-1">
+                            <div class="flex items-center justify-between mb-1">
+                                <label class="block font-semibold text-slate-700">${fl} ${reqBadge}</label>
+                                <span class="text-[9px] text-slate-400 font-mono">${fn} (${dt})</span>
+                            </div>
+                            <div class="relative">
+                                <input type="tel" id="su_f_${fn}" data-ws-su-extra="${fn}" data-ws-su-type="tel" placeholder="+966..." dir="ltr" ${reqAttr} class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 font-mono text-xs pr-3 pl-8">
+                                <span class="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs pointer-events-none"><i class="fa-solid fa-phone"></i></span>
+                            </div>
+                        </div>`;
+                    }
+                    if(it === 'number'){
+                        return `<div class="col-span-2 sm:col-span-1">
+                            <div class="flex items-center justify-between mb-1">
+                                <label class="block font-semibold text-slate-700">${fl} ${reqBadge}</label>
+                                <span class="text-[9px] text-slate-400 font-mono">${fn} (${dt})</span>
+                            </div>
+                            <input type="number" step="any" id="su_f_${fn}" data-ws-su-extra="${fn}" data-ws-su-type="number" placeholder="0" dir="ltr" ${reqAttr} class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 font-mono text-xs">
+                        </div>`;
+                    }
+                    if(it === 'textarea'){
+                        return `<div class="col-span-2">
+                            <div class="flex items-center justify-between mb-1">
+                                <label class="block font-semibold text-slate-700">${fl} ${reqBadge}</label>
+                                <span class="text-[9px] text-slate-400 font-mono">${fn} (${dt})</span>
+                            </div>
+                            <textarea id="su_f_${fn}" data-ws-su-extra="${fn}" data-ws-su-type="text" placeholder="${fl}" rows="2" ${reqAttr} class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs"></textarea>
+                        </div>`;
+                    }
+                    return `<div class="col-span-2 sm:col-span-1">
+                        <div class="flex items-center justify-between mb-1">
+                            <label class="block font-semibold text-slate-700">${fl} ${reqBadge}</label>
+                            <span class="text-[9px] text-slate-400 font-mono">${fn} (${dt})</span>
+                        </div>
+                        <input type="text" id="su_f_${fn}" data-ws-su-extra="${fn}" data-ws-su-type="text" placeholder="${fl}" ${reqAttr} class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs">
+                    </div>`;
+                };
+                box.innerHTML = `<p class="text-[11px] text-slate-600 font-medium">الجدول <span class="font-mono bg-white px-1.5 py-0.5 rounded border border-slate-200" dir="ltr">${String(d.table || '').replace(/</g,'&lt;')}</span> فارغ — أنشئ المشرف العام الأول:</p>
+                <div class="space-y-2.5 mt-2">
+                    <div class="grid grid-cols-2 gap-2.5">
+                        <div>
+                            <label class="block font-semibold text-slate-700 mb-1">اسم المستخدم <span class="text-rose-500 font-bold">*</span></label>
+                            <input id="wsSu_user" placeholder="admin" autocomplete="off" class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 font-mono text-xs" dir="ltr">
+                        </div>
+                        <div>
+                            <label class="block font-semibold text-slate-700 mb-1">الاسم الكامل</label>
+                            <input id="wsSu_name" placeholder="الاسم الكامل" class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs">
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2.5">
+                        <div>
+                            <label class="block font-semibold text-slate-700 mb-1">كلمة المرور <span class="text-rose-500 font-bold">* (6+)</span></label>
+                            <input id="wsSu_pw1" type="password" placeholder="••••••" autocomplete="new-password" class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 font-mono text-xs" dir="ltr">
+                        </div>
+                        <div>
+                            <label class="block font-semibold text-slate-700 mb-1">تأكيد كلمة المرور <span class="text-rose-500 font-bold">*</span></label>
+                            <input id="wsSu_pw2" type="password" placeholder="••••••" autocomplete="new-password" class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 font-mono text-xs" dir="ltr">
+                        </div>
+                    </div>
+                    ${_fList.length ? `<div class="border-t border-amber-200/60 pt-2"><div class="text-[10px] font-bold text-amber-800 mb-2">حقول إضافية من جدول المستخدمين (${_fList.length} حقل):</div><div class="grid grid-cols-2 gap-2.5">${_fList.map(renderField).join('')}</div></div>` : ''}
                 </div>
-                <div class="grid grid-cols-2 gap-2">
-                    <div><input id="wsSu_pw1" type="password" placeholder="كلمة المرور (6+)" autocomplete="new-password" class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 font-mono" dir="ltr"></div>
-                    <div><input id="wsSu_pw2" type="password" placeholder="تأكيد كلمة المرور" autocomplete="new-password" class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 font-mono" dir="ltr"></div>
-                </div>
-                ${_req.map(c=>`<div><label class="block font-semibold text-slate-700 mb-1">${_escA(c.name)} *</label><input data-ws-su-extra="${_escA(c.name)}" placeholder="${_escA(c.name)}" class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 font-mono" dir="ltr"></div>`).join('')}
-                <p id="wsSuMsg" class="text-[11px] text-rose-600 font-bold"></p>
-                <button onclick="wsSuCreate()" class="px-4 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold"><i class="fa-solid fa-crown"></i> إنشاء مشرف عام</button>`;
+                <p id="wsSuMsg" class="text-[11px] text-rose-600 font-bold min-h-[16px] mt-2"></p>
+                <button onclick="wsSuCreate()" class="mt-1 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition cursor-pointer"><i class="fa-solid fa-crown"></i> إنشاء مشرف عام</button>`;
             }catch(e){ box.innerHTML = `<p class="text-rose-500 text-[11px]">${String((e && e.message) || e).slice(0, 200)}</p>`; }
         }
         async function wsSuCreate(){
@@ -790,7 +895,14 @@
             try{
                 document.querySelectorAll('#wsSuBox [data-ws-su-extra]').forEach(el=>{
                     const k = el.getAttribute('data-ws-su-extra') || '';
-                    if(k) extra[k] = el.value;
+                    if(!k) return;
+                    const type = el.getAttribute('data-ws-su-type') || el.type || 'text';
+                    if(type === 'checkbox'){
+                        extra[k] = el.checked;
+                    } else {
+                        const val = String(el.value || '').trim();
+                        if(val !== '') extra[k] = val;
+                    }
                 });
             }catch(e){}
             try{

@@ -2189,6 +2189,101 @@ def _ws_required_user_fields(cur, sch, tbl, skip=()):
     return out
 
 
+def _ws_user_fields_schema(cur, sch, tbl, skip=()):
+    """Inspect all user table columns and return rich UI field descriptors."""
+    import re as _re_id
+    out = []
+    _skip = {str(s).lower() for s in (skip or [])}
+    try:
+        cur.execute("SELECT column_name, data_type, is_nullable, column_default, character_maximum_length "
+                    "FROM information_schema.columns "
+                    "WHERE table_schema=%s AND table_name=%s ORDER BY ordinal_position",
+                    (sch, tbl))
+        for r in (cur.fetchall() or []):
+            try:
+                if not r or len(r) < 2:
+                    continue
+                nm = str(r[0])
+                nl = nm.lower()
+                if nl in _skip:
+                    continue
+                if not _re_id.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", nm or ""):
+                    continue
+                dtype = str(r[1] or "").lower()
+                nullable = (str(r[2]).upper() == "YES") if len(r) > 2 else True
+                cdef = str(r[3] or "").strip() if len(r) > 3 and r[3] is not None else ""
+                maxlen = r[4] if len(r) > 4 else None
+
+                if "nextval" in cdef.lower() and nl in ("id", "user_id", "pk"):
+                    continue
+
+                if "bool" in dtype:
+                    inp_type = "checkbox"
+                elif any(k in nl for k in ("email", "mail")):
+                    inp_type = "email"
+                elif nl in ("phone", "mobile", "cellphone", "telephone", "tel"):
+                    inp_type = "tel"
+                elif nl in ("password", "passwd", "pass_hash", "password_hash") or "pass" in nl:
+                    inp_type = "password"
+                elif dtype == "date":
+                    inp_type = "date"
+                elif any(k in dtype for k in ("timestamp", "timestamptz")):
+                    inp_type = "datetime-local"
+                elif "time" in dtype:
+                    inp_type = "time"
+                elif any(k in dtype for k in ("int", "serial", "numeric", "decimal", "float", "double", "real")):
+                    inp_type = "number"
+                elif dtype in ("text",) and (maxlen is None or maxlen > 255):
+                    inp_type = "textarea" if (maxlen is None or maxlen > 500) else "text"
+                else:
+                    inp_type = "text"
+
+                ar_labels = {
+                    "email": "البريد الإلكتروني",
+                    "mail": "البريد الإلكتروني",
+                    "e_mail": "البريد الإلكتروني",
+                    "email_address": "البريد الإلكتروني",
+                    "phone": "رقم الهاتف",
+                    "mobile": "رقم الجوال",
+                    "tel": "الهاتف",
+                    "role": "الدور / الصلاحية",
+                    "roles": "الأدوار",
+                    "is_active": "حساب نشط",
+                    "active": "نشط",
+                    "created_at": "تاريخ الإنشاء",
+                    "updated_at": "تاريخ التحديث",
+                    "birth_date": "تاريخ الميلاد",
+                    "hire_date": "تاريخ التعيين",
+                    "date_joined": "تاريخ الانضمام",
+                    "notes": "ملاحظات",
+                    "address": "العنوان",
+                    "dept": "القسم",
+                    "department": "القسم",
+                    "job_title": "المسمى الوظيفي",
+                    "title": "المسمى",
+                    "code": "الكود / الرمز",
+                    "gender": "الجنس",
+                }
+                label = ar_labels.get(nl, nm.replace("_", " ").title())
+                is_req = (not nullable) and (not cdef)
+
+                out.append({
+                    "name": nm,
+                    "label": label,
+                    "data_type": dtype,
+                    "input_type": inp_type,
+                    "is_nullable": nullable,
+                    "is_required": is_req,
+                    "default_value": cdef,
+                    "max_length": maxlen,
+                })
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return out
+
+
 def _ws_real_columns(cur, sch, tbl):
     """lowercase → real column name map (for safe quoted writes). Never raises."""
     out = {}
@@ -2249,6 +2344,7 @@ def api_workspace_users_count(request, ws_id):
             _hcu, _hcp, _hcf, _hcs, _hca = _ws_user_handled_cols(_cols, _hc_map_u, _hc_map_p)
             _handled = {_c for _c in (_hcu, _hcp, _hcf, _hcs, _hca) if _c}
             _req = _ws_required_user_fields(cur, sch, tbl, skip=_handled) if n == 0 else []
+            _fields = _ws_user_fields_schema(cur, sch, tbl, skip=_handled) if n == 0 else []
         finally:
             try:
                 conn.close()
@@ -2259,7 +2355,7 @@ def api_workspace_users_count(request, ws_id):
         except Exception:
             _dom = ""
         return JsonResponse({"count": n, "schema": sch, "table": "%s.%s" % (sch, tbl),
-                             "required": _req, "domain": _dom},
+                             "required": _req, "fields": _fields, "domain": _dom},
                             json_dumps_params={"ensure_ascii": False})
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
@@ -2620,7 +2716,31 @@ def api_workspace_superuser(request, ws_id):
                 _real = _realmap.get(_kl)
                 if not _real:
                     continue
-                _clean_extra[_real] = str(_v if _v is not None else "")
+                _dt = str(cols.get(_kl, "") or "").lower()
+                if "bool" in _dt:
+                    if isinstance(_v, bool):
+                        _bval = _v
+                    else:
+                        _bval = str(_v or "").strip().lower() in ("1", "true", "t", "yes", "on")
+                    _clean_extra[_real] = _ws_bool_val(_dt, _bval)
+                elif any(k in _dt for k in ("int", "serial", "numeric", "decimal", "float", "double", "real")):
+                    if _v is None or str(_v).strip() == "":
+                        _clean_extra[_real] = None
+                    else:
+                        try:
+                            _clean_extra[_real] = int(_v) if any(k in _dt for k in ("int", "serial")) else float(_v)
+                        except Exception:
+                            _clean_extra[_real] = _v
+                elif any(k in _dt for k in ("date", "time", "timestamp")):
+                    if _v is None or str(_v).strip() == "":
+                        _clean_extra[_real] = None
+                    else:
+                        _clean_extra[_real] = str(_v).strip()
+                else:
+                    if _v is None or str(_v).strip() == "":
+                        _clean_extra[_real] = "" if any(c.get("name") == _real for c in _ws_required_user_fields(cur, sch, tbl, skip=_handled)) else None
+                    else:
+                        _clean_extra[_real] = str(_v)
             try:
                 _dom = str(((_wsm.workspace_info(ws_id) or {}).get("domain")) or "").strip()
             except Exception:
@@ -2629,16 +2749,18 @@ def api_workspace_superuser(request, ws_id):
             _email_val = ""
             if _ecol and _ecol not in _handled:
                 _ereal = _realmap.get(_ecol, _ecol)
-                _given = str(_clean_extra.get(_ereal, "")).strip()
+                _given = str(_clean_extra.get(_ereal) or "").strip()
                 if _given and "@" in _given:
                     _email_val = _given
-                else:
-                    _email_val = _ws_compose_email(_given or username, _dom)
-                    if _email_val:
-                        _clean_extra[_ereal] = _email_val
+                elif _given:
+                    _email_val = _ws_compose_email(_given, _dom)
+                elif username and _dom:
+                    _email_val = _ws_compose_email(username, _dom)
+                if _email_val:
+                    _clean_extra[_ereal] = _email_val
             _req = _ws_required_user_fields(cur, sch, tbl, skip=_handled)
             _missing = [c["name"] for c in _req
-                        if not str(_clean_extra.get(c["name"], "")).strip()]
+                        if _clean_extra.get(c["name"]) in (None, "") and not isinstance(_clean_extra.get(c["name"]), bool)]
             if _missing:
                 return JsonResponse({"error": "الحقول المطلوبة: %s" % "، ".join(_missing),
                                      "required": _req}, status=400)

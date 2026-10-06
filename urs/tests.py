@@ -131,6 +131,29 @@ class RequiredFieldsUnitTests(SimpleTestCase):
         self.assertEqual(_v._ws_required_user_fields(_Bad(), "s", "t"), [])
         self.assertEqual(_v._ws_real_columns(_Bad(), "s", "t"), {})
 
+    def test_fields_schema_types(self):
+        st = _fresh_state(fullcols=[
+            ("email", "character varying", "NO", None),
+            ("is_active", "boolean", "NO", "true"),
+            ("phone", "character varying", "YES", None),
+            ("birth_date", "date", "YES", None),
+            ("created_at", "timestamp without time zone", "YES", None),
+            ("login_time", "time without time zone", "YES", None),
+            ("notes", "text", "YES", None),
+            ("age", "integer", "YES", None),
+        ])
+        fields = _v._ws_user_fields_schema(_FakeCur(st), "s", "t", skip=["created_at"])
+        by_name = {f["name"]: f for f in fields}
+        self.assertNotIn("created_at", by_name)
+        self.assertEqual(by_name["email"]["input_type"], "email")
+        self.assertEqual(by_name["is_active"]["input_type"], "checkbox")
+        self.assertEqual(by_name["phone"]["input_type"], "tel")
+        self.assertEqual(by_name["birth_date"]["input_type"], "date")
+        self.assertEqual(by_name["login_time"]["input_type"], "time")
+        self.assertEqual(by_name["notes"]["input_type"], "textarea")
+        self.assertEqual(by_name["age"]["input_type"], "number")
+
+
 
 class SuperuserEndpointTests(SimpleTestCase):
     def setUp(self):
@@ -156,6 +179,25 @@ class SuperuserEndpointTests(SimpleTestCase):
         self.assertEqual(res.status_code, 200)
         self.assertEqual(body["count"], 0)
         self.assertEqual(sorted(c["name"] for c in body["required"]), ["email", "role"])
+        self.assertTrue(len(body.get("fields", [])) > 0)
+        field_names = [f["name"] for f in body["fields"]]
+        self.assertIn("email", field_names)
+        self.assertIn("phone", field_names)
+
+    def test_superuser_type_casting(self):
+        st = _fresh_state()
+        res, _ = self._post(st, {
+            "username": "admin", "password": "secret123", "full_name": "المدير",
+            "extra": {"email": "admin", "role": "admin", "is_active": "true", "phone": ""},
+        })
+        body = json.loads(res.content.decode())
+        self.assertEqual(res.status_code, 200, body)
+        sql, params = st["insert"]
+        # Check that is_active was cast to True (bool)
+        self.assertIn(True, params)
+        # Check that empty nullable phone was cast to None (SQL NULL)
+        self.assertIn(None, params)
+
 
     def test_users_count_no_required_when_not_empty(self):
         st = _fresh_state(count=3)
