@@ -112,54 +112,137 @@ function wsCreateOpen(){
     // فتح نموذج الإضافة نفسه يتطلب الماستر — لا عرض ولا حفظ بدونه
     wsMasterEnsure(wsCreateOpenDo);
 }
+let wsC_tab = 'basic', wsC_stage = '', wsC_stageApps = [];
+const WSCTABS = [['basic','البيانات الأساسية','fa-circle-info'],['conn','الاتصال الأساسي','fa-plug'],['apps','التطبيقات','fa-cubes'],['final','ترحيل وحفظ','fa-database']];
+function wsC_sanitize(v){ v = String(v || '').toLowerCase().replace(/[^a-z0-9_]/g, '_').replace(/_+/g, '_').replace(/^_+|_+$/g, ''); return v || 'app'; }
+function wsC_schemaAuto(){
+    const g = (k)=>{ const el = document.getElementById('wsC_' + k); return el ? el.value : ''; };
+    const ov = String(g('schema') || '').trim().toLowerCase();
+    if(ov) return ov;
+    let y = parseInt(g('fiscal_year'), 10); if(!(y >= 1900 && y <= 2200)) y = new Date().getFullYear();
+    return wsC_sanitize(g('company_code') || 'company') + '_' + wsC_sanitize(g('branch_code') || 'main') + '_' + y;
+}
+function wsC_schemaUpd(){
+    const a = document.getElementById('wsC_schema_view'), b = document.getElementById('wsC_conn_schema');
+    const s = wsC_schemaAuto();
+    if(a) a.value = s;
+    if(b) b.value = s;
+    const u = document.getElementById('wsC_users');
+    if(u && !u.dataset.touched) u.placeholder = s + '.users';
+}
+function wsC_go(tab){
+    wsC_tab = tab;
+    WSCTABS.forEach(([k])=>{
+        const b = document.getElementById('wsC_tab_' + k), s = document.getElementById('wsC_sec_' + k);
+        if(b) b.className = 'w-full text-right px-3 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition ' + (k === tab ? 'bg-emerald-600 text-white shadow' : 'text-slate-600 hover:bg-slate-100');
+        if(s) s.style.display = (k === tab ? '' : 'none');
+    });
+    if(tab === 'final') wsC_summary();
+}
+function wsC_summary(){
+    const el = document.getElementById('wsC_summary'); if(!el) return;
+    const g = (k)=>{ const e = document.getElementById('wsC_' + k); return e ? e.value : ''; };
+    const s = wsC_schemaAuto();
+    el.innerHTML = `<div class="grid grid-cols-2 gap-2 text-[11px]">
+        <div class="bg-slate-50 border border-slate-200 rounded-xl p-2"><span class="text-slate-400">المعرف:</span> <b class="font-mono" dir="ltr">${g('id') || '—'}</b></div>
+        <div class="bg-slate-50 border border-slate-200 rounded-xl p-2"><span class="text-slate-400">السكيما:</span> <b class="font-mono" dir="ltr">${s}</b></div>
+        <div class="bg-slate-50 border border-slate-200 rounded-xl p-2"><span class="text-slate-400">الاتصال:</span> <b class="font-mono" dir="ltr">${g('conn') || 'urs_local'}</b> <span class="text-slate-400">@</span> <b class="font-mono" dir="ltr">${g('host') || '—'}:${g('port') || '—'}/${g('instance') || '—'}</b></div>
+        <div class="bg-slate-50 border border-slate-200 rounded-xl p-2"><span class="text-slate-400">التطبيقات:</span> <b>${wsC_stageApps.length ? wsC_stageApps.length + ' من zip' : '—'}</b> <span class="text-slate-400">+ نسخ الإعدادات من</span> <b class="font-mono" dir="ltr">${g('from') || '—'}</b></div>
+    </div>`;
+}
 function wsCreateOpenDo(){
     let m = document.getElementById('wsCreateModal');
     if(m) m.remove();
+    wsC_tab = 'basic'; wsC_stage = ''; wsC_stageApps = [];
     m = document.createElement('div');
     m.id = 'wsCreateModal';
     m.className = 'fixed inset-0 z-[80] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4';
     m.setAttribute('onclick', 'if(event.target===this)wsCreateClose()');
-    m.innerHTML = `<div class="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col max-h-[88vh]">
+    const tabs = WSCTABS.map(([k, t, ic], i)=>`<button id="wsC_tab_${k}" onclick="wsC_go('${k}')" class="w-full text-right px-3 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition ${i === 0 ? 'bg-emerald-600 text-white shadow' : 'text-slate-600 hover:bg-slate-100'}"><i class="fa-solid ${ic}"></i>${t}<span class="mr-auto opacity-60">${i + 1}</span></button>`).join('');
+    m.innerHTML = `<div class="bg-white rounded-2xl shadow-2xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[90vh]">
         <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-emerald-50 shrink-0">
-            <h3 class="text-sm font-bold text-slate-800"><i class="fa-solid fa-plus text-emerald-600"></i> مساحة عمل جديدة</h3>
+            <h3 class="text-sm font-bold text-slate-800"><i class="fa-solid fa-plus text-emerald-600"></i> مساحة عمل جديدة — التجهيز الكامل</h3>
             <button onclick="wsCreateClose()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
         </div>
-        <div class="p-5 space-y-3 text-xs overflow-y-auto custom-scroll">
-            <p class="text-[11px] text-slate-500">تُنشأ المجلدات + <span class="font-mono" dir="ltr">workspace.conf</span> + <span class="font-mono" dir="ltr">settings.py</span>، وتُنسخ ملفات الإعدادات، ويُضاف الاتصال المحلي الافتراضي.</p>
-            <div><label class="block font-semibold text-slate-700 mb-1">المعرف (لاتيني) *</label><input id="wsC_id" dir="ltr" placeholder="workspace_2" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono"></div>
-            <div class="grid grid-cols-2 gap-3">
-                <div><label class="block font-semibold text-slate-700 mb-1">اسم المساحة</label><input id="wsC_name" placeholder="مساحتي" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"></div>
-                <div><label class="block font-semibold text-slate-700 mb-1">البراند</label><input id="wsC_brand" placeholder="Odex" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"></div>
-            </div>
-            <div class="grid grid-cols-2 gap-3">
-                <div><label class="block font-semibold text-slate-700 mb-1">اسم الشركة</label><input id="wsC_company" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"></div>
-                <div><label class="block font-semibold text-slate-700 mb-1">الدومين</label><input id="wsC_domain" dir="ltr" placeholder="company.com" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono"></div>
-            </div>
-            <div class="grid grid-cols-2 gap-3">
-                <div><label class="block font-semibold text-slate-700 mb-1">الاتصال المحلي الأساسي</label><input id="wsC_conn" dir="ltr" value="urs_local" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono"></div>
-                <div><label class="block font-semibold text-slate-700 mb-1">جدول المستخدمين</label><input id="wsC_users" dir="ltr" value="users" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono"></div>
-            </div>
-            <div class="rounded-xl border border-slate-200 p-3 space-y-3 bg-slate-50/50">
-                <div class="text-[11px] font-bold text-slate-600">بيانات الاتصال المحلي الافتراضي</div>
-                <div class="grid grid-cols-2 gap-3">
-                    <div><label class="block font-semibold text-slate-700 mb-1">الهوست</label><input id="wsC_host" dir="ltr" placeholder="127.0.0.1" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono"></div>
-                    <div><label class="block font-semibold text-slate-700 mb-1">البورت</label><input id="wsC_port" dir="ltr" inputmode="numeric" placeholder="5432" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono"></div>
+        <div class="flex flex-1 min-h-0">
+            <aside class="w-44 shrink-0 border-l border-slate-200 bg-slate-50/70 p-3 space-y-1.5">${tabs}</aside>
+            <div class="flex-1 p-5 space-y-3 text-xs overflow-y-auto custom-scroll min-w-0">
+                <div id="wsC_sec_basic" class="space-y-3">
+                    <div><label class="block font-semibold text-slate-700 mb-1">المعرف (لاتيني) *</label><input id="wsC_id" dir="ltr" placeholder="workspace_2" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono"></div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div><label class="block font-semibold text-slate-700 mb-1">اسم المساحة</label><input id="wsC_name" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"></div>
+                        <div><label class="block font-semibold text-slate-700 mb-1">البراند</label><input id="wsC_brand" value="Odex" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"></div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div><label class="block font-semibold text-slate-700 mb-1">اسم الشركة</label><input id="wsC_company" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"></div>
+                        <div><label class="block font-semibold text-slate-700 mb-1">الدومين</label><input id="wsC_domain" dir="ltr" placeholder="company.com" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono"></div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div><label class="block font-semibold text-slate-700 mb-1">الدولة</label><input id="wsC_country" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"></div>
+                        <div><label class="block font-semibold text-slate-700 mb-1">العملة</label><input id="wsC_currency" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"></div>
+                    </div>
+                    <div class="grid grid-cols-3 gap-3">
+                        <div><label class="block font-semibold text-slate-700 mb-1">رمز الشركة (للسكيما)</label><input id="wsC_company_code" dir="ltr" placeholder="company" oninput="wsC_schemaUpd()" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono"></div>
+                        <div><label class="block font-semibold text-slate-700 mb-1">رمز الفرع</label><input id="wsC_branch_code" dir="ltr" placeholder="main" oninput="wsC_schemaUpd()" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono"></div>
+                        <div><label class="block font-semibold text-slate-700 mb-1">السنة المالية</label><input id="wsC_fiscal_year" dir="ltr" inputmode="numeric" placeholder="2026" oninput="wsC_schemaUpd()" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono"></div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div><label class="block font-semibold text-slate-700 mb-1">السكيما المحسوبة</label><input id="wsC_schema_view" dir="ltr" readonly class="w-full bg-slate-100 border border-slate-200 rounded-xl px-3 py-2 font-mono text-emerald-700 font-bold"></div>
+                        <div><label class="block font-semibold text-slate-700 mb-1">تجاوز السكيما (اختياري)</label><input id="wsC_schema" dir="ltr" oninput="wsC_schemaUpd()" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono"></div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div class="flex items-center gap-2"><input id="wsC_c1" type="color" value="#4f46e5" class="w-10 h-9 rounded-lg border border-slate-200 bg-white p-1"><label class="font-semibold text-slate-700">اللون الأساسي</label></div>
+                        <div class="flex items-center gap-2"><input id="wsC_c2" type="color" value="#10b981" class="w-10 h-9 rounded-lg border border-slate-200 bg-white p-1"><label class="font-semibold text-slate-700">لون التمييز</label></div>
+                    </div>
                 </div>
-                <div class="grid grid-cols-2 gap-3">
-                    <div><label class="block font-semibold text-slate-700 mb-1">اسم المستخدم</label><input id="wsC_user" dir="ltr" autocomplete="off" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono"></div>
-                    <div><label class="block font-semibold text-slate-700 mb-1">كلمة المرور</label><input id="wsC_password" type="password" dir="ltr" autocomplete="new-password" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono"></div>
+                <div id="wsC_sec_conn" class="space-y-3" style="display:none">
+                    <div class="grid grid-cols-2 gap-3">
+                        <div><label class="block font-semibold text-slate-700 mb-1">اسم الاتصال الأساسي</label><input id="wsC_conn" dir="ltr" value="urs_local" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono"></div>
+                        <div><label class="block font-semibold text-slate-700 mb-1">جدول المستخدمين (فارغ = تلقائي)</label><input id="wsC_users" dir="ltr" oninput="this.dataset.touched='1'" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono"></div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div><label class="block font-semibold text-slate-700 mb-1">الهوست *</label><input id="wsC_host" dir="ltr" value="172.16.10.101" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono"></div>
+                        <div><label class="block font-semibold text-slate-700 mb-1">البورت *</label><input id="wsC_port" dir="ltr" inputmode="numeric" value="5432" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono"></div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div><label class="block font-semibold text-slate-700 mb-1">اسم المستخدم *</label><input id="wsC_user" dir="ltr" value="postgres" autocomplete="off" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono"></div>
+                        <div><label class="block font-semibold text-slate-700 mb-1">كلمة المرور *</label><input id="wsC_password" type="password" dir="ltr" autocomplete="new-password" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono"></div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div><label class="block font-semibold text-slate-700 mb-1">قاعدة البيانات *</label><input id="wsC_instance" dir="ltr" value="urs" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono"></div>
+                        <div><label class="block font-semibold text-slate-700 mb-1">السكيما الجديدة (تُحفظ في الاتصال)</label><input id="wsC_conn_schema" dir="ltr" readonly class="w-full bg-slate-100 border border-slate-200 rounded-xl px-3 py-2 font-mono text-emerald-700 font-bold"></div>
+                    </div>
+                    <p class="text-[11px] text-slate-500">يُنشأ صف الاتصال بهذه البيانات (الهوست/البورت/المستخدم/كلمة المرور/القاعدة/السكيما)، وتُنشأ قاعدة البيانات والسكيما تلقائياً عند الترحيل إن لم توجدا.</p>
                 </div>
-                <div><label class="block font-semibold text-slate-700 mb-1">قاعدة البيانات</label><input id="wsC_instance" dir="ltr" placeholder="urs" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono"></div>
+                <div id="wsC_sec_apps" class="space-y-3" style="display:none">
+                    <div><label class="block font-semibold text-slate-700 mb-1">نسخ ملفات الإعدادات (fmlks) من</label><select id="wsC_from" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"></select></div>
+                    <div class="rounded-xl border border-dashed border-slate-300 p-4 space-y-2 bg-slate-50/50">
+                        <label class="block font-bold text-slate-700"><i class="fa-solid fa-file-zipper text-amber-500"></i> استيراد ملف مضغوط يحوي مجلد التطبيقات</label>
+                        <div class="flex items-center gap-2">
+                            <input id="wsC_zip" type="file" accept=".zip" class="flex-1 text-[11px] text-slate-600">
+                            <button onclick="wsC_upload()" class="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold">رفع</button>
+                        </div>
+                        <div id="wsC_zipList" class="text-[11px] text-slate-500">لم يُرفع ملف بعد.</div>
+                    </div>
+                </div>
+                <div id="wsC_sec_final" class="space-y-3" style="display:none">
+                    <div id="wsC_summary"></div>
+                    <label class="flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2.5 cursor-pointer">
+                        <input id="wsC_migrate" type="checkbox" checked class="w-4 h-4 accent-emerald-600">
+                        <span class="font-bold text-emerald-800">ترحيل قاعدة البيانات الآن (إنشاء السكيما + كل جداول urs)</span>
+                    </label>
+                    <p class="text-[11px] text-slate-500">عند الحفظ: تُنشأ المجلدات (<span class="font-mono" dir="ltr">__init__.py / settings.py / workspace.conf / apps/settings</span>) + تُستورد التطبيقات + يُحفظ صف الاتصال + يُنفَّذ الترحيل على اتصال المساحة. قد يستغرق الترحيل بضع ثوانٍ.</p>
+                </div>
             </div>
-            <div><label class="block font-semibold text-slate-700 mb-1">نسخ ملفات الإعدادات من</label><select id="wsC_from" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"></select></div>
         </div>
         <div class="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2 shrink-0">
             <span id="wsCreateMsg" class="text-[11px] text-rose-600 font-bold ml-auto"></span>
             <button onclick="wsCreateClose()" class="px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs">إلغاء</button>
-            <button onclick="wsCreateSave()" class="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold">إنشاء</button>
+            <button id="wsCreateGo" onclick="wsCreateSave()" class="px-5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold"><i class="fa-solid fa-database"></i> ترحيل وحفظ مساحة العمل</button>
         </div>
     </div>`;
     document.body.appendChild(m);
+    wsC_schemaUpd();
     fetch('/api/workspaces/').then(r=>r.json()).then(d=>{
         const sel = document.getElementById('wsC_from');
         if(!sel) return;
@@ -172,27 +255,52 @@ function wsCreateOpenDo(){
         }
     }).catch(()=>{});
 }
+async function wsC_upload(){
+    wsMasterEnsure(wsC_uploadDo);
+}
+async function wsC_uploadDo(){
+    const inp = document.getElementById('wsC_zip'), box = document.getElementById('wsC_zipList');
+    if(!inp || !inp.files || !inp.files.length){ if(box) box.textContent = 'اختر ملف .zip أولاً'; return; }
+    if(box) box.textContent = 'جارٍ الرفع والفحص...';
+    try{
+        const fd = new FormData();
+        fd.append('zip', inp.files[0]);
+        const res = await fetch('/api/workspaces/upload-apps/', {method:'POST', body: fd});
+        const d = await res.json();
+        if(!res.ok) throw new Error(d.error || 'فشل الرفع');
+        wsC_stage = d.stage || ''; wsC_stageApps = d.apps || [];
+        if(box) box.innerHTML = `تم ✓ <b>${d.files || 0}</b> ملف — التطبيقات: <b>${wsC_stageApps.join('، ')}</b>`;
+    }catch(e){ if(box) box.textContent = String((e && e.message) || e).slice(0, 200); }
+}
 function wsCreateClose(){ const m = document.getElementById('wsCreateModal'); if(m) m.remove(); }
 async function wsCreateSave(){
     wsMasterEnsure(wsCreateDo);
 }
 async function wsCreateDo(){
     const msg = document.getElementById('wsCreateMsg');
-    const v = (k)=>{ const el = document.getElementById('wsC_' + k); return el ? el.value : ''; };
-    const conn = {host: v('host'), port: v('port'), user: v('user'), instance: v('instance')};
-    if(String(v('password') || '').trim() !== '') conn.password = v('password');
-    const body = {id: v('id'), name: v('name'), brand: v('brand'), company: v('company'),
-        domain: v('domain'), primary_connection: v('conn'), users_table: v('users'), from: v('from'),
-        connection: conn};
-    if(!/^workspace_[A-Za-z0-9][A-Za-z0-9_\-]*$/.test(body.id || '')){ if(msg) msg.textContent = 'المعرف: workspace_ + أحرف/أرقام/_/-'; return; }
+    const btn = document.getElementById('wsCreateGo');
+    const g = (k)=>{ const el = document.getElementById('wsC_' + k); return el ? el.value : ''; };
+    const conn = {host: g('host'), port: g('port'), user: g('user'), instance: g('instance')};
+    if(String(g('password') || '').trim() !== '') conn.password = g('password');
+    const body = {id: g('id'), name: g('name'), brand: g('brand') || 'Odex', company: g('company'),
+        domain: g('domain'), country: g('country'), currency: g('currency'),
+        brand_colors: {primary: g('c1') || '#4f46e5', accent: g('c2') || '#10b981'},
+        company_code: g('company_code'), branch_code: g('branch_code'), fiscal_year: g('fiscal_year'),
+        schema: g('schema'), primary_connection: g('conn') || 'urs_local',
+        users_table: g('users'), from: g('from'), connection: conn,
+        apps_stage: wsC_stage, migrate: !!document.getElementById('wsC_migrate')?.checked};
+    if(!/^workspace_[A-Za-z0-9][A-Za-z0-9_\-]*$/.test(body.id || '')){ if(msg) msg.textContent = 'المعرف: workspace_ + أحرف/أرقام/_/-'; wsC_go('basic'); return; }
+    if(msg){ msg.className = 'text-[11px] text-indigo-600 font-bold ml-auto'; msg.textContent = 'جارٍ إنشاء المجلدات والترحيل...'; }
+    if(btn) btn.disabled = true;
     try{
         const res = await fetch('/api/workspaces/create/', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
         const d = await res.json();
         if(!res.ok) throw new Error(d.error || 'فشل الإنشاء');
-        try{ notify('أُنشئت مساحة العمل ✓', 'success'); }catch(e){}
+        try{ notify(`أُنشئت مساحة العمل ✓ — السكيما ${d.schema || ''} (${(d.migrate && d.migrate.tables ? d.migrate.tables.length : 0)} جدول)`, 'success'); }catch(e){}
         wsCreateClose();
-        setTimeout(()=>location.reload(), 700);
-    }catch(e){ if(msg) msg.textContent = String((e && e.message) || e).slice(0, 200); }
+        setTimeout(()=>location.reload(), 900);
+    }catch(e){ if(msg){ msg.className = 'text-[11px] text-rose-600 font-bold ml-auto'; msg.textContent = String((e && e.message) || e).slice(0, 250); } }
+    finally{ if(btn) btn.disabled = false; }
 }
 </script>
 {% endblock %}

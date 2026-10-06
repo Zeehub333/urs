@@ -578,6 +578,8 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
         const DJANGO_RML_FIELDS = {{ rml_fields_json|safe }};
         const DJANGO_RML_TYPE = "{{ rml_metadata.type|default:'master'|escapejs }}";
         const DJANGO_RML_LAYOUT = "{{ rml_metadata.doc_layout|default:''|escapejs }}";
+        const DJANGO_RML_METADATA = {{ rml_metadata_json|safe }};
+        const DJANGO_RML_DOC_PARAMS = (DJANGO_RML_METADATA && (DJANGO_RML_METADATA.doc_params || DJANGO_RML_METADATA.docParams)) || [];
         let currentRml = DJANGO_RML;
         let currentApp = DJANGO_APP;
         const WS_CAN_DESIGN = {% if ws_can_design %}true{% else %}false{% endif %};
@@ -831,14 +833,14 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
             }catch(e){ return String((typeof DJANGO_RML_LAYOUT !== 'undefined' ? DJANGO_RML_LAYOUT : '') || '').toLowerCase() === 'table'; }
         }
         function docSearchFields(){
-            const md = (lastApiData && lastApiData.metadata) || {};
-            const dparams = md.doc_params || md.docParams || [];
+            const md = (lastApiData && lastApiData.metadata) || (typeof DJANGO_RML_METADATA !== 'undefined' ? DJANGO_RML_METADATA : {}) || {};
+            const dparams = md.doc_params || md.docParams || (typeof DJANGO_RML_DOC_PARAMS !== 'undefined' ? DJANGO_RML_DOC_PARAMS : []) || [];
             if(dparams && dparams.length){
                 return dparams.map(p=>({
                     alias: p.column || p.field || p.name,
                     label: p.label || p.display || p.column || p.name,
                     kind: (p.type === 'datetime' ? 'date' : (p.type || 'text')),
-                    op: p.op || (p.type === 'date' ? 'between' : p.type === 'number' ? 'equals' : 'contains'),
+                    op: p.op || (p.type === 'date' ? 'between' : (p.type === 'number' || p.type === 'select') ? 'equals' : 'contains'),
                     required: (p.required === undefined ? true : !!(p.required && p.required !== 'false' && p.required !== '0')),
                     defaultValue: p.default_value || p.defaultValue || ''
                 }));
@@ -851,7 +853,7 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                 if(!c || !c.alias) return;
                 let k = kindOf(c.alias);
                 if(k === 'datetime') k = 'date';
-                if(['text', 'date', 'number', 'time'].indexOf(k) < 0) k = 'text';
+                if(['text', 'date', 'number', 'time', 'select'].indexOf(k) < 0) k = 'text';
                 out.push({alias: c.alias, label: c.alias, kind: k, op: docDefOp(k), required: true, defaultValue: ''});
             });
             return out;
@@ -881,8 +883,59 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
             docFieldOps[alias] = op;
             renderDocRequiredHeader();
         }
+        window._docDistinctCache = window._docDistinctCache || {};
+        async function loadDocDistinctValues(alias){
+            const cacheKey = (currentApp || '') + '::' + (currentRml || '') + '::' + alias;
+            if(window._docDistinctCache[cacheKey]){
+                return window._docDistinctCache[cacheKey];
+            }
+            try{
+                const res = await fetch('/api/rml/distinct', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        rml: currentRml,
+                        app: currentApp,
+                        column: alias,
+                        limit: 1000
+                    })
+                });
+                if(res.ok){
+                    const data = await res.json();
+                    const vals = (data.values || []).map(v => (v == null ? '' : String(v)));
+                    window._docDistinctCache[cacheKey] = vals;
+                    return vals;
+                }
+            }catch(e){
+                console.warn('Failed to load distinct values for', alias, e);
+            }
+            return [];
+        }
+        function docHeaderMissingRequired(){
+            const fields = docSearchFields();
+            for(const f of fields){
+                if(!f.required) continue;
+                const op = docFieldOps[f.alias] || f.op || docDefOp(f.kind);
+                const gv = (t)=>{
+                    const el = document.querySelector(`#docHeaderControls [data-dhf="${f.alias}"][data-dht="${t}"]`);
+                    return el ? (el.value || '').trim() : '';
+                };
+                if(op === 'between'){
+                    if(!gv('from') && !gv('to')) return true;
+                } else {
+                    if(!gv('single')) return true;
+                }
+            }
+            return false;
+        }
+        function docHeaderSelectChanged(alias, val){
+            if(val && !docHeaderMissingRequired()){
+                docHeaderFetch();
+            }
+        }
         function docHeaderClear(){
             document.querySelectorAll('#docHeaderControls input').forEach(inp=>{ inp.value = ''; });
+            document.querySelectorAll('#docHeaderControls select[data-dhf]').forEach(sel=>{ sel.value = ''; });
             resetAllFilters();
             if(isDocType()){
                 showDocWaitingPrompt(true);
@@ -930,6 +983,29 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                         <span class="text-slate-400 text-[10px]">-</span>
                         <input data-dhf="${f.alias}" data-dht="to" value="${String(vTo).replace(/"/g, '&quot;')}" type="text" inputmode="numeric" placeholder="إلى" class="bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-indigo-500 w-20 text-center" onkeydown="if(event.key==='Enter') docHeaderFetch()">
                     </div>`;
+                } else if(f.kind === 'select'){
+                    const cacheKey = (currentApp || '') + '::' + (currentRml || '') + '::' + f.alias;
+                    const isLoaded = !!(window._docDistinctCache && window._docDistinctCache[cacheKey]);
+                    const vals = isLoaded ? window._docDistinctCache[cacheKey] : [];
+                    const curV = keep[f.alias + '||single'] ?? f.defaultValue ?? '';
+                    if(!isLoaded){
+                        setTimeout(()=>{
+                            loadDocDistinctValues(f.alias).then(loadedVals => {
+                                const sel = document.querySelector(`#docHeaderControls select[data-dhf="${f.alias}"][data-dht="single"]`);
+                                if(!sel) return;
+                                let h = `<option value="">-- اختر ${f.label || f.alias} --</option>`;
+                                (loadedVals || []).forEach(v => {
+                                    const isSel = (String(v) === String(curV));
+                                    h += `<option value="${String(v).replace(/"/g, '&quot;')}" ${isSel ? 'selected' : ''}>${String(v).replace(/</g, '&lt;')}</option>`;
+                                });
+                                sel.innerHTML = h;
+                            });
+                        }, 0);
+                    }
+                    const optHtml = isLoaded
+                        ? (`<option value="">-- اختر ${f.label || f.alias} --</option>` + vals.map(v => `<option value="${String(v).replace(/"/g, '&quot;')}" ${String(v) === String(curV) ? 'selected' : ''}>${String(v).replace(/</g, '&lt;')}</option>`).join(''))
+                        : `<option value="">-- جارٍ جلب القيم الفريدة... --</option>`;
+                    valInput = `<select data-dhf="${f.alias}" data-dht="single" class="bg-white border border-slate-200 rounded-lg px-2.5 py-1 text-xs focus:outline-none focus:border-indigo-500 min-w-[150px] font-medium" onchange="docHeaderSelectChanged('${f.alias}', this.value)">${optHtml}</select>`;
                 } else {
                     const ph = f.kind === 'number' ? 'القيمة...' : (op === 'inyear' ? 'YYYY' : op === 'inmonth' ? 'YYYY-MM' : 'القيمة...');
                     const curV = keep[f.alias + '||single'] ?? f.defaultValue ?? '';
@@ -990,10 +1066,11 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
             text: [['contains','يحتوي'],['equals','يساوي'],['startswith','يبدأ بـ'],['endswith','ينتهي بـ'],['not_contains','لا يحتوي'],['not_equals','لا يساوي']],
             number: [['equals','يساوي'],['not_equals','لا يساوي'],['gt','أكبر من'],['gte','≥'],['lt','أصغر من'],['lte','≤'],['between','بين']],
             date: [['between','بين تاريخين'],['equals','في يوم'],['lt','قبل'],['gt','بعد'],['inmonth','في شهر'],['inyear','في سنة'],['since','منذ']],
-            time: [['equals','يساوي'],['not_equals','لا يساوي']]
+            time: [['equals','يساوي'],['not_equals','لا يساوي']],
+            select: [['equals','يساوي'],['not_equals','لا يساوي']]
         };
         let docFieldOps = {}; // alias -> op (remembered per panel session)
-        function docDefOp(kind){ return kind === 'date' ? 'between' : kind === 'number' ? 'equals' : 'contains'; }
+        function docDefOp(kind){ return kind === 'date' ? 'between' : (kind === 'number' || kind === 'select') ? 'equals' : 'contains'; }
         function docSnapshotVals(){
             const m = {};
             try{ document.querySelectorAll('#docSearchFields [data-docf]').forEach(el=>{ m[el.getAttribute('data-docf') + '||' + el.getAttribute('data-doct')] = el.value; }); }catch(e){}
@@ -1006,6 +1083,23 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
             }catch(e){}
         }
         function docValInput(alias, kind, op, doct, val, ph){
+            if(kind === 'select'){
+                const cacheKey = (currentApp || '') + '::' + (currentRml || '') + '::' + alias;
+                const isLoaded = !!(window._docDistinctCache && window._docDistinctCache[cacheKey]);
+                const vals = isLoaded ? window._docDistinctCache[cacheKey] : [];
+                const curV = String(val == null ? '' : val);
+                if(!isLoaded){
+                    setTimeout(()=>{
+                        loadDocDistinctValues(alias).then(()=>{
+                            try{ renderDocSearchFirst(); }catch(e){}
+                        });
+                    }, 0);
+                }
+                const optHtml = isLoaded
+                    ? (`<option value="">-- اختر --</option>` + vals.map(v => `<option value="${String(v).replace(/"/g, '&quot;')}" ${curV === String(v) ? 'selected' : ''}>${String(v).replace(/</g, '&lt;')}</option>`).join(''))
+                    : `<option value="">-- جارٍ جلب القيم الفريدة... --</option>`;
+                return `<select data-docf="${alias}" data-doct="${doct}" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500">${optHtml}</select>`;
+            }
             const uid = (kind === 'date' && (op === 'inyear' || op === 'inmonth')) ? '' : (kind === 'date' ? (doct === 'dateFrom' ? ' data-uidate="from"' : doct === 'dateTo' ? ' data-uidate="to"' : ' data-uidate="single"') : '');
             const type = kind === 'number' ? 'text' : 'text';
             const im = kind === 'number' ? ' inputmode="numeric"' : '';

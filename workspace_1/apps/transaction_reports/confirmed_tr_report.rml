@@ -105,4 +105,8 @@
     <table name="vewOutgoingTransfersDeliveringReport" conn="2" is_default="1"/>
     <table name="confirmed_transfers_copy" conn="6"/>
   </table_opts>
+  <doc_params>
+    <doc_param column="الفرع" id="dp_1791267530625_278" label="الفرع" type="select" op="equals" required="0"/>
+    <doc_param column="تاريخ الحوالة" id="dp_1791268066129_80" label="تاريخ الحوالة" type="VARCHAR" op="between" required="1"/>
+  </doc_params>
 </rml>

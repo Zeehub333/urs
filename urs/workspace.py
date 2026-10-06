@@ -281,6 +281,7 @@ def workspace_info(ws_path):
         "fiscal_year": cfg.get("fiscal_year") or "",
         "status": (conf.get("STATUS") or "active").strip().lower() or "active",
         "primary_connection": conf.get("PRIMARY_CONNECTION") or "",
+        "schema": conf.get("SCHEMA") or "",
         "users_table": conf.get("USERS_TABLE") or "",
         "users_user_column": conf.get("USERS_USER_COLUMN") or "",
         "users_password_column": conf.get("USERS_PASSWORD_COLUMN") or "",

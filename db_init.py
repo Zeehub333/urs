@@ -5,11 +5,142 @@ Connects with postgres/postgres, creates DB if needed, runs migrations, syncs 15
 """
 import os
 import sys
+import re
 import socket
 import pathlib
 import json
 
 BASE_DIR = pathlib.Path(__file__).resolve().parent
+
+_WS_SCHEMA_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_MAX_SCHEMA_LEN = 63
+
+
+def validate_ws_schema(name) -> str:
+    """Validate an explicit workspace schema name (Postgres identifier).
+
+    Returns the lowercase name. Raises ValueError (Arabic) when invalid.
+    """
+    v = str(name or "").strip().lower()
+    if not v or len(v) > _MAX_SCHEMA_LEN or not _WS_SCHEMA_RE.fullmatch(v):
+        raise ValueError("اسم السكيما: أحرف لاتينية/أرقام/_ فقط، يبدأ بحرف أو _")
+    return v
+
+
+def migrate_schema(host, port, user, password, dbname, schema):
+    """Create schema `company_branch_year` and migrate ALL Django app tables into it.
+
+    Steps: (CREATE DATABASE when missing) → CREATE SCHEMA IF NOT EXISTS →
+    temporary Django connection with ``search_path=<schema>`` →
+    ``migrate --run-syncdb`` (every app incl. ``urs`` models, auth, django_migrations)
+    → list created tables from ``pg_tables``.
+
+    Returns {"schema", "tables", "migrated": True}. Raises RuntimeError (Arabic)
+    with the driver error attached. Never touches the default connection.
+    """
+    schema = validate_ws_schema(schema)
+    host = str(host or "").strip() or "127.0.0.1"
+    try:
+        port = int(port or 5432)
+    except Exception:
+        port = 5432
+    user = str(user or "").strip() or "postgres"
+    password = str(password or "")
+    dbname = str(dbname or "").strip() or "urs"
+    try:
+        import psycopg2
+        from psycopg2 import sql as _sql
+    except Exception as e:
+        raise RuntimeError("مكتبة psycopg2 غير مثبتة: %s" % e)
+
+    def _connect(db):
+        return psycopg2.connect(dbname=db, user=user, password=password,
+                                host=host, port=port, connect_timeout=10)
+
+    try:
+        try:
+            conn = _connect(dbname)
+        except Exception as e:
+            # 3D000 invalid_catalog_name → create the database, then reconnect
+            if "3D000" not in str(getattr(e, "pgcode", "") or "") and \
+               "does not exist" not in str(e):
+                raise
+            admin = _connect("postgres")
+            try:
+                admin.autocommit = True
+                cur = admin.cursor()
+                try:
+                    cur.execute(_sql.SQL("CREATE DATABASE {}").format(
+                        _sql.Identifier(dbname)))
+                except Exception as ce:
+                    if "already exists" not in str(ce):
+                        raise
+                cur.close()
+            finally:
+                admin.close()
+            conn = _connect(dbname)
+        try:
+            conn.autocommit = True
+            cur = conn.cursor()
+            cur.execute(_sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(
+                _sql.Identifier(schema)))
+            cur.close()
+        finally:
+            conn.close()
+    except (ValueError, RuntimeError):
+        raise
+    except Exception as e:
+        raise RuntimeError("فشل الاتصال/إنشاء السكيما: %s" % e)
+
+    # --- Django migrate into the schema via search_path ---------------------
+    alias = "ws_%s" % schema
+    try:
+        from django.conf import settings as _dj_settings
+        from django.db import connections as _conns
+        from django.core.management import call_command as _migrate_cmd
+    except Exception as e:
+        raise RuntimeError("تعذر تحميل Django للترحيل: %s" % e)
+    if not _dj_settings.configured:
+        raise RuntimeError("إعدادات Django غير مهيأة — نفّذ عبر manage.py/shell")
+    _dj_settings.DATABASES[alias] = {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": dbname,
+        "USER": user,
+        "PASSWORD": password,
+        "HOST": host,
+        "PORT": str(port),
+        "OPTIONS": {"options": "-c search_path=%s" % schema},
+    }
+    try:
+        try:
+            _migrate_cmd("migrate", database=alias, run_syncdb=True,
+                         verbosity=0, interactive=False)
+        except Exception as e:
+            raise RuntimeError("فشل migrate داخل السكيما %s: %s" % (schema, e))
+        try:
+            conn = _conns[alias]
+            cur = conn.cursor()
+            try:
+                cur.execute("SELECT tablename FROM pg_tables WHERE schemaname = %s "
+                            "ORDER BY tablename", [schema])
+                tables = [str(r[0]) for r in (cur.fetchall() or [])]
+            finally:
+                try:
+                    cur.close()
+                except Exception:
+                    pass
+        except Exception as e:
+            raise RuntimeError("تم الترحيل لكن تعذر سرد الجداول: %s" % e)
+    finally:
+        try:
+            _conns[alias].close()
+        except Exception:
+            pass
+        try:
+            del _dj_settings.DATABASES[alias]
+        except Exception:
+            pass
+    return {"schema": schema, "tables": tables, "migrated": True}
 
 def probe_port(host="127.0.0.1", port=5432, timeout=1.0) -> bool:
     try:

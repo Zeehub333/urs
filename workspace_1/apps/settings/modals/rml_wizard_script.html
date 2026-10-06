@@ -1685,10 +1685,12 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
             const dparams = wizardDocParams || [];
             const docParamsHtml = dparams.map((p, i)=>{
                 const isSel = rptSel.kind === 'doc_param' && rptSel.idx === i;
+                const typeBadge = p.type === 'select' ? 'صندوق اختيار' : (p.type || 'text');
+                const badgeCls = p.type === 'select' ? 'bg-indigo-100 text-indigo-800' : 'bg-sky-100 text-sky-800';
                 return `<div class="rd-tree-leaf flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs cursor-pointer transition select-none ${isSel ? 'bg-sky-50 border border-sky-200 text-sky-900 font-bold' : 'hover:bg-slate-100 text-slate-700'}" onclick="rptSelectCol('doc_param', ${i})">
                     <i class="fa-solid fa-filter text-[10px] text-sky-500"></i>
                     <span class="flex-1 truncate" title="${rptEsc(p.label || p.column)}">${rptEsc(p.label || p.column || ('مدخل ' + (i+1)))}</span>
-                    <span class="text-[9px] bg-sky-100 text-sky-800 px-1 rounded font-mono">${rptEsc(p.type || 'text')}</span>
+                    <span class="text-[9px] ${badgeCls} px-1 rounded font-mono">${rptEsc(typeBadge)}</span>
                     ${p.required ? '<span class="text-[9px] text-rose-500 font-bold" title="إلزامي">*</span>' : ''}
                     <button type="button" class="text-slate-400 hover:text-rose-600 p-0.5" title="حذف" onclick="event.stopPropagation();deleteWizardDocParam(${i})"><i class="fa-solid fa-trash text-[10px]"></i></button>
                 </div>`;
@@ -1866,7 +1868,13 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
         function updateWizardDocParam(idx, key, val){
             if(!wizardDocParams[idx]) return;
             wizardDocParams[idx][key] = val;
+            if(key === 'type' && val === 'select'){
+                if(!wizardDocParams[idx].op || wizardDocParams[idx].op === 'contains' || wizardDocParams[idx].op === 'between'){
+                    wizardDocParams[idx].op = 'equals';
+                }
+            }
             rdRenderElementsTree();
+            if(key === 'type') rptPropsRender();
         }
         function openAddDocParamModal(){
             const modal = document.getElementById('docParamPickerModal');
@@ -2143,10 +2151,14 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                     ['text', 'نص (Text)'],
                     ['number', 'رقم (Number)'],
                     ['date', 'تاريخ (Date)'],
-                    ['time', 'وقت (Time)']
+                    ['time', 'وقت (Time)'],
+                    ['select', 'صندوق اختيار (قيم فريدة من الحقل)']
                 ].map(([v, l])=>`<option value="${v}" ${p.type === v ? 'selected' : ''}>${l}</option>`).join('');
 
-                const opOpts = [
+                const opOpts = (p.type === 'select' ? [
+                    ['equals', 'يساوي (=)'],
+                    ['not_equals', 'لا يساوي (≠)']
+                ] : [
                     ['equals', 'يساوي (=)'],
                     ['contains', 'يحتوي على'],
                     ['startswith', 'يبدأ بـ'],
@@ -2157,7 +2169,7 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                     ['lt', 'أصغر من (<)'],
                     ['lte', 'أصغر أو يساوي (≤)'],
                     ['not_equals', 'لا يساوي (≠)']
-                ].map(([v, l])=>`<option value="${v}" ${p.op === v ? 'selected' : ''}>${l}</option>`).join('');
+                ]).map(([v, l])=>`<option value="${v}" ${p.op === v ? 'selected' : ''}>${l}</option>`).join('');
 
                 const colOpts = (wizardColumns || []).map(c=>{
                     const nm = c.alias || c.name;
@@ -2198,6 +2210,14 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                             <select onchange="updateWizardDocParam(${i},'op',this.value)" class="rpt-in font-bold">${opOpts}</select>
                         </div>
                     </div>
+                    ${p.type === 'select' ? `
+                    <div class="text-[11px] text-indigo-900 bg-indigo-50/90 border border-indigo-200 rounded-xl p-2.5 flex items-start gap-2">
+                        <i class="fa-solid fa-list-check text-indigo-600 mt-0.5 text-xs"></i>
+                        <div>
+                            <span class="font-bold">صندوق اختيار بقيم فريدة:</span>
+                            <p class="text-[10px] text-indigo-700 mt-0.5 leading-relaxed">سيقوم المشغل بجلب القيم الفريدة (DISTINCT) من هذا العمود تلقائياً من قاعدة البيانات، وبناءً على القيمة المختارة يتم جلب بيانات التقرير.</p>
+                        </div>
+                    </div>` : ''}
                     <div>
                         <label class="rpt-fl">القيمة الافتراضية (اختياري)</label>
                         <input value="${rptEsc(p.default_value || '')}" oninput="updateWizardDocParam(${i},'default_value',this.value)" class="rpt-in" placeholder="قيمة مبدئية...">

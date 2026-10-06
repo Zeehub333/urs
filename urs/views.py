@@ -364,12 +364,13 @@ def _write_ws_settings_py(ws, values):
 
 
 def _write_ws_conf(ws, primary_connection="", users_table="", status="active",
-                   user_column="", password_column=""):
+                   user_column="", password_column="", schema=""):
     """Write <ws>/workspace.conf bindings (display keys live in settings.py).
 
     user_column/password_column pin the login username/password columns of
     the users table (USERS_USER_COLUMN / USERS_PASSWORD_COLUMN); empty means
-    auto-detect from the known name lists.
+    auto-detect from the known name lists. schema pins the workspace
+    data schema (SCHEMA=company_branch_year, created by migrate_schema).
     """
     cp = ws / "workspace.conf"
     try:
@@ -385,7 +386,7 @@ def _write_ws_conf(ws, primary_connection="", users_table="", status="active",
             if k in drop:
                 continue
             if k in ("PRIMARY_CONNECTION", "USERS_TABLE", "STATUS",
-                     "USERS_USER_COLUMN", "USERS_PASSWORD_COLUMN"):
+                     "USERS_USER_COLUMN", "USERS_PASSWORD_COLUMN", "SCHEMA"):
                 continue
         out.append(ln)
     if primary_connection:
@@ -396,6 +397,8 @@ def _write_ws_conf(ws, primary_connection="", users_table="", status="active",
         out.append("USERS_USER_COLUMN=%s" % user_column)
     if password_column:
         out.append("USERS_PASSWORD_COLUMN=%s" % password_column)
+    if schema:
+        out.append("SCHEMA=%s" % schema)
     out.append("STATUS=%s" % (status or "active"))
     cp.write_text("\n".join(out).rstrip("\n") + "\n", encoding="utf-8")
 
@@ -424,11 +427,11 @@ def _ws_users_colmap(ws_id):
 
 
 def _ws_ensure_connection(name, params):
-    """Upsert local Connection row (host/port/user/password/database).
+    """Upsert local Connection row (host/port/user/password/database/schema).
 
-    paramsSubset of {host, port, user, password, instance}. Password applies
-    only when non-empty (blank keeps stored value). Never returns the password.
-    Returns (name, created).
+    params subset of {host, port, user, password, instance, schema}. Password
+    applies only when non-empty (blank keeps stored value). Never returns
+    the password. Returns (name, created).
     """
     from .models import Connection
     name = str(name or "").strip()
@@ -453,6 +456,9 @@ def _ws_ensure_connection(name, params):
             vals["password"] = _pw[:255]
         if "instance" in params:
             vals["instance"] = str(params.get("instance") or "").strip()[:100]
+        _sch = str(params.get("schema") or "").strip()[:100]
+        if _sch:
+            vals["schema"] = _sch
     obj = Connection.objects.filter(name=name).first()
     if obj is not None:
         if vals:
@@ -502,13 +508,213 @@ def _ws_copy_settings_files(src_app, dst_app):
     return n
 
 
+_WS_APPS_ZIP_MAX = 150 * 1024 * 1024
+_WS_APPS_FILE_MAX = 80 * 1024 * 1024
+
+
+def _ws_apps_stage_root():
+    """Transient zip staging dir (under current BASE_DIR)."""
+    d = BASE_DIR / ".tmp_ws_apps"
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+    return d
+
+
+def _ws_zip_app_names(zf):
+    """Top-level app dir names inside a zip (strips optional leading apps/)."""
+    apps = []
+    try:
+        tops = set()
+        for n in (zf.namelist() or []):
+            p = str(n or "").replace("\\", "/").strip("/")
+            if not p or p.startswith("__MACOSX/") or "/._" in p or p.startswith("._"):
+                continue
+            parts = [x for x in p.split("/") if x not in ("", ".")]
+            if not parts:
+                continue
+            if parts[0].lower() == "apps":
+                parts = parts[1:]
+            if len(parts) < 2 or ".." in parts:
+                continue  # loose file or traversal — not an app dir
+            tops.add(parts[0])
+        for t in sorted(tops):
+            if t.lower() in ("settings",):
+                continue
+            apps.append(t)
+    except Exception:
+        pass
+    return apps
+
+
+def _ws_stage_apps_zip(uploaded):
+    """Stage an uploaded apps zip. Returns {stage, apps, files}.
+
+    Raises ValueError (Arabic) on invalid/oversize/dangerous archives.
+    Content is NOT extracted here — only the listing is validated.
+    """
+    import zipfile as _zf
+    name = str(getattr(uploaded, "name", "") or "")
+    if not name.lower().endswith(".zip"):
+        raise ValueError("الملف يجب أن يكون .zip مضغوطاً")
+    try:
+        size = int(getattr(uploaded, "size", 0) or 0)
+    except Exception:
+        size = 0
+    if size > _WS_APPS_ZIP_MAX:
+        raise ValueError("حجم الملف يتجاوز 150MB")
+    import secrets as _sec
+    stage = _sec.token_hex(12)
+    root = _ws_apps_stage_root()
+    sdir = root / stage
+    try:
+        sdir.mkdir(parents=True, exist_ok=False)
+        zp = sdir / "upload.zip"
+        with open(str(zp), "wb") as fh:
+            for chunk in uploaded.chunks():
+                fh.write(chunk)
+        with _zf.ZipFile(str(zp), "r") as z:
+            bad = z.testzip()
+            if bad is not None:
+                raise ValueError("ملف مضغوط تالف: %s" % str(bad)[:80])
+            apps = _ws_zip_app_names(z)
+            files = len(z.namelist() or [])
+    except ValueError:
+        raise
+    except Exception as e:
+        try:
+            import shutil as _sh
+            _sh.rmtree(str(sdir), ignore_errors=True)
+        except Exception:
+            pass
+        raise ValueError("تعذر قراءة الملف المضغوط: %s" % str(e)[:120])
+    if not apps:
+        try:
+            import shutil as _sh
+            _sh.rmtree(str(sdir), ignore_errors=True)
+        except Exception:
+            pass
+        raise ValueError("لا توجد مجلدات تطبيقات داخل الملف")
+    return {"stage": stage, "apps": apps, "files": files}
+
+
+def _ws_install_staged_apps(stage, ws_apps_dir):
+    """Extract staged apps zip into <ws>/apps/ (zip-slip guarded). Returns {apps, files}.
+
+    Only top-level dirs that look like apps (metadata.json or *.fmlk/*.fml/*.rml)
+    are installed; `settings` is never overwritten. Raises ValueError (Arabic).
+    """
+    import zipfile as _zf
+    stage = str(stage or "").strip()
+    if not stage or not __import__("re").fullmatch(r"[0-9a-f]{24}", stage):
+        raise ValueError("رمز الاستيراد غير صالح")
+    sdir = _ws_apps_stage_root() / stage
+    zp = sdir / "upload.zip"
+    if not zp.is_file():
+        raise ValueError("انتهت صلاحية الملف المرفوع — أعد الرفع")
+    ws_apps_dir = pathlib.Path(ws_apps_dir)
+    try:
+        ws_apps_dir.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        raise ValueError("تعذر إنشاء مجلد التطبيقات: %s" % e)
+    installed, nfiles = [], 0
+    try:
+        with _zf.ZipFile(str(zp), "r") as z:
+            members = [i for i in z.infolist() if not (i.is_dir() if hasattr(i, "is_dir") else str(i.filename or "").endswith("/"))]
+            for info in members:
+                raw = str(info.filename or "").replace("\\", "/").strip("/")
+                if not raw or raw.startswith("__MACOSX/") or "/._" in raw or raw.startswith("._"):
+                    continue
+                parts = [x for x in raw.split("/") if x not in ("", ".")]
+                if not parts:
+                    continue
+                if parts[0].lower() == "apps":
+                    parts = parts[1:]
+                if not parts or parts[0].lower() == "settings":
+                    continue
+                if ".." in parts:
+                    continue
+                if len(parts) < 2:
+                    continue  # loose top-level file — belongs to no app dir
+                if int(getattr(info, "file_size", 0) or 0) > _WS_APPS_FILE_MAX:
+                    raise ValueError("ملف داخل الأرشيف يتجاوز 80MB: %s" % parts[-1][:60])
+                dest = ws_apps_dir.joinpath(*parts)
+                try:
+                    dest_resolved = dest.resolve()
+                    base_resolved = ws_apps_dir.resolve()
+                except Exception:
+                    continue
+                if dest_resolved != base_resolved and base_resolved not in dest_resolved.parents:
+                    continue
+                try:
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    with z.open(info, "r") as src, open(str(dest), "wb") as fh:
+                        import shutil as _sh
+                        _sh.copyfileobj(src, fh, length=1024 * 256)
+                    nfiles += 1
+                except Exception:
+                    continue
+        # keep only real app dirs in the report
+        for sub in sorted(ws_apps_dir.iterdir()):
+            try:
+                if not sub.is_dir() or sub.name.startswith(".") or sub.name.lower() == "settings":
+                    continue
+                has_meta = (sub / "metadata.json").is_file()
+                has_files = any(sub.glob("*.fmlk")) or any(sub.glob("*.fml")) or any(sub.glob("*.rml"))
+                if (has_meta or has_files) and sub.name not in installed:
+                    installed.append(sub.name)
+            except Exception:
+                continue
+    finally:
+        try:
+            import shutil as _sh
+            _sh.rmtree(str(sdir), ignore_errors=True)
+        except Exception:
+            pass
+    installed.sort()
+    return {"apps": installed, "files": nfiles}
+
+
+def _ws_db_init_module():
+    """Load repo-root db_init.py (importable both as script and via Django)."""
+    import importlib.util as _ilu
+    p = BASE_DIR / "db_init.py"
+    try:
+        spec = _ilu.spec_from_file_location("urs_db_init", str(p))
+        mod = _ilu.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+    except Exception as e:
+        raise RuntimeError("تعذر تحميل db_init.py: %s" % e)
+
+
+def _ws_migrate_workspace_schema(conn_params, schema):
+    """Run db_init.migrate_schema for a workspace connection dict. Returns its dict."""
+    mod = _ws_db_init_module()
+    fn = getattr(mod, "migrate_schema", None)
+    if not callable(fn):
+        raise RuntimeError("db_init.migrate_schema غير متوفرة")
+    cp = conn_params if isinstance(conn_params, dict) else {}
+    return fn(cp.get("host"), cp.get("port"), cp.get("user"),
+              cp.get("password"), cp.get("instance"), schema)
+
+
 @csrf_exempt
 def api_workspaces_create(request):
     """POST /api/workspaces/create/ — new workspace: folder + conf + settings.py,
-    copy settings files from another workspace, ensure default local connection.
+    copy settings files from another workspace, optional apps zip import,
+    schema migration (db_init.migrate_schema) and primary connection row.
 
     Body: {id? (auto workspace_N), name?, brand?, company?, domain?, country?,
-      currency?, primary_connection?, users_table?, from? (source workspace id)}
+      currency?, brand_colors?, fiscal_year?, company_code?, branch_code?,
+      schema? (override, else company_branch_year), primary_connection?,
+      users_table? (default <schema>.users), from? (source workspace id),
+      connection?: {host, port, user, password?, instance? (database)},
+      apps_stage? (from upload-apps), migrate? (default true)}
+    Steps: folders (__init__.py/settings.py/workspace.conf/apps/settings+fmlks)
+    → staged apps zip install → Connection row (host/port/user/password/
+    database/schema) → migrate all urs models into the schema.
     Requires master password (session master_ok).
     """
     if request.method != "POST":
@@ -562,6 +768,29 @@ def api_workspaces_create(request):
         (ws / "__init__.py").write_text(
             '"""Workspace package marker (plain module, not a Django app)."""\n', encoding="utf-8")
 
+        # schema company_branch_year (explicit override wins, else generated)
+        _co_code = _s(data.get("company_code"), 40)
+        _br_code = _s(data.get("branch_code"), 40)
+        try:
+            _fyear = int(str(data.get("fiscal_year") or "").strip())
+            if _fyear < 1900 or _fyear > 2200:
+                _fyear = None
+        except Exception:
+            _fyear = None
+        if _fyear is None:
+            _fyear = _dt.date.today().year
+        _schema_raw = _s(data.get("schema"), 63).strip().lower()
+        if _schema_raw:
+            if not _re_hex.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", _schema_raw):
+                return JsonResponse({"error": "schema: أحرف لاتينية/أرقام/_ فقط"}, status=400)
+            _schema = _schema_raw
+        else:
+            try:
+                from .models import build_schema_name as _bsn
+                _schema = _bsn(_co_code or "company", _br_code or "main", _fyear)
+            except Exception:
+                _schema = "company_main_%d" % _fyear
+
         def _color(v, fb):
             v = _s(v, 16)
             return v if _re_hex.fullmatch(r"#[0-9a-fA-F]{6}", v or "") else fb
@@ -574,6 +803,7 @@ def api_workspaces_create(request):
             "logo": "",
             "country": _s(data.get("country"), 80),
             "currency": _s(data.get("currency"), 40),
+            "fiscal_year": str(_fyear),
             "brand_colors": {
                 "primary": _color((data.get("brand_colors") or {}).get("primary")
                                   if isinstance(data.get("brand_colors"), dict) else "", "#4f46e5"),
@@ -582,8 +812,8 @@ def api_workspaces_create(request):
             },
         })
         _pc = _s(data.get("primary_connection"), 80) or "urs_local"
-        _ut = _s(data.get("users_table"), 160) or "users"
-        _write_ws_conf(ws, _pc, _ut, "active")
+        _ut = _s(data.get("users_table"), 160) or ("%s.users" % _schema)
+        _write_ws_conf(ws, _pc, _ut, "active", schema=_schema)
 
         copied = 0
         if src_ws is not None:
@@ -591,23 +821,25 @@ def api_workspaces_create(request):
             if _src_app.is_dir():
                 copied = _ws_copy_settings_files(_src_app, ws / "apps" / "settings")
 
-        # default local connection per workspace settings: posted params win;
-        # existing row + no params → untouched; new row → clone urs_local
-        # else localhost defaults inside the helper.
+        # Primary connection row mirrors the wizard: posted params win, the
+        # generated schema is always pinned; existing row + no params →
+        # untouched; new row → clone urs_local else localhost defaults.
         _posted_conn = {k: v for k, v in (data.get("connection") or {}).items()
                         if k in ("host", "port", "user", "password", "instance")} \
             if isinstance(data.get("connection"), dict) else {}
         _merged = dict(_posted_conn)
+        _merged["schema"] = _schema
         try:
             from .models import Connection
-            if not Connection.objects.filter(name=conn_name).exists() and not _merged:
+            _has_vals = any(str(_merged.get(k) or "").strip()
+                            for k in ("host", "port", "user", "password", "instance"))
+            if not Connection.objects.filter(name=_pc).exists() and not _has_vals:
                 _tpl = Connection.objects.filter(name="urs_local").first()
                 if _tpl is not None:
-                    _merged = {"host": getattr(_tpl, "host", "") or "",
-                               "port": getattr(_tpl, "port", "") or "",
-                               "user": getattr(_tpl, "user", "") or "",
-                               "password": getattr(_tpl, "password", "") or "",
-                               "instance": getattr(_tpl, "instance", "") or ""}
+                    for _kk in ("host", "port", "user", "password", "instance"):
+                        _vv = getattr(_tpl, _kk, "") or ""
+                        if str(_vv).strip() and not str(_merged.get(_kk) or "").strip():
+                            _merged[_kk] = _vv
         except Exception:
             pass
         conn_name, conn_created = _pc, False
@@ -625,12 +857,143 @@ def api_workspaces_create(request):
                     description="default local connection for %s" % ws_id)
         except Exception:
             pass
+
+        # staged apps zip → <ws>/apps/ (settings never overwritten)
+        imported, imported_files = [], 0
+        _stage = _s(data.get("apps_stage"), 64)
+        if _stage:
+            try:
+                _ins = _ws_install_staged_apps(_stage, ws / "apps")
+                imported = _ins.get("apps") or []
+                try:
+                    imported_files = int(_ins.get("files") or 0)
+                except Exception:
+                    imported_files = 0
+            except ValueError as e:
+                return JsonResponse({"error": str(e),
+                                     "workspace": _wsm.workspace_info(ws),
+                                     "connection": conn_name, "schema": _schema},
+                                    json_dumps_params={"ensure_ascii": False}, status=400)
+
+        # migrate all urs models into the workspace schema on its connection
+        migrated, migrate_info, migrate_error = False, {}, ""
+        _do_migrate = data.get("migrate", True)
+        if isinstance(_do_migrate, str):
+            _do_migrate = _do_migrate.strip().lower() not in ("0", "false", "no", "off", "")
+        if bool(_do_migrate):
+            try:
+                _mp = dict(_merged)
+                if not str(_mp.get("password") or "").strip():
+                    try:
+                        from .models import Connection as _Conn3
+                        _row_pw = _Conn3.objects.filter(
+                            name=conn_name).values_list("password", flat=True).first()
+                        if _row_pw:
+                            _mp["password"] = _row_pw
+                    except Exception:
+                        pass
+                migrate_info = _ws_migrate_workspace_schema(_mp, _schema) or {}
+                migrated = bool((migrate_info or {}).get("migrated"))
+            except Exception as e:
+                migrate_error = str(e)[:300]
+        if migrate_error:
+            return JsonResponse({"ok": False, "error": "فشل الترحيل: %s" % migrate_error,
+                                 "workspace": _wsm.workspace_info(ws),
+                                 "connection": conn_name, "connection_created": conn_created,
+                                 "schema": _schema, "imported_apps": imported,
+                                 "copied_files": copied},
+                                json_dumps_params={"ensure_ascii": False}, status=500)
         return JsonResponse({"ok": True, "workspace": _wsm.workspace_info(ws),
-                             "copied_files": copied, "connection": conn_name,
-                             "connection_created": conn_created},
+                             "copied_files": copied, "imported_apps": imported,
+                             "imported_files": imported_files, "connection": conn_name,
+                             "connection_created": conn_created, "schema": _schema,
+                             "migrated": migrated, "migrate": migrate_info},
                             json_dumps_params={"ensure_ascii": False})
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
+
+
+@csrf_exempt
+def api_workspaces_upload_apps(request):
+    """POST /api/workspaces/upload-apps/ — stage an apps zip (multipart field `zip`).
+
+    Validates the archive and lists the app folders without extracting.
+    Returns {ok, stage, apps, files}; pass `stage` as apps_stage to
+    POST /api/workspaces/create/. Requires master password (session master_ok).
+    """
+    if request.method != "POST":
+        return JsonResponse({"error": "POST required"}, status=405)
+    _mk = _ws_require_master(request)
+    if _mk is not None:
+        return _mk
+    try:
+        up = request.FILES.get("zip") or request.FILES.get("file")
+        if up is None:
+            return JsonResponse({"error": "أرفق ملف .zip باسم zip"}, status=400)
+        info = _ws_stage_apps_zip(up)
+        return JsonResponse({"ok": True, **info},
+                            json_dumps_params={"ensure_ascii": False})
+    except ValueError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+    except Exception as e:
+        return JsonResponse({"error": str(e)[:200]}, status=500)
+
+
+@csrf_exempt
+def api_workspace_migrate(request, ws_id):
+    """POST /api/workspaces/<id>/migrate/ — (re)run schema migration for a workspace.
+
+    Reads SCHEMA + PRIMARY_CONNECTION from workspace.conf and the matching
+    Connection row, then runs db_init.migrate_schema (CREATE SCHEMA +
+    full migrate). Body: {schema?} to override the conf SCHEMA.
+    Requires master password (session master_ok).
+    """
+    if request.method != "POST":
+        return JsonResponse({"error": "POST required"}, status=405)
+    _mk = _ws_require_master(request)
+    if _mk is not None:
+        return _mk
+    try:
+        from . import workspace as _wsm
+        known = {w.get("id") for w in _wsm.workspaces_info() if w.get("id")}
+        ws_id = (ws_id or "").strip()
+        if ws_id not in known:
+            return JsonResponse({"error": "unknown workspace"}, status=404)
+        try:
+            data = json.loads(request.body.decode() or "{}")
+        except Exception:
+            return JsonResponse({"error": "invalid JSON"}, status=400)
+        if not isinstance(data, dict):
+            return JsonResponse({"error": "invalid JSON"}, status=400)
+        ws = next(w for w in _wsm.workspace_dirs() if w.name == ws_id)
+        conf = _wsm.read_conf(ws / "workspace.conf")
+        _pc = (conf.get("PRIMARY_CONNECTION") or "").strip()
+        if not _pc:
+            return JsonResponse({"error": "لا يوجد اتصال أساسي في workspace.conf"}, status=400)
+        _schema = str(data.get("schema") or conf.get("SCHEMA") or "").strip().lower()
+        if not _schema:
+            return JsonResponse({"error": "لا توجد سكيما — حدد schema"}, status=400)
+        if not __import__("re").fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", _schema):
+            return JsonResponse({"error": "schema: أحرف لاتينية/أرقام/_ فقط"}, status=400)
+        try:
+            from .models import Connection
+            row = Connection.objects.filter(name=_pc).first()
+        except Exception:
+            row = None
+        if row is None:
+            return JsonResponse({"error": "صف الاتصال غير موجود: %s" % _pc}, status=404)
+        params = {"host": row.host, "port": row.port, "user": row.user,
+                  "password": row.password, "instance": row.instance}
+        try:
+            info = _ws_migrate_workspace_schema(params, _schema) or {}
+        except Exception as e:
+            return JsonResponse({"error": "فشل الترحيل: %s" % str(e)[:300]}, status=500)
+        return JsonResponse({"ok": True, "workspace": ws_id, "schema": _schema,
+                             "tables": info.get("tables") or [],
+                             "table_count": len(info.get("tables") or [])},
+                            json_dumps_params={"ensure_ascii": False})
+    except Exception as e:
+        return JsonResponse({"error": str(e)[:200]}, status=500)
 
 
 @csrf_exempt
