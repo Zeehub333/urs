@@ -10505,29 +10505,35 @@ def api_update_rml(request, app_name):
         return JsonResponse({"error": str(e)}, status=500)
 
 
-def _sync_connections_both_ways():
+def _sync_connections_both_ways(target_conn=None, schema=None):
     """Unify Django rows <-> PG urs_connection table (matched by name, fill gaps ONLY).
 
     Forms write PG; admin/API write Django — without this each side hides the other's
     rows (e.g. a form-added sqlserver connection invisible in the report designer).
-    Never updates existing rows, never deletes. Returns (pg_to_dj, dj_to_pg).
-    All failures swallowed (returns 0,0) — listing must never break.
+    Never updates existing rows, never deletes. Returns (pg_to_dj, dj_to_pg, pg_conn_names).
+    All failures swallowed (returns 0,0,set()) — listing must never break.
     """
     import json as _js
     from .models import Connection
+    from config.dbconf import dbpass_resolve
     try:
         dj = {c.name: c for c in Connection.objects.all()}
     except Exception:
-        return 0, 0
+        return 0, 0, set()
     try:
-        eff = _wizard_effective_conn()
-        if eff is None or (eff.engine or "postgres") != "postgres" or not (eff.host or ""):
-            return 0, 0
-        sch = ((eff.schema if hasattr(eff, "schema") else "") or "").strip() or "main_hq_2026"
+        eff = target_conn or _wizard_effective_conn()
+        if eff is None or (getattr(eff, "engine", "postgres") or "postgres") != "postgres" or not getattr(eff, "host", ""):
+            return 0, 0, set()
+        sch = (schema or getattr(eff, "schema", "") or "").strip() or "main_hq_2026"
+        pw = getattr(eff, "password", "") or ""
+        try:
+            pw = dbpass_resolve(pw) or pw
+        except Exception:
+            pass
         import psycopg2
-        pg = psycopg2.connect(dbname=(eff.instance or "urs"), user=eff.user,
-                              password=eff.password or "", host=eff.host,
-                              port=int(eff.port or 5432), connect_timeout=5)
+        pg = psycopg2.connect(dbname=(getattr(eff, "instance", "") or "urs"), user=eff.user,
+                              password=pw, host=eff.host,
+                              port=int(getattr(eff, "port", 5432) or 5432), connect_timeout=5)
         pg.autocommit = True
         cur = pg.cursor()
         try:
@@ -10536,7 +10542,7 @@ def _sync_connections_both_ways():
             pgrows = [dict(zip(cols, r)) for r in (cur.fetchall() or [])]
         except Exception:
             pg.rollback()
-            return 0, 0
+            return 0, 0, set()
         pg_by_name = {r.get("name"): r for r in pgrows if r.get("name")}
         a = b = 0
         # PG -> Django (form-added rows appear in designer/admin)
@@ -10572,8 +10578,9 @@ def _sync_connections_both_ways():
         except Exception:
             tcols = set()
         if tcols:
-            for c in Connection.objects.all():
-                if c.name in pg_by_name:
+            source_conns = [target_conn] if target_conn else Connection.objects.all()
+            for c in source_conns:
+                if not c or c.name in pg_by_name:
                     continue
                 try:
                     payload = {"id": c.id, "name": c.name, "engine": c.engine, "host": c.host,
@@ -10611,9 +10618,9 @@ def _sync_connections_both_ways():
             pg.close()
         except Exception:
             pass
-        return a, b
+        return a, b, set(pg_by_name.keys())
     except Exception:
-        return 0, 0
+        return 0, 0, set()
 
 
 def _ws_session_context(request):
@@ -10651,21 +10658,32 @@ def api_connections_list(request):
     """GET /api/connections/ — list connections for wizards/designers scoped to workspace"""
     try:
         from .models import Connection
+        ws_id, fiscal_schema, primary_conn = _ws_session_context(request)
+        target_obj = None
+        if ws_id and primary_conn:
+            target_obj = Connection.objects.filter(name=primary_conn).first()
+            if target_obj is None and primary_conn.isdigit():
+                target_obj = Connection.objects.filter(id=int(primary_conn)).first()
+
         try:
-            _sa, _sb = _sync_connections_both_ways()
+            res_sync = _sync_connections_both_ways(target_conn=target_obj, schema=fiscal_schema)
+            _sa = res_sync[0] if len(res_sync) > 0 else 0
+            _sb = res_sync[1] if len(res_sync) > 1 else 0
+            pg_names = res_sync[2] if len(res_sync) > 2 else set()
         except Exception:
             _sa = _sb = 0
+            pg_names = set()
 
-        ws_id, fiscal_schema, primary_conn = _ws_session_context(request)
         if ws_id and primary_conn:
-            conns = list(Connection.objects.filter(name=primary_conn))
+            target_names = {primary_conn} | set(pg_names)
+            conns = list(Connection.objects.filter(name__in=target_names).order_by("name"))
             if not conns and primary_conn.isdigit():
                 conns = list(Connection.objects.filter(id=int(primary_conn)))
             if conns:
                 res = []
                 for c in conns:
                     cd = c.to_dict()
-                    if fiscal_schema:
+                    if c.name == primary_conn and fiscal_schema:
                         cd["schema"] = fiscal_schema
                     res.append(cd)
                 return JsonResponse({"connections": res,
