@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<fml>
+  <fml_metadata name="users_group" displayName="@users_group" table="users_groups" model_type="form" schema="ies202601" connection="rex_local" category="عام" icon="fa-pen-to-square" details_tab="الاعضاء"/>
+  <tabs>
+    <tab id="البيانات الأساسية" name="البيانات الأساسية" alias="البيانات الأساسية" sort_order="1" is_main="1"/>
+  </tabs>
+  <fields>
+    <field id="1" name="id" alias="رقم المجموعة" dataType="INTEGER" inputType="number" required="false" nullable="true" editable="true" primary_key="true" serial="1" tab="البيانات الأساسية" destination="main" category="البيانات الأساسية" displayExpr="ROWNUM"/>
+    <field id="2" name="group_name" alias="اسم المجموعة" dataType="VARCHAR" inputType="text" required="false" nullable="true" editable="true" primary_key="false" tab="البيانات الأساسية" destination="main" category="البيانات الأساسية" is_main_col="1"/>
+    <field id="3" name="group_discription" alias="وصف المجموغة" dataType="VARCHAR" inputType="text" required="false" nullable="true" editable="true" primary_key="false" tab="البيانات الأساسية" destination="main" category="البيانات الأساسية"/>
+    <field id="4" name="level" alias="المستوى" dataType="INTEGER" inputType="number" required="false" nullable="true" editable="true" primary_key="false" tab="البيانات الأساسية" destination="main" category="البيانات الأساسية"/>
+    <field id="5" name="parent_id" alias="الأب" dataType="VARCHAR" inputType="text" required="false" nullable="true" editable="true" primary_key="false" tab="البيانات الأساسية" destination="main" category="البيانات الأساسية"/>
+  </fields>
+  <details>
+    <detail table="ies202601.users" alias="@members" master="id" detail="" rel_type="one_to_many" link_mode="junction" sub_key="id" visible="1" junction_table="users_groups_users" junction_model="users_groups_users">
+      <columns>
+        <column name="id" alias="رقم المستخدم" data_type="INTEGER" input_type="number" tab="البيانات الأساسية" ref="1"/>
+        <column name="username" alias="اسم المستخدم" data_type="VARCHAR" input_type="text" tab="البيانات الأساسية" ref="1"/>
+        <column name="full_name" alias="الاسم الكامل" data_type="VARCHAR" input_type="text" tab="البيانات الأساسية" ref="1"/>
+        <column name="email" alias="البريد الالكتروني" data_type="VARCHAR" input_type="text" tab="البيانات الأساسية" ref="1"/>
+      </columns>
+    </detail>
+  </details>
+</fml>

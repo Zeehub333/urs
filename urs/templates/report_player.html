@@ -207,13 +207,11 @@
                 <div class="flex flex-wrap items-center justify-between gap-2.5">
                     <div class="flex items-center gap-2 text-xs font-bold text-slate-800 shrink-0">
                         <span class="w-6 h-6 rounded-lg bg-sky-100 text-sky-700 flex items-center justify-center text-[11px]"><i class="fa-solid fa-file-invoice"></i></span>
-                        <span>معايير المستند:</span>
                     </div>
                     <div id="docHeaderControls" class="flex flex-wrap items-center gap-2 flex-1 max-w-5xl"></div>
                     <div class="flex items-center gap-1.5 shrink-0 mr-auto">
-                        <button type="button" onclick="docHeaderFetch()" id="docHeaderFetchBtn" class="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-2xs transition">
-                            <i class="fa-solid fa-magnifying-glass text-[10px]"></i>
-                            <span>جلب البيانات</span>
+                        <button type="button" onclick="docHeaderFetch()" id="docHeaderFetchBtn" title="بحث وعرض النتائج" class="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-2xs transition">
+                            <i class="fa-solid fa-magnifying-glass text-xs"></i>
                         </button>
                         <button type="button" onclick="docHeaderClear()" class="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-200 transition" title="مسح المعايير">
                             <i class="fa-solid fa-rotate-right text-xs"></i>
@@ -233,8 +231,7 @@
                     <div class="w-14 h-14 rounded-2xl bg-sky-50 text-sky-600 mx-auto flex items-center justify-center text-xl mb-3 shadow-2xs">
                         <i class="fa-solid fa-file-invoice"></i>
                     </div>
-                    <h3 class="text-sm font-bold text-slate-800 mb-1">تقرير مستندي</h3>
-                    <p class="text-xs text-slate-500 max-w-md mx-auto">أدخل المعايير المطلوبة في الشريط الدائم أعلاه واضغط على «جلب البيانات» لعرض السجلات والمستندات.</p>
+                    <p class="text-xs text-slate-500 max-w-md mx-auto">أدخل المعايير المطلوبة في الشريط الدائم أعلاه واضغط على أيقونة البحث <i class="fa-solid fa-magnifying-glass text-indigo-500"></i> لعرض النتائج في الجدول.</p>
                 </div>
                 <div id="scrollSentinel" class="h-1"></div>
             </div>
@@ -321,7 +318,7 @@
             <!-- Pagination Bar — Lazy Load Status -->
             <footer class="bg-white border-t border-slate-200 px-6 py-3 flex items-center justify-between text-xs text-slate-600 shrink-0">
                 <div class="flex items-center gap-2">
-                    <span>عرض <strong id="loadedRowsCount">0</strong> سجل من أصل <strong id="totalRecordsCount">0</strong></span>
+                    <span>عرض <strong id="loadedRowsCount">0</strong> سجل<span id="totalWrap"> من أصل <strong id="totalRecordsCount">0</strong></span></span>
                     <span id="lazyLoadPct" class="text-indigo-600 font-semibold"></span>
                 </div>
                 <div class="flex items-center gap-3">
@@ -658,23 +655,60 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
         let activeFilters = [];
         let activeSort = { column: null, direction: 'asc' };
         // ── إظهار/إخفاء الأعمدة (per-report, localStorage) ──
+        // القاعدة: افتراضيات المصمم (RML visible) هي المرجع دائماً، واختيار
+        // المستخدم الصريح (إخفاء/إظهار من القائمة) يتفوق عليها فقط.
         let hiddenCols = new Set();
+        let userHiddenCols = new Set();
+        let userShownCols = new Set();
         function hiddenStoreKey(){
             try{ return 'rml_hidden_' + (currentApp || 'app') + '_' + (currentRml || 'rml'); }
             catch(e){ return 'rml_hidden_default'; }
         }
-        function loadHiddenCols(){ try{ hiddenCols = new Set(JSON.parse(localStorage.getItem(hiddenStoreKey()) || '[]')); }catch(e){ hiddenCols = new Set(); } }
-        function saveHiddenCols(){ try{ localStorage.setItem(hiddenStoreKey(), JSON.stringify([...hiddenCols])); }catch(e){} }
+        function rmlHiddenCols(){
+            const s = new Set();
+            try{
+                // الأحدث أولاً: أعمدة آخر جلب من الخادم، ثم أعمدة تحميل الصفحة
+                const live = (lastApiData && lastApiData.columns && lastApiData.columns.length) ? lastApiData.columns : [];
+                const src = live.length ? live : (typeof queryColumns !== 'undefined' ? queryColumns : []);
+                src.forEach(c=>{ if(c && c.visible === false) s.add(c.alias || c.name); });
+            }catch(e){}
+            return s;
+        }
+        function loadHiddenCols(){
+            hiddenCols = new Set(); userHiddenCols = new Set(); userShownCols = new Set();
+            let legacy = null, stored = null;
+            try{
+                const raw = localStorage.getItem(hiddenStoreKey());
+                if(raw !== null){
+                    const parsed = JSON.parse(raw);
+                    if(Array.isArray(parsed)) legacy = parsed;
+                    else if(parsed && typeof parsed === 'object') stored = parsed;
+                }
+            }catch(e){}
+            const rmlH = rmlHiddenCols();
+            if(stored){
+                try{ (stored.h || []).forEach(a=>userHiddenCols.add(a)); }catch(e){}
+                try{ (stored.s || []).forEach(a=>userShownCols.add(a)); }catch(e){}
+            } else if(legacy){
+                // ترحيل لمرة واحدة من الشكل القديم: المخفي وليس في افتراضيات
+                // المصمم الحالية = إخفاء صريح من المستخدم (يُحفظ ولا يُفقد)
+                try{ legacy.forEach(a=>{ if(!rmlH.has(a)) userHiddenCols.add(a); }); }catch(e){}
+            }
+            hiddenCols = new Set([...rmlH, ...userHiddenCols]);
+            userShownCols.forEach(a=>hiddenCols.delete(a));
+        }
+        // إعادة اشتقاق المخفي من أحدث بيانات المصمم بعد كل جلب (بلا إعادة تحميل صفحة)
+        function refreshHiddenFromRml(){
+            try{
+                const rmlH = rmlHiddenCols();
+                hiddenCols = new Set([...rmlH, ...userHiddenCols]);
+                userShownCols.forEach(a=>hiddenCols.delete(a));
+            }catch(e){}
+        }
+        function saveHiddenCols(){ try{ localStorage.setItem(hiddenStoreKey(), JSON.stringify({h:[...userHiddenCols], s:[...userShownCols]})); }catch(e){} }
         function visCols(all){ const arr = all || []; return arr.filter(c=>!hiddenCols.has(c.alias || c.name)); }
         function allCols(){ return (lastApiData && lastApiData.columns) || (typeof queryColumns !== 'undefined' ? queryColumns : []) || []; }
         loadHiddenCols();
-        // Seed from RML visible:false on first visit (stored prefs win afterwards)
-        try{
-            if(localStorage.getItem(hiddenStoreKey()) === null && typeof queryColumns !== 'undefined'){
-                (queryColumns || []).forEach(c=>{ if(c && c.visible === false) hiddenCols.add(c.alias || c.name); });
-                if(hiddenCols.size) saveHiddenCols();
-            }
-        }catch(e){}
         // Per-report column widths (RML width = default, adjustable in the column menu)
         let colWidths = {};
         function widthsStoreKey(){
@@ -783,6 +817,7 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
         let lazyLoading = false;
         let lazyDone = false;
         let lazyObserver = null;
+        window._rptFirstLoad = true; // أول تحميل تلقائي عند بدء المشغل: بلا أي progressbar
         // Detail (expandable) + Doc (single-record) state
         let docPage = 1;
         let docPageOverride = null;
@@ -842,7 +877,9 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                     kind: (p.type === 'datetime' ? 'date' : (p.type || 'text')),
                     op: p.op || (p.type === 'date' ? 'between' : (p.type === 'number' || p.type === 'select') ? 'equals' : 'contains'),
                     required: (p.required === undefined ? true : !!(p.required && p.required !== 'false' && p.required !== '0')),
-                    defaultValue: p.default_value || p.defaultValue || ''
+                    defaultValue: p.default_value || p.defaultValue || '',
+                    source: p.source || {connection: p.src_conn || p.srcConn || '', table: p.src_table || p.srcTable || '', column: p.src_column || p.srcColumn || ''},
+                    searchable: (p.searchable === undefined || p.searchable === null) ? true : (['0', 'false', 'no', 'off'].indexOf(String(p.searchable).toLowerCase()) < 0)
                 }));
             }
             // كل أعمدة التقرير حقول تصفية للمستندي (لا أول عمود فقط)
@@ -854,7 +891,7 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                 let k = kindOf(c.alias);
                 if(k === 'datetime') k = 'date';
                 if(['text', 'date', 'number', 'time', 'select'].indexOf(k) < 0) k = 'text';
-                out.push({alias: c.alias, label: c.alias, kind: k, op: docDefOp(k), required: true, defaultValue: ''});
+                out.push({alias: c.alias, label: c.alias, kind: k, op: docDefOp(k), required: true, defaultValue: '', source: null, searchable: true});
             });
             return out;
         }
@@ -910,6 +947,142 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                 console.warn('Failed to load distinct values for', alias, e);
             }
             return [];
+        }
+        // ── صندوق اختيار من مصدر يحدده المصمم (اتصال/جدول/عمود) + بحث أثناء الكتابة ──
+        window._docSrcDef = window._docSrcDef || {};
+        window._docSrcLast = window._docSrcLast || {};
+        window._docSrcTimers = window._docSrcTimers || {};
+        function docParamSource(f){
+            try{
+                const s = (f && f.source) || {};
+                const c = s.connection || f.src_conn || f.srcConn || '';
+                const t = s.table || f.src_table || f.srcTable || '';
+                const col = s.column || f.src_column || f.srcColumn || '';
+                if(c && t && col) return {connection: String(c), table: String(t), column: String(col)};
+            }catch(e){}
+            return null;
+        }
+        function docSrcEscA(a){ return String(a == null ? '' : a).replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }
+        function docSrcEscH(s){ return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+        function docSrcComboHTML(f, curV, attrs, inputCls){
+            const a = docSrcEscA(f.alias);
+            return `<div class="relative flex-1 min-w-[150px]" data-docsrc-wrap="${docSrcEscH(f.alias)}">`
+                + `<input ${attrs} value="${docSrcEscH(curV)}" type="text" autocomplete="off" placeholder="ابحث واختر..." class="${inputCls}"`
+                + ` oninput="docSrcOnInput('${a}', this)" onfocus="docSrcOnInput('${a}', this, true)"`
+                + ` onkeydown="if(event.key==='Enter'){docSrcEnter('${a}', this);} if(event.key==='Escape'){docSrcHide('${a}');}">`
+                + `<button type="button" onclick="docSrcToggle('${a}', this)" title="عرض القيم" class="absolute left-1 top-1/2 -translate-y-1/2 text-slate-400 hover:text-indigo-600 px-1"><i class="fa-solid fa-chevron-down text-[10px]"></i></button>`
+                + `<div class="docsrc-list hidden absolute z-50 mt-1 w-full max-h-56 overflow-y-auto custom-scroll bg-white border border-slate-200 rounded-xl shadow-xl text-xs"></div>`
+                + `</div>`;
+        }
+        function docSrcWrap(alias, el){
+            try{
+                if(el && el.closest){
+                    const w = el.closest('[data-docsrc-wrap]');
+                    if(w) return w;
+                }
+                return document.querySelector(`[data-docsrc-wrap="${CSS.escape(alias)}"]`);
+            }catch(e){ return null; }
+        }
+        function docSrcPaint(alias, wrap, vals, totalNote){
+            if(!wrap) return;
+            const list = wrap.querySelector('.docsrc-list');
+            if(!list) return;
+            window._docSrcLast[alias] = (vals || []).slice();
+            const a = docSrcEscA(alias);
+            let h = '';
+            if(!vals || !vals.length){
+                h = '<div class="px-3 py-2.5 text-slate-400">لا توجد قيم مطابقة</div>';
+            } else {
+                h = vals.map((v, i)=>`<button type="button" onclick="docSrcPick(this, '${a}', ${i})" class="w-full text-right px-3 py-1.5 hover:bg-indigo-50 hover:text-indigo-800 truncate" title="${docSrcEscH(v)}">${docSrcEscH(v)}</button>`).join('');
+                if(totalNote) h += `<div class="px-3 py-1.5 text-[10px] text-slate-400 border-t border-slate-100">${docSrcEscH(totalNote)}</div>`;
+            }
+            list.innerHTML = h;
+            list.classList.remove('hidden');
+        }
+        async function docSrcLoad(alias, wrap, q){
+            const src = window._docSrcDef[alias];
+            const list = wrap ? wrap.querySelector('.docsrc-list') : null;
+            if(!src){ if(list){ list.innerHTML = '<div class="px-3 py-2.5 text-rose-500">المصدر غير مضبوط في المصمم</div>'; list.classList.remove('hidden'); } return; }
+            if(list && !list.classList.contains('hidden') && (q === undefined || q === null)) { /* keep open, refresh */ }
+            if(list) { list.innerHTML = '<div class="px-3 py-2.5 text-slate-400"><i class="fa-solid fa-spinner fa-spin"></i> جارٍ البحث...</div>'; list.classList.remove('hidden'); }
+            try{
+                const res = await fetch('/api/rml/values-source', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({connection: src.connection, table: src.table, column: src.column, search: q || '', limit: 50})});
+                const d = await res.json().catch(()=>({}));
+                if(!res.ok) throw new Error((d && d.error) || ('HTTP ' + res.status));
+                docSrcPaint(alias, wrap, d.values || [], (d.truncated ? ('أول ' + (d.values || []).length + ' قيمة — ضيّق البحث') : ''));
+            }catch(e){
+                if(list) list.innerHTML = '<div class="px-3 py-2.5 text-rose-500">تعذر الجلب: ' + docSrcEscH(String((e && e.message) || e).slice(0, 120)) + '</div>';
+            }
+        }
+        function docSrcOnInput(alias, el, focusOnly){
+            const wrap = docSrcWrap(alias, el);
+            if(!wrap) return;
+            clearTimeout(window._docSrcTimers[alias]);
+            const q = el ? (el.value || '') : '';
+            const def = (window._docSrcDef || {})[alias] || {};
+            const list = wrap.querySelector('.docsrc-list');
+            if(def.searchable === false && list && list.querySelector('button')){
+                const needle = q.trim();
+                list.querySelectorAll('button').forEach(b=>{
+                    b.style.display = (!needle || (b.textContent || '').includes(needle)) ? '' : 'none';
+                });
+                list.classList.remove('hidden');
+                return;
+            }
+            if(focusOnly && list && !list.classList.contains('hidden')) return;
+            window._docSrcTimers[alias] = setTimeout(()=>{ docSrcLoad(alias, wrap, q); }, focusOnly ? 60 : 350);
+        }
+        function docSrcToggle(alias, btn){
+            const wrap = docSrcWrap(alias, btn);
+            if(!wrap) return;
+            const list = wrap.querySelector('.docsrc-list');
+            if(list && !list.classList.contains('hidden')){ list.classList.add('hidden'); return; }
+            const inp = wrap.querySelector('input');
+            docSrcLoad(alias, wrap, inp ? (inp.value || '') : '');
+            if(inp){ try{ inp.focus(); }catch(e){} }
+        }
+        function docSrcHide(alias){
+            try{
+                document.querySelectorAll('[data-docsrc-wrap]').forEach(w=>{
+                    if(!alias || w.getAttribute('data-docsrc-wrap') === alias){
+                        const l = w.querySelector('.docsrc-list');
+                        if(l) l.classList.add('hidden');
+                    }
+                });
+            }catch(e){}
+        }
+        function docSrcEnter(alias, el){
+            docSrcHide(alias);
+            try{
+                if(el && el.closest && el.closest('#docHeaderControls')){ docHeaderFetch(); return; }
+                if(el && el.closest && el.closest('#docSearchFields')){ docSearch(); return; }
+                docHeaderFetch();
+            }catch(e){}
+        }
+        function docSrcPick(btn, alias, idx){
+            try{
+                const vals = window._docSrcLast[alias] || [];
+                const v = vals[idx];
+                if(v === undefined) return;
+                const wrap = btn ? btn.closest('[data-docsrc-wrap]') : docSrcWrap(alias, null);
+                if(!wrap) return;
+                const inp = wrap.querySelector('input');
+                if(inp) inp.value = String(v);
+                docSrcHide(alias);
+                if(inp && inp.closest && inp.closest('#docHeaderControls')){
+                    docHeaderSelectChanged(alias, String(v));
+                }
+            }catch(e){}
+        }
+        if(!window._docSrcAway){
+            window._docSrcAway = true;
+            document.addEventListener('click', (ev)=>{
+                try{
+                    if(ev.target && ev.target.closest && ev.target.closest('[data-docsrc-wrap]')) return;
+                    document.querySelectorAll('.docsrc-list').forEach(l=>l.classList.add('hidden'));
+                }catch(e){}
+            });
         }
         function docHeaderMissingRequired(){
             const fields = docSearchFields();
@@ -982,10 +1155,16 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                         <input data-dhf="${f.alias}" data-dht="to" value="${String(vTo).replace(/"/g, '&quot;')}" type="text" inputmode="numeric" placeholder="إلى" class="bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-indigo-500 w-20 text-center" onkeydown="if(event.key==='Enter') docHeaderFetch()">
                     </div>`;
                 } else if(f.kind === 'select'){
+                    const curV = keep[f.alias + '||single'] ?? f.defaultValue ?? '';
+                    const _src = docParamSource(f);
+                    if(_src){
+                        window._docSrcDef[f.alias] = _src;
+                        window._docSrcDef[f.alias].searchable = (f.searchable !== false);
+                        valInput = docSrcComboHTML(f, curV, `data-dhf="${f.alias}" data-dht="single"`, 'w-full bg-white border border-slate-200 rounded-lg pl-7 pr-2.5 py-1 text-xs focus:outline-none focus:border-indigo-500 font-medium');
+                    } else {
                     const cacheKey = (currentApp || '') + '::' + (currentRml || '') + '::' + f.alias;
                     const isLoaded = !!(window._docDistinctCache && window._docDistinctCache[cacheKey]);
                     const vals = isLoaded ? window._docDistinctCache[cacheKey] : [];
-                    const curV = keep[f.alias + '||single'] ?? f.defaultValue ?? '';
                     if(!isLoaded){
                         setTimeout(()=>{
                             loadDocDistinctValues(f.alias).then(loadedVals => {
@@ -1004,6 +1183,7 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                         ? (`<option value="">-- اختر ${f.label || f.alias} --</option>` + vals.map(v => `<option value="${String(v).replace(/"/g, '&quot;')}" ${String(v) === String(curV) ? 'selected' : ''}>${String(v).replace(/</g, '&lt;')}</option>`).join(''))
                         : `<option value="">-- جارٍ جلب القيم الفريدة... --</option>`;
                     valInput = `<select data-dhf="${f.alias}" data-dht="single" class="bg-white border border-slate-200 rounded-lg px-2.5 py-1 text-xs focus:outline-none focus:border-indigo-500 min-w-[150px] font-medium" onchange="docHeaderSelectChanged('${f.alias}', this.value)">${optHtml}</select>`;
+                    }
                 } else {
                     const ph = f.kind === 'number' ? 'القيمة...' : (op === 'inyear' ? 'YYYY' : op === 'inmonth' ? 'YYYY-MM' : 'القيمة...');
                     const curV = keep[f.alias + '||single'] ?? f.defaultValue ?? '';
@@ -1079,8 +1259,15 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                 renderDocSearchFirst(docSnapshotVals());
             }catch(e){}
         }
-        function docValInput(alias, kind, op, doct, val, ph){
+        function docValInput(alias, kind, op, doct, val, ph, f){
             if(kind === 'select'){
+                const _src = docParamSource(f || {});
+                const _svCur = String(val == null ? '' : val);
+                if(_src){
+                    window._docSrcDef[alias] = _src;
+                    window._docSrcDef[alias].searchable = !((f || {}).searchable === false);
+                    return docSrcComboHTML({alias: alias}, _svCur, `data-docf="${alias}" data-doct="${doct}"`, 'w-full bg-slate-50 border border-slate-200 rounded-xl pl-8 pr-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500');
+                }
                 const cacheKey = (currentApp || '') + '::' + (currentRml || '') + '::' + alias;
                 const isLoaded = !!(window._docDistinctCache && window._docDistinctCache[cacheKey]);
                 const vals = isLoaded ? window._docDistinctCache[cacheKey] : [];
@@ -1116,13 +1303,13 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                         const op = f.op || docDefOp(f.kind);
                         let vals = '';
                         if(f.kind === 'date' && op === 'between'){
-                            vals = `<div class="grid grid-cols-2 gap-2"><div>${docValInput(f.alias, f.kind, op, 'dateFrom', keep[f.alias + '||dateFrom'], 'من')}</div><div>${docValInput(f.alias, f.kind, op, 'dateTo', keep[f.alias + '||dateTo'], 'إلى')}</div></div>`;
+                            vals = `<div class="grid grid-cols-2 gap-2"><div>${docValInput(f.alias, f.kind, op, 'dateFrom', keep[f.alias + '||dateFrom'], 'من', f)}</div><div>${docValInput(f.alias, f.kind, op, 'dateTo', keep[f.alias + '||dateTo'], 'إلى', f)}</div></div>`;
                         } else if(f.kind === 'number' && op === 'between'){
-                            vals = `<div class="grid grid-cols-2 gap-2"><div>${docValInput(f.alias, f.kind, op, 'numFrom', keep[f.alias + '||numFrom'], 'من')}</div><div>${docValInput(f.alias, f.kind, op, 'numTo', keep[f.alias + '||numTo'], 'إلى')}</div></div>`;
+                            vals = `<div class="grid grid-cols-2 gap-2"><div>${docValInput(f.alias, f.kind, op, 'numFrom', keep[f.alias + '||numFrom'], 'من', f)}</div><div>${docValInput(f.alias, f.kind, op, 'numTo', keep[f.alias + '||numTo'], 'إلى', f)}</div></div>`;
                         } else {
                             const ph = f.kind === 'number' ? 'القيمة...' : (op === 'inyear' ? 'YYYY' : op === 'inmonth' ? 'YYYY-MM' : 'القيمة...');
                             const sv = keep[f.alias + '||single'] ?? keep[f.alias + '||dateFrom'] ?? keep[f.alias + '||numFrom'] ?? keep[f.alias + '||dateTo'] ?? keep[f.alias + '||numTo'] ?? '';
-                            vals = docValInput(f.alias, f.kind, op, 'single', sv, ph);
+                            vals = docValInput(f.alias, f.kind, op, 'single', sv, ph, f);
                         }
                         return `<div><label class="block font-semibold text-slate-700 mb-1">${f.label || f.alias}${f.required ? '<span class="text-rose-500 mr-0.5">*</span>' : ''}</label><div class="w-full">${vals}</div></div>`;
                     }).join('');
@@ -1421,6 +1608,9 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
         }
         function _rptSleep(ms){ return new Promise(_r=>setTimeout(_r, ms)); }
         function showReportProgress(show, text, info){
+            // مودال التنفيذ الخلفي محذوف نهائياً — لا حاجب إطلاقاً (السبينر السفلي يكفي)
+            try{ const _o0 = document.getElementById('rmlProgOv'); if(_o0) _o0.style.display = 'none'; }catch(e){}
+            if(show) return;
             try{
                 let ov = document.getElementById('rmlProgOv');
                 if(show){
@@ -1506,10 +1696,10 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                     throw e;
                 }
             }
-            try{ showReportProgress(true, 'بدء التنفيذ الخلفي…'); }catch(e){}
+            try{ if(!window._rptFirstLoad) showReportProgress(true, 'بدء التنفيذ الخلفي…'); }catch(e){}
             try{
                 const data = await fetchRmlAsync(body.rml, body.app, body.payload, (p)=>{
-                    try{ showReportProgress(true, (p && p.text) || 'جاري التنفيذ…', p); }catch(e){}
+                    try{ if(!window._rptFirstLoad) showReportProgress(true, (p && p.text) || 'جاري التنفيذ…', p); }catch(e){}
                 });
                 try{ showReportProgress(false); }catch(e){}
                 if(data && data.error) return {ok: false, data: data, status: 500};
@@ -1529,6 +1719,7 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                 const sp0 = document.getElementById('lazyLoadSpinner');
                 if(sp0) sp0.classList.add('hidden');
                 updateLazyStats();
+                window._rptFirstLoad = false;
                 return;
             }
             showDocWaitingPrompt(false);
@@ -1546,8 +1737,9 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                 const useAll = !append && (apiReportType() !== 'doc' || effDocTable()) && hasActiveFilters() && groupingOn;
                 const effPageSize = useAll ? 'all' : lazyPageSize;
                 const payload = buildApiPayload(page, effPageSize);
-                // الصفحات التالية تعرف الإجمالي مسبقاً — تخطي COUNT(*) (أبطأ استعلام غالباً)
-                if(append && lazyTotal > 0) payload.skipTotal = true;
+                // بلا مرحلة عدّ إطلاقاً — COUNT(*) لا تُنفَّذ أبداً (الأبطأ غالباً)؛
+                // النهاية تُكتشف بصفحة ناقصة، والإجمالي «مجهول» في الشريط السفلي
+                payload.skipTotal = true;
                 // Note: grouping is applied client-side over loaded rows
                 // (renderGroupingSidebar); groupBy is NOT sent so the main
                 // window-function query stays valid.
@@ -1569,10 +1761,14 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                     }
                     showDocWaitingPrompt(false);
                     lastApiData = data;
-                    // total = -1 عند skipTotal: الإجمالي معروف من الصفحة الأولى — لا تصفّره
+                    try{ refreshHiddenFromRml(); }catch(e){}
+                    // total = -1 دائماً (لا عدّ): الإجمالي مجهول — النهاية = صفحة ناقصة فقط
                     if(typeof data.total === 'number' && data.total >= 0){
                         lazyTotal = data.total || 0;
                         lazyTotalPages = data.totalPages || Math.ceil(lazyTotal / lazyPageSize) || 1;
+                    } else {
+                        lazyTotal = -1;
+                        lazyTotalPages = -1;
                     }
                     if(useAll) lazyDone = true;
                     // Doc reports show one record per page (unless كشف واحد = table layout)
@@ -1588,7 +1784,9 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                         lazyLoadedRows = data.rows || [];
                     }
                     lazyPage = page + 1;
-                    if(!data.rows || data.rows.length < lazyPageSize || lazyPage > lazyTotalPages) lazyDone = true;
+                    const _rowsGot = (data.rows || []).length;
+                    if(lazyTotal < 0 || lazyTotalPages < 0){ if(_rowsGot < lazyPageSize) lazyDone = true; }
+                    else if(!data.rows || _rowsGot < lazyPageSize || lazyPage > lazyTotalPages) lazyDone = true;
                     apiMode = true;
                     apiFailed = '';
                     const badge = document.getElementById('apiModeBadge');
@@ -1600,6 +1798,7 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                     throw new Error(msg);
                 }
             }catch(e){ try{showReportProgress(false);}catch(_h){} const _fm = String((e && e.message) || e).slice(0, 4000); apiFailed = _fm.slice(0, 300); showError(_fm, 'تقرير: ' + (currentRml || '') + ' — ' + (currentApp || '')); }
+            window._rptFirstLoad = false;
             lazyLoading = false;
             if(spinner) spinner.classList.add('hidden');
             updateLazyStats();
@@ -1607,10 +1806,17 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
         function updateLazyStats(){
             const loaded = document.getElementById('loadedRowsCount');
             const total = document.getElementById('totalRecordsCount');
+            const wrap = document.getElementById('totalWrap');
             const pct = document.getElementById('lazyLoadPct');
             if(loaded) loaded.textContent = lazyLoadedRows.length.toLocaleString();
-            if(total) total.textContent = lazyTotal.toLocaleString();
-            if(pct && lazyTotal > 0) pct.textContent = Math.round(lazyLoadedRows.length / lazyTotal * 100) + '%';
+            if(lazyTotal < 0){
+                if(wrap) wrap.style.display = 'none';
+                if(pct) pct.textContent = '';
+            } else {
+                if(wrap) wrap.style.display = '';
+                if(total) total.textContent = lazyTotal.toLocaleString();
+                if(pct) pct.textContent = (lazyTotal > 0) ? (Math.round(lazyLoadedRows.length / lazyTotal * 100) + '%') : '';
+            }
         }
         const FMT_DAYS_AR = ['الأحد','الاثنين','الثلاثاء','الأربعاء','الخميس','الجمعة','السبت'];
         const FMT_DAYS_AR_S = ['أحد','اثنين','ثلا','أرب','خمي','جمع','سبت'];
@@ -1737,7 +1943,7 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                 }
                 return chain;
             });
-            const colTh = (gc)=>`<th class="px-2 py-1 font-bold border-b border-l border-r border-slate-200 bg-slate-50 text-slate-700 cursor-pointer hover:bg-slate-100 select-none group" onclick="openColumnMenu(event, '${gc.alias}')"><div class="flex items-center justify-between"><span>${gc.alias}</span><i class="fa-solid fa-chevron-down text-[10px] text-slate-400 group-hover:text-indigo-600"></i></div></th>`;
+            const colTh = (gc)=>{ const _cs = colTextStyle(gc); return `<th${colDataAttr(gc)} class="px-2 py-1 font-bold border-b border-l border-r border-slate-200 bg-slate-50 text-slate-700 cursor-pointer hover:bg-slate-100 select-none group"${_cs ? ` style="${_cs}"` : ''} onclick="openColumnMenu(event, '${gc.alias}')"><div class="flex items-center justify-between"><span>${gc.alias}</span><i class="fa-solid fa-chevron-down text-[10px] text-slate-400 group-hover:text-indigo-600"></i></div></th>`; };
             const grpCls = (L)=> L === 1
                 ? 'px-4 py-2.5 font-extrabold text-[13px] border-b-2 border-l border-r border-slate-300 bg-slate-200 text-slate-800 text-center select-none'
                 : 'px-4 py-2 font-bold text-xs border-b border-l border-r border-slate-300 bg-slate-100 text-slate-700 text-center select-none';
@@ -1760,7 +1966,8 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                         let rs = 1, below = false;
                         for(let k = L + 1; k <= depth; k++){ if(chains[i][k - 1]){ below = true; break; } rs++; }
                         if(!below){
-                            rows[L - 1] += `<th class="px-2 py-1 font-bold border-b-2 border-slate-300 bg-slate-100 text-slate-800 cursor-pointer hover:bg-slate-200 select-none group" rowspan="${rs + 1}" onclick="openColumnMenu(event, '${cols[i].alias}')"><div class="flex items-center justify-between"><span>${cols[i].alias}</span><i class="fa-solid fa-chevron-down text-[10px] text-slate-400 group-hover:text-indigo-600"></i></div></th>`;
+                            const _cs0 = colTextStyle(cols[i]);
+                            rows[L - 1] += `<th${colDataAttr(cols[i])} class="px-2 py-1 font-bold border-b-2 border-slate-300 bg-slate-100 text-slate-800 cursor-pointer hover:bg-slate-200 select-none group" rowspan="${rs + 1}"${_cs0 ? ` style="${_cs0}"` : ''} onclick="openColumnMenu(event, '${cols[i].alias}')"><div class="flex items-center justify-between"><span>${cols[i].alias}</span><i class="fa-solid fa-chevron-down text-[10px] text-slate-400 group-hover:text-indigo-600"></i></div></th>`;
                             chains[i].done = true;
                             for(let k = L + 1; k <= depth; k++) pending[i]++;
                         } else {
@@ -1772,7 +1979,8 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                     }
                     let span = 0, j = i;
                     while(j < cols.length && pending[j] === 0 && chains[j][L - 1] === g){ span++; j++; }
-                    rows[L - 1] += `<th class="${grpCls(L)}" colspan="${span}">${g.name}</th>`;
+                    const _gs = colTextStyle(g);
+                    rows[L - 1] += `<th class="${grpCls(L)}" colspan="${span}"${_gs ? ` style="${_gs}"` : ''}>${g.name}</th>`;
                     i = j;
                 }
             }
@@ -1803,6 +2011,73 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                 return lum > 0.6 ? '#1e293b' : '#ffffff';
             }catch(e){ return '#ffffff'; }
         }
+        function colHex(v){ try{ v = String(v || '').trim(); return /^#[0-9a-fA-F]{6}$/.test(v) ? v : ''; }catch(e){ return ''; } }
+        // designer column/group style → inline CSS (color/bg/weight)
+        function colTextStyle(c){
+            let s = '';
+            try{
+                const fg = colHex(c && (c.color || c.textColor));
+                const bg = colHex(c && (c.bg || c.bgColor || c.background));
+                if(fg) s += 'color:' + fg + ';';
+                if(bg) s += 'background:' + bg + ';';
+                if(String((c && (c.weight || c.fontWeight)) || '').toLowerCase() === 'bold') s += 'font-weight:700;';
+            }catch(e){}
+            return s;
+        }
+        function colDataAttr(c){
+            try{
+                const a = String((c && (c.alias || c.name)) || '').replace(/"/g, '&quot;');
+                return a ? ` data-col="${a}"` : '';
+            }catch(e){ return ''; }
+        }
+        // frozen set: designer column frozen + frozen-group members; leading run only
+        function colFrozenRun(cols, groups){
+            const set = {};
+            try{
+                (cols || []).forEach(c=>{ const a = c && (c.alias || c.name); if(a && (c.frozen || c.freeze)) set[a] = true; });
+                (groups || []).forEach(g=>{ if(g && (g.frozen || g.freeze)) (g.columns || []).forEach(a=>{ if(a) set[a] = true; }); });
+            }catch(e){}
+            const run = [];
+            try{
+                for(const c of (cols || [])){ const a = c && (c.alias || c.name); if(a && set[a]) run.push(a); else break; }
+            }catch(e){}
+            return run;
+        }
+        function applyColFreeze(cols){
+            try{
+                const data = lastApiData || {};
+                const groups = data.groups || (data.metadata && data.metadata.groups) || [];
+                const run = colFrozenRun(cols, groups);
+                if(!run.length) return;
+                const thead = document.getElementById('tableHeader');
+                const tbody = document.getElementById('tableBody');
+                const widths = {};
+                run.forEach(a=>{
+                    let w = 0;
+                    try{
+                        const th = thead ? thead.querySelector(`th[data-col="${CSS.escape(a)}"]`) : null;
+                        w = th ? th.getBoundingClientRect().width : 0;
+                    }catch(e){}
+                    widths[a] = w > 0 ? w : 120;
+                });
+                let off = 0;
+                run.forEach(a=>{
+                    let sel = '';
+                    try{ sel = `[data-col="${CSS.escape(a)}"]`; }catch(e){ return; }
+                    const cells = [];
+                    if(thead) thead.querySelectorAll(sel).forEach(el=>cells.push([el, 30, '#f8fafc']));
+                    if(tbody) tbody.querySelectorAll(sel).forEach(el=>cells.push([el, 10, '#ffffff']));
+                    cells.forEach(([el, z, fb])=>{
+                        el.style.position = 'sticky';
+                        el.style.right = off + 'px';
+                        el.style.zIndex = z;
+                        if(!el.style.background) el.style.background = fb;
+                        el.style.boxShadow = 'inset -1px 0 0 #e2e8f0';
+                    });
+                    off += (widths[a] || 120);
+                });
+            }catch(e){}
+        }
         function statusCellHtml(c, rawV, formattedInner){
             const st = ((c && (c.is_status || c.isStatus)) ? statusEntry(c, rawV) : null);
             const wcls = colWrapCls(c);
@@ -1817,12 +2092,12 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                 }
                 if(_w >= 40) _cww = 'min-width:' + Math.min(_w, 1200) + 'px;max-width:' + Math.min(_w, 1200) + 'px;';
             }catch(e){}
-            if(!st) return `<td class="px-2 py-1 text-slate-800 excel-cell ${wcls}"${tip}${_cww ? ` style="${_cww}"` : ''}>${formattedInner}</td>`;
+            if(!st) return `<td class="px-2 py-1 text-slate-800 excel-cell ${wcls}"${colDataAttr(c)}${tip}${((_cww + colTextStyle(c))) ? ` style="${_cww + colTextStyle(c)}"` : ''}>${formattedInner}</td>`;
             const tint = statusTint(st.color, 0.16) || '';
             const fg = (/^#[0-9a-fA-F]{6}$/.test(st.color || '') ? st.color : '#334155');
             const label = String(st.label ?? rawV ?? '').replace(/</g,'&lt;');
-            const style = ((tint ? `background:${tint};` : '') + _cww);
-            return `<td class="px-2 py-1 excel-cell ${wcls}"${style ? ` style="${style}"` : ''}${tip}><span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold" style="background:${fg};color:${statusFg(st.color)}">${label}</span></td>`;
+            const style = ((tint ? `background:${tint};` : '') + _cww + colTextStyle(c));
+            return `<td class="px-2 py-1 excel-cell ${wcls}"${colDataAttr(c)}${style ? ` style="${style}"` : ''}${tip}><span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold" style="background:${fg};color:${statusFg(st.color)}">${label}</span></td>`;
         }
         function renderApiData(data, append){
             const cols = visCols(data.columns || []);
@@ -1840,7 +2115,7 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                 if(groupHeader){
                     thead.innerHTML = groupHeader;
                 } else {
-                    thead.innerHTML = '<tr>' + (detailMode() ? '<th class="w-10 px-2 py-2 border-b border-slate-200 bg-slate-100"></th>' : '') + '<th class="w-12 px-3 py-2 text-center border-b border-slate-200 bg-slate-100 font-bold">#</th>' + cols.map(c=>`<th class="px-2 py-1 font-bold border-b border-slate-200 bg-slate-50 text-slate-700 cursor-pointer hover:bg-slate-100 select-none group"${(typeof colWidthStyle === 'function' ? colWidthStyle(c.alias || c.name) : '')} onclick="openColumnMenu(event, '${c.alias}')"><div class="flex items-center justify-between"><span>${c.alias}</span><i class="fa-solid fa-chevron-down text-[10px] text-slate-400 group-hover:text-indigo-600"></i></div></th>`).join('') + '</tr>';
+                    thead.innerHTML = '<tr>' + (detailMode() ? '<th class="w-10 px-2 py-2 border-b border-slate-200 bg-slate-100"></th>' : '') + '<th class="w-12 px-3 py-2 text-center border-b border-slate-200 bg-slate-100 font-bold">#</th>' + cols.map(c=>{ const _cs = colTextStyle(c); return `<th${colDataAttr(c)} class="px-2 py-1 font-bold border-b border-slate-200 bg-slate-50 text-slate-700 cursor-pointer hover:bg-slate-100 select-none group"${(typeof colWidthStyle === 'function' ? colWidthStyle(c.alias || c.name) : '')}${_cs ? ` style="${_cs}"` : ''} onclick="openColumnMenu(event, '${c.alias}')"><div class="flex items-center justify-between"><span>${c.alias}</span><i class="fa-solid fa-chevron-down text-[10px] text-slate-400 group-hover:text-indigo-600"></i></div></th>`; }).join('') + '</tr>';
                 }
             }
             const tbody = document.getElementById('tableBody');
@@ -1869,6 +2144,18 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
             }
             renderGroupingSidebar(lazyLoadedRows);
             updateLazyStats();
+            try{ applyColFreeze(cols); }catch(e){}
+            try{
+                if(!window._colFzRaf && typeof requestAnimationFrame === 'function'){
+                    window._colFzRaf = true;
+                    const _reapply = ()=>{ try{ window._colFzRaf = false; applyColFreeze(visCols((lastApiData && lastApiData.columns) || [])); }catch(e){} };
+                    window.addEventListener('resize', ()=>{ try{ if(!window._colFzRaf){ window._colFzRaf = true; requestAnimationFrame(_reapply); } }catch(e){} });
+                    requestAnimationFrame(()=>{ try{ _reapply(); }catch(e){} });
+                } else if(!window._colFzResize){
+                    window._colFzResize = true;
+                    window.addEventListener('resize', ()=>{ try{ applyColFreeze(visCols((lastApiData && lastApiData.columns) || [])); }catch(e){} });
+                }
+            }catch(e){}
             setupLazyObserver();
             renderDocView();
             try{ refreshSearchColOptions(); }catch(e){}
@@ -2006,13 +2293,11 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
             const wrap = document.getElementById('tableScrollContainer');
             const doc = document.getElementById('docPanel');
             if(!wrap || !doc) return;
-            if(apiReportType() !== 'doc' || effDocTable()){
-                // كشف واحد (أو غير مستندي): الجدول الرئيسي يعرض كل النتائج
-                doc.classList.add('hidden');
-                wrap.classList.remove('hidden');
-                setTableRowVisible(true);
-                return;
-            }
+            // المستندي: النتائج تُعرض دائماً في الجدول الإجمالي العادي (لا بطاقات مستندات)
+            doc.classList.add('hidden');
+            wrap.classList.remove('hidden');
+            setTableRowVisible(true);
+            return;
             wrap.classList.add('hidden');
             setTableRowVisible(false);
             doc.classList.remove('hidden');
@@ -2228,7 +2513,7 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
             lazyDone = false;
             if(lazyObserver) lazyObserver.disconnect();
             const tbody = document.getElementById('tableBody');
-            if(tbody) tbody.innerHTML = '<tr><td colspan="10" class="text-center py-12 text-slate-400"><i class="fa-solid fa-spinner fa-spin text-indigo-400"></i> جاري تحميل البيانات...</td></tr>';
+            if(tbody && !window._rptFirstLoad) tbody.innerHTML = '<tr><td colspan="10" class="text-center py-12 text-slate-400"><i class="fa-solid fa-spinner fa-spin text-indigo-400"></i> جاري تحميل البيانات...</td></tr>';
             // مستندي (سجل): استبدال فوري لنتيجة المستند القديمة — لا تُعرض بيانات قديمة أثناء الجلب الجديد
             try{
                 if(isDocType() && !effDocTable()){
@@ -2650,6 +2935,7 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
             const all = allCols().map(c=>c.alias || c.name);
             if(all.filter(a=>!hiddenCols.has(a)).length <= 1){ try{ notify('يجب إبقاء عمود واحد ظاهراً على الأقل', 'info'); }catch(e){} return; }
             hiddenCols.add(currentMenuColumn);
+            try{ userHiddenCols.add(currentMenuColumn); userShownCols.delete(currentMenuColumn); }catch(e){}
             saveHiddenCols();
             closeColumnMenu();
             renderGrid();
@@ -2672,17 +2958,18 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
         }
         function closeColsManager(){ document.getElementById('colsManagerModal').classList.add('hidden'); }
         function toggleColVis(alias, show){
-            if(show){ hiddenCols.delete(alias); }
+            if(show){ hiddenCols.delete(alias); try{ userShownCols.add(alias); userHiddenCols.delete(alias); }catch(e){} }
             else {
                 const all = allCols().map(c=>c.alias || c.name);
                 if(all.filter(a=>!hiddenCols.has(a)).length <= 1){ try{ notify('يجب إبقاء عمود واحد ظاهراً على الأقل', 'info'); }catch(e){} openColsManager(); return; }
                 hiddenCols.add(alias);
+                try{ userHiddenCols.add(alias); userShownCols.delete(alias); }catch(e){}
             }
             saveHiddenCols();
             openColsManager();
             renderGrid();
         }
-        function showAllCols(){ hiddenCols.clear(); saveHiddenCols(); openColsManager(); renderGrid(); }
+        function showAllCols(){ hiddenCols.clear(); try{ userHiddenCols.clear(); allCols().forEach(c=>userShownCols.add(c.alias || c.name)); }catch(e){} saveHiddenCols(); openColsManager(); renderGrid(); }
         function filterColumnCheckboxes(query) {
             const q = String(query || '');
             const items = document.querySelectorAll('#colValuesCheckboxesList label');

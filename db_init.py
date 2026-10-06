@@ -27,16 +27,57 @@ def validate_ws_schema(name) -> str:
     return v
 
 
-def migrate_schema(host, port, user, password, dbname, schema):
+_WS_USERS_DDL = """
+CREATE TABLE IF NOT EXISTS "{schema}"."{table}" (
+    id SERIAL PRIMARY KEY,
+    username character varying(150) NOT NULL UNIQUE,
+    full_name character varying(200) NOT NULL,
+    email character varying(254) NOT NULL,
+    password character varying(255) NOT NULL,
+    password_hash character varying(255),
+    role character varying(50) NOT NULL,
+    phone character varying(50),
+    company_code character varying(50),
+    branch_code character varying(50),
+    is_active boolean NOT NULL DEFAULT true,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+)
+""".strip()
+
+
+def _split_users_table(users_table, schema):
+    """(schema, table) targeted for the users table, or (None, None) to skip.
+
+    Only targets tables INSIDE the migrated schema (never foreign schemas).
+    Bare names default to <schema>.users.
+    """
+    raw = str(users_table or "").strip()
+    if not raw:
+        return schema, "users"
+    parts = [p.strip() for p in raw.split(".")]
+    if len(parts) == 1:
+        parts = [schema, parts[0]]
+    if len(parts) != 2 or not all(parts):
+        return None, None
+    if any(len(p) > _MAX_SCHEMA_LEN or not _WS_SCHEMA_RE.fullmatch(p) for p in (parts[0].lower(), parts[1].lower())):
+        return None, None
+    if parts[0].lower() != schema:
+        return None, None
+    return parts[0].lower(), parts[1].lower()
+
+
+def migrate_schema(host, port, user, password, dbname, schema, users_table=""):
     """Create schema `company_branch_year` and migrate ALL Django app tables into it.
 
     Steps: (CREATE DATABASE when missing) → CREATE SCHEMA IF NOT EXISTS →
+    CREATE users table (when missing, sys_users-compatible shape) →
     temporary Django connection with ``search_path=<schema>`` →
     ``migrate --run-syncdb`` (every app incl. ``urs`` models, auth, django_migrations)
     → list created tables from ``pg_tables``.
 
-    Returns {"schema", "tables", "migrated": True}. Raises RuntimeError (Arabic)
-    with the driver error attached. Never touches the default connection.
+    Returns {"schema", "tables", "migrated": True, "users_table", "users_created"}.
+    Raises RuntimeError (Arabic) with the driver error attached. Never touches
+    the default connection.
     """
     schema = validate_ws_schema(schema)
     host = str(host or "").strip() or "127.0.0.1"
@@ -92,6 +133,39 @@ def migrate_schema(host, port, user, password, dbname, schema):
     except Exception as e:
         raise RuntimeError("فشل الاتصال/إنشاء السكيما: %s" % e)
 
+    # --- users table (login target) inside the migrated schema ---------------
+    _usch, _utbl = _split_users_table(users_table, schema)
+    users_target = "%s.%s" % (_usch, _utbl) if _usch and _utbl else ""
+    users_created = False
+    if users_target:
+        try:
+            conn = _connect(dbname)
+        except Exception as e:
+            raise RuntimeError("فشل الاتصال لإنشاء جدول المستخدمين: %s" % e)
+        try:
+            conn.autocommit = True
+            cur = conn.cursor()
+            try:
+                cur.execute("SELECT 1 FROM pg_tables WHERE schemaname = %s AND tablename = %s",
+                            [_usch, _utbl])
+                if cur.fetchone() is None:
+                    cur.execute(_WS_USERS_DDL.format(schema=_usch, table=_utbl))
+                    users_created = True
+            finally:
+                try:
+                    cur.close()
+                except Exception:
+                    pass
+        except (ValueError, RuntimeError):
+            raise
+        except Exception as e:
+            raise RuntimeError("فشل إنشاء جدول المستخدمين %s: %s" % (users_target, e))
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
     # --- Django migrate into the schema via search_path ---------------------
     alias = "ws_%s" % schema
     try:
@@ -110,6 +184,16 @@ def migrate_schema(host, port, user, password, dbname, schema):
         "HOST": host,
         "PORT": str(port),
         "OPTIONS": {"options": "-c search_path=%s" % schema},
+        # Same defaults ConnectionHandler.configure_settings applies at
+        # startup (runtime-added aliases skip them; missing TIME_ZONE raised
+        # KeyError: 'TIME_ZONE' on connect via check_settings()).
+        "ATOMIC_REQUESTS": False,
+        "AUTOCOMMIT": True,
+        "CONN_MAX_AGE": 0,
+        "CONN_HEALTH_CHECKS": False,
+        "TIME_ZONE": None,
+        "TEST": {"CHARSET": None, "COLLATION": None, "MIGRATE": True,
+                 "MIRROR": None, "NAME": None},
     }
     try:
         try:
@@ -140,7 +224,8 @@ def migrate_schema(host, port, user, password, dbname, schema):
             del _dj_settings.DATABASES[alias]
         except Exception:
             pass
-    return {"schema": schema, "tables": tables, "migrated": True}
+    return {"schema": schema, "tables": tables, "migrated": True,
+            "users_table": users_target, "users_created": users_created}
 
 def probe_port(host="127.0.0.1", port=5432, timeout=1.0) -> bool:
     try:

@@ -13,8 +13,44 @@ Nothing here imports urs.views/models (safe for config/settings.py).
 """
 from __future__ import annotations
 
+import contextvars as _ctxvars
 import json
 from pathlib import Path
+
+# Active workspace for app isolation: set per-request by the gate middleware
+# from the session (or ?settings= override). When set (and known), app roots
+# cover ONLY that workspace (+ legacy shared roots) — other workspaces'
+# apps are invisible. Unset (manager/scripts/tests) → all roots (legacy).
+_active_ws = _ctxvars.ContextVar("urs_active_ws", default=None)
+
+
+def set_active_ws(ws_id):
+    """Pin catalog/lookup roots to one workspace for the current context.
+
+    Returns the reset token (middleware resets after the request). Unknown
+    or empty ids behave as unset (unscoped).
+    """
+    try:
+        ws_id = str(ws_id or "").strip() or None
+    except Exception:
+        ws_id = None
+    return _active_ws.set(ws_id)
+
+
+def reset_active_ws(token):
+    """Reset the active workspace pin (middleware, finally)."""
+    try:
+        _active_ws.reset(token)
+    except Exception:
+        pass
+
+
+def active_ws_id():
+    """Currently pinned workspace id or None."""
+    try:
+        return _active_ws.get()
+    except Exception:
+        return None
 
 try:
     from django.conf import settings as _dj
@@ -55,9 +91,26 @@ def workspace_dirs():
 
 
 def system_roots():
-    """App-container roots in priority order: workspace apps/*, then legacy."""
+    """App-container roots in priority order: workspace apps/*, then legacy.
+
+    When an active workspace is pinned (request session), only THAT
+    workspace's apps dir is listed — other workspaces are isolated out.
+    Legacy shared roots (odex/system, system) always stay as fallback.
+    """
     roots = []
-    for ws in workspace_dirs():
+    try:
+        _wss = workspace_dirs()
+    except Exception:
+        _wss = []
+    try:
+        _act = active_ws_id()
+    except Exception:
+        _act = None
+    if _act and not any(w.name == _act for w in _wss):
+        _act = None
+    for ws in _wss:
+        if _act and ws.name != _act:
+            continue
         d = ws / APPS_DIRNAME
         try:
             if d.is_dir():
@@ -89,10 +142,21 @@ def first_app_dir(app_name):
 
 
 def ensure_app_dir(app_name):
-    """Dir for NEW apps: first workspace apps/* (created) else legacy odex/system."""
+    """Dir for NEW apps: active workspace apps/* when pinned, else first
+    workspace apps/* (created) else legacy odex/system."""
     app = str(app_name or "").strip()
     wss = workspace_dirs()
-    base = (wss[0] / APPS_DIRNAME) if wss else (BASE_DIR / "odex" / "system")
+    base = None
+    try:
+        _act = active_ws_id()
+        if _act:
+            _hit = [w for w in wss if w.name == _act]
+            if _hit:
+                base = _hit[0] / APPS_DIRNAME
+    except Exception:
+        base = None
+    if base is None:
+        base = (wss[0] / APPS_DIRNAME) if wss else (BASE_DIR / "odex" / "system")
     d = base / app
     d.mkdir(parents=True, exist_ok=True)
     return d

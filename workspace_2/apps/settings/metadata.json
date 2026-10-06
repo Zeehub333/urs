@@ -1,0 +1,12 @@
+{
+  "name": "settings",
+  "ar": "إعدادات النظام",
+  "en": "System Settings",
+  "icon": "fa-gear",
+  "icon_bg": "bg-slate-800",
+  "icon_color": "text-white",
+  "version": "1.0.0",
+  "category": "النظام",
+  "description": "إعدادات النظام — الشركات والفروع والمستخدمون والصلاحيات",
+  "sort_order": 1
+}

@@ -239,10 +239,16 @@
     <script>
         // Users table selector initialization - runs after DOM is ready
         document.addEventListener('DOMContentLoaded', function(){
-            const _wt = '{{ workspace_info.users_table || "main_hq_2026.sys_users" }}';
+            const _wt = '{{ workspace_info.users_table|default:"main_hq_2026.sys_users" }}';
             const _selector = document.getElementById('wsUsersTable');
             if(_selector){
-                _selector.value = _wt.split('.').pop() || _wt;
+                if(![..._selector.options].some(o=>o.value === _wt)){
+                    const _opt = document.createElement('option');
+                    _opt.value = _wt;
+                    _opt.textContent = _wt + ' (الحالي)';
+                    _selector.appendChild(_opt);
+                }
+                _selector.value = _wt;
                 _selector.addEventListener('change', function(){
                     const _new = this.value;
                     fetch('/api/settings/users-table/', {

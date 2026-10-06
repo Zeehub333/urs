@@ -1,16 +1,47 @@
 <header class="bg-white border-b border-gray-200 h-11 px-4 flex items-center justify-between sticky top-0 z-10">
-    <div class="flex items-center gap-2">
-        <div class="relative">
-            <div class="w-7 h-7 rounded-full bg-emerald-700 text-white flex items-center justify-center font-bold text-[10px] shadow-sm">
-                <i class="fa-solid fa-user"></i>
+    <!-- User profile and dropdown -->
+    <div class="relative" id="userMenuDropdownWrapper">
+        <button type="button" onclick="toggleUserDropdown(event)" id="userMenuBtn" class="flex items-center gap-2 px-2 py-1 rounded-xl hover:bg-gray-100 transition focus:outline-none cursor-pointer">
+            <div class="relative">
+                <div class="w-7 h-7 rounded-full bg-emerald-700 text-white flex items-center justify-center font-bold text-[10px] shadow-sm">
+                    <i class="fa-solid fa-user"></i>
+                </div>
+                <span class="absolute bottom-0 right-0 w-2 h-2 bg-emerald-500 border border-white rounded-full"></span>
             </div>
-            <span class="absolute bottom-0 right-0 w-2 h-2 bg-emerald-500 border border-white rounded-full"></span>
-        </div>
-        <div>
-            <h3 class="text-[11px] font-bold text-gray-800 leading-none">{% if ws_user.username %}{{ ws_user.username }}{% if ws_user.is_superuser %} <span class="text-amber-500" title="مشرف عام">★</span>{% endif %}{% else %}admin{% endif %}</h3>
+            <div class="text-right flex items-center gap-1.5">
+                <div class="leading-tight">
+                    <h3 id="topbarUserFullName" class="text-[11px] font-bold text-gray-800 leading-none">{% if ws_user.full_name %}{{ ws_user.full_name }}{% elif ws_user.username %}{{ ws_user.username }}{% else %}admin{% endif %}{% if ws_user.is_superuser %} <span class="text-amber-500" title="مشرف عام">★</span>{% endif %}</h3>
+                    {% if ws_user.username and ws_user.full_name and ws_user.full_name != ws_user.username %}
+                    <span class="text-[9px] text-gray-400 font-mono block leading-none mt-0.5">{{ ws_user.username }}</span>
+                    {% endif %}
+                </div>
+                <i class="fa-solid fa-chevron-down text-[8px] text-gray-400 transition-transform duration-200" id="userMenuChevron"></i>
+            </div>
+        </button>
+
+        <!-- Dropdown Menu -->
+        <div id="userDropdownMenu" class="hidden absolute right-0 mt-1.5 w-52 bg-white rounded-2xl shadow-xl border border-gray-100 py-1.5 z-50 text-xs">
+            <div class="px-3 py-2 border-b border-gray-100 mb-1 bg-slate-50/50 rounded-t-2xl">
+                <div class="font-bold text-gray-800 text-[11px] truncate" id="userDropdownNameLabel">{% if ws_user.full_name %}{{ ws_user.full_name }}{% elif ws_user.username %}{{ ws_user.username }}{% else %}admin{% endif %}</div>
+                <div class="text-[10px] text-gray-400 font-mono truncate">{% if ws_user.username %}{{ ws_user.username }}{% else %}admin{% endif %}</div>
+            </div>
+            <button type="button" onclick="openChangePasswordModal()" class="w-full text-right px-3 py-2 text-gray-700 hover:bg-slate-50 flex items-center gap-2.5 transition font-semibold cursor-pointer">
+                <i class="fa-solid fa-key text-emerald-600 text-[11px] w-4 text-center"></i>
+                <span>تغيير كلمة المرور</span>
+            </button>
+            <button type="button" onclick="openEditProfileModal()" class="w-full text-right px-3 py-2 text-gray-700 hover:bg-slate-50 flex items-center gap-2.5 transition font-semibold cursor-pointer">
+                <i class="fa-solid fa-user-pen text-blue-600 text-[11px] w-4 text-center"></i>
+                <span>تعديل الملف الشخصي</span>
+            </button>
+            <div class="my-1 border-t border-gray-100"></div>
+            <a href="/exit/" class="w-full text-right px-3 py-2 text-rose-600 hover:bg-rose-50 flex items-center gap-2.5 transition font-bold block">
+                <i class="fa-solid fa-right-from-bracket text-[11px] w-4 text-center"></i>
+                <span>خروج</span>
+            </a>
         </div>
     </div>
 
+    <!-- Right controls -->
     <div class="flex items-center gap-2">
         <a href="/settings/" id="connStatusPill" title="حالة الاتصالات — اضغط للإدارة" class="flex items-center gap-1.5 px-2 py-0.5 bg-gray-50 border border-gray-200 rounded-lg text-[10px] font-semibold text-gray-600 hover:bg-gray-100 transition">
             <span id="connDot" class="w-2 h-2 rounded-full bg-slate-300 animate-pulse"></span>
@@ -30,8 +61,273 @@
         <a href="/exit/" title="خروج إلى قائمة مساحات العمل" class="h-7 px-3 rounded-full bg-rose-600 hover:bg-rose-700 text-white flex items-center gap-1.5 transition text-[11px] font-bold shadow-sm"><i class="fa-solid fa-right-from-bracket"></i><span>خروج</span></a>
     </div>
 </header>
+
+<!-- Change Password Modal -->
+<div id="changePasswordModal" class="hidden fixed inset-0 z-[100] bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
+    <div class="bg-white rounded-3xl shadow-2xl max-w-sm w-full p-5 space-y-4 border border-slate-100 animate-in fade-in zoom-in-95 duration-150">
+        <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+            <h3 class="font-bold text-sm text-slate-800 flex items-center gap-2">
+                <i class="fa-solid fa-key text-emerald-600"></i>
+                تغيير كلمة المرور
+            </h3>
+            <button type="button" onclick="closeChangePasswordModal()" class="text-slate-400 hover:text-slate-600 text-sm">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+        </div>
+        <div class="space-y-3 text-xs">
+            <div>
+                <label class="block font-semibold text-slate-700 mb-1">كلمة المرور الحالية *</label>
+                <div class="relative">
+                    <input id="cpCurPass" type="password" placeholder="••••••" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono text-xs pr-3 pl-8" dir="ltr" autocomplete="current-password">
+                    <button type="button" onclick="togglePassVisibility('cpCurPass', this)" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"><i class="fa-regular fa-eye"></i></button>
+                </div>
+            </div>
+            <div>
+                <label class="block font-semibold text-slate-700 mb-1">كلمة المرور الجديدة * (6 أحرف فأكثر)</label>
+                <div class="relative">
+                    <input id="cpNewPass" type="password" placeholder="••••••" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono text-xs pr-3 pl-8" dir="ltr" autocomplete="new-password">
+                    <button type="button" onclick="togglePassVisibility('cpNewPass', this)" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"><i class="fa-regular fa-eye"></i></button>
+                </div>
+            </div>
+            <div>
+                <label class="block font-semibold text-slate-700 mb-1">تأكيد كلمة المرور الجديدة *</label>
+                <div class="relative">
+                    <input id="cpConfPass" type="password" placeholder="••••••" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono text-xs pr-3 pl-8" dir="ltr" autocomplete="new-password">
+                    <button type="button" onclick="togglePassVisibility('cpConfPass', this)" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"><i class="fa-regular fa-eye"></i></button>
+                </div>
+            </div>
+            <div id="cpMsg" class="text-[11px] font-bold min-h-[16px] text-rose-600"></div>
+        </div>
+        <div class="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+            <button type="button" onclick="closeChangePasswordModal()" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs font-semibold">إلغاء</button>
+            <button type="button" onclick="submitChangePassword()" id="cpSubmitBtn" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm">حفظ التغييرات</button>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Profile Modal -->
+<div id="editProfileModal" class="hidden fixed inset-0 z-[100] bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
+    <div class="bg-white rounded-3xl shadow-2xl max-w-sm w-full p-5 space-y-4 border border-slate-100 animate-in fade-in zoom-in-95 duration-150">
+        <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+            <h3 class="font-bold text-sm text-slate-800 flex items-center gap-2">
+                <i class="fa-solid fa-user-pen text-blue-600"></i>
+                تعديل الملف الشخصي
+            </h3>
+            <button type="button" onclick="closeEditProfileModal()" class="text-slate-400 hover:text-slate-600 text-sm">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+        </div>
+        <div class="space-y-3 text-xs">
+            <div>
+                <label class="block font-semibold text-slate-700 mb-1">اسم المستخدم</label>
+                <input id="epUsername" type="text" disabled class="w-full bg-slate-100 border border-slate-200 rounded-xl px-3 py-2 font-mono text-xs text-slate-500" dir="ltr" value="{% if ws_user.username %}{{ ws_user.username }}{% else %}admin{% endif %}">
+            </div>
+            <div>
+                <label class="block font-semibold text-slate-700 mb-1">الاسم الكامل *</label>
+                <input id="epFullName" type="text" placeholder="الاسم الكامل" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs" value="{% if ws_user.full_name %}{{ ws_user.full_name }}{% elif ws_user.username %}{{ ws_user.username }}{% else %}admin{% endif %}">
+            </div>
+            <div id="epEmailContainer">
+                <label class="block font-semibold text-slate-700 mb-1">البريد الإلكتروني</label>
+                <input id="epEmail" type="email" placeholder="user@example.com" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono text-xs" dir="ltr">
+            </div>
+            <div id="epMsg" class="text-[11px] font-bold min-h-[16px] text-rose-600"></div>
+        </div>
+        <div class="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+            <button type="button" onclick="closeEditProfileModal()" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs font-semibold">إلغاء</button>
+            <button type="button" onclick="submitEditProfile()" id="epSubmitBtn" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-sm">حفظ</button>
+        </div>
+    </div>
+</div>
+
 <script>
 (function(){
+    // Dropdown toggle
+    window.toggleUserDropdown = function(e){
+        if(e) e.stopPropagation();
+        var menu = document.getElementById('userDropdownMenu');
+        var chevron = document.getElementById('userMenuChevron');
+        if(!menu) return;
+        var isHidden = menu.classList.contains('hidden');
+        if(isHidden){
+            menu.classList.remove('hidden');
+            if(chevron) chevron.classList.add('rotate-180');
+        } else {
+            menu.classList.add('hidden');
+            if(chevron) chevron.classList.remove('rotate-180');
+        }
+    };
+
+    document.addEventListener('click', function(e){
+        var menu = document.getElementById('userDropdownMenu');
+        var wrapper = document.getElementById('userMenuDropdownWrapper');
+        if(menu && !menu.classList.contains('hidden')){
+            if(!wrapper || !wrapper.contains(e.target)){
+                menu.classList.add('hidden');
+                var chevron = document.getElementById('userMenuChevron');
+                if(chevron) chevron.classList.remove('rotate-180');
+            }
+        }
+    });
+
+    window.togglePassVisibility = function(inputId, btn){
+        var inp = document.getElementById(inputId);
+        if(!inp) return;
+        var icon = btn.querySelector('i');
+        if(inp.type === 'password'){
+            inp.type = 'text';
+            if(icon) { icon.classList.remove('fa-eye'); icon.classList.add('fa-eye-slash'); }
+        } else {
+            inp.type = 'password';
+            if(icon) { icon.classList.remove('fa-eye-slash'); icon.classList.add('fa-eye'); }
+        }
+    };
+
+    function topbarCsrf(){
+        try{
+            var m = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]*)/);
+            if(m) return decodeURIComponent(m[1]);
+            var el = document.querySelector('input[name="csrfmiddlewaretoken"]');
+            if(el) return el.value;
+        }catch(e){}
+        return '';
+    }
+
+    // Change Password Modal
+    window.openChangePasswordModal = function(){
+        var dmenu = document.getElementById('userDropdownMenu');
+        if(dmenu) dmenu.classList.add('hidden');
+        var m = document.getElementById('changePasswordModal');
+        if(m) m.classList.remove('hidden');
+        var cur = document.getElementById('cpCurPass');
+        var nw = document.getElementById('cpNewPass');
+        var cf = document.getElementById('cpConfPass');
+        var msg = document.getElementById('cpMsg');
+        if(cur) cur.value = '';
+        if(nw) nw.value = '';
+        if(cf) cf.value = '';
+        if(msg) { msg.textContent = ''; msg.className = 'text-[11px] font-bold min-h-[16px] text-rose-600'; }
+        if(cur) cur.focus();
+    };
+
+    window.closeChangePasswordModal = function(){
+        var m = document.getElementById('changePasswordModal');
+        if(m) m.classList.add('hidden');
+    };
+
+    window.submitChangePassword = async function(){
+        var cur = (document.getElementById('cpCurPass')?.value || '').trim();
+        var nw = (document.getElementById('cpNewPass')?.value || '').trim();
+        var cf = (document.getElementById('cpConfPass')?.value || '').trim();
+        var msg = document.getElementById('cpMsg');
+        var btn = document.getElementById('cpSubmitBtn');
+
+        if(!nw){
+            if(msg){ msg.textContent = 'كلمة المرور الجديدة مطلوبة'; msg.className = 'text-[11px] font-bold text-rose-600'; }
+            return;
+        }
+        if(nw.length < 6){
+            if(msg){ msg.textContent = 'كلمة المرور الجديدة 6 أحرف فأكثر'; msg.className = 'text-[11px] font-bold text-rose-600'; }
+            return;
+        }
+        if(nw !== cf){
+            if(msg){ msg.textContent = 'كلمة المرور غير متطابقة مع التأكيد'; msg.className = 'text-[11px] font-bold text-rose-600'; }
+            return;
+        }
+        if(msg){ msg.textContent = 'جارٍ الحفظ...'; msg.className = 'text-[11px] font-bold text-slate-500'; }
+        if(btn) btn.disabled = true;
+
+        try {
+            var res = await fetch('/api/user/change-password/', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json', 'X-CSRFToken': topbarCsrf()},
+                body: JSON.stringify({current_password: cur, new_password: nw, confirm_password: cf})
+            });
+            var d = await res.json();
+            if(!res.ok) throw new Error(d.error || 'فشل تغيير كلمة المرور');
+            if(msg){ msg.textContent = d.message || 'تم تغيير كلمة المرور بنجاح ✓'; msg.className = 'text-[11px] font-bold text-emerald-600'; }
+            setTimeout(function(){
+                closeChangePasswordModal();
+                if(typeof notify === 'function') notify('تم تغيير كلمة المرور بنجاح ✓', 'success');
+            }, 800);
+        } catch(e) {
+            if(msg){ msg.textContent = String(e.message || e).slice(0, 150); msg.className = 'text-[11px] font-bold text-rose-600'; }
+        } finally {
+            if(btn) btn.disabled = false;
+        }
+    };
+
+    // Edit Profile Modal
+    window.openEditProfileModal = async function(){
+        var dmenu = document.getElementById('userDropdownMenu');
+        if(dmenu) dmenu.classList.add('hidden');
+        var m = document.getElementById('editProfileModal');
+        if(m) m.classList.remove('hidden');
+        var msg = document.getElementById('epMsg');
+        if(msg) { msg.textContent = ''; msg.className = 'text-[11px] font-bold min-h-[16px] text-rose-600'; }
+        try {
+            var res = await fetch('/api/user/profile/');
+            if(res.ok){
+                var d = await res.json();
+                var fnEl = document.getElementById('epFullName');
+                var emEl = document.getElementById('epEmail');
+                var unEl = document.getElementById('epUsername');
+                if(fnEl && d.full_name) fnEl.value = d.full_name;
+                if(emEl && d.email !== undefined) emEl.value = d.email;
+                if(unEl && d.username) unEl.value = d.username;
+            }
+        }catch(e){}
+    };
+
+    window.closeEditProfileModal = function(){
+        var m = document.getElementById('editProfileModal');
+        if(m) m.classList.add('hidden');
+    };
+
+    window.submitEditProfile = async function(){
+        var fn = (document.getElementById('epFullName')?.value || '').trim();
+        var em = (document.getElementById('epEmail')?.value || '').trim();
+        var msg = document.getElementById('epMsg');
+        var btn = document.getElementById('epSubmitBtn');
+
+        if(!fn){
+            if(msg){ msg.textContent = 'الاسم الكامل مطلوب'; msg.className = 'text-[11px] font-bold text-rose-600'; }
+            return;
+        }
+        if(msg){ msg.textContent = 'جارٍ الحفظ...'; msg.className = 'text-[11px] font-bold text-slate-500'; }
+        if(btn) btn.disabled = true;
+
+        try {
+            var res = await fetch('/api/user/profile/', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json', 'X-CSRFToken': topbarCsrf()},
+                body: JSON.stringify({full_name: fn, email: em})
+            });
+            var d = await res.json();
+            if(!res.ok) throw new Error(d.error || 'فشل تحديث الملف الشخصي');
+            var topName = document.getElementById('topbarUserFullName');
+            if(topName && d.full_name) topName.textContent = d.full_name;
+            var dropName = document.getElementById('userDropdownNameLabel');
+            if(dropName && d.full_name) dropName.textContent = d.full_name;
+            if(msg){ msg.textContent = 'تم التحديث بنجاح ✓'; msg.className = 'text-[11px] font-bold text-emerald-600'; }
+            setTimeout(function(){
+                closeEditProfileModal();
+                if(typeof notify === 'function') notify('تم تعديل الملف الشخصي بنجاح ✓', 'success');
+            }, 600);
+        } catch(e) {
+            if(msg){ msg.textContent = String(e.message || e).slice(0, 150); msg.className = 'text-[11px] font-bold text-rose-600'; }
+        } finally {
+            if(btn) btn.disabled = false;
+        }
+    };
+
+    // Close modals on Escape key
+    document.addEventListener('keydown', function(e){
+        if(e.key === 'Escape'){
+            closeChangePasswordModal();
+            closeEditProfileModal();
+        }
+    });
+
     // حالة الاتصالات من آخر فحص مسجل (بلا فحص حي ثقيل) — تحديث كل دقيقة
     async function refreshConnStatus(){
         var dot = document.getElementById('connDot');

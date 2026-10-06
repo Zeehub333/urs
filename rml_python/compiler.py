@@ -57,7 +57,8 @@ class RMLMetadata:
 @dataclass
 class RMLDocParam:
     """معلمة / مدخل مطلوب لتقرير المستند:
-    <doc_params><doc_param id column label type op required default_value /></doc_params>
+    <doc_params><doc_param id column label type op required default_value
+      src_conn src_table src_column searchable /></doc_params>
     """
     id: str
     column: str
@@ -66,6 +67,10 @@ class RMLDocParam:
     op: str = "equals"
     required: bool = True
     default_value: str = ""
+    src_conn: str = ""
+    src_table: str = ""
+    src_column: str = ""
+    searchable: bool = True
     raw_attrs: Dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -78,6 +83,15 @@ class RMLDocParam:
             "required": self.required,
             "default_value": self.default_value,
             "defaultValue": self.default_value,
+            "src_conn": self.src_conn or "",
+            "srcConn": self.src_conn or "",
+            "src_table": self.src_table or "",
+            "srcTable": self.src_table or "",
+            "src_column": self.src_column or "",
+            "srcColumn": self.src_column or "",
+            "source": {"connection": self.src_conn or "", "table": self.src_table or "",
+                       "column": self.src_column or ""},
+            "searchable": bool(self.searchable),
         }
 
 
@@ -183,6 +197,10 @@ class RMLColumn:
     date_format: Optional[str] = None  # date/datetime/time: display pattern
     visible: bool = True  # designer palette + player: shown by default, toggleable
     width: Optional[int] = None  # display width in px (player honors, user-adjustable)
+    color: Optional[str] = None  # text color #rrggbb (designer + player)
+    bg: Optional[str] = None  # background color #rrggbb (designer + player)
+    weight: Optional[str] = None  # font weight: normal|bold (designer + player)
+    frozen: bool = False  # frozen column: sticky, immune to horizontal scroll
 
     def to_dict(self) -> Dict[str, Any]:
         base = {
@@ -203,6 +221,12 @@ class RMLColumn:
             "colRefname": self.col_refname,
             "visible": self.visible,
             "width": self.width,
+            "color": self.color,
+            "bg": self.bg,
+            "bgColor": self.bg,
+            "weight": self.weight,
+            "fontWeight": self.weight,
+            "frozen": self.frozen,
             "icon": self.icon,
             "is_amount": self.is_amount,
             "isAmount": self.is_amount,
@@ -252,6 +276,10 @@ class RMLGroup:
     order: int = 0
     columns: List[str] = field(default_factory=list)  # member column aliases
     level: int = 1  # 1 = رئيسية، 2+ = فرعية (صفوف رأس متداخلة)
+    color: Optional[str] = None  # header text color #rrggbb
+    bg: Optional[str] = None  # header background #rrggbb
+    weight: Optional[str] = None  # font weight: normal|bold
+    frozen: bool = False  # freeze member columns (sticky, no horizontal scroll)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -260,6 +288,12 @@ class RMLGroup:
             "order": self.order,
             "columns": list(self.columns),
             "level": self.level,
+            "color": self.color,
+            "bg": self.bg,
+            "bgColor": self.bg,
+            "weight": self.weight,
+            "fontWeight": self.weight,
+            "frozen": self.frozen,
         }
 
 
@@ -649,6 +683,19 @@ class RMLReportCompiler:
             decimals = max(0, min(decimals, 6))
         date_format = get("date_format", "dateFormat", "date-format", "format")
         date_format = str(date_format).strip() if date_format else None
+        # Display style attrs (designer style section, honored by the player)
+        def _hex(_v):
+            try:
+                _s = str(_v or "").strip()
+                import re as _re_hex
+                return _s if _re_hex.fullmatch(r"#[0-9a-fA-F]{6}", _s or "") else None
+            except Exception:
+                return None
+        color = _hex(get("color", "text_color", "textColor", "font_color", "fontColor", "fg"))
+        bg = _hex(get("bg", "bg_color", "bgColor", "background", "background_color", "backgroundColor"))
+        _wt = str(get("weight", "font_weight", "fontWeight", "font-weight", "bold", default="") or "").strip().lower()
+        weight = "bold" if _wt in ("bold", "700", "800", "900", "bolder", "1", "true", "yes") else (None if not _wt or _wt in ("normal", "400", "0", "false", "no", "") else "bold")
+        frozen = str(get("frozen", "freeze", "sticky", "locked", default="") or "").strip().lower() in ("1", "true", "yes", "y")
         # Column classification: explicit type attr takes precedence
         explicit_type = (get("col_type", "colType", "column_type", default="") or "").lower()
         if explicit_type in ("direct", "computed", "fk_lookup", "fk-lookup", "lookup", "aggregated", "aggregate"):
@@ -696,6 +743,10 @@ class RMLReportCompiler:
             wrap=wrap,
             decimals=decimals,
             date_format=date_format,
+            color=color,
+            bg=bg,
+            weight=weight,
+            frozen=frozen,
             raw_attrs=dict(el.attrib),
         )
 
@@ -773,6 +824,15 @@ class RMLReportCompiler:
                         req_raw = get(el, "required", default="1").lower()
                         req = req_raw not in ("0", "false", "no")
                         def_val = get(el, "default_value", "defaultValue", default="")
+                        src = {str(k).lower(): v for k, v in (el.attrib or {}).items()}
+
+                        def _src(*names):
+                            for _n in names:
+                                _vv = src.get(_n.lower(), "")
+                                if isinstance(_vv, str) and _vv.strip():
+                                    return _vv.strip()
+                            return ""
+
                         result.append(RMLDocParam(
                             id=pid,
                             column=col,
@@ -781,6 +841,10 @@ class RMLReportCompiler:
                             op=op,
                             required=req,
                             default_value=def_val,
+                            src_conn=_src("src_conn", "srcconn", "source_connection", "connection"),
+                            src_table=_src("src_table", "srctable", "source_table", "table"),
+                            src_column=_src("src_column", "srccolumn", "source_column", "column_name"),
+                            searchable=(_src("searchable") or "1").lower() not in ("0", "false", "no", "off"),
                             raw_attrs=dict(el.attrib or {})
                         ))
                 break
@@ -1293,7 +1357,21 @@ class RMLReportCompiler:
                     alias = ch.text.strip()
                 if alias and alias not in members:
                     members.append(alias)
-            result.append(RMLGroup(id=str(gid), name=str(name), order=order, columns=members, level=level))
+            import re as _re_ghex
+
+            def _ghex(_v):
+                try:
+                    _s = str(_v or "").strip()
+                    return _s if _re_ghex.fullmatch(r"#[0-9a-fA-F]{6}", _s or "") else None
+                except Exception:
+                    return None
+
+            _gwt = str(get("weight", "font_weight", "fontWeight", default="") or "").strip().lower()
+            result.append(RMLGroup(id=str(gid), name=str(name), order=order, columns=members, level=level,
+                                   color=_ghex(get("color", "text_color", "textColor")),
+                                   bg=_ghex(get("bg", "bg_color", "bgColor", "background")),
+                                   weight="bold" if _gwt in ("bold", "700", "800", "900", "bolder", "1", "true", "yes") else None,
+                                   frozen=str(get("frozen", "freeze", "sticky", default="") or "").strip().lower() in ("1", "true", "yes", "y")))
         result.sort(key=lambda g: (g.order, g.id))
         self._groups = result
         return result

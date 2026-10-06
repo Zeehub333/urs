@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<cml>
+  <cml_metadata name="permissions" displayName="الصلاحيات" category="النظام" icon="fa-shield-halved" description="صلاحيات النظام — الحقول وقواعد العمل" table="sys_permissions" schema="SYS" connection="ORCL_PROD" scope="system" app="settings"/>
+  <controls>
+    <control id="1" name="permission_code" alias="رمز الصلاحية" inputType="text" dataType="VARCHAR" required="true" category="أساسية" placeholder="مثال: HR.EMP.VIEW">
+      <validation regex="^[A-Z0-9_.]+$" min_length="3" max_length="60"/>
+    </control>
+    <control id="2" name="permission_name" alias="اسم الصلاحية" inputType="text" dataType="VARCHAR" required="true" category="أساسية"/>
+    <control id="3" name="module" alias="الوحدة" inputType="select" dataType="VARCHAR" required="true" category="التصنيف" options="الموارد البشرية,المحاسبة,المخزون,المبيعات,المشتريات,النظام"/>
+    <control id="4" name="action" alias="الإجراء" inputType="select" dataType="VARCHAR" required="true" category="التصنيف" options="عرض,إضافة,تعديل,حذف,اعتماد,تصدير"/>
+    <control id="5" name="role" alias="الدور الممنوح" inputType="select" dataType="VARCHAR" required="true" category="المنح" options="مدير نظام,مدير,مشرف,مستخدم,ضيف"/>
+    <control id="6" name="scope" alias="النطاق" inputType="select" dataType="VARCHAR" category="المنح" options="عام,الشركة,الفرع,شخصي"/>
+    <control id="7" name="is_active" alias="مفعلة" inputType="boolean" dataType="BOOLEAN" category="الحالة" default="true"/>
+    <control id="8" name="notes" alias="ملاحظات" inputType="textarea" dataType="TEXT" category="إضافية"/>
+  </controls>
+  <rules>
+    <rule id="1" name="code_unique" type="unique" target="permission_code" message="رمز الصلاحية يجب أن يكون فريداً"/>
+    <rule id="2" name="code_format" type="regex" target="permission_code" value="^[A-Z0-9_.]+$" message="رمز الصلاحية: أحرف إنجليزية كبيرة وأرقام ونقاط فقط"/>
+    <rule id="3" name="module_required" type="required" target="module" message="يجب اختيار الوحدة"/>
+    <rule id="4" name="action_required" type="required" target="action" message="يجب اختيار الإجراء"/>
+  </rules>
+</cml>

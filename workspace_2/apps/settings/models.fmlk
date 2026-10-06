@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<fml>
+  <fml_metadata name="models" displayName="سجل الموديلات" table="sys_models" category="البيانات" description="سجل الموديلات من جداول الاتصالات المحلية وتعريفها" connection="urs_local" schema="main_hq_2026" model_type="form"/>
+  <tabs>
+    <tab id="main" name="تعريف الجدول" alias="تعريف الجدول" sort_order="1"/>
+  </tabs>
+  <fields>
+    <field id="1" name="connection" alias="الاتصال" inputType="text" dataType="VARCHAR" required="true" nullable="false" editable="false" primary_key="false" tab="main" category="المصدر"/>
+    <field id="2" name="schema_name" alias="السكيما" inputType="text" dataType="VARCHAR" required="true" nullable="false" editable="false" primary_key="false" tab="main" category="المصدر"/>
+    <field id="3" name="table_name" alias="الجدول" inputType="text" dataType="VARCHAR" required="true" nullable="false" editable="true" primary_key="false" tab="main" category="المصدر"/>
+    <field id="4" name="table_ar" alias="اسم الجدول بالعربي" inputType="text" dataType="VARCHAR" required="false" nullable="true" editable="true" primary_key="false" tab="main" category="التعريف"/>
+    <field id="5" name="app" alias="التطبيق" inputType="text" dataType="VARCHAR" required="false" nullable="true" editable="true" primary_key="false" tab="main" category="التعريف"/>
+    <field id="6" name="file" alias="ملف الموديل" inputType="text" dataType="VARCHAR" required="false" nullable="true" editable="true" primary_key="false" tab="main" category="التعريف" placeholder="customers.fmlk"/>
+    <field id="7" name="model_type" alias="نوع الموديل" inputType="select" dataType="VARCHAR" required="false" nullable="true" editable="true" primary_key="false" tab="main" category="التعريف" default="form">
+      <options>
+        <option>form</option>
+        <option>rule</option>
+      </options>
+    </field>
+    <field id="8" name="fields_count" alias="عدد الحقول" inputType="number" dataType="INTEGER" required="false" nullable="true" editable="false" primary_key="false" tab="main" category="التعريف"/>
+    <field id="9" name="definition" alias="تعريف الأعمدة (JSON)" inputType="textarea" dataType="TEXT" required="false" nullable="true" editable="false" primary_key="false" tab="main" category="التعريف"/>
+    <field id="10" name="is_active" alias="نشط" inputType="boolean" dataType="BOOLEAN" required="false" nullable="true" editable="true" primary_key="false" tab="main" category="الحالة" default="true"/>
+  </fields>
+  <custom_actions>
+    <action name="sync" label="مزامنة الجداول" endpoint="/api/apps/settings/models/sync/" icon="fa-rotate" badge_color="#059669" level="form" replace="new"/>
+  </custom_actions>
+</fml>

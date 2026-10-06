@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<fml>
+  <fml_metadata name="users" displayName="المستخدمون" table="users" model_type="form" schema="ies202601" connection="rex_local" category="النظام" icon="fa-users" description="مستخدمو النظام — الحقول وقواعد العمل" details_tab="التفاصيل"/>
+  <tabs>
+    <tab id="المستخدمون" name="المستخدمون" alias="المستخدمون" sort_order="1"/>
+  </tabs>
+  <fields>
+    <field id="1" name="id" alias="id" dataType="INTEGER" inputType="number" required="false" nullable="true" editable="true" primary_key="true" tab="المستخدمون" destination="main" category="المستخدمون"/>
+    <field id="2" name="username" alias="username" dataType="VARCHAR" inputType="text" required="false" nullable="true" editable="true" primary_key="false" tab="المستخدمون" destination="main" category="المستخدمون"/>
+    <field id="3" name="full_name" alias="full_name" dataType="VARCHAR" inputType="text" required="false" nullable="true" editable="true" primary_key="false" tab="المستخدمون" destination="main" category="المستخدمون"/>
+    <field id="4" name="email" alias="email" dataType="VARCHAR" inputType="text" required="false" nullable="true" editable="true" primary_key="false" tab="المستخدمون" destination="main" category="المستخدمون"/>
+    <field id="5" name="password_hash" alias="password_hash" dataType="VARCHAR" inputType="password" required="false" nullable="true" editable="true" primary_key="false" tab="المستخدمون" destination="main" category="المستخدمون"/>
+    <field id="6" name="role" alias="role" dataType="VARCHAR" inputType="text" required="false" nullable="true" editable="true" primary_key="false" tab="المستخدمون" destination="main" category="المستخدمون"/>
+    <field id="7" name="role_id" alias="role_id" dataType="INTEGER" inputType="number" required="false" nullable="true" editable="true" primary_key="false" tab="المستخدمون" destination="main" category="المستخدمون"/>
+    <field id="8" name="created_at" alias="created_at" dataType="TIMESTAMP" inputType="datetime" required="false" nullable="true" editable="true" primary_key="false" tab="المستخدمون" destination="main" category="المستخدمون"/>
+    <field id="9" name="allowed_branches" alias="allowed_branches" dataType="TEXT" inputType="textarea" required="false" nullable="true" editable="true" primary_key="false" tab="المستخدمون" destination="main" category="المستخدمون"/>
+  </fields>
+</fml>

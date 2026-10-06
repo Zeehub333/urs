@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<fml>
+  <fml_metadata name="companies" displayName="الشركات" table="urs_company" category="النظام" description="سجل الشركات — إنشاء الشركة يجهز نطاق السكيما" connection="urs_local" schema="main_hq_2026"/>
+  <tabs>
+    <tab id="main" name="بيانات الشركة" alias="بيانات الشركة" sort_order="1"/>
+  </tabs>
+  <fields>
+    <field id="1" name="code" alias="رمز الشركة" inputType="text" required="true" tab="main" category="أساسية" placeholder="CMP">
+      <validation regex="^[A-Za-z0-9_]+$" min_length="2" max_length="30"/>
+    </field>
+    <field id="2" name="name" alias="اسم الشركة" inputType="text" required="true" tab="main" category="أساسية"/>
+    <field id="3" name="name_en" alias="الاسم بالإنجليزية" inputType="text" tab="main" category="أساسية"/>
+    <field id="4" name="tax_number" alias="الرقم الضريبي" inputType="text" tab="main" category="مالية"/>
+    <field id="5" name="country_id" alias="الدولة" inputType="select" tab="main" category="العنوان" refTable="urs_country" refFk="id" refDisplay="name"/>
+    <field id="6" name="city_id" alias="المدينة" inputType="select" tab="main" category="العنوان" refTable="urs_city" refFk="id" refDisplay="name"/>
+    <field id="7" name="currency_id" alias="العملة" inputType="select" tab="main" category="مالية" refTable="urs_currency" refFk="id" refDisplay="code"/>
+    <field id="8" name="fiscal_year" alias="السنة المالية" inputType="number" required="true" tab="main" category="مالية"/>
+    <field id="9" name="is_active" alias="نشطة" inputType="boolean" tab="main" category="الحالة"/>
+  </fields>
+</fml>

@@ -73,30 +73,30 @@
     <field id="57" name="created_at" type="TIMESTAMP" conn_id="6" table_source="confirmed_transfers_copy"/>
   </fields>
   <columns>
-    <column id="1" name="col_الرقم العام" alias="الرقم العام" expr="=get(vewOutgoingTransfersDeliveringReport.الرقم العام)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="1" name="col_الرقم العام" alias="الرقم العام" expr="=get(vewOutgoingTransfersDeliveringReport.الرقم العام)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag" bg="#ffdd00" weight="bold"/>
     <column id="2" name="col_رقم الحوالة" alias="رقم الحوالة" expr="=get(vewOutgoingTransfersDeliveringReport.رقم الحوالة)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
-    <column id="3" name="col_المصدر" alias="المصدر" expr="=get(vewOutgoingTransfersDeliveringReport.المصدر)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
-    <column id="4" name="col_المنطقة" alias="المنطقة" expr="=get(vewOutgoingTransfersDeliveringReport.المنطقة)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="3" name="col_المصدر" alias="المصدر" expr="=get(vewOutgoingTransfersDeliveringReport.المصدر)" dataType="VARCHAR" join_type="one_to_one" visible="0" icon="fa-hashtag"/>
+    <column id="4" name="col_المنطقة" alias="المنطقة" expr="=get(vewOutgoingTransfersDeliveringReport.المنطقة)" dataType="VARCHAR" join_type="one_to_one" visible="0" icon="fa-hashtag"/>
     <column id="5" name="col_الجهة" alias="الجهة" expr="=get(vewOutgoingTransfersDeliveringReport.الجهة)" dataType="VARCHAR" join_type="one_to_one" visible="0" icon="fa-hashtag"/>
     <column id="6" name="col_مبلغ الحوالة" alias="مبلغ الحوالة" expr="=get(vewOutgoingTransfersDeliveringReport.مبلغ الحوالة)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
     <column id="7" name="col_عملة الحوالة" alias="عملة الحوالة" expr="=get(vewOutgoingTransfersDeliveringReport.عملة الحوالة)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="13" name="col_تاريخ الحوالة" alias="تاريخ الحوالة" expr="=get(vewOutgoingTransfersDeliveringReport.تاريخ الحوالة)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
     <column id="8" name="col_المستلم" alias="المستلم" expr="=get(vewOutgoingTransfersDeliveringReport.المستلم)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
     <column id="9" name="col_هاتف المستلم" alias="هاتف المستلم" expr="=get(vewOutgoingTransfersDeliveringReport.هاتف المستلم)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
     <column id="10" name="col_المرسل" alias="المرسل" expr="=get(vewOutgoingTransfersDeliveringReport.المرسل)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
     <column id="11" name="col_هاتف المرسل" alias="هاتف المرسل" expr="=get(vewOutgoingTransfersDeliveringReport.هاتف المرسل)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
-    <column id="12" name="col_عمولة الوكيل" alias="عمولة الوكيل" expr="=get(vewOutgoingTransfersDeliveringReport.عمولة الوكيل)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
-    <column id="13" name="col_تاريخ الحوالة" alias="تاريخ الحوالة" expr="=get(vewOutgoingTransfersDeliveringReport.تاريخ الحوالة)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
-    <column id="14" name="col_وقت الإدخال" alias="وقت الإدخال" expr="=get(vewOutgoingTransfersDeliveringReport.وقت الإدخال)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
-    <column id="15" name="col_الفرع" alias="الفرع" expr="=get(vewOutgoingTransfersDeliveringReport.الفرع)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
-    <column id="16" name="col_الوكيل" alias="الوكيل" expr="=get(vewOutgoingTransfersDeliveringReport.الوكيل)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
-    <column id="17" name="col_ملاحظات" alias="ملاحظات" expr="=get(vewOutgoingTransfersDeliveringReport.ملاحظات)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
-    <column id="18" name="col_ReferenceExpress" alias="الرقم المرجعي" expr="=get(6.confirmed_transfers_copy.express_number)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="12" name="col_عمولة الوكيل" alias="عمولة الوكيل" expr="=get(vewOutgoingTransfersDeliveringReport.عمولة الوكيل)" dataType="VARCHAR" join_type="one_to_one" visible="0" icon="fa-hashtag"/>
+    <column id="14" name="col_وقت الإدخال" alias="وقت الإدخال" expr="=get(vewOutgoingTransfersDeliveringReport.وقت الإدخال)" dataType="VARCHAR" join_type="one_to_one" visible="0" icon="fa-hashtag"/>
+    <column id="15" name="col_الفرع" alias="الفرع" expr="=get(vewOutgoingTransfersDeliveringReport.الفرع)" dataType="VARCHAR" join_type="one_to_one" visible="0" icon="fa-hashtag"/>
+    <column id="16" name="col_الوكيل" alias="الوكيل" expr="=get(vewOutgoingTransfersDeliveringReport.الوكيل)" dataType="VARCHAR" join_type="one_to_one" visible="0" icon="fa-hashtag"/>
+    <column id="17" name="col_ملاحظات" alias="ملاحظات" expr="=get(vewOutgoingTransfersDeliveringReport.ملاحظات)" dataType="VARCHAR" join_type="one_to_one" visible="0" icon="fa-hashtag"/>
+    <column id="18" name="col_ReferenceExpress" alias="الرقم المرجعي" expr="=get(6.confirmed_transfers_copy.express_number)" dataType="VARCHAR" join_type="one_to_one" visible="0" icon="fa-hashtag"/>
     <column id="19" name="col_OutgoingTargetNetwork" alias="جهة الصرف" expr="=get(3.confirmed_transfers_copy.disbursement_destination)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
     <column id="20" name="col_EnterTimeNetwork" alias="وقت الصرف" expr="=get(3.confirmed_transfers_copy.disbursement_time)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
     <column id="21" name="col_DebitingMethod" alias="حساب الصرف" expr="=get(vewOutgoingTransfersDeliveringReport.DebitingMethod)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
-    <column id="22" name="col_معتمدة" alias="معتمدة" expr="=get(vewOutgoingTransfersDeliveringReport.معتمدة)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
-    <column id="23" name="col_الحالة" alias="الحالة" expr="=get(vewOutgoingTransfersDeliveringReport.الحالة)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag" is_status="1"/>
-    <column id="24" name="col_النوع" alias="النوع" expr="=get(vewOutgoingTransfersDeliveringReport.النوع)" dataType="VARCHAR" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="22" name="col_معتمدة" alias="معتمدة" expr="=get(vewOutgoingTransfersDeliveringReport.معتمدة)" dataType="VARCHAR" join_type="one_to_one" visible="0" icon="fa-hashtag"/>
+    <column id="23" name="col_الحالة" alias="الحالة" expr="=get(vewOutgoingTransfersDeliveringReport.الحالة)" dataType="VARCHAR" join_type="one_to_one" visible="0" icon="fa-hashtag" is_status="1"/>
+    <column id="24" name="col_النوع" alias="النوع" expr="=get(vewOutgoingTransfersDeliveringReport.النوع)" dataType="VARCHAR" join_type="one_to_one" visible="0" icon="fa-hashtag"/>
   </columns>
   <links>
     <link id="1" from_table="vewOutgoingTransfersDeliveringReport" from_col="ملاحظات" to_table="confirmed_transfers_copy" to_col="express_number" rel_type="one_to_one" match="regex" pattern="(\d+)(?!.*\d)"/>
@@ -105,6 +105,26 @@
     <table name="vewOutgoingTransfersDeliveringReport" conn="2" is_default="1"/>
     <table name="confirmed_transfers_copy" conn="6"/>
   </table_opts>
+  <groups>
+    <group id="1" name="بيانات الحوالة" order="1" bg="#006af5">
+      <column alias="الرقم العام"/>
+      <column alias="رقم الحوالة"/>
+      <column alias="مبلغ الحوالة"/>
+      <column alias="عملة الحوالة"/>
+      <column alias="تاريخ الحوالة"/>
+    </group>
+    <group id="2" name="اطراف الحوالة" order="2">
+      <column alias="هاتف المستلم"/>
+      <column alias="المستلم"/>
+      <column alias="المرسل"/>
+      <column alias="هاتف المرسل"/>
+    </group>
+    <group id="3" name="بيانات صرف الحوالة" order="3">
+      <column alias="حساب الصرف"/>
+      <column alias="وقت الصرف"/>
+      <column alias="جهة الصرف"/>
+    </group>
+  </groups>
   <doc_params>
     <doc_param column="تاريخ الحوالة" id="dp_1791268066129_80" label="تاريخ الحوالة" type="date" op="between" required="1"/>
   </doc_params>

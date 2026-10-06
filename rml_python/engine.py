@@ -7469,6 +7469,68 @@ class RMLReportEngine:
             preview += f"\n-- Binds: {params}"
         return preview
 
+    def _doc_required_missing(self, filters):
+        """True when a doc-type report still lacks a required filter value.
+
+        The player sends `field` after resolveDbField (may be the column expr,
+        not the alias the doc_param was linked by) — matching is done against
+        every key of the linked report column (alias/name/expr).
+        """
+        try:
+            _is_doc = str((self.metadata or {}).get("report_type") or (self.metadata or {}).get("type") or "").strip().lower() == "doc"
+        except Exception:
+            _is_doc = False
+        if not _is_doc:
+            return False
+
+        def _filter_has_val(f):
+            if not isinstance(f, dict):
+                return False
+            v = f.get("value")
+            if v is not None and str(v).strip() != "":
+                return True
+            vf, vt = f.get("valFrom"), f.get("valTo")
+            if (vf is not None and str(vf).strip() != "") or (vt is not None and str(vt).strip() != ""):
+                return True
+            vals = f.get("values")
+            if isinstance(vals, (list, tuple)) and any(x is not None and str(x).strip() != "" for x in vals):
+                return True
+            return False
+
+        def _col_keys(c):
+            out = set()
+            try:
+                for _attr in ("alias", "name", "expr"):
+                    _vv = getattr(c, _attr, None)
+                    if _vv is None and isinstance(c, dict):
+                        _vv = c.get(_attr)
+                    if _vv is not None and str(_vv).strip() != "":
+                        out.add(str(_vv).strip().lower())
+            except Exception:
+                pass
+            return out
+
+        try:
+            doc_params = getattr(self.compiler, "doc_params", lambda: [])() if hasattr(self, "compiler") else []
+        except Exception:
+            doc_params = []
+        req_params = [p for p in (doc_params or []) if getattr(p, "required", True)]
+        active_val_filters = [f for f in (filters or []) if _filter_has_val(f)]
+        rep_cols = list(self.columns or [])
+        if req_params:
+            for rp in req_params:
+                rp_col = str(getattr(rp, "column", None) or (rp.get("column") if isinstance(rp, dict) else "") or "").strip().lower()
+                cands = {rp_col} if rp_col else set()
+                if rp_col:
+                    for _c in rep_cols:
+                        _keys = _col_keys(_c)
+                        if rp_col in _keys:
+                            cands |= _keys
+                if not any(str(f.get("field", "")).strip().lower() in cands for f in active_val_filters):
+                    return True
+            return False
+        return not active_val_filters
+
     def execute(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """
         Compile and execute query, return paginated result.
@@ -7508,36 +7570,7 @@ class RMLReportEngine:
         # Document Report Guard: لا يجلب التقرير شيئاً إلا بعد إدخال/اختيار عوامل تصفية مخصصة
         _is_doc = str((self.metadata or {}).get("report_type") or (self.metadata or {}).get("type") or "").strip().lower() == "doc"
         if _is_doc:
-            doc_params = getattr(self.compiler, "doc_params", lambda: [])() if hasattr(self, "compiler") else []
-            req_params = [p for p in doc_params if getattr(p, "required", True)]
-
-            def _filter_has_val(f):
-                if not isinstance(f, dict):
-                    return False
-                v = f.get("value")
-                if v is not None and str(v).strip() != "":
-                    return True
-                vf, vt = f.get("valFrom"), f.get("valTo")
-                if (vf is not None and str(vf).strip() != "") or (vt is not None and str(vt).strip() != ""):
-                    return True
-                vals = f.get("values")
-                if isinstance(vals, (list, tuple)) and any(x is not None and str(x).strip() != "" for x in vals):
-                    return True
-                return False
-
-            active_val_filters = [f for f in filters if _filter_has_val(f)]
-            missing_required = False
-            if req_params:
-                for rp in req_params:
-                    rp_col = str(getattr(rp, "column", None) or (rp.get("column") if isinstance(rp, dict) else "") or "").strip().lower()
-                    matched = any(str(f.get("field", "")).strip().lower() == rp_col for f in active_val_filters)
-                    if not matched:
-                        missing_required = True
-                        break
-            else:
-                if not active_val_filters:
-                    missing_required = True
-
+            missing_required = self._doc_required_missing(filters)
             if missing_required:
                 return {
                     "rows": [],
@@ -7545,9 +7578,9 @@ class RMLReportEngine:
                     "page": 1,
                     "pageSize": page_size,
                     "columns": [c.to_dict() if hasattr(c, "to_dict") else c for c in (self.columns or [])],
-                    "sql": "-- تقرير مستندي: بانتظار إدخال عوامل التصفية المطلوبة",
+                    "sql": "-- لا بيانات بعد",
                     "required_inputs_missing": True,
-                    "message": "تقرير مستندي: يرجى تحديد عوامل التصفية المطلوبة لجلب البيانات",
+                    "message": "لا بيانات بعد",
                     "metadata": self.metadata or {},
                 }
 
@@ -7639,6 +7672,12 @@ class RMLReportEngine:
             # The stream computes the post-filter total itself; the base
             # COUNT(*) would double the heavy I/O for nothing.
             _skip_total = True
+        try:
+            # الجلب الكامل (all: تجميع/تصدير) يحتاج الإجمالي — العدّ إجباري هنا
+            if str(page_size).strip().lower() == "all":
+                _skip_total = False
+        except Exception:
+            pass
         try:
             # Ensure connection (on the routed base DB)
             if not getattr(base_db, "conn", None):
@@ -7763,7 +7802,10 @@ class RMLReportEngine:
         else:
             try:
                 page_size_val = int(page_size)
-                total_pages = (total + page_size_val - 1) // page_size_val if page_size_val else 1
+                if total is not None and int(total) < 0:
+                    total_pages = -1  # بلا عدّ — الإجمالي مجهول، النهاية بصفحة ناقصة
+                else:
+                    total_pages = (total + page_size_val - 1) // page_size_val if page_size_val else 1
             except:
                 page_size_val = 50
                 total_pages = 1
@@ -8733,14 +8775,22 @@ class RMLReportEngine:
                                "text": "دمج النتائج…"})
         merged = self._merge_lazy(primary_rows, sec_indexes, sec_specs, sort)
 
+        try:
+            _dskip = bool(payload.get("skipTotal") or payload.get("skip_total"))
+        except Exception:
+            _dskip = False
         if isinstance(merged, list):
             result_rows = [{k: _fmt_cell(v) for k, v in _r.items()} for _r in merged]
-            total = max(total_primary, len(merged))
+            total = -1 if _dskip else max(total_primary, len(merged))
         else:
             result_rows = []
-            total = 0
+            total = -1 if _dskip else 0
 
-        total_pages = (total + page_size - 1) // page_size if page_size else 1
+        try:
+            total_pages = -1 if (total is not None and int(total) < 0) \
+                else ((total + page_size - 1) // page_size if page_size else 1)
+        except Exception:
+            total_pages = 1
         try:
             _groups_list = [g.to_dict() for g in (self.compiler.groups() if hasattr(self.compiler, "groups") else [])]
         except Exception:
@@ -8987,9 +9037,28 @@ class RMLReportEngine:
                     _fcur.close()
                 except Exception:
                     pass
+            # Regex links: pre-index secondary rows by their extract ONCE
+            # (extract→first row, table order). Merge then does one extract +
+            # dict lookup per primary row instead of a full scan per row —
+            # identical "first hit wins" result, ~1000x faster on big tables.
+            _byx = None
+            if _im == "regex" and str(spec.get("pattern") or ""):
+                try:
+                    from .xsql import regex_extract as _rxb
+                    _pat = str(spec.get("pattern") or "")
+                    _byx = {}
+                    for _sr in _srows:
+                        try:
+                            _e = _rxb(_sr.get(scol), _pat)
+                        except Exception:
+                            _e = None
+                        if _e is not None and _e not in _byx:
+                            _byx[_e] = _sr
+                except Exception:
+                    _byx = None
             return {"__fuzzy__": True, "rows": _srows, "match": _im,
                     "pattern": str(spec.get("pattern") or ""),
-                    "bcol": bcol, "scol": scol}
+                    "bcol": bcol, "scol": scol, "by_extract": _byx}
         # Collect distinct base key values from primary_rows.
         keys = []
         seen = set()
@@ -9054,7 +9123,15 @@ class RMLReportEngine:
                         from .xsql import fuzzy_link_match as _flm
                         _bv = r.get(idx.get("bcol") or bcol)
                         _hit = None
-                        if _bv is not None:
+                        _bx = idx.get("by_extract")
+                        if _bx is not None and _bv is not None:
+                            try:
+                                from .xsql import regex_extract as _rxm
+                                _eb = _rxm(_bv, idx.get("pattern") or "")
+                                _hit = _bx.get(_eb) if _eb is not None else None
+                            except Exception:
+                                _hit = None
+                        elif _bv is not None:
                             for _sr in (idx.get("rows") or []):
                                 try:
                                     if _flm(idx.get("match"), idx.get("pattern"),

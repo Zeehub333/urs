@@ -1,0 +1,376 @@
+    <!-- مصمم التقارير — شريط أوامر + شبكة عمل -->
+    <div id="addRmlModal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-2 sm:p-3 overflow-hidden">
+        <div class="wb-shell bg-white rounded-2xl shadow-2xl w-full max-w-[98vw] h-[96vh] max-h-[96vh] overflow-hidden flex flex-col flex-1 min-h-0">
+            <div class="hidden">
+                <span id="rmlWizardTitle">تقرير جديد</span><span id="wbDirty">●</span>
+                <button onclick="rmlWizardPrev()" id="rmlPrevBtn">السابق</button>
+                <button onclick="closeAddRmlModal()">إغلاق</button>
+                <button onclick="rmlWizardNext()" id="rmlNextBtn">التالي</button>
+                <button onclick="submitAddRml()" id="rmlCreateBtn">حفظ</button>
+            </div>
+            <!-- شريط الأخطاء العام -->
+            <div id="wbInfoStrip" class="hidden"></div>
+            <!-- بيئة عمل المصمم: flex ثلاثي (سايدبار 10vw + لوحة التقرير 80vw + خصائص العمود المنزلقة بأنميشن) -->
+            <div id="wbSheets" class="flex-1 min-h-0 flex flex-row overflow-hidden text-xs relative rpt-flex h-full">
+                <!-- سايدبار: أقسام المصمم + واجهة شجرة العناصر (الأعمدة، التفاصيل، المجموعات) -->
+                <aside id="rdSidebar" class="rd-sidebar shrink-0 bg-slate-50/95 border-l border-slate-200 flex flex-col overflow-hidden h-full">
+                    <div class="p-2 border-b border-slate-200 shrink-0">
+                        <button type="button" onclick="rdToggleReportProps()" class="w-full flex items-center justify-between px-2.5 py-1.5 mb-2 rounded-xl border border-emerald-200 bg-emerald-50/80 hover:bg-emerald-100 text-emerald-900 font-bold text-xs transition shadow-2xs">
+                            <span class="flex items-center gap-1.5"><i class="fa-solid fa-sliders text-emerald-600"></i> خصائص التقرير</span>
+                            <i class="fa-solid fa-chevron-left text-[10px] text-emerald-500"></i>
+                        </button>
+                        <div class="text-[10px] font-extrabold text-slate-400 px-2 py-0.5 mb-1 tracking-wider uppercase">أقسام المصمم</div>
+                        <div id="wbSheetTabs" class="flex flex-col gap-1"></div>
+                    </div>
+                    <div class="flex-1 min-h-0 flex flex-col p-2 overflow-hidden">
+                        <div class="flex items-center justify-between px-2 py-1 mb-1 text-[10px] font-extrabold text-slate-500 uppercase tracking-wider shrink-0">
+                            <span>واجهة العناصر</span>
+                            <i class="fa-solid fa-sitemap text-slate-400 text-[10px]"></i>
+                        </div>
+                        <div id="rdElementsTree" class="flex-1 min-h-0 overflow-y-auto custom-scroll space-y-1.5"></div>
+                    </div>
+                    <div id="rptSideCols" class="hidden"></div>
+                    <div id="rptSideDet" class="hidden"></div>
+                </aside>
+                <!-- لوحة التقرير 80vw -->
+                <main id="rdMainPalette" class="rd-palette flex-1 min-w-0 flex flex-col overflow-hidden relative bg-white h-full">
+                    <div id="wbSheetBody" class="flex-1 min-h-0 flex flex-col h-full overflow-hidden"></div>
+                    <div id="wbSheetFoot" class="shrink-0 border-t border-slate-200 bg-slate-50/70 px-3 py-1.5 flex items-center gap-2 hidden"></div>
+                </main>
+                <!-- لوحة خصائص العمود المتحركة بأنميشن -->
+                                <!-- لوحة خصائص التقرير والعناصر المتحركة بأنميشن والمزيحة للوحة -->
+                <aside id="rdPropsDrawer" class="rd-props-drawer open">
+                    <!-- 1. شاشة خصائص التقرير المدمجة (بيانات التقرير الأساسية + الاتصالات) -->
+                    <div id="rdReportPropsPanel" class="flex-1 min-h-0 flex flex-col overflow-hidden h-full">
+                        <div class="p-3 border-b border-slate-200 bg-slate-50/90 flex items-center justify-between shrink-0">
+                            <div class="flex items-center gap-2 min-w-0">
+                                <span class="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center text-xs shrink-0"><i class="fa-solid fa-sliders"></i></span>
+                                <div class="min-w-0">
+                                    <h4 class="font-bold text-slate-800 text-xs truncate">خصائص التقرير</h4>
+                                    <p class="text-[10px] text-slate-400">البيانات الأساسية ومصادر الاتصال</p>
+                                </div>
+                            </div>
+                            <button type="button" onclick="rdClosePropsDrawer()" class="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-200 transition" title="إغلاق اللوحة">
+                                <i class="fa-solid fa-xmark text-sm"></i>
+                            </button>
+                        </div>
+                        <div class="flex border-b border-slate-200 bg-slate-50/50 shrink-0 text-xs">
+                            <button type="button" onclick="rdSetReportTab('meta')" id="rdRepTabMeta" class="flex-1 py-2 text-center font-bold border-b-2 border-emerald-600 text-emerald-700 transition">بيانات التقرير</button>
+                            <button type="button" onclick="rdSetReportTab('conns')" id="rdRepTabConns" class="flex-1 py-2 text-center font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-700 transition">الاتصالات (<span id="rdConnsCountBadge">0</span>)</button>
+                        </div>
+                        <div class="flex-1 min-h-0 overflow-y-auto custom-scroll p-3 space-y-3">
+                            <div id="rdRepPaneMeta" class="space-y-2.5">
+                                <div id="rmlWizardStep1" class="space-y-2.5">
+                                    <div><label class="block text-[10px] font-bold text-slate-500 mb-1">الاسم العربي *</label><input id="rmlDisplayName" placeholder="تقرير جديد" class="wb-inp w-full"></div>
+                                    <div><label class="block text-[10px] font-bold text-slate-500 mb-1">الاسم الإنجليزي *</label><input id="rmlProgName" placeholder="my_report" class="wb-inp w-full font-mono" dir="ltr" oninput="syncRmlFileName()" onchange="syncRmlFileName()"></div>
+                                    <div><label class="block text-[10px] font-bold text-slate-500 mb-1">اسم الملف *</label><input id="rmlFileName" placeholder="my_report.rml" class="wb-inp w-full font-mono" dir="ltr" oninput="syncRmlProgName()" onchange="syncRmlProgName()"></div>
+                                    <div class="grid grid-cols-2 gap-2">
+                                        <div><label class="block text-[10px] font-bold text-slate-500 mb-1">الأيقونة</label><select id="rmlIcon" class="wb-inp w-full"><option value="fa-chart-bar">أعمدة</option><option value="fa-chart-line">خط بياني</option><option value="fa-chart-pie">دائري</option><option value="fa-table">جدول</option><option value="fa-file-lines">مستند</option></select></div>
+                                        <div><label class="block text-[10px] font-bold text-slate-500 mb-1">الفئة</label><input id="rmlCategory" list="rmlCategoryList" placeholder="اكتب جديدة أو اختر" class="wb-inp w-full" autocomplete="off"><datalist id="rmlCategoryList"></datalist></div>
+                                    </div>
+                                    <div class="grid grid-cols-2 gap-2">
+                                        <div><label class="block text-[10px] font-bold text-slate-500 mb-1">النوع</label><select id="rmlReportType" onchange="toggleWizardDetailBox();wbSyncSheets()" class="wb-inp w-full"><option value="master">إجمالي (Master)</option><option value="detail">تحليلي (Detail)</option><option value="doc">مستندي (Doc)</option></select></div>
+                                        <div><label class="block text-[10px] font-bold text-slate-500 mb-1">النطاق</label><input id="rmlNamespace" placeholder="hr" class="wb-inp w-full font-mono" dir="ltr"></div>
+                                    </div>
+                                    <div><label class="block text-[10px] font-bold text-slate-500 mb-1">الوصف</label><input id="rmlDescription" placeholder="وصف مختصر" class="wb-inp w-full"></div>
+                                </div>
+                            </div>
+                            <div id="rdRepPaneConns" class="space-y-2 hidden">
+                                <div class="flex items-center justify-between mb-1 pb-1 border-b border-slate-100">
+                                    <span class="text-[11px] font-bold text-slate-600">قواعد البيانات المرتبطة:</span>
+                                    <button type="button" onclick="loadConnectionsForWizard()" class="text-[10px] text-emerald-600 hover:text-emerald-700 font-bold flex items-center gap-1"><i class="fa-solid fa-rotate"></i> تحديث</button>
+                                </div>
+                                <div id="rdConnectionsHost" class="space-y-1.5"></div>
+                            </div>
+                        </div>
+                        <div id="rmlError" class="hidden text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-3 py-1.5 text-xs m-3 mt-0"></div>
+                    </div>
+                    <!-- 2. لوحة خصائص العنصر المحدد (الأعمدة / المجموعات / التفاصيل) -->
+                    <div id="rdElementPropsPanel" class="flex-1 min-h-0 flex flex-col overflow-hidden h-full hidden"></div>
+                </aside>
+            </div>
+            <!-- مستودعات البيانات المخفية (تُملأ بواسطة منطق المعالج الحالي وتُرسم في الشبكة) -->
+            <div id="rmlWizardStep2" class="hidden">
+                <div id="wizardConnectionsList"></div>
+                <div id="wizardConnectionsSelected" class="hidden"></div>
+            </div>
+            <div id="rmlWizardStep3" class="hidden">
+                <div id="wizardFieldsList"></div>
+                <div id="wizardRulesList"></div>
+            </div>
+            <div id="rmlWizardStep4" class="hidden">
+                <div id="colSubNav" class="hidden">
+                    <button onclick="setColSubTab('main')" id="colSubTabMain">main</button>
+                    <button onclick="setColSubTab('sub')" id="colSubTabSub">sub</button>
+                </div>
+                <div id="wizardMainColsBox"><div id="wizardColumnsList"></div></div>
+                <div id="wizardGroupsBox"><div id="wizardGroupsList"></div></div>
+                <div id="wizardDetailBox" class="hidden">
+                    <input id="wizardDetailTable" oninput="wizardDetail.table=this.value">
+                    <select id="wizardDetailMaster" onchange="wizardDetail.master=this.value"></select>
+                    <input id="wizardDetailKey" oninput="wizardDetail.detail=this.value">
+                    <select id="wizardDetailRel" onchange="wizardDetail.rel_type=this.value"><option value="one_to_many">o2m</option><option value="one_to_one">o2o</option></select>
+                    <div id="wizardDetailColsList"></div>
+                </div>
+            </div>
+            <div id="rmlWizardStep5" class="hidden">
+                <div id="wizardChartsList"></div>
+                <div id="wizardChartsPreview" class="hidden"></div>
+            </div>
+            <div id="rmlWizardStep6" class="hidden">
+                <div id="wizardLinkedDocsList"></div>
+            </div>
+            <!-- معاينة المستند -->
+            <div id="dmlPreviewModal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[80] overflow-y-auto p-4" onclick="if(event.target===this) closeDmlPreviewModal()">
+                <div class="bg-white rounded-2xl shadow-2xl w-full max-w-4xl m-auto overflow-hidden flex flex-col max-h-[90vh]">
+                    <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-slate-50 gap-2 shrink-0">
+                        <h3 id="dmlPreviewTitle" class="text-sm font-bold text-slate-800 flex items-center gap-2"><i class="fa-solid fa-eye text-violet-600"></i> معاينة المستند</h3>
+                        <div class="flex items-center gap-2">
+                            <button onclick="printDmlPreview()" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs"><i class="fa-solid fa-print"></i> طباعة</button>
+                            <button onclick="closeDmlPreviewModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+                        </div>
+                    </div>
+                    <div class="flex-1 min-h-0 p-3 bg-slate-200">
+                        <iframe id="dmlPreviewFrame2" class="w-full h-[65vh] bg-white border border-slate-200 rounded-xl" title="معاينة المستند"></iframe>
+                    </div>
+                </div>
+            </div>
+            <!-- استعلام تجريبي عن الجدول (Top N) -->
+            <div id="tblPreviewModal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[300] overflow-y-auto p-4" onclick="if(event.target===this) closeTblPreviewModal()">
+                <div class="bg-white rounded-2xl shadow-2xl w-full max-w-6xl m-auto overflow-hidden flex flex-col max-h-[92vh]">
+                    <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-sky-50 gap-2 shrink-0">
+                        <h3 id="tblPreviewTitle" class="text-sm font-bold text-slate-800 flex items-center gap-2"><i class="fa-solid fa-table-cells text-sky-600"></i> استعلام تجريبي</h3>
+                        <div class="flex items-center gap-2">
+                            <input id="tblPreviewSearch" onkeydown="if(event.key==='Enter')tblPreviewSearchGo()" placeholder="بحث عام في كل الأعمدة... (Enter)" class="bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs w-48 focus:outline-none focus:ring-2 focus:ring-sky-500">
+                            <button onclick="tblPreviewClear()" title="مسح البحث والفلاتر" class="px-2.5 py-1.5 bg-white hover:bg-slate-100 text-slate-500 border border-slate-200 rounded-xl text-xs"><i class="fa-solid fa-xmark"></i></button>
+                            <select id="tblPreviewLimit" onchange="tblPreviewReload()" title="عدد الصفوف" class="bg-white border border-slate-200 rounded-xl px-2 py-1.5 text-xs font-mono" dir="ltr"><option>25</option><option selected>50</option><option>100</option><option>200</option></select>
+                            <button onclick="tblPreviewReload()" title="تحديث" class="px-3 py-1.5 bg-white hover:bg-sky-100 text-sky-700 border border-sky-200 rounded-xl text-xs"><i class="fa-solid fa-rotate"></i></button>
+                            <button onclick="closeTblPreviewModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+                        </div>
+                    </div>
+                    <div id="tblPreviewBody" class="flex-1 min-h-0 overflow-auto custom-scroll p-3 bg-slate-100"></div>
+                </div>
+            </div>
+            <span id="wbCompatStepNum" class="hidden">1</span>
+            <!-- شريط الحالة السفلي -->
+            <div id="wbStatus" class="border-t border-slate-200 px-3 py-1 flex items-center gap-3 text-[10px] text-slate-500 bg-slate-50/70 shrink-0">
+                <span id="wbStatFields">حقول: 0</span><span class="text-slate-300">|</span>
+                <span id="wbStatCols">أعمدة: 0</span><span class="text-slate-300">|</span>
+                <span id="wbStatGroups">مجموعات: 0</span><span class="text-slate-300">|</span>
+                <span id="wbStatConns">اتصالات: 0</span><span class="text-slate-300">|</span>
+                <span id="wbStatCharts">مخططات: 0</span><span class="mr-auto"></span>
+                <span id="wbStatType" class="font-bold text-indigo-600">إجمالي</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Field create/edit Modal -->
+    <div id="fieldModal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+            <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+                <h3 id="fieldModalTitle" class="text-sm font-bold text-slate-800 flex items-center gap-2"><i class="fa-solid fa-tag text-indigo-600"></i> إضافة حقل</h3>
+                <button onclick="closeFieldModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="p-6 space-y-3 text-xs">
+                <div><label class="block font-semibold text-slate-700 mb-1">الاتصال (من تبويب الاتصالات السابق)</label><select id="fldConn" onchange="loadFieldModalTables()" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"></select></div>
+                <div><label class="block font-semibold text-slate-700 mb-1">الجدول (المصدر) — اختيار</label><input id="fldTableSearch" oninput="filterFldTables(this.value)" placeholder="ابحث عن جدول..." class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs mb-1"><select id="fldTable" onchange="loadFieldModalColumns()" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono" dir="ltr"><option value="">— اختر الاتصال أولاً —</option></select></div>
+                <div><label class="block font-semibold text-slate-700 mb-1">الحقول من ذلك الجدول — اضغط للاختيار (إنشاء/تحرير)</label><div id="fldColsList" class="max-h-40 overflow-y-auto custom-scroll bg-slate-50 border border-slate-200 rounded-xl p-2 space-y-1 text-xs"><p class="text-slate-400 p-1">اختر الاتصال والجدول أولاً</p></div></div>
+                <div><label class="block font-semibold text-slate-700 mb-1">اسم الحقل (يجب أن يطابق عمود قاعدة البيانات) *</label><input id="fldName" placeholder="employee_id" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono" dir="ltr"></div>
+                <div><label class="block font-semibold text-slate-700 mb-1">النوع</label><select id="fldType" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"><option value="">—</option><option value="INTEGER">رقم صحيح</option><option value="NUMERIC">رقم عشري</option><option value="VARCHAR">نص قصير</option><option value="TEXT">نص طويل</option><option value="DATE">تاريخ</option><option value="TIME">وقت</option><option value="TIMESTAMP">تاريخ ووقت</option><option value="BOOLEAN">نعم / لا</option><option value="IMAGE">صورة</option><option value="MEDIA">وسائط</option></select></div>
+                <div id="fldError" class="hidden text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2"></div>
+            </div>
+            <div class="px-6 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2">
+                <button onclick="closeFieldModal()" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs">إلغاء</button>
+                <button onclick="submitFieldModal()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold">حفظ الحقل</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Import fields from table Modal -->
+    <div id="importFieldsModal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[70] flex items-center justify-center p-4" onclick="if(event.target===this) closeImportFieldsModal()">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
+            <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-emerald-50 gap-2 shrink-0">
+                <h3 class="text-sm font-bold text-slate-800 flex items-center gap-2"><i class="fa-solid fa-download text-emerald-600"></i> استيراد الحقول من جدول</h3>
+                <button onclick="closeImportFieldsModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="flex-1 min-h-0 overflow-y-auto p-5 space-y-3 text-xs">
+                <div class="grid grid-cols-2 gap-2">
+                    <div><label class="block text-[11px] font-semibold text-slate-600">الاتصال</label><select id="importConnSel" onchange="loadImportTables()" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs"></select></div>
+                    <div><label class="block text-[11px] font-semibold text-slate-600">الجدول</label><input id="importTableSearch" oninput="filterImportTables(this.value)" placeholder="ابحث..." class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs mb-1"><select id="importTableSel" onchange="loadImportColumns()" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs"><option value="">— اختر الاتصال أولاً —</option></select></div>
+                </div>
+                <div id="importColsList" class="max-h-64 overflow-y-auto custom-scroll bg-white border border-slate-200 rounded-lg p-2 space-y-1"></div>
+                <div class="flex items-center gap-2">
+                    <button onclick="importToggleAll(true)" class="text-[11px] text-indigo-600 hover:text-indigo-800">تحديد الكل</button>
+                    <button onclick="importToggleAll(false)" class="text-[11px] text-slate-500 hover:text-slate-700">إلغاء التحديد</button>
+                    <button onclick="previewImportTable()" title="استعلام تجريبي عن الجدول المحدد (أول 50)" class="text-[11px] text-sky-600 hover:text-sky-800 font-bold"><i class="fa-solid fa-table-cells"></i> استعلام تجريبي</button>
+                    <span class="mr-auto"></span>
+                    <button onclick="importSelectedFields()" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold">إضافة المحدد</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- UNION Modal: same table from another connection -->
+    <div id="unionModal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[72] flex items-center justify-center p-4" onclick="if(event.target===this) closeUnionModal()">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
+            <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-violet-50 gap-2 shrink-0">
+                <h3 class="text-sm font-bold text-slate-800 flex items-center gap-2"><i class="fa-solid fa-code-merge text-violet-600"></i> UNION — نفس الجدول من اتصال آخر</h3>
+                <button onclick="closeUnionModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="flex-1 min-h-0 overflow-y-auto p-5 space-y-3 text-xs">
+                <p id="unionSrcLabel" class="text-[11px] text-slate-600 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"></p>
+                <div class="grid grid-cols-2 gap-2">
+                    <div><label class="block text-[11px] font-semibold text-slate-600">الاتصال الآخر</label><select id="unionConnSel" onchange="loadUnionTables()" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs"></select></div>
+                    <div><label class="block text-[11px] font-semibold text-slate-600">الجدول (يُقترح نفس الاسم تلقائياً)</label><select id="unionTableSel" onchange="loadUnionColumns()" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs"><option value="">— اختر الاتصال أولاً —</option></select></div>
+                </div>
+                <div id="unionColsList" class="max-h-64 overflow-y-auto custom-scroll bg-white border border-slate-200 rounded-lg p-2 space-y-1"></div>
+                <div class="flex items-center gap-2">
+                    <button onclick="unionToggleAll(true)" class="text-[11px] text-indigo-600 hover:text-indigo-800">تحديد الكل</button>
+                    <button onclick="unionToggleAll(false)" class="text-[11px] text-slate-500 hover:text-slate-700">إلغاء التحديد</button>
+                    <span class="mr-auto"></span>
+                    <button onclick="importUnionFields()" class="px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-xs font-semibold">استيراد للـ UNION</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Link editor Modal: table first, then field (each side) -->
+    <div id="wbLinkModal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[78] flex items-center justify-center p-4" onclick="if(event.target===this) closeLinkModal()">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+            <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-indigo-50">
+                <h3 id="wbLinkTitle" class="text-sm font-bold text-slate-800 flex items-center gap-2"><i class="fa-solid fa-link text-indigo-600"></i> رابط جديد</h3>
+                <button onclick="closeLinkModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="p-5 space-y-3 text-xs">
+                <div class="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2">
+                    <div class="text-[11px] font-bold text-slate-500">من — اختر الجدول أولاً ثم الحقل</div>
+                    <div><label class="block text-[11px] font-semibold text-slate-600">الجدول</label><select id="wbLinkFromTbl" onchange="wbLinkTblChanged('from')" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs"></select></div>
+                    <div><label class="block text-[11px] font-semibold text-slate-600">الحقل</label><select id="wbLinkFromFld" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-mono" dir="ltr"></select></div>
+                </div>
+                <div class="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2">
+                    <div class="text-[11px] font-bold text-slate-500">إلى — اختر الجدول أولاً ثم الحقل</div>
+                    <div><label class="block text-[11px] font-semibold text-slate-600">الجدول</label><select id="wbLinkToTbl" onchange="wbLinkTblChanged('to')" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs"></select></div>
+                    <div><label class="block text-[11px] font-semibold text-slate-600">الحقل</label><select id="wbLinkToFld" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-mono" dir="ltr"></select></div>
+                </div>
+                <div><label class="block text-[11px] font-semibold text-slate-600">نوع الربط</label><select id="wbLinkRel" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs"><option value="one_to_many">واحد لمتعدد</option><option value="one_to_one">واحد لواحد</option></select></div>
+                <div><label class="block text-[11px] font-semibold text-slate-600">نوع المطابقة</label><select id="wbLinkMatch" onchange="document.getElementById('wbLinkPatternWrap').style.display = (this.value === 'regex' ? '' : 'none')" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs"><option value="exact">مطابقة تامة (=)</option><option value="contains">احتواء (قيمة داخل قيمة)</option><option value="regex">تعبير نمطي (regex)</option></select></div>
+                <div id="wbLinkPatternWrap"><label class="block text-[11px] font-semibold text-slate-600">النمط (regex)</label><input id="wbLinkPattern" dir="ltr" placeholder="مثال: (\d+)" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-mono"></div>
+            </div>
+            <div class="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2">
+                <button onclick="closeLinkModal()" class="px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs">إلغاء</button>
+                <button onclick="wbSaveLink()" class="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold">حفظ الرابط</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Status map Modal: distinct values -> label + color -->
+    <div id="statusMapModal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[75] flex items-center justify-center p-4" onclick="if(event.target===this) closeStatusMapModal()">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] overflow-hidden flex flex-col">
+            <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-violet-50 gap-2 shrink-0">
+                <h3 id="statusMapTitle" class="text-sm font-bold text-slate-800 flex items-center gap-2"><i class="fa-solid fa-tags text-violet-600"></i> تعريف الحالات</h3>
+                <button onclick="closeStatusMapModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="flex-1 min-h-0 overflow-y-auto custom-scroll p-5 space-y-3 text-xs">
+                <p id="statusMapHint" class="text-[11px] text-slate-500">السجلات الفريدة للعمود — حدد الاسم الذي يظهر بدل الرقم/الترميز ولون كل حالة</p>
+                <div id="statusMapList" class="space-y-1.5"></div>
+                <button onclick="addStatusMapRow()" class="w-full py-2 bg-violet-50 hover:bg-violet-100 text-violet-700 rounded-xl text-xs font-bold"><i class="fa-solid fa-plus"></i> إضافة حالة يدوياً</button>
+            </div>
+            <div class="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2 shrink-0">
+                <button onclick="closeStatusMapModal()" class="px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs">إلغاء</button>
+                <button onclick="saveStatusMapModal()" class="px-4 py-1.5 bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-xs font-bold">حفظ الحالات</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Column type + formatting modal -->
+    <div id="colTypeModal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[77] flex items-center justify-center p-4" onclick="if(event.target===this) closeColTypeModal()">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col">
+            <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-indigo-50 gap-2 shrink-0">
+                <h3 id="colTypeTitle" class="text-sm font-bold text-slate-800 flex items-center gap-2"><i class="fa-solid fa-shapes text-indigo-600"></i> نوع العمود وتنسيقه</h3>
+                <button onclick="closeColTypeModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="flex-1 min-h-0 overflow-y-auto custom-scroll p-5 space-y-3 text-xs">
+                <div>
+                    <div class="text-[11px] font-bold text-slate-600 mb-1.5">نوع البيانات — يقود العمليات ومنتقي التاريخ والفلترة</div>
+                    <div id="colTypeGrid" class="grid grid-cols-4 gap-1.5"></div>
+                </div>
+                <div id="colTypeConfig" class="space-y-2"></div>
+            </div>
+            <div class="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2 shrink-0">
+                <button onclick="closeColTypeModal()" class="px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs">إلغاء</button>
+                <button onclick="saveColTypeModal()" class="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold">حفظ النوع</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Expression builder: connection -> table -> imported field -->
+    <div id="exprBuilderModal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[85] overflow-y-auto p-4" onclick="if(event.target===this) closeExprBuilder()">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md m-auto overflow-hidden">
+            <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+                <h3 class="text-sm font-bold text-slate-800 flex items-center gap-2"><i class="fa-solid fa-magnifying-glass text-indigo-600"></i> اختيار حقل للتعبير</h3>
+                <button onclick="closeExprBuilder()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="p-5 space-y-3 text-xs">
+                <p class="text-[11px] text-slate-500">اختر من الحقول المستوردة في تبويب الحقول: الاتصال ← الجدول ← الحقل، ثم إدراج.</p>
+                <div><label class="block text-[11px] font-semibold text-slate-600">الاتصال</label><select id="exprBConn" onchange="exprBLoadTables()" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs"></select></div>
+                <div><label class="block text-[11px] font-semibold text-slate-600">الجدول</label><select id="exprBTable" onchange="exprBLoadFields()" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-mono" dir="ltr"></select></div>
+                <div><label class="block text-[11px] font-semibold text-slate-600">الحقل</label><select id="exprBField" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-mono" dir="ltr"></select></div>
+                <div id="exprBHint" class="text-[11px] text-slate-400"></div>
+            </div>
+            <div class="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2">
+                <button onclick="closeExprBuilder()" class="px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs">إلغاء</button>
+                <button onclick="submitExprBuilder()" class="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold">إدراج في التعبير</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Expression expand editor: large modal for long column expressions -->
+    <div id="exprExpandModal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[90] overflow-y-auto p-4" onclick="if(event.target===this) closeExprExpand()">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-3xl m-auto overflow-hidden flex flex-col max-h-[92vh]">
+            <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-indigo-50 gap-2 shrink-0">
+                <h3 id="exprExpandTitle" class="text-sm font-bold text-slate-800 flex items-center gap-2"><i class="fa-solid fa-expand text-indigo-600"></i> تحرير التعبير</h3>
+                <button onclick="closeExprExpand()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="p-5 flex-1 min-h-0 flex flex-col gap-2">
+                <textarea id="exprExpandTa" rows="14" spellcheck="false" autocomplete="off" class="flex-1 min-h-[280px] w-full bg-slate-900 text-emerald-300 border border-slate-700 rounded-xl px-4 py-3 text-sm font-mono custom-scroll focus:outline-none focus:border-indigo-500" dir="ltr"></textarea>
+                <p class="text-[11px] text-slate-500">اكتب <span class="font-mono" dir="ltr">[</span> للحقول (<span class="font-mono" dir="ltr">[رقم_الاتصال.الجدول.الحقل]</span>) • <span class="font-mono" dir="ltr">$</span> لقواعد الأعمال • كلمة إنجليزية لاقتراح دوال SQL • الأسهم + Enter للاختيار</p>
+            </div>
+            <div class="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2 shrink-0">
+                <button onclick="closeExprExpand()" class="px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs">إلغاء</button>
+                <button onclick="saveExprExpand()" class="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold">حفظ التعبير</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Generic searchable suggest modal (tables / columns / fields) -->
+    <div id="suggestModal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[80] overflow-y-auto p-4" onclick="if(event.target===this) closeSuggestModal()">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg m-auto overflow-hidden flex flex-col max-h-[85vh]">
+            <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-slate-50 gap-2 shrink-0">
+                <h3 id="suggestModalTitle" class="text-sm font-bold text-slate-800 flex items-center gap-2"><i class="fa-solid fa-magnifying-glass text-indigo-600"></i> بحث</h3>
+                <button onclick="closeSuggestModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="px-5 pt-3 shrink-0">
+                <input id="suggestSearch" oninput="renderSuggestList()" placeholder="ابحث..." autocomplete="off" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-indigo-500">
+            </div>
+            <div id="suggestList" class="flex-1 min-h-0 overflow-y-auto custom-scroll p-3 space-y-1 text-xs"></div>
+        </div>
+    </div>
+
+    <!-- Doc Param Import Modal (استيراد عمود من واقع التقرير كمدخل مطلوب) -->
+    <div id="docParamPickerModal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[80] overflow-y-auto p-4 flex items-center justify-center" onclick="if(event.target===this) closeAddDocParamModal()">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg m-auto overflow-hidden flex flex-col max-h-[85vh]">
+            <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-slate-50 gap-2 shrink-0">
+                <h3 class="text-sm font-bold text-slate-800 flex items-center gap-2">
+                    <i class="fa-solid fa-file-import text-sky-600"></i>
+                    <span>استيراد عمود من واقع التقرير كمدخل مطلوب</span>
+                </h3>
+                <button type="button" onclick="closeAddDocParamModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="px-5 py-2.5 bg-slate-50/50 border-b border-slate-100 flex items-center justify-between gap-2 shrink-0">
+                <input id="docParamPickerSearch" oninput="renderDocParamPickerList()" placeholder="بحث في أعمدة التقرير..." autocomplete="off" class="flex-1 bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs focus:outline-none focus:border-sky-500">
+                <button type="button" onclick="importAllColumnsToDocParams()" class="px-3 py-1.5 bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 rounded-xl text-xs font-bold whitespace-nowrap transition">استيراد الكل</button>
+            </div>
+            <div id="docParamPickerList" class="flex-1 min-h-0 overflow-y-auto custom-scroll p-4 space-y-1.5 text-xs"></div>
+        </div>
+    </div>
+

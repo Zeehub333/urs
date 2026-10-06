@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<fml>
+  <fml_metadata name="permissions" displayName="الصلاحيات" table="sys_permissions" model_type="form" schema="main_hq_2026" connection="urs_local" category="النظام" description="صلاحيات النظام — الحقول وقواعد العمل" icon="fa-shield-halved"/>
+  <tabs>
+    <tab id="main" name="الصلاحيات" alias="الصلاحيات" sort_order="1"/>
+  </tabs>
+  <fields>
+    <field id="1" name="permission_code" alias="رمز الصلاحية" dataType="VARCHAR" inputType="text" required="true" nullable="false" editable="true" primary_key="true" tab="main" category="أساسية" placeholder="مثال: HR.EMP.VIEW">
+      <validation pattern="^[A-Z0-9_.]+$" min_length="3" max_length="60"/>
+    </field>
+    <field id="2" name="permission_name" alias="اسم الصلاحية" dataType="VARCHAR" inputType="text" required="true" nullable="false" editable="true" primary_key="false" tab="main" category="أساسية"/>
+    <field id="3" name="module" alias="الوحدة" dataType="VARCHAR" inputType="select" required="true" nullable="false" editable="true" primary_key="false" tab="main" category="التصنيف">
+      <options>
+        <option>الموارد البشرية</option>
+        <option>المحاسبة</option>
+        <option>المخزون</option>
+        <option>المبيعات</option>
+        <option>المشتريات</option>
+        <option>النظام</option>
+      </options>
+    </field>
+    <field id="4" name="action" alias="الإجراء" dataType="VARCHAR" inputType="select" required="true" nullable="false" editable="true" primary_key="false" tab="main" category="التصنيف">
+      <options>
+        <option>عرض</option>
+        <option>إضافة</option>
+        <option>تعديل</option>
+        <option>حذف</option>
+        <option>اعتماد</option>
+        <option>تصدير</option>
+      </options>
+    </field>
+    <field id="5" name="role" alias="الدور الممنوح" dataType="VARCHAR" inputType="select" required="true" nullable="false" editable="true" primary_key="false" tab="main" category="المنح">
+      <options>
+        <option>مدير نظام</option>
+        <option>مدير</option>
+        <option>مشرف</option>
+        <option>مستخدم</option>
+        <option>ضيف</option>
+      </options>
+    </field>
+    <field id="6" name="scope" alias="النطاق" dataType="VARCHAR" inputType="select" required="false" nullable="true" editable="true" primary_key="false" tab="main" category="المنح">
+      <options>
+        <option>عام</option>
+        <option>الشركة</option>
+        <option>الفرع</option>
+        <option>شخصي</option>
+      </options>
+    </field>
+    <field id="7" name="is_active" alias="مفعلة" dataType="BOOLEAN" inputType="boolean" required="false" nullable="true" editable="true" primary_key="false" tab="main" category="الحالة" default="true"/>
+    <field id="8" name="notes" alias="ملاحظات" dataType="TEXT" inputType="textarea" required="false" nullable="true" editable="true" primary_key="false" tab="main" category="إضافية"/>
+  </fields>
+</fml>

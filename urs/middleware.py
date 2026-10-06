@@ -40,14 +40,54 @@ class WorkspaceGateMiddleware:
 
     def __call__(self, request):
         path = request.path or "/"
-        if _is_exempt(path):
-            return self.get_response(request)
         try:
-            from .workspace import workspaces_info, workspace_status
-            known = {w.get("id") for w in workspaces_info() if w.get("id")}
+            from .workspace import (workspaces_info, workspace_status,
+                                    set_active_ws, reset_active_ws)
+        except Exception:
+            workspaces_info, workspace_status = None, None
+            set_active_ws, reset_active_ws = None, None
+        try:
+            known = {w.get("id") for w in workspaces_info() if w.get("id")} \
+                if workspaces_info else set()
         except Exception:
             known = set()
             workspace_status = None
+        # Pin app roots for this request: explicit ?settings= workspace wins,
+        # else the held session workspace. Unknown/empty → unscoped.
+        try:
+            _sid0 = (request.GET.get("settings") or "").strip()
+        except Exception:
+            _sid0 = ""
+        try:
+            _held0 = (request.session.get("workspace") or "").strip()
+        except Exception:
+            _held0 = ""
+        _active = None
+        try:
+            if _sid0 and _sid0 in known:
+                _active = _sid0
+            elif _held0 and _held0 in known:
+                _active = _held0
+        except Exception:
+            _active = None
+        _tok = None
+        if set_active_ws is not None:
+            try:
+                _tok = set_active_ws(_active)
+            except Exception:
+                _tok = None
+        try:
+            return self._gated(request, path, known, workspace_status)
+        finally:
+            if reset_active_ws is not None and _tok is not None:
+                try:
+                    reset_active_ws(_tok)
+                except Exception:
+                    pass
+
+    def _gated(self, request, path, known, workspace_status):
+        if _is_exempt(path):
+            return self.get_response(request)
         active = lambda i: workspace_status is None or (workspace_status(i) or "active") == "active"
         # Settings-only flow (?settings=<known-id>): repair surface, no entry.
         try:

@@ -1031,3 +1031,63 @@ class JsonConnectionEndpointTests(SimpleTestCase):
             self.assertIn("CONN_JSON_ENGINES", f.read())
         with open("workspace_1/apps/settings/modals/rml_wizard_script.html", encoding="utf-8") as f:
             self.assertIn("json", f.read())
+
+
+class UserProfileAndHeaderTests(SimpleTestCase):
+    def setUp(self):
+        self.rf = RequestFactory()
+
+    def test_change_password_endpoint(self):
+        from fmlk_engine.engine import hash_secret
+        st = _fresh_state(
+            fullcols=[("username", "text", "NO", None),
+                      ("password", "text", "NO", None),
+                      ("full_name", "text", "YES", None)],
+            userrow=("admin", hash_secret("secret123"), "Admin Full Name")
+        )
+        req = self.rf.post("/api/user/change-password/",
+                           data=json.dumps({"current_password": "secret123",
+                                            "new_password": "newpassword123",
+                                            "confirm_password": "newpassword123"}),
+                           content_type="application/json")
+        req.session = {
+            "ws_user": {"username": "admin", "full_name": "Admin Full Name"},
+            "workspace": "workspace_1",
+            "fiscal_schema": "main_hq_2026",
+        }
+        with mock.patch.multiple(_v,
+                                 _ws_login_connection=mock.Mock(return_value=({"fake": True}, "sys_users", "")),
+                                 _ws_pg_connect=mock.Mock(side_effect=lambda _obj: _FakeConn(st))):
+            res = _v.api_user_change_password(req)
+            self.assertEqual(res.status_code, 200)
+            data = json.loads(res.content)
+            self.assertTrue(data.get("ok"))
+            self.assertIsNotNone(st.get("update"))
+            sql, params = st["update"]
+            self.assertIn("UPDATE", sql)
+            self.assertNotEqual(params[0], "newpassword123")
+            self.assertTrue(params[0].startswith("pbkdf2_"))
+
+    def test_profile_update_endpoint(self):
+        st = _fresh_state(
+            fullcols=[("username", "text", "NO", None),
+                      ("full_name", "text", "YES", None),
+                      ("email", "text", "YES", None)],
+            userrow=("admin", "Admin Old", "admin@old.com")
+        )
+        req = self.rf.post("/api/user/profile/",
+                           data=json.dumps({"full_name": "Ahmed Mohamed", "email": "ahmed@example.com"}),
+                           content_type="application/json")
+        req.session = {
+            "ws_user": {"username": "admin", "full_name": "Admin Old"},
+            "workspace": "workspace_1",
+            "fiscal_schema": "main_hq_2026",
+        }
+        with mock.patch.multiple(_v,
+                                 _ws_login_connection=mock.Mock(return_value=({"fake": True}, "sys_users", "")),
+                                 _ws_pg_connect=mock.Mock(side_effect=lambda _obj: _FakeConn(st))):
+            res = _v.api_user_profile(req)
+            self.assertEqual(res.status_code, 200)
+            data = json.loads(res.content)
+            self.assertEqual(data.get("full_name"), "Ahmed Mohamed")
+            self.assertEqual(req.session["ws_user"]["full_name"], "Ahmed Mohamed")

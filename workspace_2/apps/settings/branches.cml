@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<cml>
+  <cml_metadata name="branches" displayName="الفروع" category="النظام" icon="fa-code-branch" description="فروع الشركة — الحقول وقواعد العمل" table="sys_branches" schema="SYS" connection="ORCL_PROD" scope="system" app="settings"/>
+  <controls>
+    <control id="1" name="branch_code" alias="رمز الفرع" inputType="text" dataType="VARCHAR" required="true" category="أساسية" placeholder="مثال: BR-RYD-01">
+      <validation regex="^[A-Z0-9-]+$" min_length="2" max_length="20"/>
+    </control>
+    <control id="2" name="branch_name" alias="اسم الفرع" inputType="text" dataType="VARCHAR" required="true" category="أساسية"/>
+    <control id="3" name="company_code" alias="الشركة التابع لها" inputType="select" dataType="VARCHAR" required="true" category="الارتباط" refTable="sys_companies" refFk="company_code" refDisplay="company_name"/>
+    <control id="4" name="branch_type" alias="نوع الفرع" inputType="select" dataType="VARCHAR" category="التصنيف" options="رئيسي,فرعي,مستودع,نقطة بيع"/>
+    <control id="5" name="city" alias="المدينة" inputType="text" dataType="VARCHAR" category="العنوان"/>
+    <control id="6" name="address" alias="العنوان" inputType="textarea" dataType="TEXT" category="العنوان"/>
+    <control id="7" name="phone" alias="الهاتف" inputType="phone" dataType="VARCHAR" category="الاتصال"/>
+    <control id="8" name="manager_name" alias="اسم المدير" inputType="text" dataType="VARCHAR" category="الإدارة"/>
+    <control id="9" name="is_active" alias="نشط" inputType="boolean" dataType="BOOLEAN" category="الحالة" default="true"/>
+  </controls>
+  <rules>
+    <rule id="1" name="branch_unique" type="unique" target="branch_code" message="رمز الفرع يجب أن يكون فريداً"/>
+    <rule id="2" name="company_required" type="required" target="company_code" message="يجب اختيار الشركة التابع لها الفرع"/>
+    <rule id="3" name="code_format" type="regex" target="branch_code" value="^[A-Z0-9-]+$" message="رمز الفرع: أحرف إنجليزية كبيرة وأرقام وشرطات فقط"/>
+  </rules>
+</cml>

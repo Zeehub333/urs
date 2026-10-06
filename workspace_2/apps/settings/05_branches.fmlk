@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<fml>
+  <fml_metadata name="branches" displayName="الفروع" table="urs_branch" category="النظام" description="فروع الشركة — كل فرع ينشئ سكيما company_branch_year" connection="urs_local" schema="main_hq_2026"/>
+  <tabs>
+    <tab id="main" name="بيانات الفرع" alias="بيانات الفرع" sort_order="1"/>
+  </tabs>
+  <fields>
+    <field id="1" name="company_id" alias="الشركة" inputType="select" required="true" tab="main" category="الارتباط" refTable="urs_company" refFk="id" refDisplay="name"/>
+    <field id="2" name="code" alias="رمز الفرع" inputType="text" required="true" tab="main" category="أساسية" placeholder="MAIN">
+      <validation regex="^[A-Za-z0-9_]+$" min_length="2" max_length="30"/>
+    </field>
+    <field id="3" name="name" alias="اسم الفرع" inputType="text" required="true" tab="main" category="أساسية"/>
+    <field id="4" name="city_id" alias="المدينة" inputType="select" tab="main" category="العنوان" refTable="urs_city" refFk="id" refDisplay="name"/>
+    <field id="5" name="branch_type" alias="نوع الفرع" inputType="select" tab="main" category="التصنيف" options="main,sub,warehouse,pos"/>
+    <field id="6" name="schema_name" alias="السكима (تُولد تلقائياً)" inputType="text" tab="main" category="النظام" placeholder="cmp_main_2026"/>
+    <field id="7" name="is_active" alias="نشط" inputType="boolean" tab="main" category="الحالة"/>
+  </fields>
+</fml>
