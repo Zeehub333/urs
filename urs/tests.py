@@ -1182,3 +1182,19 @@ class OracleClientUtilTests(SimpleTestCase):
             obj = _resolve_connection_record({"id": 2, "name": "اونكس تعافي"})
             self.assertEqual(obj.name, "اونكس تعافي")
             m_filter.assert_called_with(name="اونكس تعافي")
+
+    def test_resolve_connection_record_with_arabic_aliases(self):
+        from urs.views import _resolve_connection_record
+        from urs.models import Connection
+        with mock.patch("urs.models.Connection.objects.filter") as m_filter:
+            m_target = mock.Mock(spec=Connection)
+            m_target.name = "اونكس تعافي"
+            m_filter.return_value.first.return_value = m_target
+            obj = _resolve_connection_record({
+                "اسم الاتصال": "اونكس تعافي",
+                "نوع المحرك": "oracle",
+                "المضيف / IP الجهاز": "172.16.10.100",
+                "__pk_id": 2,
+            })
+            self.assertEqual(obj.name, "اونكس تعافي")
+            m_filter.assert_called_with(name="اونكس تعافي")

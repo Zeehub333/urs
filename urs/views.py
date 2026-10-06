@@ -11295,15 +11295,45 @@ def api_iot_mirror_sync(request):
         return JsonResponse({"error": str(e)}, status=500)
 
 
+def _normalize_connection_dict(rec: dict) -> dict:
+    """Map Arabic aliases and case variations from FMLK table rows to standard Connection field keys."""
+    if not isinstance(rec, dict):
+        return {}
+    out = dict(rec)
+    rec_lower = {str(k).strip().lower(): v for k, v in rec.items()}
+    mapping = {
+        "name": ("اسم الاتصال", "الاسم", "اسم_الاتصال", "connection_name", "conn_name"),
+        "engine": ("نوع المحرك", "المحرك", "نوع_المحرك"),
+        "host": ("المضيف / ip الجهاز", "المضيف / ip", "المضيف", "السيرفر", "الخادم", "ip"),
+        "port": ("المنفذ", "منفذ", "بورت"),
+        "user": ("المستخدم", "اسم المستخدم", "اسم_المستخدم"),
+        "password": ("كلمة المرور", "كلمة_المرور", "السر"),
+        "instance": ("القاعدة / sid", "القاعدة", "قاعدة البيانات", "قاعدة_البيانات", "sid"),
+        "instance_name": ("اسم المثيل (sql server)", "اسم المثيل", "اسم_المثيل"),
+        "schema": ("السكيما", "المخطط"),
+        "conn_type": ("نوع الاتصال", "نوع_الاتصال"),
+        "id": ("__pk_id", "id", "id_سجل"),
+    }
+    for canonical, aliases in mapping.items():
+        if canonical not in out or out[canonical] is None or str(out[canonical]).strip() == "":
+            for al in aliases:
+                val = rec_lower.get(al.lower())
+                if val is not None and str(val).strip() != "":
+                    out[canonical] = val
+                    break
+    return out
+
+
 def _resolve_connection_record(rec):
-    """مطابقة سجل اتصال من صف شبكة (الاسم أولاً ثم id لتجنب تعارض معرفات PG مع Django)."""
+    """مطابقة سجل اتصال من صف شبكة أو فورم (الاسم أولاً ثم id لتجنب تعارض معرفات PG مع Django)."""
     from .models import Connection
-    nm = ((rec or {}).get("name") or (rec or {}).get("الاسم") or "").strip()
+    norm = _normalize_connection_dict(rec or {})
+    nm = str(norm.get("name") or "").strip()
     if nm:
         obj = Connection.objects.filter(name=nm).first()
         if obj is not None:
             return obj
-    rid = (rec or {}).get("id") or (rec or {}).get("__pk_id") or (rec or {}).get("ID")
+    rid = norm.get("id") or norm.get("__pk_id") or norm.get("ID")
     if rid and str(rid).isdigit():
         obj = Connection.objects.filter(id=int(rid)).first()
         if obj is not None:
@@ -11360,7 +11390,8 @@ def api_connection_stats(request):
         return JsonResponse({"error": "POST required"}, status=405)
     try:
         data = json.loads(request.body.decode() or "{}")
-        rec = data.get("record") or data.get("form") or {}
+        raw_rec = data.get("record") or data.get("form") or {}
+        rec = _normalize_connection_dict(raw_rec)
         if not rec.get("id") and data.get("record_id"):
             rec["id"] = data["record_id"]
         from .models import Connection
@@ -11378,14 +11409,18 @@ def api_connection_stats(request):
             tables_error = str(ve)
         except Exception as e:
             tables_error = str(e)
-        obj.refresh_from_db()
+        if hasattr(obj, "refresh_from_db"):
+            try:
+                obj.refresh_from_db()
+            except Exception:
+                pass
         stats = {
             "name": obj.name, "engine": obj.engine, "host": obj.host, "port": obj.port,
             "status": "سليم ✓" if ok else "فاشل ✗", "ok": ok,
             "detail": test_payload.get("note") or test_payload.get("user") or test_payload.get("error") or "",
-            "last_check_at": obj.last_check_at.isoformat() if obj.last_check_at else "—",
-            "last_check_by": obj.last_check_by or by,
-            "last_check_ok": "✓" if obj.last_check_ok else ("✗" if obj.last_check_ok is False else "—"),
+            "last_check_at": obj.last_check_at.isoformat() if getattr(obj, "last_check_at", None) else "—",
+            "last_check_by": getattr(obj, "last_check_by", "") or by,
+            "last_check_ok": "✓" if getattr(obj, "last_check_ok", None) else ("✗" if getattr(obj, "last_check_ok", None) is False else "—"),
             "tables_count": len(tables), "tables_error": tables_error,
             "tables": [t["full"] for t in tables[:50]],
         }
@@ -11401,7 +11436,8 @@ def api_connection_test_record(request):
         return JsonResponse({"error": "POST required"}, status=405)
     try:
         data = json.loads(request.body.decode() or "{}")
-        rec = data.get("record") or data.get("form") or {}
+        raw_rec = data.get("record") or data.get("form") or {}
+        rec = _normalize_connection_dict(raw_rec)
         if not rec.get("id") and data.get("record_id"):
             rec["id"] = data["record_id"]
         from .models import Connection
@@ -11427,8 +11463,8 @@ def api_connection_test_record(request):
         if obj is None:
             return JsonResponse({"ok": False, "error": "سجل الاتصال غير موجود — أدخل بيانات الاتصال أو احفظ السجل أولاً"}, status=404)
 
-        form_data = data.get("form")
-        if form_data and isinstance(form_data, dict):
+        form_data = _normalize_connection_dict(data.get("form") or {})
+        if form_data:
             for k in ("host", "port", "user", "password", "instance", "instance_name", "schema", "engine"):
                 if k in form_data and form_data[k] is not None and str(form_data[k]).strip() != "":
                     v = form_data[k]
