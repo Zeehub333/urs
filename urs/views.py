@@ -11945,6 +11945,24 @@ def _iot_mirror_tables(obj):
     return out
 
 
+def _resolve_connection_schema(request, obj):
+    """Resolve the effective schema for a given connection object.
+
+    If the caller explicitly passed ?schema= in request.GET, use it.
+    If obj is the workspace's primary connection (or matches its name/id),
+    use the workspace fiscal_schema if set.
+    Otherwise, preserve obj's own configured schema.
+    """
+    ws_id, fiscal_schema, primary_conn = _ws_session_context(request)
+    req_schema = (request.GET.get("schema") or "").strip() if request else ""
+    if req_schema:
+        return req_schema
+    is_primary = bool(primary_conn and (obj.name == primary_conn or str(obj.id) == str(primary_conn)))
+    if is_primary and fiscal_schema:
+        return fiscal_schema
+    return (obj.schema or "").strip()
+
+
 def api_connection_tables(request, conn_id):
     """GET /api/connections/<id>/tables/ — جداول أي اتصال (تشمل البعيدة).
 
@@ -11956,9 +11974,9 @@ def api_connection_tables(request, conn_id):
         obj = _effective_or_row(conn_id)
         if obj is None:
             return JsonResponse({"error": "not found"}, status=404)
-        ws_id, fiscal_schema, _ = _ws_session_context(request)
-        if fiscal_schema:
-            obj.schema = fiscal_schema
+        eff_schema = _resolve_connection_schema(request, obj)
+        if eff_schema:
+            obj.schema = eff_schema
         if _iot_is_conn(obj):
             tables = _iot_mirror_tables(obj)
             payload = {"tables": tables, "total": len(tables), "engine": obj.engine,
@@ -11967,8 +11985,8 @@ def api_connection_tables(request, conn_id):
                 payload["mirror_missing"] = True
                 payload["note"] = "لا مرايا لهذا الاتصال — أنشئ جدول المرآة أولاً من سجل الاتصال"
             return JsonResponse(payload, json_dumps_params={"ensure_ascii": False})
-        tables = _list_tables_obj(obj, schema_override=fiscal_schema)
-        return JsonResponse({"tables": tables, "total": len(tables), "engine": obj.engine, "schema": fiscal_schema or obj.schema})
+        tables = _list_tables_obj(obj, schema_override=eff_schema)
+        return JsonResponse({"tables": tables, "total": len(tables), "engine": obj.engine, "schema": eff_schema or obj.schema})
     except ValueError as e:
         return JsonResponse({"error": str(e)}, status=400)
     except Exception as e:
@@ -12049,8 +12067,9 @@ def api_connection_table_fks(request, conn_id, table):
         if obj is None:
             return JsonResponse({"error": "not found"}, status=404)
         ws_id, fiscal_schema, _ = _ws_session_context(request)
-        if fiscal_schema:
-            obj.schema = fiscal_schema
+        eff_schema = _resolve_connection_schema(request, obj)
+        if eff_schema:
+            obj.schema = eff_schema
         from .models import IoTMirror
         from .iot_sync import mirror_schema
         if _iot_is_conn(obj):
@@ -12072,7 +12091,7 @@ def api_connection_table_fks(request, conn_id, table):
         if "." in table:
             schema, tname = table.split(".", 1)
         else:
-            schema, tname = (fiscal_schema or _default_schema_for(obj)), table
+            schema, tname = (eff_schema or _default_schema_for(obj)), table
         if not _valid_table_ref(schema) or not _valid_table_ref(tname):
             return JsonResponse({"error": "invalid table name"}, status=400)
         fks = _table_fks_obj(obj, schema, tname)
@@ -12321,8 +12340,9 @@ def api_connection_table_preview(request, conn_id, table):
         if obj is None:
             return JsonResponse({"error": "not found"}, status=404)
         ws_id, fiscal_schema, _ = _ws_session_context(request)
-        if fiscal_schema:
-            obj.schema = fiscal_schema
+        eff_schema = _resolve_connection_schema(request, obj)
+        if eff_schema:
+            obj.schema = eff_schema
         try:
             limit = int(request.GET.get("limit", "50"))
         except Exception:
@@ -12369,7 +12389,7 @@ def api_connection_table_preview(request, conn_id, table):
         if "." in table:
             schema, tname = table.split(".", 1)
         else:
-            schema, tname = (fiscal_schema or _default_schema_for(obj)), table
+            schema, tname = (eff_schema or _default_schema_for(obj)), table
         if not _valid_table_ref(schema) or not _valid_table_ref(tname):
             return JsonResponse({"error": "invalid table name"}, status=400)
         cols, rows = _table_preview_obj(obj, schema, tname, limit, q, filters)
@@ -12393,8 +12413,9 @@ def api_connection_table_columns(request, conn_id, table):
         if obj is None:
             return JsonResponse({"error": "not found"}, status=404)
         ws_id, fiscal_schema, _ = _ws_session_context(request)
-        if fiscal_schema:
-            obj.schema = fiscal_schema
+        eff_schema = _resolve_connection_schema(request, obj)
+        if eff_schema:
+            obj.schema = eff_schema
         if "." in table:
             _, tname = table.split(".", 1)
         else:
@@ -12444,7 +12465,7 @@ def api_connection_table_columns(request, conn_id, table):
         if "." in table:
             schema, tname = table.split(".", 1)
         else:
-            schema, tname = (fiscal_schema or _default_schema_for(obj)), table
+            schema, tname = (eff_schema or _default_schema_for(obj)), table
         if not _valid_table_ref(schema) or not _valid_table_ref(tname):
             return JsonResponse({"error": "invalid table name"}, status=400)
         cols = _table_columns_obj(obj, schema, tname)

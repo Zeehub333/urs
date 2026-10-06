@@ -1268,3 +1268,34 @@ class OracleClientUtilTests(SimpleTestCase):
         self.assertEqual(dicts[0]["endpoint"], "/api/connections/test/")
         self.assertEqual(dicts[1]["render"], "modals/conn_stats.html")
         self.assertEqual(dicts[2]["badge_color"], "#16a34a")
+
+    def test_resolve_connection_schema_isolates_external_connections(self):
+        from unittest.mock import patch, MagicMock
+        from urs.views import _resolve_connection_schema
+        from django.test import RequestFactory
+        rf = RequestFactory()
+
+        class DummyConn:
+            def __init__(self, id, name, schema):
+                self.id = id
+                self.name = name
+                self.schema = schema
+
+        primary = DummyConn(1, "rex_local", "default_pg")
+        external = DummyConn(16, "اونكس تعافي", "IAS20264")
+
+        # Mock workspace context: primary_conn="rex_local", fiscal_schema="ies202601"
+        with patch("urs.views._ws_session_context", return_value=("ws1", "ies202601", "rex_local")):
+            # 1. External connection MUST preserve its own schema and NOT get corrupted by ies202601
+            req = rf.get("/api/connections/16/tables/")
+            sch = _resolve_connection_schema(req, external)
+            self.assertEqual(sch, "IAS20264")
+
+            # 2. Primary connection receives the workspace fiscal_schema
+            sch_p = _resolve_connection_schema(req, primary)
+            self.assertEqual(sch_p, "ies202601")
+
+            # 3. Explicit URL param ?schema= overrides
+            req_custom = rf.get("/api/connections/16/tables/?schema=CUSTOM_SCH")
+            sch_c = _resolve_connection_schema(req_custom, external)
+            self.assertEqual(sch_c, "CUSTOM_SCH")
