@@ -2173,13 +2173,17 @@ def _ws_required_user_fields(cur, sch, tbl, skip=()):
                 if r is None or len(r) < 2:
                     continue
                 nm = str(r[0])
-                if nm.lower() in _skip:
+                nl = nm.lower()
+                if nl in _skip:
+                    continue
+                _AUTO_EXCLUDE = ("id", "user_id", "pk", "last_login", "lastlogin", "created_at", "createdat", "updated_at", "updatedat", "date_joined", "datejoined")
+                if nl in _AUTO_EXCLUDE:
                     continue
                 if not _re_id.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", nm or ""):
                     continue
                 nullable = (str(r[2]).upper() == "YES") if len(r) > 2 else True
-                has_def = bool(str(r[3] or "").strip()) if len(r) > 3 else False
-                if nullable or has_def:
+                cdef = str(r[3] or "").strip() if len(r) > 3 and r[3] is not None else ""
+                if nullable or bool(cdef) or "nextval" in cdef.lower():
                     continue
                 out.append({"name": nm, "data_type": str(r[1] or "").lower()})
             except Exception:
@@ -2214,7 +2218,10 @@ def _ws_user_fields_schema(cur, sch, tbl, skip=()):
                 cdef = str(r[3] or "").strip() if len(r) > 3 and r[3] is not None else ""
                 maxlen = r[4] if len(r) > 4 else None
 
-                if "nextval" in cdef.lower() and nl in ("id", "user_id", "pk"):
+                _AUTO_EXCLUDE = ("id", "user_id", "pk", "last_login", "lastlogin", "created_at", "createdat", "updated_at", "updatedat", "date_joined", "datejoined")
+                if nl in _AUTO_EXCLUDE:
+                    continue
+                if "nextval" in cdef.lower():
                     continue
 
                 if "bool" in dtype:
@@ -2334,6 +2341,17 @@ def api_workspace_users_count(request, ws_id):
             cur = conn.cursor()
             sch, tbl, _cols, err, _cands = _ws_users_table_info(
                 cur, utable, str(request.GET.get("schema") or "").strip())
+            if err:
+                try:
+                    mod = _ws_db_init_module()
+                    _usch, _utbl = mod._split_users_table(utable, str(request.GET.get("schema") or "").strip())
+                    if _usch and _utbl:
+                        cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{_usch}"')
+                        cur.execute(mod._WS_USERS_DDL.format(schema=_usch, table=_utbl))
+                        conn.commit()
+                        sch, tbl, _cols, err, _cands = _ws_users_table_info(cur, utable, _usch)
+                except Exception:
+                    pass
             if err:
                 return JsonResponse({"error": err, "candidates": _cands}, status=400)
             _tq = "%s.%s" % (_ws_quote_ident(sch), _ws_quote_ident(tbl))
@@ -2694,6 +2712,17 @@ def api_workspace_superuser(request, ws_id):
             sch, tbl, cols, err, _cands = _ws_users_table_info(
                 cur, utable, str(data.get("schema") or "").strip())
             if err:
+                try:
+                    mod = _ws_db_init_module()
+                    _usch, _utbl = mod._split_users_table(utable, str(data.get("schema") or "").strip())
+                    if _usch and _utbl:
+                        cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{_usch}"')
+                        cur.execute(mod._WS_USERS_DDL.format(schema=_usch, table=_utbl))
+                        conn.commit()
+                        sch, tbl, cols, err, _cands = _ws_users_table_info(cur, utable, _usch)
+                except Exception:
+                    pass
+            if err:
                 return JsonResponse({"error": err, "candidates": _cands}, status=400)
             _tq = "%s.%s" % (_ws_quote_ident(sch), _ws_quote_ident(tbl))
             cur.execute("SELECT count(*) FROM %s" % _tq)
@@ -2756,8 +2785,14 @@ def api_workspace_superuser(request, ws_id):
                     _email_val = _ws_compose_email(_given, _dom)
                 elif username and _dom:
                     _email_val = _ws_compose_email(username, _dom)
+                if not _email_val and username:
+                    _email_val = f"{username}@{_dom or 'workspace.local'}"
                 if _email_val:
                     _clean_extra[_ereal] = _email_val
+            if "is_staff" in cols:
+                _real_staff = _realmap.get("is_staff", "is_staff")
+                if _real_staff not in _clean_extra and _real_staff not in _handled:
+                    _clean_extra[_real_staff] = True
             _req = _ws_required_user_fields(cur, sch, tbl, skip=_handled)
             _missing = [c["name"] for c in _req
                         if _clean_extra.get(c["name"]) in (None, "") and not isinstance(_clean_extra.get(c["name"]), bool)]
@@ -2780,13 +2815,19 @@ def api_workspace_superuser(request, ws_id):
             _vals = [username, _hpw]
             if _fcol:
                 _fields.append(_fcol)
-                _vals.append(full_name)
+                _vals.append(full_name or username)
             if _sucol:
                 _fields.append(_sucol)
                 _vals.append(_ws_bool_val(cols.get(_sucol), True))
             if _accol:
                 _fields.append(_accol)
                 _vals.append(_ws_bool_val(cols.get(_accol), True))
+
+            for _pw_alias in ("password", "password_hash", "passwd", "pwd"):
+                if _pw_alias in cols and _pw_alias not in _fields:
+                    _real_pw = _realmap.get(_pw_alias, _pw_alias)
+                    if _real_pw not in _clean_extra:
+                        _clean_extra[_real_pw] = _hpw
             for _ek in sorted(_clean_extra):
                 _fields.append(_ek)
                 _vals.append(_clean_extra[_ek])

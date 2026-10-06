@@ -855,12 +855,13 @@
                             <textarea id="su_f_${fn}" data-ws-su-extra="${fn}" data-ws-su-type="text" placeholder="${fl}" rows="2" ${reqAttr} class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs"></textarea>
                         </div>`;
                     }
+                    const defVal = (fn.toLowerCase() === 'role') ? 'admin' : '';
                     return `<div class="col-span-2 sm:col-span-1">
                         <div class="flex items-center justify-between mb-1">
                             <label class="block font-semibold text-slate-700">${fl} ${reqBadge}</label>
                             <span class="text-[9px] text-slate-400 font-mono">${fn} (${dt})</span>
                         </div>
-                        <input type="text" id="su_f_${fn}" data-ws-su-extra="${fn}" data-ws-su-type="text" placeholder="${fl}" ${reqAttr} class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs">
+                        <input type="text" id="su_f_${fn}" data-ws-su-extra="${fn}" data-ws-su-type="text" value="${_escA(defVal)}" placeholder="${fl}" ${reqAttr} class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs">
                     </div>`;
                 };
                 box.innerHTML = `<p class="text-[11px] text-slate-600 font-medium">الجدول <span class="font-mono bg-white px-1.5 py-0.5 rounded border border-slate-200" dir="ltr">${String(d.table || '').replace(/</g,'&lt;')}</span> فارغ — أنشئ المشرف العام الأول:</p>
@@ -888,7 +889,7 @@
                     ${_fList.length ? `<div class="border-t border-amber-200/60 pt-2"><div class="text-[10px] font-bold text-amber-800 mb-2">حقول إضافية من جدول المستخدمين (${_fList.length} حقل):</div><div class="grid grid-cols-2 gap-2.5">${_fList.map(renderField).join('')}</div></div>` : ''}
                 </div>
                 <p id="wsSuMsg" class="text-[11px] text-rose-600 font-bold min-h-[16px] mt-2"></p>
-                <button onclick="wsSuCreate()" class="mt-1 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition cursor-pointer"><i class="fa-solid fa-crown"></i> إنشاء مشرف عام</button>`;
+                <button onclick="wsMasterEnsure(wsSuCreate)" class="mt-1 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition cursor-pointer"><i class="fa-solid fa-crown"></i> إنشاء مشرف عام</button>`;
                 try{
                     const _domInput = document.getElementById('wsF_domain');
                     if(_domInput && !(_domInput.dataset.suDomBound)){
@@ -964,11 +965,20 @@
                         extra[k] = local;
                     }
                 });
+                if(!extra['role'] && document.querySelector('#wsSuBox [data-ws-su-extra="role"]')){
+                    extra['role'] = 'admin';
+                }
             }catch(e){}
             try{
                 const res = await fetch('/api/workspaces/' + encodeURIComponent(window._wsEditId) + '/superuser/', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({username, password: pw1, full_name: String(v('wsSu_name') || '').trim(), table: tEl ? String(tEl.value || '').trim() : '', extra})});
                 const d = await res.json().catch(()=>({}));
-                if(!res.ok) throw new Error(d.error || 'فشل الإنشاء');
+                if(!res.ok){
+                    if(res.status === 403 && d.master_required){
+                        wsMasterEnsure(wsSuCreate);
+                        return;
+                    }
+                    throw new Error(d.error || 'فشل الإنشاء');
+                }
                 try{ notify('أُنشئ المشرف العام ✓', 'success'); }catch(e){}
                 wsSuRefresh();
             }catch(e){ if(msg) msg.textContent = String((e && e.message) || e).slice(0, 200); }

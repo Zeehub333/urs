@@ -2565,6 +2565,12 @@
                 setTimeout(()=>{ try{ fmlkResolveDisplay(field.name); }catch(e){} }, 0);
                 return label + `<div data-display-field="${field.name}" class="w-full bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-sm text-slate-700">…</div>`;
             }
+            const isUneditable = (field.editable === false) || (field.readonly === true) || (String(field.editable).toLowerCase() === 'false') || (String(field.readonly).toLowerCase() === 'true');
+            if(isUneditable){
+                const v = fieldVal(field);
+                const vs = (v !== null && v !== undefined) ? String(v) : '';
+                return `<div>${label}<div class="flex items-center gap-1.5"><input type="text" data-field="${escAttr(field.name)}" value="${escAttr(vs)}" readonly tabindex="-1" class="fx-inp bg-slate-50 text-slate-500 font-mono text-xs cursor-not-allowed select-none flex-1 border-slate-200" title="حقل غير قابل للتعديل"/><span class="w-8 h-8 rounded-lg bg-slate-100 text-slate-400 flex items-center justify-center shrink-0" title="غير قابل للتعديل"><i class="fa-solid fa-lock text-xs"></i></span></div></div>`;
+            }
             let input = '';
             const ph = field.placeholder || '';
             const val = fieldVal(field);
