@@ -1299,3 +1299,44 @@ class OracleClientUtilTests(SimpleTestCase):
             req_custom = rf.get("/api/connections/16/tables/?schema=CUSTOM_SCH")
             sch_c = _resolve_connection_schema(req_custom, external)
             self.assertEqual(sch_c, "CUSTOM_SCH")
+
+    def test_api_connection_table_values_validation(self):
+        from unittest.mock import patch, MagicMock
+        from urs.views import api_connection_table_values
+        from django.test import RequestFactory
+        import json
+
+        rf = RequestFactory()
+
+        # 1. Connection not found -> 404
+        with patch("urs.views._effective_or_row", return_value=None):
+            req = rf.get("/api/connections/999/tables/ACCOUNT/values/?column=A_CODE")
+            resp = api_connection_table_values(req, 999, "ACCOUNT")
+            self.assertEqual(resp.status_code, 404)
+
+        # 2. Missing or invalid column name -> 400
+        dummy = MagicMock()
+        dummy.id = 1
+        dummy.engine = "postgres"
+        with patch("urs.views._effective_or_row", return_value=dummy):
+            # Missing column
+            req_no_col = rf.get("/api/connections/1/tables/ACCOUNT/values/")
+            resp_no_col = api_connection_table_values(req_no_col, 1, "ACCOUNT")
+            self.assertEqual(resp_no_col.status_code, 400)
+
+            # Invalid column (SQL injection pattern)
+            req_bad_col = rf.get("/api/connections/1/tables/ACCOUNT/values/?column=bad;drop")
+            resp_bad_col = api_connection_table_values(req_bad_col, 1, "ACCOUNT")
+            self.assertEqual(resp_bad_col.status_code, 400)
+
+        # 3. Successful values fetch using mock _table_values_obj
+        with patch("urs.views._effective_or_row", return_value=dummy), \
+             patch("urs.views._resolve_connection_schema", return_value="public"), \
+             patch("urs.views._table_values_obj", return_value=["val1", "val2", "val3"]):
+            req_ok = rf.get("/api/connections/1/tables/ACCOUNT/values/?column=A_CODE&limit=10")
+            resp_ok = api_connection_table_values(req_ok, 1, "ACCOUNT")
+            self.assertEqual(resp_ok.status_code, 200)
+            data = json.loads(resp_ok.content.decode("utf-8"))
+            self.assertEqual(data["values"], ["val1", "val2", "val3"])
+            self.assertEqual(data["total"], 3)
+            self.assertEqual(data["column"], "A_CODE")

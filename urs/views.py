@@ -9292,6 +9292,9 @@ def _write_table_opts_el(rml, ET, table_opts):
                 t_el.set("is_default", "1")
             if t.get("is_sub", t.get("isSub", t.get("sub", False))):
                 t_el.set("is_sub", "1")
+            wh = str(t.get("where") or "").strip()
+            if wh:
+                t_el.set("where", wh)
     except Exception:
         pass
 
@@ -12474,6 +12477,217 @@ def api_connection_table_columns(request, conn_id, table):
         return JsonResponse({"error": str(e)}, status=400)
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
+
+
+def _table_values_obj(obj, schema: str, table: str, column: str, limit: int = 50, q=None):
+    """جلب قائمة بالقيم المميزة (DISTINCT) لعمود من جدول على أي اتصال قاعدة بيانات."""
+    eng = str(getattr(obj, "engine", "") or "").lower()
+    limit = max(1, min(int(limit or 50), 200))
+    q_str = str(q).strip() if q is not None and str(q).strip() != "" else None
+
+    if eng == "json":
+        from . import json_source as _jsrc
+        try:
+            doc, _mode = _jsrc.load(str(getattr(obj, "host", "") or ""), BASE_DIR)
+            _t = (table or "").split(".")[-1]
+            _jcols, _jrows = _jsrc.preview(doc, _t, 1000)
+            cidx = -1
+            for i, c in enumerate(_jcols):
+                cn = c.get("name") if isinstance(c, dict) else str(c)
+                if cn == column:
+                    cidx = i
+                    break
+            vals = []
+            if cidx >= 0:
+                seen = set()
+                q_low = q_str.lower() if q_str else None
+                for row in _jrows:
+                    if cidx < len(row):
+                        val = row[cidx]
+                        if val is not None and str(val).strip() != "":
+                            sval = str(val)
+                            if q_low and q_low not in sval.lower():
+                                continue
+                            if sval not in seen:
+                                seen.add(sval)
+                                vals.append(_preview_cell(val))
+                                if len(vals) >= limit:
+                                    break
+            return vals
+        except Exception:
+            return []
+
+    if eng == "oracle":
+        conn = _oracle_connect_obj(obj)
+        try:
+            cur = conn.cursor()
+            params = {}
+            where = f'WHERE "{column}" IS NOT NULL'
+            if q_str:
+                where += f' AND UPPER(TO_CHAR("{column}")) LIKE :q'
+                params["q"] = f"%{q_str.upper()}%"
+            cur.execute(f'SELECT DISTINCT "{column}" FROM "{schema}"."{table}" {where} ORDER BY 1 FETCH FIRST {limit} ROWS ONLY', params)
+            vals = [_preview_cell(r[0]) for r in cur.fetchall() if r[0] is not None]
+            cur.close()
+            return vals
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    if eng == "postgres":
+        conn = _pg_conn_for(obj)
+        try:
+            cur = conn.cursor()
+            params = []
+            where = f'WHERE "{column}" IS NOT NULL'
+            if q_str:
+                where += f' AND CAST("{column}" AS TEXT) ILIKE %s'
+                params.append(f"%{q_str}%")
+            params.append(limit)
+            cur.execute(f'SELECT DISTINCT "{column}" FROM "{schema}"."{table}" {where} ORDER BY 1 LIMIT %s', params)
+            vals = [_preview_cell(r[0]) for r in cur.fetchall() if r[0] is not None]
+            cur.close()
+            return vals
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    if eng == "sqlserver":
+        conn, _, _ = _mssql_connect_obj(obj, timeout=10)
+        try:
+            cur = conn.cursor()
+            params = []
+            where = f'WHERE [{column}] IS NOT NULL'
+            if q_str:
+                where += f' AND CAST([{column}] AS NVARCHAR(MAX)) LIKE ?'
+                params.append(f"%{q_str}%")
+            cur.execute(f'SELECT DISTINCT TOP ({limit}) [{column}] FROM [{schema}].[{table}] {where} ORDER BY 1', params)
+            vals = [_preview_cell(r[0]) for r in cur.fetchall() if r[0] is not None]
+            cur.close()
+            return vals
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    if eng == "mysql":
+        import MySQLdb
+        conn = MySQLdb.connect(host=obj.host, user=obj.user, passwd=obj.password or "",
+                               db=obj.instance or None, port=int(obj.port or 3306), connect_timeout=10)
+        try:
+            cur = conn.cursor()
+            params = []
+            where = f'WHERE `{column}` IS NOT NULL'
+            if q_str:
+                where += f' AND CAST(`{column}` AS CHAR) LIKE %s'
+                params.append(f"%{q_str}%")
+            params.append(limit)
+            cur.execute(f'SELECT DISTINCT `{column}` FROM `{schema}`.`{table}` {where} ORDER BY 1 LIMIT %s', params)
+            vals = [_preview_cell(r[0]) for r in cur.fetchall() if r[0] is not None]
+            cur.close()
+            return vals
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    if eng == "sqlite":
+        import sqlite3
+        db_path = getattr(obj, "database", "") or getattr(obj, "host", "") or "db.sqlite3"
+        conn = sqlite3.connect(db_path)
+        try:
+            cur = conn.cursor()
+            params = []
+            where = f'WHERE "{column}" IS NOT NULL'
+            if q_str:
+                where += f' AND CAST("{column}" AS TEXT) LIKE ?'
+                params.append(f"%{q_str}%")
+            params.append(limit)
+            cur.execute(f'SELECT DISTINCT "{column}" FROM "{table}" {where} ORDER BY 1 LIMIT ?', params)
+            vals = [_preview_cell(r[0]) for r in cur.fetchall() if r[0] is not None]
+            cur.close()
+            return vals
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    raise ValueError(f"محرك غير مدعوم لجلب القيم: {eng}")
+
+
+def api_connection_table_values(request, conn_id, table):
+    """GET /api/connections/<id>/tables/<table>/values/?column=<col>&q=<query>&limit=50 — جلب القيم المميزة للعمود."""
+    try:
+        from .models import Connection
+        obj = _effective_or_row(conn_id)
+        if obj is None:
+            return JsonResponse({"error": "not found"}, status=404)
+        eff_schema = _resolve_connection_schema(request, obj)
+        if eff_schema:
+            obj.schema = eff_schema
+        column = (request.GET.get("column") or request.GET.get("col") or "").strip()
+        if not column or not _valid_table_ref(column):
+            return JsonResponse({"error": "اسم العمود غير صالح أو مفقود"}, status=400)
+        try:
+            limit = int(request.GET.get("limit", "50"))
+        except Exception:
+            limit = 50
+        limit = max(1, min(limit, 200))
+        q = (request.GET.get("q") or "").strip() or None
+
+        if "." in table:
+            _, tname = table.split(".", 1)
+        else:
+            tname = table
+
+        if _iot_is_conn(obj):
+            from .models import IoTMirror
+            from .iot_sync import mirror_schema
+            try:
+                m = IoTMirror.objects.select_related("local_connection").filter(
+                    connection=obj, table_name=tname).first()
+            except Exception:
+                m = None
+            if m is None:
+                return JsonResponse({"error": "الجداول المتاحة لاتصال IoT هي جداول المرايا فقط"}, status=400)
+            try:
+                sch = (mirror_schema(m.local_connection) or "").strip() or "public"
+            except Exception:
+                sch = "public"
+            vals = _table_values_obj(m.local_connection, sch, m.table_name, column, limit, q)
+            return JsonResponse({"table": f"{sch}.{m.table_name}", "column": column, "values": vals, "total": len(vals)},
+                                json_dumps_params={"ensure_ascii": False})
+
+        if str(getattr(obj, "engine", "") or "").lower() == "json":
+            _t = (table or "").split(".")[-1]
+            if not _valid_table_ref(_t):
+                return JsonResponse({"error": "invalid table name"}, status=400)
+            vals = _table_values_obj(obj, "", _t, column, limit, q)
+            return JsonResponse({"table": _t, "column": column, "values": vals, "total": len(vals)},
+                                json_dumps_params={"ensure_ascii": False})
+
+        if "." in table:
+            schema, tname = table.split(".", 1)
+        else:
+            schema, tname = (eff_schema or _default_schema_for(obj)), table
+        if not _valid_table_ref(schema) or not _valid_table_ref(tname):
+            return JsonResponse({"error": "invalid table name"}, status=400)
+
+        vals = _table_values_obj(obj, schema, tname, column, limit, q)
+        return JsonResponse({"table": f"{schema}.{tname}" if schema else tname,
+                             "column": column, "values": vals, "total": len(vals)},
+                            json_dumps_params={"ensure_ascii": False})
+    except ValueError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+    except Exception as e:
+        return JsonResponse({"error": str(e)[:300]}, status=500)
 
 
 # ── JSON connection row writes ─────────────────────────────────────────

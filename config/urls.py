@@ -82,6 +82,7 @@ urlpatterns = [
     path('api/connections/<int:conn_id>/tables/', urs_views.api_connection_tables, name='api_connection_tables'),
     path('api/connections/<int:conn_id>/tables/<str:table>/columns/', urs_views.api_connection_table_columns, name='api_connection_table_columns'),
     path('api/connections/<int:conn_id>/tables/<str:table>/preview/', urs_views.api_connection_table_preview, name='api_connection_table_preview'),
+    path('api/connections/<int:conn_id>/tables/<str:table>/values/', urs_views.api_connection_table_values, name='api_connection_table_values'),
     path('api/connections/<int:conn_id>/tables/<str:table>/fks/', urs_views.api_connection_table_fks, name='api_connection_table_fks'),
     path('api/connections/<int:conn_id>/tables/<str:table>/rows/insert/', urs_views.api_json_row_insert, name='api_json_row_insert'),
     path('api/connections/<int:conn_id>/tables/<str:table>/rows/update/', urs_views.api_json_row_update, name='api_json_row_update'),

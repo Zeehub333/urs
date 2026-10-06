@@ -919,6 +919,7 @@ class RMLReportCompiler:
                 "conn": get(el, "conn", "conn_id", "connection_id"),
                 "is_default": flag(get(el, "is_default", "isDefault", "default")),
                 "is_sub": flag(get(el, "is_sub", "isSub", "sub")),
+                "where": get(el, "where", "where_clause", default=""),
             })
         return result
 

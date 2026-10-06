@@ -188,24 +188,69 @@
 
     <!-- Import fields from table Modal -->
     <div id="importFieldsModal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[70] flex items-center justify-center p-4" onclick="if(event.target===this) closeImportFieldsModal()">
-        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[92vh] overflow-hidden flex flex-col">
             <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-emerald-50 gap-2 shrink-0">
-                <h3 class="text-sm font-bold text-slate-800 flex items-center gap-2"><i class="fa-solid fa-download text-emerald-600"></i> استيراد الحقول من جدول</h3>
+                <h3 class="text-sm font-bold text-slate-800 flex items-center gap-2"><i class="fa-solid fa-download text-emerald-600"></i> استيراد الحقول من جدول وتحديد الشرط العام</h3>
                 <button onclick="closeImportFieldsModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
             </div>
-            <div class="flex-1 min-h-0 overflow-y-auto p-5 space-y-3 text-xs">
+            <div class="flex-1 min-h-0 overflow-y-auto p-5 space-y-3.5 text-xs">
                 <div class="grid grid-cols-2 gap-2">
                     <div><label class="block text-[11px] font-semibold text-slate-600">الاتصال</label><select id="importConnSel" onchange="loadImportTables()" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs"></select></div>
                     <div><label class="block text-[11px] font-semibold text-slate-600">الجدول</label><input id="importTableSearch" oninput="filterImportTables(this.value)" placeholder="ابحث..." class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs mb-1"><select id="importTableSel" onchange="loadImportColumns()" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs"><option value="">— اختر الاتصال أولاً —</option></select></div>
                 </div>
-                <div id="importColsList" class="max-h-64 overflow-y-auto custom-scroll bg-white border border-slate-200 rounded-lg p-2 space-y-1"></div>
-                <div class="flex items-center gap-2">
-                    <button onclick="importToggleAll(true)" class="text-[11px] text-indigo-600 hover:text-indigo-800">تحديد الكل</button>
-                    <button onclick="importToggleAll(false)" class="text-[11px] text-slate-500 hover:text-slate-700">إلغاء التحديد</button>
-                    <button onclick="previewImportTable()" title="استعلام تجريبي عن الجدول المحدد (أول 50)" class="text-[11px] text-sky-600 hover:text-sky-800 font-bold"><i class="fa-solid fa-table-cells"></i> استعلام تجريبي</button>
-                    <span class="mr-auto"></span>
-                    <button onclick="importSelectedFields()" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold">إضافة المحدد</button>
+
+                <!-- Columns selection -->
+                <div>
+                    <div class="flex items-center justify-between mb-1">
+                        <span class="text-[11px] font-semibold text-slate-600">أعمدة الجدول المطلوبة للتقرير</span>
+                        <div class="flex items-center gap-2">
+                            <button type="button" onclick="importToggleAll(true)" class="text-[11px] text-indigo-600 hover:text-indigo-800 font-semibold">تحديد الكل</button>
+                            <span class="text-slate-300">|</span>
+                            <button type="button" onclick="importToggleAll(false)" class="text-[11px] text-slate-500 hover:text-slate-700 font-semibold">إلغاء التحديد</button>
+                            <span class="text-slate-300">|</span>
+                            <button type="button" onclick="previewImportTable()" title="استعلام تجريبي عن الجدول المحدد (أول 50)" class="text-[11px] text-sky-600 hover:text-sky-800 font-bold"><i class="fa-solid fa-table-cells"></i> استعلام تجريبي</button>
+                        </div>
+                    </div>
+                    <div id="importColsList" class="max-h-40 overflow-y-auto custom-scroll bg-white border border-slate-200 rounded-lg p-2 space-y-1"></div>
                 </div>
+
+                <!-- Table general condition builder (WHERE) -->
+                <div id="importFilterSection" class="bg-amber-50/60 border border-amber-200/90 rounded-xl p-3 space-y-2.5">
+                    <div class="flex items-center justify-between gap-2">
+                        <div class="flex items-center gap-2">
+                            <span class="w-6 h-6 rounded-lg bg-amber-500 text-white flex items-center justify-center text-xs shadow-xs"><i class="fa-solid fa-filter"></i></span>
+                            <div>
+                                <span class="text-xs font-bold text-slate-800">الشرط العام للجدول (فلترة السجلات قبل الاستيراد)</span>
+                                <span class="text-[10px] text-slate-500 block">حدد اسم الحقل والعملية حسب نوع بياناته — وعند المساواة (=) تظهر قائمة القيم مع إمكانية البحث</span>
+                            </div>
+                        </div>
+                        <button type="button" onclick="addImportFilterRow()" class="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1 shadow-xs transition">
+                            <i class="fa-solid fa-plus text-[10px]"></i> إضافة شرط
+                        </button>
+                    </div>
+
+                    <!-- Filter rows container -->
+                    <div id="importFilterRows" class="space-y-2">
+                        <!-- Rendered by JS -->
+                    </div>
+
+                    <!-- Live SQL WHERE preview -->
+                    <div class="pt-2 border-t border-amber-200/60 flex items-center justify-between gap-2">
+                        <div class="flex items-center gap-1.5 flex-1 min-w-0">
+                            <span class="text-[10px] font-bold text-amber-800 shrink-0">معاينة الشرط:</span>
+                            <span id="importFilterPreview" class="text-[11px] font-mono text-slate-700 bg-white border border-amber-200 rounded px-2 py-0.5 truncate flex-1" dir="ltr">لا توجد شروط (استيراد كافة السجلات)</span>
+                        </div>
+                        <button type="button" onclick="clearImportFilterRows()" id="importFilterClearBtn" class="text-[10px] text-slate-400 hover:text-rose-600 font-semibold shrink-0 hidden">
+                            مسح الشروط <i class="fa-solid fa-xmark"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2 shrink-0">
+                <button type="button" onclick="closeImportFieldsModal()" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold">إلغاء</button>
+                <button type="button" onclick="importSelectedFields()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-200 flex items-center gap-1.5">
+                    <i class="fa-solid fa-check"></i> استيراد الحقول والشرط
+                </button>
             </div>
         </div>
     </div>
