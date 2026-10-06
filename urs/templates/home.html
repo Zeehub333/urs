@@ -513,16 +513,36 @@
                 </aside>
                 <div class="flex-1 flex flex-col min-w-0 min-h-0">
                     <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-indigo-50 shrink-0">
-                        <h3 class="text-sm font-bold text-slate-800"><i class="fa-solid fa-gear text-indigo-600"></i> إعدادات مساحة العمل</h3>
-                        <button onclick="wsSettingsClose()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+                        <h3 class="text-sm font-bold text-slate-800 flex items-center gap-2">
+                            <i class="fa-solid fa-gear text-indigo-600"></i> إعدادات مساحة العمل
+                        </h3>
+                        <div class="flex items-center gap-2">
+                            <button type="button" onclick="location.reload()" title="تحديث الصفحة بالكامل" class="px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition shadow-xs cursor-pointer">
+                                <i class="fa-solid fa-arrows-rotate text-indigo-600 text-[11px]"></i>
+                                <span>تحديث الصفحة</span>
+                            </button>
+                            <button onclick="wsSettingsClose()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+                        </div>
                     </div>
                     <div class="p-5 space-y-3 text-xs overflow-y-auto custom-scroll flex-1 min-h-0" id="wsSettingsBody">
                         <p class="text-slate-400 text-center py-4">جاري التحميل...</p>
                     </div>
-                    <div class="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2 shrink-0">
-                        <span id="wsSettingsMsg" class="text-[11px] text-rose-600 font-bold ml-auto"></span>
-                        <button onclick="wsSettingsClose()" class="px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs">إلغاء</button>
-                        <button onclick="wsSettingsSave()" class="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold">حفظ</button>
+                    <div class="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-2 shrink-0">
+                        <div class="flex items-center gap-2">
+                            <button type="button" onclick="wsMasterEnsure(wsMigrateTablesDo)" id="wsMigrateBtn" title="ترحيل جداول models.py وإنشاء السكيما فورياً" class="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition shadow-sm cursor-pointer">
+                                <i class="fa-solid fa-database"></i>
+                                <span>ترحيل الجداول</span>
+                            </button>
+                            <button type="button" onclick="location.reload()" title="تحديث الصفحة بالكامل" class="px-3.5 py-1.5 bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition shadow-xs cursor-pointer">
+                                <i class="fa-solid fa-arrows-rotate text-slate-600"></i>
+                                <span>تحديث الصفحة</span>
+                            </button>
+                        </div>
+                        <span id="wsSettingsMsg" class="text-[11px] text-rose-600 font-bold mr-auto ml-2"></span>
+                        <div class="flex items-center gap-2">
+                            <button onclick="wsSettingsClose()" class="px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs">إلغاء</button>
+                            <button onclick="wsSettingsSave()" class="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold">حفظ</button>
+                        </div>
                     </div>
                 </div>
             </div>`;
@@ -623,6 +643,16 @@
                     <div class="grid grid-cols-2 gap-3">
                         ${inp('primary_connection', w.primary_connection, 'الاتصال المحلي الأساسي', 'dir="ltr" onchange="wsTablesFetch()"')}
                         ${inp('schema', w.schema, 'السكيما (Schema) — تكامل models.py', 'dir="ltr" placeholder="public"')}
+                    </div>
+                    <div class="flex items-center justify-between p-3 bg-emerald-50/70 border border-emerald-200 rounded-xl">
+                        <div>
+                            <div class="text-[11px] font-bold text-emerald-800 flex items-center gap-1.5"><i class="fa-solid fa-database text-emerald-600"></i> ترحيل الجداول وتكامل Models.py</div>
+                            <div class="text-[10px] text-emerald-600 mt-0.5">ينشئ السكيما إذا لم تكن موجودة ويرحل كافة جداول models.py فورياً</div>
+                        </div>
+                        <button type="button" onclick="wsMasterEnsure(wsMigrateTablesDo)" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition shadow-sm cursor-pointer shrink-0">
+                            <i class="fa-solid fa-play"></i>
+                            <span>ترحيل الجداول الآن</span>
+                        </button>
                     </div>
                     <div><label class="block font-semibold text-slate-700 mb-1">جدول المستخدمين الرئيسي (ابحث واختر)</label>
                     <div class="flex gap-1">
@@ -841,6 +871,40 @@
                 wsSettingsClose();
                 setTimeout(()=>location.reload(), 600);
             }catch(e){ if(msg) msg.textContent = String((e && e.message) || e).slice(0, 200); }
+        }
+        async function wsMigrateTablesDo(){
+            const id = window._wsEditId;
+            const msg = document.getElementById('wsSettingsMsg');
+            const btn = document.getElementById('wsMigrateBtn');
+            if(!id) return;
+            const v = (k)=>{ const el = document.getElementById('wsF_' + k); return el ? el.value : ''; };
+            const schema = (v('schema') || '').trim();
+            if(msg) { msg.textContent = 'جارٍ ترحيل الجداول وتكامل models.py...'; msg.className = 'text-[11px] text-indigo-600 font-bold'; }
+            if(btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> جاري الترحيل...'; }
+            try{
+                const conn = {host: v('host'), port: v('port'), user: v('user'), instance: v('instance')};
+                if(String(v('password') || '').trim() !== '') conn.password = v('password');
+                const res = await fetch('/api/workspaces/' + encodeURIComponent(id) + '/migrate/', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({schema: schema, connection: conn})
+                });
+                const d = await res.json();
+                if(!res.ok) throw new Error(d.error || 'فشل الترحيل');
+                const tCount = d.table_count || (d.tables ? d.tables.length : 0);
+                const sName = d.schema || schema || '';
+                const successMsg = `تم ترحيل الجداول بنجاح ✓ (${tCount} جدول في السكيما ${sName})`;
+                if(msg) { msg.textContent = successMsg; msg.className = 'text-[11px] text-emerald-600 font-bold'; }
+                if(typeof notify === 'function') notify(successMsg, 'success');
+                if(typeof wsTablesFetch === 'function') wsTablesFetch();
+                if(typeof wsColsFetch === 'function') wsColsFetch();
+            }catch(e){
+                const errText = 'تعذر ترحيل الجداول: ' + String((e && e.message) || e).slice(0, 200);
+                if(msg) { msg.textContent = errText; msg.className = 'text-[11px] text-rose-600 font-bold'; }
+                if(typeof notify === 'function') notify(errText, 'danger');
+            }finally{
+                if(btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-database"></i> <span>ترحيل الجداول</span>'; }
+            }
         }
         (function(){
             try{

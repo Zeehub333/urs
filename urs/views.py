@@ -1189,6 +1189,10 @@ def api_workspace_migrate(request, ws_id):
             return JsonResponse({"error": "لا توجد سكيما — حدد schema"}, status=400)
         if not __import__("re").fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", _schema):
             return JsonResponse({"error": "schema: أحرف لاتينية/أرقام/_ فقط"}, status=400)
+        if _schema != (conf.get("SCHEMA") or "").strip().lower():
+            _write_ws_conf(ws, conf.get("PRIMARY_CONNECTION", ""), conf.get("USERS_TABLE", ""),
+                           conf.get("STATUS", "active"), conf.get("USERS_USER_COLUMN", ""),
+                           conf.get("USERS_PASSWORD_COLUMN", ""), _schema)
         try:
             from .models import Connection
             row = Connection.objects.filter(name=_pc).first()
@@ -1198,6 +1202,14 @@ def api_workspace_migrate(request, ws_id):
             return JsonResponse({"error": "صف الاتصال غير موجود: %s" % _pc}, status=404)
         params = {"host": row.host, "port": row.port, "user": row.user,
                   "password": row.password, "instance": row.instance}
+        if isinstance(data.get("connection"), dict) and data.get("connection"):
+            _c = data.get("connection")
+            if _c.get("host"): params["host"] = _c["host"]
+            if _c.get("port"): params["port"] = _c["port"]
+            if _c.get("user"): params["user"] = _c["user"]
+            if _c.get("password") is not None and str(_c.get("password")).strip() != "":
+                params["password"] = _c["password"]
+            if _c.get("instance"): params["instance"] = _c["instance"]
         try:
             info = _ws_migrate_workspace_schema(
                 params, _schema, conf.get("USERS_TABLE") or "") or {}
