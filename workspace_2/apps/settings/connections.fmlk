@@ -45,4 +45,9 @@
     <field id="14" name="is_queryable" alias="قابل للاستعلام (SQL)" dataType="BOOLEAN" inputType="boolean" required="false" nullable="true" editable="true" primary_key="false" tab="الحالة" destination="main" category="الحالة"/>
     <field id="15" name="description" alias="الوصف" dataType="TEXT" inputType="textarea" required="false" nullable="true" editable="true" primary_key="false" tab="إضافية" destination="main" category="إضافية"/>
   </fields>
+  <custom_actions>
+    <action name="test_connection" label="اختبار الاتصال" endpoint="/api/connections/test/" icon="fa-plug-circle-check" badge_color="#059669" level="record"/>
+    <action name="test_connection_form" label="اختبار الاتصال" endpoint="/api/connections/test/" icon="fa-plug-circle-check" badge_color="#059669" level="form"/>
+    <action name="stats" label="إحصائيات الاتصال" endpoint="/api/connections/stats/" render="modals/conn_stats.html" icon="fa-chart-simple" badge_color="#4f46e5" level="record"/>
+  </custom_actions>
 </fml>

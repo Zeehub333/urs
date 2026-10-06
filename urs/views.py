@@ -11385,24 +11385,57 @@ def api_connection_stats(request):
 
 @csrf_exempt
 def api_connection_test_record(request):
-    """POST /api/connections/test/ — زر مخصص في FMLK: {record: {id}} → اختبار ذلك السجل."""
+    """POST /api/connections/test/ — زر مخصص في FMLK: {record: {...}} أو {form: {...}} → اختبار ذلك السجل."""
     if request.method != "POST":
         return JsonResponse({"error": "POST required"}, status=405)
     try:
         data = json.loads(request.body.decode() or "{}")
-        rec = data.get("record") or {}
+        rec = data.get("record") or data.get("form") or {}
+        if not rec.get("id") and data.get("record_id"):
+            rec["id"] = data["record_id"]
         from .models import Connection
+        obj = None
         try:
             obj = _resolve_connection_record(rec)
         except (Connection.DoesNotExist, ValueError, TypeError):
-            return JsonResponse({"ok": False, "error": "سجل الاتصال غير موجود — احفظ السجل أولاً"}, status=404)
+            eng = (rec.get("engine") or "").strip().lower()
+            if eng:
+                from types import SimpleNamespace
+                obj = SimpleNamespace(
+                    id=None,
+                    name=rec.get("name") or "unsaved",
+                    engine=eng,
+                    host=(rec.get("host") or "").strip(),
+                    port=int(rec.get("port") or (1521 if eng == "oracle" else (1433 if eng == "sqlserver" else 5432))),
+                    user=(rec.get("user") or "").strip(),
+                    password=rec.get("password") or "",
+                    instance=(rec.get("instance") or "").strip(),
+                    instance_name=(rec.get("instance_name") or "").strip(),
+                    schema=(rec.get("schema") or "").strip(),
+                )
+        if obj is None:
+            return JsonResponse({"ok": False, "error": "سجل الاتصال غير موجود — أدخل بيانات الاتصال أو احفظ السجل أولاً"}, status=404)
+
+        form_data = data.get("form")
+        if form_data and isinstance(form_data, dict):
+            for k in ("host", "port", "user", "password", "instance", "instance_name", "schema", "engine"):
+                if k in form_data and form_data[k] is not None and str(form_data[k]).strip() != "":
+                    v = form_data[k]
+                    if k == "port":
+                        try:
+                            v = int(v)
+                        except Exception:
+                            v = getattr(obj, "port", 5432)
+                    setattr(obj, k, v)
+
         ok, payload, status = _test_connection_obj(obj)
         _err2 = ""
         try:
             _err2 = (payload or {}).get("error") if isinstance(payload, dict) else ""
         except Exception:
             _err2 = ""
-        _record_check(obj, ok, _check_actor(request), _err2)
+        if getattr(obj, "id", None):
+            _record_check(obj, ok, _check_actor(request), _err2)
         if ok and "message" not in payload:
             payload["message"] = f"اتصال ومصادقة سليمة ✓ ({obj.engine})"
         return JsonResponse(payload, status=status)

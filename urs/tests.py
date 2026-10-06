@@ -1158,3 +1158,15 @@ class OracleClientUtilTests(SimpleTestCase):
         eng.table = "urs_connection"
         out = FMLKFormEngine._hash_secrets(eng, {"password": "plain_password_123"}, {"password"})
         self.assertEqual(out.get("password"), "plain_password_123")
+
+    def test_connections_fmlk_has_custom_actions(self):
+        from pathlib import Path
+        from fmlk_engine.compiler import FMLKFormCompiler
+        c = FMLKFormCompiler(Path("workspace_2/apps/settings/connections.fmlk"))
+        action_names = [a.name for a in c.actions()]
+        self.assertIn("test_connection", action_names)
+        self.assertIn("test_connection_form", action_names)
+        tc = next(a for a in c.actions() if a.name == "test_connection")
+        self.assertEqual(tc.label, "اختبار الاتصال")
+        self.assertEqual(tc.endpoint, "/api/connections/test/")
+        self.assertEqual(tc.level, "record")

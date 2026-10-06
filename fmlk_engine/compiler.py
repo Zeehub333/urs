@@ -568,10 +568,13 @@ class FMLKFormCompiler:
             return self._actions
         result: List[FMLKAction] = []
         container = self._find("custom_actions")
-        els = [e for e in container if e.tag.lower() == "action"] if container is not None else []
+        if container is None:
+            container = self._find("custom_action")
+        valid_tags = ("action", "custom_action")
+        els = [e for e in container if e.tag.lower() in valid_tags] if container is not None else []
         if not els and self._root is not None:
-            # fallback: <action> مباشرة تحت الجذر
-            els = [e for e in self._root if e.tag.lower() == "action"]
+            # fallback: <action> أو <custom_action> مباشرة تحت الجذر
+            els = [e for e in self._root if e.tag.lower() in valid_tags]
         for idx, el in enumerate(els, start=1):
             def get(*names, default=None):
                 for k, v in el.attrib.items():
