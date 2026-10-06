@@ -1881,9 +1881,11 @@ def api_workspace_fiscal_years(request, ws_id):
     try:
         from . import workspace as _wsm
         ws_id = (ws_id or "").strip()
-        if ws_id not in {w.name for w in _wsm.workspace_dirs()}:
+        ws = next((w for w in _wsm.workspace_dirs() if w.name == ws_id), None)
+        if ws is None:
             return JsonResponse({"error": "unknown workspace"}, status=404)
-        obj, _ut, err = _ws_login_connection(ws_id)
+        conf = _wsm.read_conf(ws / "workspace.conf")
+        obj, utable, err = _ws_login_connection(ws_id)
         if err or obj is None:
             return JsonResponse({"error": err or "no connection"}, status=400)
         try:
@@ -1894,6 +1896,12 @@ def api_workspace_fiscal_years(request, ws_id):
             cur = conn.cursor()
             cur.execute("SELECT schema_name FROM information_schema.schemata ORDER BY 1")
             schemas = [r[0] for r in (cur.fetchall() or [])]
+            tbl = (utable.split(".")[-1] if utable else "users").strip()
+            if tbl:
+                cur.execute("SELECT DISTINCT table_schema FROM information_schema.tables WHERE table_name = %s", (tbl,))
+                schemas_with_users = {r[0] for r in (cur.fetchall() or [])}
+                if schemas_with_users:
+                    schemas = [s for s in schemas if s in schemas_with_users]
         finally:
             try:
                 conn.close()
@@ -1902,6 +1910,13 @@ def api_workspace_fiscal_years(request, ws_id):
         schemas = [s for s in schemas
                    if s not in ("pg_catalog", "information_schema")
                    and not str(s).startswith("pg_")]
+        ws_sch = (conf.get("SCHEMA") or "").strip()
+        if ws_sch and _FYEAR_RE:
+            pfx = _FYEAR_RE.sub("", ws_sch)
+            if pfx:
+                matching = [s for s in schemas if str(s).startswith(pfx)]
+                if matching:
+                    schemas = matching
         return JsonResponse({"years": extract_fiscal_years(schemas)},
                             json_dumps_params={"ensure_ascii": False})
     except Exception as e:
