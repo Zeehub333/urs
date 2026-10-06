@@ -720,3 +720,58 @@ class WsCreateModalMarkupTests(SimpleTestCase):
         self.assertIn("/api/lookup/lists/", html)
         self.assertIn("اختر الدولة", html)
         self.assertIn("اختر العملة", html)
+
+
+class WsScopedConnectionsTests(__import__("django.test", fromlist=["TestCase"]).TestCase):
+    def setUp(self):
+        self.rf = RequestFactory()
+        from urs.models import Connection
+        Connection.objects.all().delete()
+        self.c1 = Connection.objects.create(name="ws_primary", engine="postgres", host="127.0.0.1", port=5432, instance="db1", schema="sch_orig")
+        self.c2 = Connection.objects.create(name="other_conn", engine="postgres", host="127.0.0.1", port=5432, instance="db2", schema="public")
+
+    def test_api_connections_list_scoped_to_workspace_session(self):
+        import tempfile as _tf
+        with _tf.TemporaryDirectory() as td:
+            ws_dir = pathlib.Path(td) / "workspace_t"
+            ws_dir.mkdir()
+            (ws_dir / "workspace.conf").write_text("PRIMARY_CONNECTION=ws_primary\nSCHEMA=sch_ws\n", encoding="utf-8")
+            with mock.patch("urs.workspace.workspace_dirs", return_value=[ws_dir]):
+                req = self.rf.get("/api/connections/")
+                req.session = {"workspace": "workspace_t", "fiscal_schema": "fiscal_2026"}
+                res = _v.api_connections_list(req)
+                data = json.loads(res.content.decode())
+                conns = data.get("connections", [])
+                self.assertEqual(len(conns), 1)
+                self.assertEqual(conns[0]["name"], "ws_primary")
+                self.assertEqual(conns[0]["schema"], "fiscal_2026")
+
+    def test_api_connections_list_unscoped_when_no_session(self):
+        req = self.rf.get("/api/connections/")
+        req.session = {}
+        res = _v.api_connections_list(req)
+        data = json.loads(res.content.decode())
+        names = {c["name"] for c in data.get("connections", [])}
+        self.assertIn("ws_primary", names)
+        self.assertIn("other_conn", names)
+
+    def test_api_connection_tables_scoped_to_session_schema(self):
+        req = self.rf.get(f"/api/connections/{self.c1.id}/tables/")
+        req.session = {"workspace": "workspace_t", "fiscal_schema": "fiscal_2026"}
+        with mock.patch("urs.views._list_tables_obj", return_value=[{"name": "tbl1", "schema": "fiscal_2026", "full": "fiscal_2026.tbl1"}]) as mock_list:
+            res = _v.api_connection_tables(req, self.c1.id)
+            data = json.loads(res.content.decode())
+            self.assertEqual(res.status_code, 200)
+            mock_list.assert_called_once_with(mock.ANY, schema_override="fiscal_2026")
+            self.assertEqual(data["schema"], "fiscal_2026")
+
+    def test_api_connection_table_columns_scoped_to_session_schema(self):
+        req = self.rf.get(f"/api/connections/{self.c1.id}/tables/users/columns/")
+        req.session = {"workspace": "workspace_t", "fiscal_schema": "fiscal_2026"}
+        with mock.patch("urs.views._table_columns_obj", return_value=[{"name": "id", "type": "INTEGER", "db_type": "int"}]) as mock_cols:
+            res = _v.api_connection_table_columns(req, self.c1.id, "users")
+            data = json.loads(res.content.decode())
+            self.assertEqual(res.status_code, 200)
+            mock_cols.assert_called_once_with(mock.ANY, "fiscal_2026", "users")
+            self.assertEqual(data["table"], "fiscal_2026.users")
+

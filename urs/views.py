@@ -10589,19 +10589,67 @@ def _sync_connections_both_ways():
         return 0, 0
 
 
+def _ws_session_context(request):
+    """Returns (ws_id, fiscal_schema, primary_connection_name)."""
+    try:
+        from .workspace import active_ws_id, workspace_dirs, read_conf
+        ws_id = ""
+        if request:
+            try:
+                ws_id = (request.session.get("workspace") or request.GET.get("workspace") or "").strip()
+            except Exception:
+                ws_id = ""
+        if not ws_id:
+            ws_id = str(active_ws_id() or "").strip()
+        fiscal_schema = ""
+        if request:
+            try:
+                fiscal_schema = (request.session.get("fiscal_schema") or request.GET.get("schema") or "").strip()
+            except Exception:
+                fiscal_schema = ""
+        primary_conn = ""
+        if ws_id:
+            ws = next((w for w in workspace_dirs() if w.name == ws_id), None)
+            if ws is not None:
+                conf = read_conf(ws / "workspace.conf")
+                primary_conn = (conf.get("PRIMARY_CONNECTION") or "").strip()
+                if not fiscal_schema:
+                    fiscal_schema = (conf.get("SCHEMA") or "").strip()
+        return ws_id, fiscal_schema, primary_conn
+    except Exception:
+        return "", "", ""
+
+
 def api_connections_list(request):
-    """GET /api/connections/ — list all connections for report wizard"""
+    """GET /api/connections/ — list connections for wizards/designers scoped to workspace"""
     try:
         from .models import Connection
         try:
             _sa, _sb = _sync_connections_both_ways()
         except Exception:
             _sa = _sb = 0
+
+        ws_id, fiscal_schema, primary_conn = _ws_session_context(request)
+        if ws_id and primary_conn:
+            conns = list(Connection.objects.filter(name=primary_conn))
+            if not conns and primary_conn.isdigit():
+                conns = list(Connection.objects.filter(id=int(primary_conn)))
+            if conns:
+                res = []
+                for c in conns:
+                    cd = c.to_dict()
+                    if fiscal_schema:
+                        cd["schema"] = fiscal_schema
+                    res.append(cd)
+                return JsonResponse({"connections": res,
+                                     "synced": {"pg_to_dj": _sa, "dj_to_pg": _sb}})
+
         conns = Connection.objects.all().order_by("name")
         return JsonResponse({"connections": [c.to_dict() for c in conns],
                              "synced": {"pg_to_dj": _sa, "dj_to_pg": _sb}})
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
+
 
 
 @csrf_exempt
@@ -10960,6 +11008,9 @@ def _effective_or_row(conn_id):
     except Exception:
         return None
     try:
+        from .workspace import active_ws_id
+        if active_ws_id() or (obj.name and obj.name != "urs" and obj.instance):
+            return obj
         if not (obj.id == 1 or (obj.name or "") == "urs_local"):
             return obj
         from config.dbconf import read_appconf, dbpass_resolve
@@ -10979,10 +11030,12 @@ def _effective_or_row(conn_id):
         _pw = dbpass_resolve(ac.get("DB_PASS") or "")
         if _pw:
             obj.password = _pw
-        if (ac.get("DB_NAME") or "").strip():
-            obj.instance = ac["DB_NAME"].strip()
-        if (ac.get("DB_SCHEMA") or "").strip():
-            obj.schema = ac["DB_SCHEMA"].strip()
+        if obj.id == 1 or not obj.instance:
+            if (ac.get("DB_NAME") or "").strip():
+                obj.instance = ac["DB_NAME"].strip()
+        if obj.id == 1 or not obj.schema:
+            if (ac.get("DB_SCHEMA") or "").strip():
+                obj.schema = ac["DB_SCHEMA"].strip()
         if (ac.get("DB_INSTANCENAME") or "").strip():
             try:
                 obj.instance_name = ac["DB_INSTANCENAME"].strip()
@@ -11216,13 +11269,13 @@ def _resolve_connection_record(rec):
     return Connection.objects.get(name=((rec or {}).get("name") or (rec or {}).get("الاسم") or ""))
 
 
-def _list_tables_obj(obj):
+def _list_tables_obj(obj, schema_override=None):
     """قائمة جداول أي اتصال (postgres/oracle/sqlserver/mysql) — وجداول zk المنطقية."""
     if obj.engine == "postgres":
         conn = _pg_conn_for(obj)
         try:
             cur = conn.cursor()
-            schema = (obj.schema or "").strip()
+            schema = (schema_override or obj.schema or "").strip()
             if schema:
                 cur.execute("SELECT table_name FROM information_schema.tables WHERE table_schema=%s AND table_type IN ('BASE TABLE','VIEW') ORDER BY table_name", (schema,))
                 tables = [{"name": r[0], "schema": schema, "full": f"{schema}.{r[0]}"} for r in cur.fetchall()]
@@ -11239,11 +11292,11 @@ def _list_tables_obj(obj):
             pass
         return tables
     if obj.engine == "oracle":
-        return _oracle_tables(obj)
+        return _oracle_tables(obj, schema_override=schema_override)
     if obj.engine == "sqlserver":
-        return _mssql_tables(obj)
+        return _mssql_tables(obj, schema_override=schema_override)
     if obj.engine == "mysql":
-        return _mysql_tables(obj)
+        return _mysql_tables(obj, schema_override=schema_override)
     if obj.engine == "zk":
         return [{"name": t, "schema": "", "full": t} for t in _ZK_TABLES]
     if obj.engine == "json":
@@ -11440,10 +11493,10 @@ except Exception:
     pass
 
 
-def _oracle_tables(obj):
+def _oracle_tables(obj, schema_override=None):
     conn = _oracle_connect_obj(obj)
     try:
-        owner = ((obj.schema or "").strip() or obj.user or "").upper()
+        owner = ((schema_override or obj.schema or "").strip() or obj.user or "").upper()
         cur = conn.cursor()
         try:
             cur.execute("SELECT table_name FROM all_tables WHERE owner = :o ORDER BY table_name", {"o": owner})
@@ -11540,11 +11593,11 @@ def _mssql_connect_obj(obj, timeout=10):
     raise last
 
 
-def _mssql_tables(obj):
+def _mssql_tables(obj, schema_override=None):
     conn, _, _ = _mssql_connect_obj(obj, timeout=5)
     try:
         cur = conn.cursor()
-        schema = (obj.schema or "").strip()
+        schema = (schema_override or obj.schema or "").strip()
         if schema:
             cur.execute("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_TYPE IN ('BASE TABLE','VIEW') ORDER BY TABLE_NAME", schema)
             tables = [{"name": r[0], "schema": schema, "full": f"{schema}.{r[0]}"} for r in cur.fetchall()]
@@ -11569,13 +11622,13 @@ def _mssql_columns(obj, schema, table):
     return cols
 
 
-def _mysql_tables(obj):
+def _mysql_tables(obj, schema_override=None):
     import MySQLdb
     conn = MySQLdb.connect(host=obj.host, user=obj.user, passwd=obj.password or "",
                            db=obj.instance or None, port=int(obj.port or 3306), connect_timeout=5)
     try:
         cur = conn.cursor()
-        db = (obj.schema or "").strip() or obj.instance or ""
+        db = (schema_override or obj.schema or "").strip() or obj.instance or ""
         if db:
             cur.execute("SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = %s AND TABLE_TYPE IN ('BASE TABLE','VIEW') ORDER BY TABLE_NAME", (db,))
             tables = [{"name": r[0], "schema": db, "full": f"{db}.{r[0]}"} for r in cur.fetchall()]
@@ -11663,6 +11716,9 @@ def api_connection_tables(request, conn_id):
         obj = _effective_or_row(conn_id)
         if obj is None:
             return JsonResponse({"error": "not found"}, status=404)
+        ws_id, fiscal_schema, _ = _ws_session_context(request)
+        if fiscal_schema:
+            obj.schema = fiscal_schema
         if _iot_is_conn(obj):
             tables = _iot_mirror_tables(obj)
             payload = {"tables": tables, "total": len(tables), "engine": obj.engine,
@@ -11671,8 +11727,8 @@ def api_connection_tables(request, conn_id):
                 payload["mirror_missing"] = True
                 payload["note"] = "لا مرايا لهذا الاتصال — أنشئ جدول المرآة أولاً من سجل الاتصال"
             return JsonResponse(payload, json_dumps_params={"ensure_ascii": False})
-        tables = _list_tables_obj(obj)
-        return JsonResponse({"tables": tables, "total": len(tables), "engine": obj.engine})
+        tables = _list_tables_obj(obj, schema_override=fiscal_schema)
+        return JsonResponse({"tables": tables, "total": len(tables), "engine": obj.engine, "schema": fiscal_schema or obj.schema})
     except ValueError as e:
         return JsonResponse({"error": str(e)}, status=400)
     except Exception as e:
@@ -11752,6 +11808,9 @@ def api_connection_table_fks(request, conn_id, table):
         obj = _effective_or_row(conn_id)
         if obj is None:
             return JsonResponse({"error": "not found"}, status=404)
+        ws_id, fiscal_schema, _ = _ws_session_context(request)
+        if fiscal_schema:
+            obj.schema = fiscal_schema
         from .models import IoTMirror
         from .iot_sync import mirror_schema
         if _iot_is_conn(obj):
@@ -11773,7 +11832,7 @@ def api_connection_table_fks(request, conn_id, table):
         if "." in table:
             schema, tname = table.split(".", 1)
         else:
-            schema, tname = _default_schema_for(obj), table
+            schema, tname = (fiscal_schema or _default_schema_for(obj)), table
         if not _valid_table_ref(schema) or not _valid_table_ref(tname):
             return JsonResponse({"error": "invalid table name"}, status=400)
         fks = _table_fks_obj(obj, schema, tname)
@@ -12021,6 +12080,9 @@ def api_connection_table_preview(request, conn_id, table):
         obj = _effective_or_row(conn_id)
         if obj is None:
             return JsonResponse({"error": "not found"}, status=404)
+        ws_id, fiscal_schema, _ = _ws_session_context(request)
+        if fiscal_schema:
+            obj.schema = fiscal_schema
         try:
             limit = int(request.GET.get("limit", "50"))
         except Exception:
@@ -12067,7 +12129,7 @@ def api_connection_table_preview(request, conn_id, table):
         if "." in table:
             schema, tname = table.split(".", 1)
         else:
-            schema, tname = _default_schema_for(obj), table
+            schema, tname = (fiscal_schema or _default_schema_for(obj)), table
         if not _valid_table_ref(schema) or not _valid_table_ref(tname):
             return JsonResponse({"error": "invalid table name"}, status=400)
         cols, rows = _table_preview_obj(obj, schema, tname, limit, q, filters)
@@ -12090,6 +12152,9 @@ def api_connection_table_columns(request, conn_id, table):
         obj = _effective_or_row(conn_id)
         if obj is None:
             return JsonResponse({"error": "not found"}, status=404)
+        ws_id, fiscal_schema, _ = _ws_session_context(request)
+        if fiscal_schema:
+            obj.schema = fiscal_schema
         if "." in table:
             _, tname = table.split(".", 1)
         else:
@@ -12139,7 +12204,7 @@ def api_connection_table_columns(request, conn_id, table):
         if "." in table:
             schema, tname = table.split(".", 1)
         else:
-            schema, tname = _default_schema_for(obj), table
+            schema, tname = (fiscal_schema or _default_schema_for(obj)), table
         if not _valid_table_ref(schema) or not _valid_table_ref(tname):
             return JsonResponse({"error": "invalid table name"}, status=400)
         cols = _table_columns_obj(obj, schema, tname)
