@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <fml>
-  <fml_metadata name="users" displayName="المستخدمون" table="users" model_type="form" schema="ies202601" connection="rex_local" category="النظام" icon="fa-users" description="مستخدمو النظام — الحقول وقواعد العمل" details_tab="التفاصيل"/>
+  <fml_metadata name="users" displayName="المستخدمون" table="users" model_type="form" schema="taafi_main_2026" connection="urs_local" category="النظام" icon="fa-users" description="مستخدمو النظام — الحقول وقواعد العمل" details_tab="التفاصيل"/>
   <tabs>
     <tab id="المستخدمون" name="المستخدمون" alias="المستخدمون" sort_order="1"/>
   </tabs>

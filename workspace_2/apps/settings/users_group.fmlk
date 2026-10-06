@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <fml>
-  <fml_metadata name="users_group" displayName="@users_group" table="users_groups" model_type="form" schema="ies202601" connection="rex_local" category="عام" icon="fa-pen-to-square" details_tab="الاعضاء"/>
+  <fml_metadata name="users_group" displayName="@users_group" table="users_groups" model_type="form" schema="taafi_main_2026" connection="urs_local" category="عام" icon="fa-pen-to-square" details_tab="الاعضاء"/>
   <tabs>
     <tab id="البيانات الأساسية" name="البيانات الأساسية" alias="البيانات الأساسية" sort_order="1" is_main="1"/>
   </tabs>

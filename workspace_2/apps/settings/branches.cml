@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <cml>
-  <cml_metadata name="branches" displayName="الفروع" category="النظام" icon="fa-code-branch" description="فروع الشركة — الحقول وقواعد العمل" table="sys_branches" schema="SYS" connection="ORCL_PROD" scope="system" app="settings"/>
+  <cml_metadata name="branches" displayName="الفروع" category="النظام" icon="fa-code-branch" description="فروع الشركة — الحقول وقواعد العمل" table="sys_branches" schema="taafi_main_2026" connection="urs_local" scope="system" app="settings"/>
   <controls>
     <control id="1" name="branch_code" alias="رمز الفرع" inputType="text" dataType="VARCHAR" required="true" category="أساسية" placeholder="مثال: BR-RYD-01">
       <validation regex="^[A-Z0-9-]+$" min_length="2" max_length="20"/>

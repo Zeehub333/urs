@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <cml>
-  <cml_metadata name="permissions" displayName="الصلاحيات" category="النظام" icon="fa-shield-halved" description="صلاحيات النظام — الحقول وقواعد العمل" table="sys_permissions" schema="SYS" connection="ORCL_PROD" scope="system" app="settings"/>
+  <cml_metadata name="permissions" displayName="الصلاحيات" category="النظام" icon="fa-shield-halved" description="صلاحيات النظام — الحقول وقواعد العمل" table="sys_permissions" schema="taafi_main_2026" connection="urs_local" scope="system" app="settings"/>
   <controls>
     <control id="1" name="permission_code" alias="رمز الصلاحية" inputType="text" dataType="VARCHAR" required="true" category="أساسية" placeholder="مثال: HR.EMP.VIEW">
       <validation regex="^[A-Z0-9_.]+$" min_length="3" max_length="60"/>

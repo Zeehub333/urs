@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <cml>
-  <cml_metadata name="companies" displayName="الشركات" category="النظام" icon="fa-building" description="بيانات الشركات — الحقول وقواعد العمل" table="sys_companies" schema="SYS" connection="ORCL_PROD" scope="system" app="settings"/>
+  <cml_metadata name="companies" displayName="الشركات" category="النظام" icon="fa-building" description="بيانات الشركات — الحقول وقواعد العمل" table="sys_companies" schema="taafi_main_2026" connection="urs_local" scope="system" app="settings"/>
   <controls>
     <control id="1" name="company_code" alias="رمز الشركة" inputType="text" dataType="VARCHAR" required="true" category="أساسية" placeholder="مثال: CMP-001">
       <validation regex="^[A-Z0-9-]+$" min_length="2" max_length="20"/>

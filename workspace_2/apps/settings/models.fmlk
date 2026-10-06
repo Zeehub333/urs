@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <fml>
-  <fml_metadata name="models" displayName="سجل الموديلات" table="sys_models" category="البيانات" description="سجل الموديلات من جداول الاتصالات المحلية وتعريفها" connection="urs_local" schema="main_hq_2026" model_type="form"/>
+  <fml_metadata name="models" displayName="سجل الموديلات" table="sys_models" category="البيانات" description="سجل الموديلات من جداول الاتصالات المحلية وتعريفها" connection="urs_local" schema="taafi_main_2026" model_type="form"/>
   <tabs>
     <tab id="main" name="تعريف الجدول" alias="تعريف الجدول" sort_order="1"/>
   </tabs>

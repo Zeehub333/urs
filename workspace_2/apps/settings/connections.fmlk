@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <fml>
-  <fml_metadata name="connections" displayName="الاتصالات" table="urs_connection" model_type="form" schema="main_hq_2026" connection="urs_local" category="البيانات" icon="fa-pen-to-square" description="سجل اتصالات قواعد البيانات — يدار بمشغل النماذج"/>
+  <fml_metadata name="connections" displayName="الاتصالات" table="urs_connection" model_type="form" schema="taafi_main_2026" connection="urs_local" category="البيانات" icon="fa-pen-to-square" description="سجل اتصالات قواعد البيانات — يدار بمشغل النماذج" details_tab="التفاصيل"/>
   <tabs>
     <tab id="أساسية" name="أساسية" alias="أساسية" sort_order="1" is_main="1"/>
     <tab id="الاتصال" name="الاتصال" alias="الاتصال" sort_order="2" visibleIf="conn_type!=iot"/>

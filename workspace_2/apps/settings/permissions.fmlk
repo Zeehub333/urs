@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <fml>
-  <fml_metadata name="permissions" displayName="الصلاحيات" table="sys_permissions" model_type="form" schema="main_hq_2026" connection="urs_local" category="النظام" description="صلاحيات النظام — الحقول وقواعد العمل" icon="fa-shield-halved"/>
+  <fml_metadata name="permissions" displayName="الصلاحيات" table="sys_permissions" model_type="form" schema="taafi_main_2026" connection="urs_local" category="النظام" description="صلاحيات النظام — الحقول وقواعد العمل" icon="fa-shield-halved"/>
   <tabs>
     <tab id="main" name="الصلاحيات" alias="الصلاحيات" sort_order="1"/>
   </tabs>

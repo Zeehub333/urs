@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <cml>
-  <cml_metadata name="users" displayName="المستخدمون" category="النظام" icon="fa-users" description="مستخدمو النظام — الحقول وقواعد العمل" table="sys_users" schema="SYS" connection="ORCL_PROD" scope="system" app="settings"/>
+  <cml_metadata name="users" displayName="المستخدمون" category="النظام" icon="fa-users" description="مستخدمو النظام — الحقول وقواعد العمل" table="sys_users" schema="taafi_main_2026" connection="urs_local" scope="system" app="settings"/>
   <controls>
     <control id="1" name="username" alias="اسم المستخدم" inputType="text" dataType="VARCHAR" required="true" category="الدخول" placeholder="مثال: ahmed.admin">
       <validation regex="^[a-z0-9_.]+$" min_length="3" max_length="30"/>

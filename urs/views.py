@@ -4088,7 +4088,19 @@ def _fmlk_get_engine(fml_name, app_name=None):
         db = MockDB()
     from fmlk_engine.engine import FMLKFormEngine
     engine = FMLKFormEngine(comp, db)
-    # Monkey-patch Postgres bind handling for FML engine if needed (already in _exec)
+    try:
+        from .workspace import active_ws_id, active_fiscal_schema, workspace_dirs, read_conf
+        ws_id = active_ws_id()
+        if ws_id:
+            ws_sch = (active_fiscal_schema() or "").strip()
+            if not ws_sch:
+                ws = next((w for w in workspace_dirs() if w.name == ws_id), None)
+                if ws:
+                    ws_sch = (read_conf(ws / "workspace.conf").get("SCHEMA") or "").strip()
+            if ws_sch and hasattr(engine, "metadata") and isinstance(engine.metadata, dict):
+                engine.metadata["schema"] = ws_sch
+    except Exception:
+        pass
     return engine
 
 

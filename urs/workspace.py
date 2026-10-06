@@ -22,6 +22,7 @@ from pathlib import Path
 # cover ONLY that workspace (+ legacy shared roots) — other workspaces'
 # apps are invisible. Unset (manager/scripts/tests) → all roots (legacy).
 _active_ws = _ctxvars.ContextVar("urs_active_ws", default=None)
+_active_fiscal_schema = _ctxvars.ContextVar("urs_active_fiscal_schema", default=None)
 
 
 def set_active_ws(ws_id):
@@ -49,6 +50,31 @@ def active_ws_id():
     """Currently pinned workspace id or None."""
     try:
         return _active_ws.get()
+    except Exception:
+        return None
+
+
+def set_active_fiscal_schema(sch):
+    """Pin fiscal schema for the current request context."""
+    try:
+        sch = str(sch or "").strip() or None
+    except Exception:
+        sch = None
+    return _active_fiscal_schema.set(sch)
+
+
+def reset_active_fiscal_schema(token):
+    """Reset the active fiscal schema pin (middleware, finally)."""
+    try:
+        _active_fiscal_schema.reset(token)
+    except Exception:
+        pass
+
+
+def active_fiscal_schema():
+    """Currently pinned fiscal schema or None."""
+    try:
+        return _active_fiscal_schema.get()
     except Exception:
         return None
 
