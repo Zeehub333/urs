@@ -10545,9 +10545,32 @@ def _sync_connections_both_ways(target_conn=None, schema=None):
             return 0, 0, set()
         pg_by_name = {r.get("name"): r for r in pgrows if r.get("name")}
         a = b = 0
-        # PG -> Django (form-added rows appear in designer/admin)
+        # PG -> Django (form-added/edited rows appear in designer/admin)
         for nm, pr in pg_by_name.items():
             if nm in dj:
+                c = dj[nm]
+                changed = False
+                for f in ("engine", "host", "user", "password", "instance", "instance_name",
+                          "schema", "endpoint", "description", "conn_type"):
+                    if f in pr and pr[f] is not None:
+                        val = pr[f]
+                        if f == "password" and str(c.password or "").startswith("pbkdf2_sha256$") and not str(val).startswith("pbkdf2_sha256$"):
+                            c.password = val
+                            changed = True
+                        elif val and str(val) != str(getattr(c, f, "") or ""):
+                            setattr(c, f, val)
+                            changed = True
+                if "port" in pr and pr["port"]:
+                    try:
+                        p_int = int(pr["port"])
+                        if p_int != c.port:
+                            c.port = p_int
+                            changed = True
+                    except Exception:
+                        pass
+                if changed:
+                    c.save()
+                    a += 1
                 continue
             try:
                 vals = {"name": nm}
