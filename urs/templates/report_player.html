@@ -915,7 +915,7 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
             const fields = docSearchFields();
             for(const f of fields){
                 if(!f.required) continue;
-                const op = docFieldOps[f.alias] || f.op || docDefOp(f.kind);
+                const op = f.op || docDefOp(f.kind);
                 const gv = (t)=>{
                     const el = document.querySelector(`#docHeaderControls [data-dhf="${f.alias}"][data-dht="${t}"]`);
                     return el ? (el.value || '').trim() : '';
@@ -963,9 +963,7 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
             }catch(e){}
 
             wrap.innerHTML = fields.map((f)=>{
-                const op = docFieldOps[f.alias] || f.op || docDefOp(f.kind);
-                docFieldOps[f.alias] = op;
-                const opts = (DOC_OPS[f.kind] || DOC_OPS.text).map(([v, l])=>`<option value="${v}" ${op === v ? 'selected' : ''}>${l}</option>`).join('');
+                const op = f.op || docDefOp(f.kind);
                 let valInput = '';
                 if(f.kind === 'date' && op === 'between'){
                     const vFrom = keep[f.alias + '||from'] ?? '';
@@ -1011,9 +1009,8 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                     const curV = keep[f.alias + '||single'] ?? f.defaultValue ?? '';
                     valInput = `<input data-dhf="${f.alias}" data-dht="single" value="${String(curV).replace(/"/g, '&quot;')}" type="${f.kind==='date'?'date':'text'}" ${f.kind==='number'?'inputmode="numeric"':''} placeholder="${ph}" class="bg-white border border-slate-200 rounded-lg px-2.5 py-1 text-xs focus:outline-none focus:border-indigo-500 min-w-[130px]" onkeydown="if(event.key==='Enter') docHeaderFetch()">`;
                 }
-                return `<div class="flex items-center gap-1.5 bg-white border border-slate-200/90 rounded-xl px-2.5 py-1 shadow-2xs">
+                return `<div class="flex items-center gap-2 bg-white border border-slate-200/90 rounded-xl px-2.5 py-1 shadow-2xs">
                     <span class="font-bold text-slate-700 whitespace-nowrap text-xs">${f.label || f.alias}${f.required ? '<span class="text-rose-500 mr-0.5">*</span>' : ''}</span>
-                    <select data-dhop="${f.alias}" onchange="docHeaderOpChanged('${f.alias}', this.value)" class="bg-slate-50 border border-slate-200 text-[11px] text-slate-600 rounded px-1 py-0.5 focus:outline-none">${opts}</select>
                     <div class="min-w-0">${valInput}</div>
                 </div>`;
             }).join('');
@@ -1025,7 +1022,7 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
             let missingName = '';
 
             fields.forEach(f=>{
-                const op = docFieldOps[f.alias] || f.op || docDefOp(f.kind);
+                const op = f.op || docDefOp(f.kind);
                 const gv = (t)=>{
                     const el = document.querySelector(`#docHeaderControls [data-dhf="${f.alias}"][data-dht="${t}"]`);
                     return el ? (el.value || '').trim() : '';
@@ -1116,9 +1113,7 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                     wrap.innerHTML = '<p class="text-slate-400 text-xs sm:col-span-2">لا توجد أعمدة — سيُعرض أول مستند مباشرة</p>';
                 } else {
                     wrap.innerHTML = fields.map(f=>{
-                        const op = docFieldOps[f.alias] || docDefOp(f.kind);
-                        docFieldOps[f.alias] = op;
-                        const opts = (DOC_OPS[f.kind] || DOC_OPS.text).map(([v, l])=>`<option value="${v}" ${op === v ? 'selected' : ''}>${l}</option>`).join('');
+                        const op = f.op || docDefOp(f.kind);
                         let vals = '';
                         if(f.kind === 'date' && op === 'between'){
                             vals = `<div class="grid grid-cols-2 gap-2"><div>${docValInput(f.alias, f.kind, op, 'dateFrom', keep[f.alias + '||dateFrom'], 'من')}</div><div>${docValInput(f.alias, f.kind, op, 'dateTo', keep[f.alias + '||dateTo'], 'إلى')}</div></div>`;
@@ -1129,7 +1124,7 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                             const sv = keep[f.alias + '||single'] ?? keep[f.alias + '||dateFrom'] ?? keep[f.alias + '||numFrom'] ?? keep[f.alias + '||dateTo'] ?? keep[f.alias + '||numTo'] ?? '';
                             vals = docValInput(f.alias, f.kind, op, 'single', sv, ph);
                         }
-                        return `<div><label class="block font-semibold text-slate-700 mb-1">${f.alias}</label><div class="flex gap-1"><select data-docop="${f.alias}" onchange="docFieldOpChanged()" title="العملية" class="bg-slate-50 border border-slate-200 rounded-xl px-1.5 py-2 text-slate-700 focus:outline-none focus:border-indigo-500 shrink-0 max-w-[110px]">${opts}</select><div class="flex-1 min-w-0">${vals}</div></div></div>`;
+                        return `<div><label class="block font-semibold text-slate-700 mb-1">${f.label || f.alias}${f.required ? '<span class="text-rose-500 mr-0.5">*</span>' : ''}</label><div class="w-full">${vals}</div></div>`;
                     }).join('');
                     try{ if(typeof uiEnhanceDates === 'function') uiEnhanceDates(wrap); }catch(e){}
                 }
@@ -1156,20 +1151,19 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
             }catch(e){}
         }
         function docSearch(){
-            const blocks = document.querySelectorAll('#docSearchFields [data-docop]');
+            const fields = docSearchFields();
             activeFilters = [];
-            blocks.forEach(sel=>{
-                const f = sel.getAttribute('data-docop');
-                const op = sel.value;
-                const gv = (t)=>{ const el = document.querySelector('#docSearchFields [data-docf="' + f.replace(/"/g, '\\"') + '"][data-doct="' + t + '"]'); return el ? (el.value || '').trim() : ''; };
+            fields.forEach(f=>{
+                const op = f.op || docDefOp(f.kind);
+                const gv = (t)=>{ const el = document.querySelector('#docSearchFields [data-docf="' + f.alias.replace(/"/g, '\\"') + '"][data-doct="' + t + '"]'); return el ? (el.value || '').trim() : ''; };
                 if(op === 'between'){
                     const a = gv('dateFrom') || gv('numFrom'), b = gv('dateTo') || gv('numTo');
-                    if(a && b) activeFilters.push({field: f, op: 'between', valFrom: a, valTo: b});
-                    else if(a) activeFilters.push({field: f, op: 'gte', value: a});
-                    else if(b) activeFilters.push({field: f, op: 'lte', value: b});
+                    if(a && b) activeFilters.push({field: f.alias, op: 'between', valFrom: a, valTo: b});
+                    else if(a) activeFilters.push({field: f.alias, op: 'gte', value: a});
+                    else if(b) activeFilters.push({field: f.alias, op: 'lte', value: b});
                 } else {
                     const v = gv('single');
-                    if(v) activeFilters.push({field: f, op: op, value: v});
+                    if(v) activeFilters.push({field: f.alias, op: op, value: v});
                 }
             });
             if(!activeFilters.length){ notify('أدخل معايير البحث أولاً', 'info'); return; }
