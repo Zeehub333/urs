@@ -2608,12 +2608,12 @@
                         const _domDisp = _effDom ? ('@' + _effDom) : '@domain.com';
                         const _combVal = _rawV || (_uPart && _effDom ? (_uPart + '@' + _effDom) : '');
                         input = `<div class="space-y-1">`
-                            + `<div class="flex items-center" dir="ltr">`
+                            + `<div class="flex items-stretch rounded-xl border border-slate-200 overflow-hidden bg-white shadow-xs focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-500/20 transition" dir="ltr">`
                             + `<div class="relative flex-1 min-w-0">`
-                            + `<input type="text" data-email-user="${escAttr(field.name)}" value="${escAttr(_uPart)}" placeholder="${escAttr(ph || 'username')}" ${patternAttr} ${minLenAttr} ${maxLenAttr} autocomplete="off" spellcheck="false" oninput="FMLK.emailSync('${field.name}')" class="fx-inp font-mono !rounded-r-none !border-r-0" dir="ltr"/>`
+                            + `<input type="text" data-email-user="${escAttr(field.name)}" value="${escAttr(_uPart)}" placeholder="${escAttr(ph || 'username')}" ${patternAttr} ${minLenAttr} ${maxLenAttr} autocomplete="off" spellcheck="false" oninput="FMLK.emailSync('${field.name}')" class="w-full h-full bg-transparent px-3 py-2.5 font-mono text-xs text-slate-800 outline-none border-0" dir="ltr"/>`
                             + `</div>`
-                            + `<div class="relative shrink-0">`
-                            + `<input type="text" data-email-dom="${escAttr(field.name)}" value="${escAttr(_domDisp)}" readonly tabindex="-1" title="دومين مساحة العمل (غير قابل للتعديل إلا من الإعدادات)" class="w-36 sm:w-44 fx-inp font-mono text-xs font-bold !bg-slate-100 !text-slate-600 !rounded-l-none cursor-not-allowed select-none" dir="ltr"/>`
+                            + `<div class="flex items-center bg-slate-100 border-l border-slate-200 px-3 select-none shrink-0" title="دومين مساحة العمل (غير قابل للتعديل إلا من الإعدادات)">`
+                            + `<input type="text" data-email-dom="${escAttr(field.name)}" value="${escAttr(_domDisp)}" readonly tabindex="-1" class="w-auto bg-transparent font-mono text-xs font-bold text-slate-600 outline-none border-0 cursor-not-allowed select-none pointer-events-none" style="pointer-events: none;" dir="ltr"/>`
                             + `</div>`
                             + `</div>`
                             + `<div class="text-[10px] text-slate-400 flex items-center gap-1"><i class="fa-solid fa-lock text-[9px]"></i> دومين مساحة العمل (غير قابل للتعديل إلا من الإعدادات)</div>`

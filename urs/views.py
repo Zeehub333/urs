@@ -3733,10 +3733,23 @@ def app_form_player(request, app_name, fml_file):
         _t = (((_f.get("metadata") or {}).get("table")) or "").strip()
         if _t:
             _tbl_map.setdefault(_t.split(".")[-1], _f.get("file"))
-    ws_id = request.session.get("workspace") or request.GET.get("workspace")
     from . import workspace as _wsm
+    ws_id = _wsm.active_ws_id() or request.session.get("workspace") or request.GET.get("workspace")
+    if not ws_id and fml_path:
+        for _p in fml_path.parents:
+            if (_p / "workspace.conf").exists() or (_p / "settings.py").exists():
+                ws_id = _p.name
+                break
+    if not ws_id:
+        _pw = _wsm.primary_workspace()
+        if _pw and _pw.exists():
+            ws_id = _pw.name
+    if not ws_id:
+        _dirs = _wsm.workspace_dirs()
+        if _dirs:
+            ws_id = _dirs[0].name
     ws_info = _wsm.workspace_info(ws_id) if ws_id else None
-    ws_domain = str((ws_info or {}).get("domain") or "").strip()
+    ws_domain = str((ws_info or {}).get("domain") or "").strip().lstrip("@")
     return render(request, "forms_player.html", {
         "app": app_meta,
         "app_name": app_name,
