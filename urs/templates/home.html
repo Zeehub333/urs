@@ -970,7 +970,10 @@
                 }
             }catch(e){}
             try{
-                const res = await fetch('/api/workspaces/' + encodeURIComponent(window._wsEditId) + '/superuser/', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({username, password: pw1, full_name: String(v('wsSu_name') || '').trim(), table: tEl ? String(tEl.value || '').trim() : '', extra})});
+                const _csrf = (document.cookie.match(/(?:^|;\s*)csrftoken=([^;]*)/) || [])[1] || '';
+                const headers = {'Content-Type': 'application/json'};
+                if(_csrf) headers['X-CSRFToken'] = _csrf;
+                const res = await fetch('/api/workspaces/' + encodeURIComponent(window._wsEditId) + '/superuser/', {method:'POST', headers, body: JSON.stringify({username, password: pw1, full_name: String(v('wsSu_name') || '').trim(), table: tEl ? String(tEl.value || '').trim() : '', extra})});
                 const d = await res.json().catch(()=>({}));
                 if(!res.ok){
                     if(res.status === 403 && d.master_required){

@@ -2176,7 +2176,11 @@ def _ws_required_user_fields(cur, sch, tbl, skip=()):
                 nl = nm.lower()
                 if nl in _skip:
                     continue
-                _AUTO_EXCLUDE = ("id", "user_id", "pk", "last_login", "lastlogin", "created_at", "createdat", "updated_at", "updatedat", "date_joined", "datejoined")
+                _AUTO_EXCLUDE = (
+                    "id", "user_id", "pk",
+                    "password", "password_hash", "passwd", "pwd", "pass_hash", "user_password", "pwd_hash",
+                    "last_login", "lastlogin", "created_at", "createdat", "updated_at", "updatedat", "date_joined", "datejoined"
+                )
                 if nl in _AUTO_EXCLUDE:
                     continue
                 if not _re_id.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", nm or ""):
@@ -2218,7 +2222,11 @@ def _ws_user_fields_schema(cur, sch, tbl, skip=()):
                 cdef = str(r[3] or "").strip() if len(r) > 3 and r[3] is not None else ""
                 maxlen = r[4] if len(r) > 4 else None
 
-                _AUTO_EXCLUDE = ("id", "user_id", "pk", "last_login", "lastlogin", "created_at", "createdat", "updated_at", "updatedat", "date_joined", "datejoined")
+                _AUTO_EXCLUDE = (
+                    "id", "user_id", "pk",
+                    "password", "password_hash", "passwd", "pwd", "pass_hash", "user_password", "pwd_hash",
+                    "last_login", "lastlogin", "created_at", "createdat", "updated_at", "updatedat", "date_joined", "datejoined"
+                )
                 if nl in _AUTO_EXCLUDE:
                     continue
                 if "nextval" in cdef.lower():
@@ -2666,6 +2674,7 @@ def api_workspace_login_reset(request, ws_id):
         return JsonResponse({"error": str(e)}, status=500)
 
 
+@csrf_exempt
 def api_workspace_superuser(request, ws_id):
     """POST /api/workspaces/<id>/superuser/ {username, password, full_name?, schema?}.
 
