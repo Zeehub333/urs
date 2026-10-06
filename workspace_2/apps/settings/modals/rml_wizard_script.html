@@ -972,6 +972,407 @@ function wizApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof 
             }
         }
 
+        /* ── Edit General Condition Modal for already imported table ── */
+        let tfModalCurrentKey = '';
+        let tfModalCurrentConn = '';
+        let tfModalCurrentTable = '';
+        let tfModalColsCache = [];
+        let tfModalFilterRowsState = [];
+        let _tfComboboxSearchTimers = {};
+
+        function getTfColTypeCategory(colName){
+            const c = (tfModalColsCache || []).find(x => x.name === colName);
+            if(!c) return 'text';
+            const t = String(c.type || '').toUpperCase();
+            if(t.includes('INT') || t.includes('NUM') || t.includes('DECIMAL') || t.includes('FLOAT') || t.includes('DOUBLE') || t.includes('MONEY') || t.includes('REAL') || t.includes('BIGINT') || t.includes('SMALLINT')) return 'number';
+            if(t.includes('DATE') || t.includes('TIME')) return 'date';
+            if(t.includes('BOOL')) return 'bool';
+            return 'text';
+        }
+
+        async function openTableFilterModal(key){
+            tfModalCurrentKey = key;
+            const parts = String(key).split('||');
+            tfModalCurrentConn = parts[0] || '';
+            tfModalCurrentTable = parts.slice(1).join('||') || '';
+
+            const tnameEl = document.getElementById('tfModalTableName');
+            if(tnameEl) tnameEl.textContent = tfModalCurrentTable;
+            const cbadgeEl = document.getElementById('tfModalConnBadge');
+            if(cbadgeEl) cbadgeEl.textContent = 'الاتصال: ' + (connLabel(tfModalCurrentConn) || tfModalCurrentConn || '—');
+
+            const modal = document.getElementById('tableFilterModal');
+            if(modal) modal.classList.remove('hidden');
+
+            const matchingFields = (wizardFields || []).filter(f =>
+                String(f.conn_id || f.connection_id || '') === tfModalCurrentConn &&
+                String(f.table_source || f.tableSource || '') === tfModalCurrentTable
+            );
+            tfModalColsCache = matchingFields.map(f => ({ name: f.name, type: f.type || 'TEXT' }));
+
+            if(window.wizardTableFilterRows && window.wizardTableFilterRows[tfModalCurrentTable] && window.wizardTableFilterRows[tfModalCurrentTable].length){
+                tfModalFilterRowsState = JSON.parse(JSON.stringify(window.wizardTableFilterRows[tfModalCurrentTable]));
+            } else {
+                tfModalFilterRowsState = [];
+            }
+
+            renderTableFilterModalRows();
+            updateTableFilterModalPreview();
+
+            if(tfModalCurrentConn && tfModalCurrentTable){
+                try{
+                    const res = await fetch(`/api/connections/${encodeURIComponent(tfModalCurrentConn)}/tables/${encodeURIComponent(tfModalCurrentTable)}/columns/`);
+                    const data = await res.json();
+                    if(data.columns && data.columns.length){
+                        tfModalColsCache = data.columns;
+                        renderTableFilterModalRows();
+                    }
+                }catch(e){}
+            }
+        }
+
+        function closeTableFilterModal(){
+            const modal = document.getElementById('tableFilterModal');
+            if(modal) modal.classList.add('hidden');
+        }
+
+        function addTableFilterModalRow(){
+            if(!tfModalColsCache || !tfModalColsCache.length){
+                return notify('لا توجد أعمدة متاحة لهذا الجدول', 'warning');
+            }
+            const defaultCol = tfModalColsCache[0].name;
+            tfModalFilterRowsState.push({
+                col: defaultCol,
+                op: '=',
+                val: '',
+                val2: ''
+            });
+            renderTableFilterModalRows();
+            updateTableFilterModalPreview();
+        }
+
+        function removeTableFilterModalRow(idx){
+            tfModalFilterRowsState.splice(idx, 1);
+            renderTableFilterModalRows();
+            updateTableFilterModalPreview();
+        }
+
+        function onTfFilterFieldChange(sel, idx){
+            const row = tfModalFilterRowsState[idx];
+            if(!row) return;
+            row.col = sel.value;
+            const cat = getTfColTypeCategory(row.col);
+            const validOps = IMPORT_OPS_BY_CAT[cat] || IMPORT_OPS_BY_CAT.text;
+            if(!validOps.some(o => o.val === row.op)){
+                row.op = '=';
+            }
+            row.val = '';
+            row.val2 = '';
+            renderTableFilterModalRows();
+            updateTableFilterModalPreview();
+        }
+
+        function onTfFilterOpChange(sel, idx){
+            const row = tfModalFilterRowsState[idx];
+            if(!row) return;
+            row.op = sel.value;
+            renderTableFilterModalRows();
+            updateTableFilterModalPreview();
+        }
+
+        function renderTableFilterModalRows(){
+            const container = document.getElementById('tfModalRows');
+            if(!container) return;
+
+            if(!tfModalFilterRowsState.length){
+                container.innerHTML = `
+                    <div class="p-3 text-center bg-white/70 border border-dashed border-amber-200 rounded-lg text-slate-400 text-xs">
+                        لا توجد شروط لهذا الجدول — اضغط «إضافة شرط» لتحديد تصفية السجلات
+                    </div>`;
+                return;
+            }
+
+            container.innerHTML = tfModalFilterRowsState.map((row, idx) => {
+                const cat = getTfColTypeCategory(row.col);
+                const ops = IMPORT_OPS_BY_CAT[cat] || IMPORT_OPS_BY_CAT.text;
+
+                const colOpts = (tfModalColsCache || []).map(c =>
+                    `<option value="${wbEsc(c.name)}" ${c.name === row.col ? 'selected' : ''}>${wbEsc(c.name)} (${wbEsc(c.type || '')})</option>`
+                ).join('');
+
+                const opOpts = ops.map(o =>
+                    `<option value="${o.val}" ${o.val === row.op ? 'selected' : ''}>${o.label}</option>`
+                ).join('');
+
+                let valControl = '';
+                if(row.op === 'is_null' || row.op === 'not_null'){
+                    valControl = `<div class="flex-1 bg-slate-100 border border-slate-200 rounded-lg px-2 py-1.5 text-center text-slate-400 text-[11px] select-none">— بدون قيمة —</div>`;
+                } else if(row.op === 'between'){
+                    const inputType = cat === 'date' ? 'date' : (cat === 'number' ? 'number' : 'text');
+                    valControl = `
+                        <div class="flex-1 flex items-center gap-1">
+                            <input type="${inputType}" value="${wbEsc(row.val || '')}" oninput="tfModalFilterRowsState[${idx}].val=this.value;updateTableFilterModalPreview()" placeholder="من" class="w-1/2 bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-mono" dir="ltr">
+                            <span class="text-slate-400 text-[10px]">إلى</span>
+                            <input type="${inputType}" value="${wbEsc(row.val2 || '')}" oninput="tfModalFilterRowsState[${idx}].val2=this.value;updateTableFilterModalPreview()" placeholder="إلى" class="w-1/2 bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-mono" dir="ltr">
+                        </div>`;
+                } else if(row.op === '='){
+                    valControl = `
+                        <div class="relative flex-1 import-combobox-wrapper" id="tf_combobox_wrap_${idx}">
+                            <div class="flex items-center bg-white border border-slate-200 rounded-lg overflow-hidden focus-within:border-amber-500 focus-within:ring-1 focus-within:ring-amber-500">
+                                <input type="text"
+                                       id="tf_combobox_inp_${idx}"
+                                       value="${wbEsc(row.val || '')}"
+                                       oninput="onTfComboboxInput(this, ${idx})"
+                                       onfocus="openTfComboboxDropdown(${idx})"
+                                       placeholder="اختر أو ابحث عن قيمة..."
+                                       class="flex-1 min-w-0 px-2 py-1.5 text-xs bg-transparent outline-none font-mono"
+                                       dir="ltr"
+                                       autocomplete="off">
+                                <button type="button"
+                                        onclick="toggleTfComboboxDropdown(${idx})"
+                                        title="عرض القيم المميزة من الجدول"
+                                        tabindex="-1"
+                                        class="px-2 py-1.5 text-slate-400 hover:text-slate-600 bg-slate-50 border-r border-slate-200 text-[11px]">
+                                    <i class="fa-solid fa-chevron-down text-[10px]"></i>
+                                </button>
+                            </div>
+                            <div id="tf_combobox_drop_${idx}" class="hidden absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-xl max-h-48 overflow-y-auto z-50 p-1 text-xs space-y-0.5 custom-scroll">
+                            </div>
+                        </div>`;
+                } else {
+                    const inputType = cat === 'date' ? 'date' : (cat === 'number' ? 'number' : 'text');
+                    const placeholder = (row.op === 'contains' || row.op === 'startswith' || row.op === 'endswith') ? 'نص البحث...' : 'القيمة...';
+                    valControl = `
+                        <div class="flex-1">
+                            <input type="${inputType}"
+                                   value="${wbEsc(row.val || '')}"
+                                   oninput="tfModalFilterRowsState[${idx}].val=this.value;updateTableFilterModalPreview()"
+                                   placeholder="${placeholder}"
+                                   class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-mono"
+                                   dir="ltr">
+                        </div>`;
+                }
+
+                return `
+                    <div class="bg-white p-2.5 rounded-xl border border-amber-200/80 shadow-2xs space-y-1.5">
+                        <div class="flex items-center gap-2">
+                            <span class="text-[10px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded shrink-0">شرط ${idx + 1}</span>
+                            <div class="w-1/3 min-w-[130px]">
+                                <select onchange="onTfFilterFieldChange(this, ${idx})" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-mono font-semibold text-slate-800" dir="ltr">
+                                    ${colOpts}
+                                </select>
+                            </div>
+                            <div class="w-1/4 min-w-[110px]">
+                                <select onchange="onTfFilterOpChange(this, ${idx})" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-slate-700">
+                                    ${opOpts}
+                                </select>
+                            </div>
+                            ${valControl}
+                            <button type="button" onclick="removeTableFilterModalRow(${idx})" class="text-slate-400 hover:text-rose-600 p-1 rounded-lg transition shrink-0" title="حذف هذا الشرط">
+                                <i class="fa-solid fa-trash-can text-xs"></i>
+                            </button>
+                        </div>
+                    </div>`;
+            }).join('');
+        }
+
+        async function fetchTfColumnDistinctValues(idx, q=''){
+            const row = tfModalFilterRowsState[idx];
+            if(!row || !tfModalCurrentConn || !tfModalCurrentTable || !row.col) return [];
+            try{
+                const url = `/api/connections/${encodeURIComponent(tfModalCurrentConn)}/tables/${encodeURIComponent(tfModalCurrentTable)}/values/?column=${encodeURIComponent(row.col)}&limit=50&q=${encodeURIComponent(q || '')}`;
+                const res = await fetch(url);
+                const data = await res.json();
+                return data.values || [];
+            }catch(e){
+                return [];
+            }
+        }
+
+        async function openTfComboboxDropdown(idx, q=''){
+            const drop = document.getElementById(`tf_combobox_drop_${idx}`);
+            if(!drop) return;
+            document.querySelectorAll('[id^="tf_combobox_drop_"]').forEach(d => {
+                if(d.id !== `tf_combobox_drop_${idx}`) d.classList.add('hidden');
+            });
+            drop.classList.remove('hidden');
+            drop.innerHTML = '<div class="p-2 text-center text-slate-400 text-xs"><i class="fa-solid fa-spinner fa-spin"></i> جاري جلب القيم...</div>';
+
+            const row = tfModalFilterRowsState[idx];
+            const cat = row ? getTfColTypeCategory(row.col) : 'text';
+            const values = await fetchTfColumnDistinctValues(idx, q);
+
+            if(!drop || drop.classList.contains('hidden')) return;
+
+            let items = [];
+            if(cat === 'bool'){
+                items.push({val: '1', label: '1 (صحيح / نعم)'});
+                items.push({val: '0', label: '0 (خطأ / لا)'});
+            }
+            values.forEach(v => {
+                const sv = String(v);
+                if(!items.some(it => it.val === sv)){
+                    items.push({val: sv, label: sv});
+                }
+            });
+
+            if(!items.length){
+                drop.innerHTML = '<div class="p-2 text-center text-slate-400 text-xs">لا توجد قيم مطابقة</div>';
+                return;
+            }
+
+            drop.innerHTML = items.map(item =>
+                `<div onclick="selectTfComboboxValue(${idx}, '${wbEsc(item.val).replace(/'/g, "\\'")}')" class="px-2 py-1.5 hover:bg-amber-50 hover:text-amber-800 rounded cursor-pointer font-mono text-[11px] truncate flex items-center justify-between" title="${wbEsc(item.label)}">
+                    <span>${wbEsc(item.label)}</span>
+                    <i class="fa-solid fa-arrow-turn-down text-[9px] text-slate-300"></i>
+                </div>`
+            ).join('');
+        }
+
+        function toggleTfComboboxDropdown(idx){
+            const drop = document.getElementById(`tf_combobox_drop_${idx}`);
+            if(!drop) return;
+            if(drop.classList.contains('hidden')){
+                const inp = document.getElementById(`tf_combobox_inp_${idx}`);
+                openTfComboboxDropdown(idx, (inp ? inp.value : ''));
+            } else {
+                drop.classList.add('hidden');
+            }
+        }
+
+        function onTfComboboxInput(inp, idx){
+            const val = inp.value;
+            if(tfModalFilterRowsState[idx]){
+                tfModalFilterRowsState[idx].val = val;
+            }
+            updateTableFilterModalPreview();
+
+            clearTimeout(_tfComboboxSearchTimers[idx]);
+            _tfComboboxSearchTimers[idx] = setTimeout(() => {
+                openTfComboboxDropdown(idx, val);
+            }, 250);
+        }
+
+        function selectTfComboboxValue(idx, val){
+            if(tfModalFilterRowsState[idx]){
+                tfModalFilterRowsState[idx].val = val;
+            }
+            const inp = document.getElementById(`tf_combobox_inp_${idx}`);
+            if(inp) inp.value = val;
+            const drop = document.getElementById(`tf_combobox_drop_${idx}`);
+            if(drop) drop.classList.add('hidden');
+            updateTableFilterModalPreview();
+        }
+
+        function generateTableFilterModalWhere(){
+            const shortTbl = tfModalCurrentTable.includes('.') ? tfModalCurrentTable.split('.').pop() : tfModalCurrentTable;
+            const parts = [];
+            for(const r of tfModalFilterRowsState){
+                if(!r.col) continue;
+                const cat = getTfColTypeCategory(r.col);
+                const colRef = shortTbl ? `[${shortTbl}.${r.col}]` : `[${r.col}]`;
+                const val = String(r.val || '').trim();
+                const valEsc = val.replace(/'/g, "''");
+                const val2 = String(r.val2 || '').trim();
+                const val2Esc = val2.replace(/'/g, "''");
+
+                if(r.op === 'is_null'){
+                    parts.push(`${colRef} IS NULL`);
+                } else if(r.op === 'not_null'){
+                    parts.push(`${colRef} IS NOT NULL`);
+                } else if(r.op === 'between'){
+                    if(val === '' && val2 === '') continue;
+                    if(cat === 'number'){
+                        parts.push(`${colRef} BETWEEN ${val || 0} AND ${val2 || 0}`);
+                    } else {
+                        parts.push(`${colRef} BETWEEN '${valEsc}' AND '${val2Esc}'`);
+                    }
+                } else if(r.op === 'contains'){
+                    if(val === '') continue;
+                    parts.push(`${colRef} LIKE '%${valEsc}%'`);
+                } else if(r.op === 'startswith'){
+                    if(val === '') continue;
+                    parts.push(`${colRef} LIKE '${valEsc}%'`);
+                } else if(r.op === 'endswith'){
+                    if(val === '') continue;
+                    parts.push(`${colRef} LIKE '%${valEsc}'`);
+                } else if(r.op === '='){
+                    if(val === '') continue;
+                    if(cat === 'number'){
+                        parts.push(`${colRef} = ${val}`);
+                    } else {
+                        parts.push(`${colRef} = '${valEsc}'`);
+                    }
+                } else if(r.op === '!='){
+                    if(val === '') continue;
+                    if(cat === 'number'){
+                        parts.push(`${colRef} <> ${val}`);
+                    } else {
+                        parts.push(`${colRef} <> '${valEsc}'`);
+                    }
+                } else if(['>', '>=', '<', '<='].includes(r.op)){
+                    if(val === '') continue;
+                    if(cat === 'number'){
+                        parts.push(`${colRef} ${r.op} ${val}`);
+                    } else {
+                        parts.push(`${colRef} ${r.op} '${valEsc}'`);
+                    }
+                }
+            }
+            return parts.join(' AND ');
+        }
+
+        function updateTableFilterModalPreview(){
+            const prev = document.getElementById('tfModalPreview');
+            if(!prev) return;
+            const clause = generateTableFilterModalWhere();
+            if(clause){
+                prev.textContent = `WHERE ${clause}`;
+                prev.className = 'text-[11px] font-mono font-bold text-amber-900 bg-amber-100/90 border border-amber-300 rounded px-2 py-0.5 truncate flex-1';
+            } else {
+                prev.textContent = 'لا توجد شروط (استيراد كافة السجلات)';
+                prev.className = 'text-[11px] font-mono text-slate-500 bg-slate-50 border border-slate-200 rounded px-2 py-0.5 truncate flex-1';
+            }
+        }
+
+        function saveTableFilterModal(){
+            const tableWhere = generateTableFilterModalWhere();
+            const tbl = tfModalCurrentTable;
+            if(!window.wizardTableConditions) window.wizardTableConditions = {};
+            if(!window.wizardTableFilterRows) window.wizardTableFilterRows = {};
+
+            if(tableWhere){
+                window.wizardTableConditions[tbl] = tableWhere;
+                window.wizardTableFilterRows[tbl] = JSON.parse(JSON.stringify(tfModalFilterRowsState));
+            } else {
+                delete window.wizardTableConditions[tbl];
+                delete window.wizardTableFilterRows[tbl];
+            }
+
+            const allTableWheres = Object.values(window.wizardTableConditions).filter(Boolean);
+            if(allTableWheres.length){
+                wizardGeneralWhere = allTableWheres.map(w => '(' + w + ')').join(' AND ');
+            } else {
+                wizardGeneralWhere = '';
+            }
+
+            if(typeof wizardTableOpts !== 'undefined'){
+                if(!wizardTableOpts[tfModalCurrentKey]) wizardTableOpts[tfModalCurrentKey] = {};
+                wizardTableOpts[tfModalCurrentKey].where = tableWhere || '';
+            }
+
+            closeTableFilterModal();
+            try{ if(typeof wbRenderActiveSheet === 'function') wbRenderActiveSheet(); }catch(e){}
+            notify(`تم حفظ الشرط العام لجدول ${tbl}${tableWhere ? '' : ' (تم مسح الشرط)'}`, 'success');
+        }
+
+        function clearAndSaveTableFilterModal(){
+            tfModalFilterRowsState = [];
+            renderTableFilterModalRows();
+            updateTableFilterModalPreview();
+            saveTableFilterModal();
+        }
+
         async function loadImportColumns(){
             const cid = document.getElementById('importConnSel').value;
             const tbl = document.getElementById('importTableSel').value;
@@ -4354,7 +4755,17 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                     + '<button onclick="openSqlImport()" class="wb-add w-full"><i class="fa-solid fa-file-code"></i> استيراد من SQL</button>'
                     + '<button onclick="openFetchQuery()" class="wb-add w-full"><i class="fa-solid fa-terminal"></i> fetch query</button>'
                     + '<div class="wb-dside-title">الجداول ('+_tkeys.length+')</div>'
-                    + (_tkeys.map(k=>'<div class="wb-dside-tbl"><span class="font-mono" dir="ltr">'+wbEsc(_groups[k].table)+'</span><span class="text-slate-400">'+_groups[k].rows.length+'</span></div>').join('') || '<p class="text-slate-400 text-[11px]">استورد حقولاً أولاً</p>')
+                    + (_tkeys.map(k=>{
+                        const _tblName = _groups[k].table;
+                        const _w = (wizardTableOpts[k]||{}).where || (window.wizardTableConditions ? window.wizardTableConditions[_tblName] : '');
+                        return '<div class="wb-dside-tbl flex items-center justify-between gap-1">'
+                            + '<span class="font-mono truncate" dir="ltr">'+wbEsc(_tblName)+'</span>'
+                            + '<div class="flex items-center gap-1 shrink-0">'
+                            + (_w ? '<span class="w-2 h-2 rounded-full bg-amber-500 shrink-0" title="يوجد شرط عام مفعل"></span>' : '')
+                            + '<button onclick="openTableFilterModal(\''+wbEsc(k).replace(/'/g,"\\'")+'\')" class="text-amber-600 hover:text-amber-800 p-0.5 text-[10px]" title="تعديل الشرط العام لهذا الجدول"><i class="fa-solid fa-filter"></i></button>'
+                            + '<span class="text-slate-400">'+_groups[k].rows.length+'</span>'
+                            + '</div></div>';
+                    }).join('') || '<p class="text-slate-400 text-[11px]">استورد حقولاً أولاً</p>')
                     + '<div class="wb-dside-title">الروابط ('+(wizardLinks||[]).length+')</div>'
                     + '<button onclick="wbAutoLinks()" class="wb-add w-full"><i class="fa-solid fa-wand-magic-sparkles"></i> تحليل تلقائي</button>'
                     + '<button onclick="wbOpenLinkModal(-1)" class="wb-add wb-add2 w-full"><i class="fa-solid fa-link"></i> رابط مخصص</button>'
@@ -4369,16 +4780,20 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                         const _o = (wizardTableOpts[k] || {});
                         const _isDef = !!_o.is_default;
                         const _isSub = !!_o.is_sub;
+                        const _hasWhere = !!(_o.where || (window.wizardTableConditions && window.wizardTableConditions[g.table]));
+                        const _whereFull = _o.where || (window.wizardTableConditions && window.wizardTableConditions[g.table]) || '';
                         const _rtype = ((document.getElementById('rmlReportType') || {}).value || 'master');
                         const _un = wbUnionConns(g.table);
                         return '<div class="wb-dbox" data-tbi="'+bi+'" data-key="'+wbEsc(k)+'"><div class="wb-dhead"><span class="font-mono font-bold" dir="ltr">'+wbEsc(g.table)+'</span>'+(_un.length>1?'<span title="UNION عبر '+_un.length+' اتصالات: '+wbEsc(_un.map(c=>connLabel(c)).join('، '))+'" style="font-size:9px;font-weight:bold;background:#ede9fe;color:#6d28d9;border:1px solid #c4b5fd;border-radius:999px;padding:1px 8px;white-space:nowrap">UNION ×'+_un.length+'</span>':'')+'<span class="text-[10px] text-slate-400">'+wbEsc(g.conn?connLabel(g.conn):'')+' • '+g.rows.length+'</span></div>'
                         + '<div class="wb-tbox-ctl">'
+                        + '<button onclick="openTableFilterModal(\''+wbEsc(k).replace(/'/g,"\\'")+'\')" class="wb-tctl '+(_hasWhere?'bg-amber-100 text-amber-900 border-amber-300 font-bold':'')+'" title="تعديل الشرط العام لهذا الجدول (WHERE)"><i class="fa-solid fa-filter text-[10px] text-amber-600"></i> '+(_hasWhere?'الشرط العام ✓':'تعديل الشرط')+'</button>'
                         + '<button onclick="wbDropTable(\''+wbEsc(k).replace(/'/g,"\\'")+'\')" class="wb-tctl wb-tctl-rose" title="إزالة الاستيراد — حذف كل حقول هذا الجدول وروابطه"><i class="fa-solid fa-trash-can text-[10px]"></i> إزالة الاستيراد</button>'
                         + '<button onclick="openUnionModal(\''+wbEsc(k).replace(/'/g,"\\'")+'\')" class="wb-tctl" title="UNION — استيراد نفس الجدول من اتصال آخر ودمج السجلات"><i class="fa-solid fa-code-merge text-[10px]"></i> UNION</button>'
                         + '<button onclick="wbPreviewBoxTable(this)" class="wb-tctl" title="استعلام تجريبي عن هذا الجدول (أول 50)"><i class="fa-solid fa-table-cells text-[10px]"></i> استعلام تجريبي</button>'
                         + '<button onclick="wbSetDefault(\''+wbEsc(k).replace(/'/g,"\\'")+'\')" class="wb-tctl '+(_isDef?'wb-tctl-on':'')+'" title="الجدول الافتراضي — تُجلب قيم حقوله مباشرة"><i class="fa-solid fa-star text-[10px]"></i> افتراضي'+(_isDef?' ✓':'')+'</button>'
                         + (_rtype !== 'master' ? '<button onclick="wbSetSub(\''+wbEsc(k).replace(/'/g,"\\'")+'\')" class="wb-tctl '+(_isSub?'wb-tctl-on2':'')+'" title="الجدول الفرعي الافتراضي للتقرير التحليلي"><i class="fa-solid fa-list-check text-[10px]"></i> فرعي'+(_isSub?' ✓':'')+'</button>' : '')
                         + '</div>'
+                        + (_hasWhere ? '<div class="px-2 py-1 bg-amber-50/90 border-b border-amber-200/70 text-[10px] text-amber-900 font-mono flex items-center justify-between gap-1" dir="ltr" title="شرط الجدول: '+wbEsc(_whereFull)+'"><span class="truncate flex-1 font-bold flex items-center gap-1"><i class="fa-solid fa-filter text-amber-600 text-[9px]" dir="rtl"></i><span>'+wbEsc(_whereFull)+'</span></span><button onclick="openTableFilterModal(\''+wbEsc(k).replace(/'/g,"\\'")+'\')" class="text-amber-700 hover:text-amber-900 shrink-0 font-sans px-1" title="تعديل الشرط"><i class="fa-solid fa-pen text-[9px]"></i></button></div>' : '')
                         + g.rows.map(r=>'<div class="wb-drow" data-fld="'+wbEsc(r.f.name)+'"><span class="font-mono" dir="ltr">'+wbEsc(r.f.name)+'</span><span class="text-[10px] text-slate-400">'+wbEsc(r.f.type||'')+'</span><button onclick="removeWizardField('+r.i+')" class="wb-del" title="حذف الحقل"><i class="fa-solid fa-xmark text-[10px]"></i></button></div>').join('')
                         + '</div>';
                     }).join('') || '<p class="text-slate-400 text-center py-8">لا حقول بعد — استورد من جدول أو أضف حقلاً</p>')
