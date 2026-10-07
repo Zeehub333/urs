@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <rml>
-  <rpt_metadata name="sales_plan" displayName="تقرير انحرافات خطط العينات" category="الخطط والانحرافات" schema="IAS20264" icon="fa-chart-bar" connection="ORCL_PROD" namespace="p"/>
+  <rpt_metadata name="sales_plan" displayName="تقرير انحرافات خطط العينات" category="الخطط والانحرافات" schema="IAS20264" icon="fa-chart-bar" type="doc" connection="ORCL_PROD" namespace="p"/>
   <rml_connections>
     <connection id="1" connection_id="16"/>
   </rml_connections>
@@ -263,8 +263,7 @@
   <columns>
     <column id="1" name="col_1" alias="رمز الصنف" expr="=[I_CODE]" join_type="one_to_one" icon="fa-hashtag" distinct="1"/>
     <column id="2" name="col_2" alias="اسم الصنف" expr="=[16.IAS_ITM_MST.I_NAME]" join_type="one_to_one" icon="fa-hashtag"/>
-    <column id="3" name="col_3" alias="سعر التكلفة" expr="=[PRIMARY_COST]" join_type="one_to_one" icon="fa-hashtag" color="#d400ff" weight="bold" is_amount="1" currency_symbol="$" is_status="1"/>
-    <column id="4" name="col_4" alias="سعر البيع الاقصى" expr="=([16.IAS_ITEM_PRICE.I_PRICE])" join_type="one_to_one" icon="fa-hashtag" color="#006aff" weight="bold" is_amount="1" currency_symbol="$"/>
+    <column id="3" name="col_3" alias="التسعير" expr="=if(@priceMethod=o1,[16.IAS_ITEM_PRICE.I_PRICE],[PRIMARY_COST])" join_type="one_to_one" icon="fa-hashtag" color="#d400ff" weight="bold" is_amount="1" currency_symbol="$" is_status="1"/>
   </columns>
   <links>
     <link id="1" from_table="IAS_ITM_MST" from_col="I_CODE" to_table="IAS_ITEM_PRICE" to_col="I_CODE" rel_type="one_to_one"/>
@@ -283,5 +282,11 @@
       <column alias="سعر البيع الاقصى"/>
     </group>
   </groups>
+  <doc_params>
+    <doc_param column="priceMethod" id="dp_custom_1791365971394" label="طريقة التسعيرة" type="select" op="equals" required="1" default_value="o1" param_refname="priceMethod" is_custom="1" no_filter="1">
+      <option name="o1" value="بالبيع">بالبيع</option>
+      <option name="o2" value="بالتكلفة">بالتكلفة</option>
+    </doc_param>
+  </doc_params>
   <general_where>([IAS_ITM_MST.G_CODE] &lt;&gt; '9000' AND [IAS_ITM_MST.G_CODE] &lt;&gt; '9200') AND ([IAS_ITEM_PRICE.LEV_NO] = 1)</general_where>
 </rml>
