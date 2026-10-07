@@ -7775,11 +7775,14 @@ def api_rml_values_source(request):
         except (TypeError, ValueError):
             limit = 50
         limit = max(1, min(limit, 500))
+        display_column = str(data.get("display_column", data.get("displayColumn", data.get("src_display_column", data.get("ref_display", data.get("refDisplay", ""))))) or "").strip()
         _ident = _re_vs.compile(r"[A-Za-z_][A-Za-z0-9_]*")
         tparts = [p for p in table.split(".") if p]
         if not (conn_ref and tparts and column) or not _ident.fullmatch(column) \
                 or not all(_ident.fullmatch(p) for p in tparts) or len(tparts) > 2:
             return JsonResponse({"error": "connection / table / column غير صالحة"}, status=400)
+        if display_column and not _ident.fullmatch(display_column):
+            return JsonResponse({"error": "display_column غير صالحة"}, status=400)
         try:
             from .models import Connection as _DC
             try:
@@ -7801,13 +7804,17 @@ def api_rml_values_source(request):
         eng = str(eng or "").lower()
         if eng.startswith("sqlserver") or eng in ("mssql",):
             qc = "[%s]" % column
+            qdc = "[%s]" % display_column if display_column and display_column != column else None
             qt = ".".join("[%s]" % p for p in tparts)
             cast = "CAST(%s AS NVARCHAR(MAX))" % qc
+            cast_dc = "CAST(%s AS NVARCHAR(MAX))" % qdc if qdc else None
             dialect = "mssql"
         elif eng.startswith("postgres"):
             qc = '"%s"' % column
+            qdc = '"%s"' % display_column if display_column and display_column != column else None
             qt = ".".join('"%s"' % p for p in tparts)
             cast = "CAST(%s AS TEXT)" % qc
+            cast_dc = "CAST(%s AS TEXT)" % qdc if qdc else None
             dialect = "pg"
         else:
             return JsonResponse({"error": "المحرك غير مدعوم هنا: %s" % eng}, status=400)
@@ -7820,12 +7827,16 @@ def api_rml_values_source(request):
             pat = "N'%%%s%%'" % _like_esc(search.strip()) if dialect == "mssql" \
                 else "'%%%s%%'" % _like_esc(search.strip())
             op = "LIKE" if dialect == "mssql" else "ILIKE"
-            conds.append("%s %s %s ESCAPE '\\'" % (cast, op, pat))
+            if qdc and cast_dc:
+                conds.append("(%s %s %s ESCAPE '\\' OR %s %s %s ESCAPE '\\')" % (cast, op, pat, cast_dc, op, pat))
+            else:
+                conds.append("%s %s %s ESCAPE '\\'" % (cast, op, pat))
         where = "WHERE " + " AND ".join(conds)
+        sel_cols = "%s AS v, %s AS label" % (qc, qdc) if qdc else "%s AS v" % qc
         if dialect == "mssql":
-            sql = "SELECT DISTINCT TOP(%d) %s AS v FROM %s %s ORDER BY 1" % (limit + 1, qc, qt, where)
+            sql = "SELECT DISTINCT TOP(%d) %s FROM %s %s ORDER BY 1" % (limit + 1, sel_cols, qt, where)
         else:
-            sql = "SELECT DISTINCT %s AS v FROM %s %s ORDER BY 1 LIMIT %d" % (qc, qt, where, limit + 1)
+            sql = "SELECT DISTINCT %s FROM %s %s ORDER BY 1 LIMIT %d" % (sel_cols, qt, where, limit + 1)
         try:
             rows, _names = _xsql_exec_on_db(db_obj, sql, {})
         finally:
@@ -7836,25 +7847,44 @@ def api_rml_values_source(request):
         vals = []
         try:
             import datetime as _vs_dt
-            for r in (rows or []):
-                v = r.get("v") if isinstance(r, dict) else (r[0] if r else None)
+            def _clean_val(v):
                 if v is None or (isinstance(v, str) and not v.strip()):
-                    continue
+                    return ""
                 if isinstance(v, bool):
-                    vals.append("1" if v else "0")
-                elif isinstance(v, (int, float)):
-                    vals.append(v)
-                elif isinstance(v, (_vs_dt.datetime, _vs_dt.date, _vs_dt.time)):
-                    vals.append(v.isoformat(sep=" "))
+                    return "1" if v else "0"
+                if isinstance(v, (int, float)):
+                    return v
+                if isinstance(v, (_vs_dt.datetime, _vs_dt.date, _vs_dt.time)):
+                    return v.isoformat(sep=" ")
+                return str(v)
+
+            for r in (rows or []):
+                if isinstance(r, dict):
+                    v_raw = r.get("v")
+                    lbl_raw = r.get("label") if qdc else None
                 else:
-                    vals.append(str(v))
+                    v_raw = r[0] if r else None
+                    lbl_raw = r[1] if (qdc and len(r) > 1) else None
+
+                v_clean = _clean_val(v_raw)
+                if v_clean == "" and v_clean != 0:
+                    continue
+
+                if qdc:
+                    lbl_clean = _clean_val(lbl_raw)
+                    vals.append({
+                        "value": str(v_clean),
+                        "label": "%s - %s" % (v_clean, lbl_clean) if lbl_clean != "" else str(v_clean)
+                    })
+                else:
+                    vals.append(v_clean)
         except Exception:
             vals = []
         truncated = len(vals) > limit
         vals = vals[:limit]
         return JsonResponse({"values": vals, "count": len(vals), "truncated": truncated,
                              "connection": getattr(_row, "name", ""),
-                             "table": table, "column": column},
+                             "table": table, "column": column, "display_column": display_column},
                             json_dumps_params={"ensure_ascii": False})
     except Exception as e:
         return JsonResponse({"error": str(e)[:200]}, status=500)

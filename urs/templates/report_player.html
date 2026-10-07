@@ -1564,6 +1564,9 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                 if(_src){
                     window._docSrcDef[alias] = _src;
                     window._docSrcDef[alias].searchable = !((f || {}).searchable === false);
+                    if((f || {}).displayColumn || (f || {}).refDisplay || (f || {}).display_column) {
+                        window._docSrcDef[alias].displayColumn = (f || {}).displayColumn || (f || {}).refDisplay || (f || {}).display_column;
+                    }
                     return docSrcComboHTML({alias: alias}, _svCur, `data-docf="${alias}" data-doct="${doct}"`, 'w-full bg-slate-50 border border-slate-200 rounded-xl pl-8 pr-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500');
                 }
                 const cacheKey = (currentApp || '') + '::' + (currentRml || '') + '::' + alias;
