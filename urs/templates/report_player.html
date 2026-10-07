@@ -10,13 +10,13 @@
         .excel-cell { border-right: 1px solid #e2e8f0; border-bottom: 1px solid #e2e8f0; }
         #selectorBar:has(#activeGroupIndicator.hidden) { display: none; }
         @keyframes cellValueUpdate {
-            0% { background-color: rgba(99, 102, 241, 0.35) !important; color: #3730a3 !important; transform: scale(1.04); }
-            40% { background-color: rgba(199, 210, 254, 0.3) !important; transform: scale(1.02); }
-            100% { background-color: transparent !important; transform: scale(1); }
+            0% { background-color: rgba(99, 102, 241, 0.25) !important; color: #3730a3 !important; }
+            50% { background-color: rgba(199, 210, 254, 0.2) !important; }
+            100% { background-color: transparent !important; }
         }
         .cell-animate-update {
-            animation: cellValueUpdate 0.75s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
-            will-change: transform, background-color;
+            animation: cellValueUpdate 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
+            will-change: background-color, color;
         }
 {% endblock %}
 {% block sidebar %}
@@ -1083,9 +1083,9 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
         function docSrcEnter(alias, el){
             docSrcHide(alias);
             try{
-                if(el && el.closest && el.closest('#docHeaderControls')){ docHeaderFetch(); return; }
+                if(el && el.closest && el.closest('#docHeaderControls')){ docHeaderFetch(true, alias); return; }
                 if(el && el.closest && el.closest('#docSearchFields')){ docSearch(); return; }
-                docHeaderFetch();
+                docHeaderFetch(true, alias);
             }catch(e){}
         }
         function docSrcPick(btn, alias, idx){
@@ -1319,6 +1319,32 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                 refreshApiData();
             }
         }
+        function animateNumberCount(el, start, end, formatFn, duration = 450){
+            if(start === end || isNaN(start) || isNaN(end)){
+                el.textContent = formatFn(end);
+                return;
+            }
+            if(el._animCountId){
+                cancelAnimationFrame(el._animCountId);
+                el._animCountId = null;
+            }
+            const startTime = performance.now();
+            const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
+            function step(now){
+                const elapsed = now - startTime;
+                const progress = Math.min(elapsed / duration, 1);
+                const eased = easeOutCubic(progress);
+                const current = start + (end - start) * eased;
+                el.textContent = formatFn(current);
+                if(progress < 1){
+                    el._animCountId = requestAnimationFrame(step);
+                } else {
+                    el.textContent = formatFn(end);
+                    el._animCountId = null;
+                }
+            }
+            el._animCountId = requestAnimationFrame(step);
+        }
         async function docFetchInPlace(changedAlias){
             if(!lazyLoadedRows || !lazyLoadedRows.length){
                 resetLazyState();
@@ -1372,25 +1398,110 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                 if(!changedCols.size){
                     cols.forEach(c => changedCols.add(c));
                 }
+
+                // Lock table layout and header widths so columns never jump or resize
+                const table = document.getElementById('dataTable');
+                if(table){
+                    const ths = table.querySelectorAll('thead th');
+                    ths.forEach(th => {
+                        const w = th.getBoundingClientRect().width;
+                        if(w > 0 && (!th.style.width || th.style.width === 'auto')){
+                            th.style.width = w + 'px';
+                            th.style.minWidth = w + 'px';
+                            th.style.maxWidth = w + 'px';
+                        }
+                    });
+                    table.style.tableLayout = 'fixed';
+                }
+
                 const trs = Array.from(document.querySelectorAll('#tableBody tr:not(.rpt-detail-subrow)'));
                 trs.forEach((tr, ri) => {
                     const row = newRows[ri];
                     if(!row) return;
+                    const oldRow = oldRows[ri] || null;
+                    const trH = tr.getBoundingClientRect().height;
+                    if(trH > 0 && !tr.style.height){
+                        tr.style.height = trH + 'px';
+                    }
                     changedCols.forEach(c => {
                         const colName = c.alias || c.name;
                         const td = Array.from(tr.querySelectorAll('td[data-col]')).find(el => el.getAttribute('data-col') === colName);
                         if(!td) return;
-                        const rawV = row[colName] !== undefined ? row[colName] : row[c.name];
-                        let inner = (fmtCell(rawV, c.is_amount || c.isAmount, c) ?? '') + amountSuffix(row, c, cols);
-                        const st = ((c && (c.is_status || c.isStatus)) ? statusEntry(c, rawV) : null);
-                        if(st){
-                            const fg = (/^#[0-9a-fA-F]{6}$/.test(st.color || '') ? st.color : '#334155');
-                            const label = String(st.label ?? rawV ?? '').replace(/</g,'&lt;');
-                            inner = `<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold" style="background:${fg};color:${statusFg(st.color)}">${label}</span>`;
+
+                        // Lock cell dimensions and prevent text wrap/growth
+                        const tdRect = td.getBoundingClientRect();
+                        if(tdRect.height > 0 && !td.style.height){
+                            td.style.height = tdRect.height + 'px';
                         }
+                        if(tdRect.width > 0 && !td.style.width){
+                            td.style.width = tdRect.width + 'px';
+                            td.style.minWidth = tdRect.width + 'px';
+                        }
+                        td.style.overflow = 'hidden';
+                        td.style.textOverflow = 'ellipsis';
+                        td.style.whiteSpace = 'nowrap';
+
+                        const rawV = row[colName] !== undefined ? row[colName] : row[c.name];
+                        const oldRawV = oldRow ? (oldRow[colName] !== undefined ? oldRow[colName] : oldRow[c.name]) : null;
+                        const st = ((c && (c.is_status || c.isStatus)) ? statusEntry(c, rawV) : null);
+                        const isAmt = !!(c && (c.is_amount || c.isAmount));
+                        const dt = String((c && (c.dataType || c.data_type)) || '').toLowerCase();
+                        const isNum = isAmt || dt === 'number';
+
                         td.classList.remove('cell-animate-update');
                         void td.offsetWidth;
-                        td.innerHTML = inner;
+
+                        if(st){
+                            const fg = (/^#[0-9a-fA-F]{6}$/.test(st.color || '') ? st.color : '#334155');
+                            const label = String(st.label ?? rawV ?? '');
+                            const badge = td.querySelector('span');
+                            if(badge){
+                                badge.textContent = label;
+                                badge.style.background = fg;
+                                badge.style.color = statusFg(st.color);
+                            } else {
+                                td.innerHTML = `<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold" style="background:${fg};color:${statusFg(st.color)}">${label.replace(/</g,'&lt;')}</span>`;
+                            }
+                            td.title = label;
+                        } else if(isNum){
+                            const parseN = (v) => {
+                                if(typeof v === 'number') return isFinite(v) ? v : null;
+                                if(v !== null && v !== undefined && v !== ''){
+                                    const s = String(v).replace(/,/g, '').trim();
+                                    const m = s.match(/-?\d+(?:\.\d+)?/);
+                                    if(m){ const n = parseFloat(m[0]); if(isFinite(n)) return n; }
+                                }
+                                return null;
+                            };
+                            const endNum = parseN(rawV);
+                            const startNum = parseN(oldRawV) ?? parseN(td.textContent) ?? 0;
+                            const sfx = amountSuffix(row, c, cols) || '';
+                            const dc = parseInt(c.decimals ?? c.dec, 10);
+                            const decimals = !isNaN(dc) ? dc : (isAmt ? 2 : 0);
+
+                            const fmtVal = (n) => {
+                                if(n === null || isNaN(n)) return '';
+                                const formatted = n.toLocaleString('en-US', {
+                                    useGrouping: true,
+                                    minimumFractionDigits: decimals,
+                                    maximumFractionDigits: decimals
+                                });
+                                return formatted + sfx;
+                            };
+
+                            td.title = fmtVal(endNum !== null ? endNum : 0);
+
+                            if(endNum !== null && startNum !== endNum && typeof animateNumberCount === 'function'){
+                                animateNumberCount(td, startNum, endNum, fmtVal, 450);
+                            } else {
+                                td.textContent = (fmtCell(rawV, isAmt, c) ?? '') + sfx;
+                            }
+                        } else {
+                            const inner = (fmtCell(rawV, isAmt, c) ?? '') + amountSuffix(row, c, cols);
+                            td.textContent = inner;
+                            td.title = String(rawV ?? inner);
+                        }
+
                         td.classList.add('cell-animate-update');
                     });
                 });
