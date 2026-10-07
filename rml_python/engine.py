@@ -8161,7 +8161,73 @@ class RMLReportEngine:
                 if getattr(base_db, "conn", None):
                     base_db.conn.rollback()
             except: pass
-            raise RuntimeError(f"Report execution failed: {e}\nSQL: {sql}\nParams: {params}") from e
+            
+            err_msg = str(e)
+            import re
+            
+            error_columns = {}
+            # ORA-00904: "column": invalid identifier
+            m = re.search(r'ORA-00904: (?:".*?"\.)?"([^"]+)": invalid identifier', err_msg)
+            if m:
+                err_code = "#Name"
+                err_col = m.group(1)
+            else:
+                m = re.search(r'column "([^"]+)" does not exist', err_msg)
+                if m:
+                    err_code = "#Name"
+                    err_col = m.group(1)
+                else:
+                    m = re.search(r"Invalid column name '([^']+)'", err_msg)
+                    if m:
+                        err_code = "#Name"
+                        err_col = m.group(1)
+                    else:
+                        err_col = None
+
+            if err_col:
+                # Find matching column
+                for c in self.columns:
+                    cname = str(getattr(c, "name", "") or "").upper()
+                    calias = str(getattr(c, "alias", "") or "").upper()
+                    cexpr = str(getattr(c, "expr", "") or "").upper()
+                    tcol = err_col.upper()
+                    if tcol == cname or tcol == calias or tcol in cexpr:
+                        error_columns[c.alias] = {"code": err_code, "full": err_msg}
+
+            # ORA-01722: invalid number (datatype) -> #DATATYPE
+            if not error_columns and "ORA-01722" in err_msg:
+                # Can't easily extract column name from basic Oracle message,
+                # mark first computed or amount column as a fallback guess
+                for c in self.columns:
+                    if getattr(c, "is_amount", False) or getattr(c, "col_type", "") == "computed":
+                        error_columns[c.alias] = {"code": "#DATATYPE", "full": err_msg}
+                        break
+            
+            # Divide by zero -> #VALUE
+            if not error_columns and ("divide by zero" in err_msg.lower() or "ORA-01476" in err_msg):
+                for c in self.columns:
+                    if getattr(c, "col_type", "") == "computed":
+                        error_columns[c.alias] = {"code": "#VALUE", "full": err_msg}
+                        break
+
+            if error_columns:
+                # Generate a single dummy row containing the error codes
+                fake_row = {}
+                for c in self.columns:
+                    if c.alias in error_columns:
+                        fake_row[c.alias] = error_columns[c.alias]['code']
+                        fake_row["@" + str(getattr(c, "col_refname", "") or "")] = error_columns[c.alias]['code']
+                    else:
+                        fake_row[c.alias] = ""
+                
+                result_rows = [fake_row]
+                total = 1
+                try:
+                    self._error_columns = error_columns
+                except:
+                    pass
+            else:
+                raise RuntimeError(f"Report execution failed: {e}\nSQL: {sql}\nParams: {params}") from e
 
         # Handle pagination 'all'
         if page_size == "all":
@@ -8185,6 +8251,11 @@ class RMLReportEngine:
             _meta_out = {}
         # duplicate groups inside metadata for player header (reads metadata.groups)
         _meta_out["groups"] = _groups_list
+        try:
+            if hasattr(self, "_error_columns"):
+                _meta_out["error_columns"] = self._error_columns
+        except Exception:
+            pass
         try:
             self._timings["total_ms"] = int((_tmod.time() - _t_all) * 1000)
             self._timings["merge_stats"] = dict(getattr(self, "_merge_stats", {}) or {})

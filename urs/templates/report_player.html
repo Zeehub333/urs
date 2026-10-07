@@ -2430,6 +2430,17 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
             }catch(e){}
         }
         function statusCellHtml(c, rawV, formattedInner){
+            try {
+                if (window.lastApiData && window.lastApiData.metadata && window.lastApiData.metadata.error_columns) {
+                    const errs = window.lastApiData.metadata.error_columns;
+                    const errObj = errs[c.alias] || errs[c.name];
+                    if (errObj) {
+                        const _wa = (c && (c.alias || c.name)) || '';
+                        const safeFull = String(errObj.full || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                        return `<td class="px-2 py-1 text-center excel-cell"${colDataAttr(c)}><a href="javascript:void(0)" onclick="showErrorModal('خطأ في العمود ${_wa}', '${safeFull}')" class="inline-flex items-center gap-1 font-bold text-rose-600 hover:text-rose-800 bg-rose-50 px-2 py-0.5 rounded-lg text-[11px] border border-rose-200"><span>${errObj.code}</span><i class="fa-solid fa-triangle-exclamation"></i></a></td>`;
+                    }
+                }
+            } catch(e){}
             const st = ((c && (c.is_status || c.isStatus)) ? statusEntry(c, rawV) : null);
             const wcls = colWrapCls(c);
             const tip = (colTruncated(c, rawV) ? ` title="${String(rawV ?? '').replace(/"/g, '&quot;')}"` : '');

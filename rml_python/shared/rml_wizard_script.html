@@ -437,7 +437,7 @@ function wizApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof 
             
             if(typeof rdRenderElementsTree === 'function') rdRenderElementsTree();
             try{ renderWizardColumns(); }catch(e){}
-            try{ rptPreviewSoon(); }catch(e){}
+            try{ rptPreviewFetch(true); }catch(e){}
             try{ wbPaintStatus(); }catch(e){}
             try{ notify('تم إنشاء حقل التجميع التحليلي وإضافته لأعمدة التقرير', 'success'); }catch(e){}
             if(typeof rdNavTo === 'function') rdNavTo('columns');
@@ -1007,6 +1007,12 @@ function wizApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof 
             }
         });
 
+        let importMatchModeState = 'AND';
+        function onImportMatchModeChange(val) {
+            importMatchModeState = val === 'OR' ? 'OR' : 'AND';
+            updateImportFilterPreview();
+        }
+
         function generateImportTableWhere(){
             const box = document.getElementById('importColsList');
             const tbl = (box && box.dataset.table) || document.getElementById('importTableSel').value;
@@ -1069,7 +1075,9 @@ function wizApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof 
                     }
                 }
             }
-            return parts.join(' AND ');
+            if(!parts.length) return '';
+            const joinOp = (importMatchModeState === 'OR') ? ' OR ' : ' AND ';
+            return (parts.length > 1 && importMatchModeState === 'OR') ? `(${parts.join(joinOp)})` : parts.join(joinOp);
         }
 
         function updateImportFilterPreview(){
@@ -1599,9 +1607,13 @@ function wizApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof 
                 // Restore previously saved filters for this table or start clean
                 if(window.wizardTableFilterRows && window.wizardTableFilterRows[shortTbl] && window.wizardTableFilterRows[shortTbl].length){
                     importFilterRowsState = JSON.parse(JSON.stringify(window.wizardTableFilterRows[shortTbl]));
+                    importMatchModeState = (window.wizardTableFilterMatchMode && window.wizardTableFilterMatchMode[shortTbl]) || 'AND';
                 } else {
                     importFilterRowsState = [];
+                    importMatchModeState = 'AND';
                 }
+                const immSel = document.getElementById('importMatchMode');
+                if(immSel) immSel.value = importMatchModeState;
                 renderImportFilterRows();
                 updateImportFilterPreview();
             }catch(e){ box.innerHTML = '<p class="text-rose-500 text-xs p-2">فشل التحميل</p>'; }
@@ -1640,13 +1652,16 @@ function wizApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof 
             const tableWhere = generateImportTableWhere();
             if(!window.wizardTableConditions) window.wizardTableConditions = {};
             if(!window.wizardTableFilterRows) window.wizardTableFilterRows = {};
+            if(!window.wizardTableFilterMatchMode) window.wizardTableFilterMatchMode = {};
 
             if(tableWhere){
                 window.wizardTableConditions[shortTbl] = tableWhere;
                 window.wizardTableFilterRows[shortTbl] = JSON.parse(JSON.stringify(importFilterRowsState));
+                window.wizardTableFilterMatchMode[shortTbl] = importMatchModeState;
             } else {
                 delete window.wizardTableConditions[shortTbl];
                 delete window.wizardTableFilterRows[shortTbl];
+                delete window.wizardTableFilterMatchMode[shortTbl];
             }
 
             // إعادة تجميع الشرط العام للتقرير من كافة شروط الجداول

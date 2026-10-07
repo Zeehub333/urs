@@ -410,10 +410,19 @@
                                 المساواة (=) تظهر قائمة القيم مع إمكانية البحث</span>
                         </div>
                     </div>
-                    <button type="button" onclick="addImportFilterRow()"
-                        class="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1 shadow-xs transition">
-                        <i class="fa-solid fa-plus text-[10px]"></i> إضافة شرط
-                    </button>
+                    <div class="flex items-center gap-2">
+                        <div class="flex items-center gap-1.5 bg-amber-50/50 px-2 py-1 rounded-lg border border-amber-200/50" title="طريقة دمج الشروط المتعددة">
+                            <span class="text-[11px] font-bold text-slate-600">المطابقة:</span>
+                            <select id="importMatchMode" onchange="onImportMatchModeChange(this.value)" class="bg-white border border-slate-200 rounded-md px-2 py-0.5 text-xs font-bold text-slate-700 focus:outline-none focus:border-amber-500">
+                                <option value="AND">كل الشروط (ALL)</option>
+                                <option value="OR">أي شرط (ANY)</option>
+                            </select>
+                        </div>
+                        <button type="button" onclick="addImportFilterRow()"
+                            class="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1 shadow-xs transition">
+                            <i class="fa-solid fa-plus text-[10px]"></i> إضافة شرط
+                        </button>
+                    </div>
                 </div>
 
                 <!-- Filter rows container -->
