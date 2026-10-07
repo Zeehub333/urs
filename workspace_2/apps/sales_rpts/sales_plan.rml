@@ -781,7 +781,7 @@
   <table_opts>
     <table name="IAS_ITM_MST" conn="16" is_default="1" where="[IAS_ITM_MST.G_CODE] &lt;&gt; '9000' AND [IAS_ITM_MST.G_CODE] &lt;&gt; '9200'"/>
     <table name="IAS_ITEM_PRICE" conn="16" where="[IAS_ITEM_PRICE.LEV_NO] = 1 AND [IAS_ITEM_PRICE.I_PRICE] &lt;&gt; 0"/>
-    <table name="IAS_BILL_DTL" conn="16" where="[IAS_BILL_DTL.CC_CODE] = '11'"/>
+    <table name="IAS_BILL_DTL" conn="16" where="([IAS_BILL_DTL.CC_CODE] = '11' OR [IAS_BILL_DTL.CC_CODE] &lt;&gt; '12')"/>
     <table name="IAS_BILL_MST" conn="16"/>
   </table_opts>
   <groups>
@@ -806,6 +806,15 @@
       <option name="o1" value="بالبيع">بالبيع</option>
       <option name="o2" value="بالتكلفة">بالتكلفة</option>
     </doc_param>
+    <doc_param column="v_custom_2" id="dp_custom_1791394198530" label="الفرع" type="select" op="equals" required="1" default_value="o1" param_refname="branch" is_custom="1" no_filter="1">
+      <option name="1" value="كلي">كلي</option>
+      <option name="1012" value="صنعاء">صنعاء</option>
+      <option name="1022" value="ذمار">ذمار</option>
+      <option name="1032" value="اب">اب</option>
+      <option name="1042" value="الحديده">الحديده</option>
+      <option name="1052" value="عمران">عمران</option>
+      <option name="1062" value="صعدة">صعدة</option>
+    </doc_param>
   </doc_params>
-  <general_where>([IAS_ITM_MST.G_CODE] &lt;&gt; '9000' AND [IAS_ITM_MST.G_CODE] &lt;&gt; '9200') AND ([IAS_ITEM_PRICE.LEV_NO] = 1 AND [IAS_ITEM_PRICE.I_PRICE] &lt;&gt; 0) AND ([IAS_BILL_DTL.CC_CODE] = '11')</general_where>
+  <general_where>([IAS_ITM_MST.G_CODE] &lt;&gt; '9000' AND [IAS_ITM_MST.G_CODE] &lt;&gt; '9200') AND ([IAS_ITEM_PRICE.LEV_NO] = 1 AND [IAS_ITEM_PRICE.I_PRICE] &lt;&gt; 0) AND (([IAS_BILL_DTL.CC_CODE] = '11' OR [IAS_BILL_DTL.CC_CODE] &lt;&gt; '12'))</general_where>
 </rml>

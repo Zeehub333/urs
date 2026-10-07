@@ -7600,14 +7600,25 @@ class RMLReportEngine:
                 plan, columns, table_map, where_clause, group_clause,
                 order_clause, paginate_clause, params, page_size, _valplan,
                 extra_selects=extra_selects)
-        _sel_kw = "SELECT DISTINCT" if self._report_distinct() else "SELECT"
         _don = []
+        _has_any_distinct = False
+        for c in (columns or []):
+            try:
+                if getattr(c, "is_distinct", False):
+                    _has_any_distinct = True
+                    break
+            except Exception:
+                pass
+
         if _is_pg_db(plan.get("base_db")):
             try:
                 _don = self._distinct_on_keys(columns, getattr(self, "fields", []),
                                               table_map, self._conn_map(), _abt_plan)
             except Exception:
                 _don = []
+
+        _sel_kw = "SELECT DISTINCT" if (self._report_distinct() or (_has_any_distinct and not _don)) else "SELECT"
+
         if _don:
             # DISTINCT ON يتطلب أن يبدأ ORDER BY بنفس الأعمدة — مع احترام
             # اتجاه فرز المستخدم عندما يفرز بأحدها (التواريخ لم ترتب قبل هذا)
@@ -7986,7 +7997,12 @@ class RMLReportEngine:
         else:
             _need_distinct_count = False
             try:
-                _need_distinct_count = bool(self._report_distinct()) or (
+                _has_dist = False
+                for c in (exec_plan.get("columns") or []):
+                    if getattr(c, "is_distinct", False):
+                        _has_dist = True
+                        break
+                _need_distinct_count = bool(self._report_distinct()) or _has_dist or (
                     bool(_is_pg_db(exec_plan.get("base_db"))) and bool(
                         self._distinct_on_keys(exec_plan["columns"], getattr(self, "fields", []),
                                               exec_plan["table_map"], self._conn_map())))
