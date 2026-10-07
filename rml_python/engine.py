@@ -7533,7 +7533,15 @@ class RMLReportEngine:
             select_clause += f", {_ex} AS {_q(_al)}"
         for _ex, _al in (plan.get("extra") or []):
             select_clause += f", {_ex} AS {_q(_al)}"
-        _sel_kw = "SELECT DISTINCT" if self._report_distinct() else "SELECT"
+        _has_any_distinct = False
+        for c in (columns or []):
+            try:
+                if getattr(c, "is_distinct", False):
+                    _has_any_distinct = True
+                    break
+            except Exception:
+                pass
+
         _don_ord0 = ""
         _don = []
         if _is_pg_db(plan.get("base_db")):
@@ -7543,6 +7551,9 @@ class RMLReportEngine:
                                               table_map, self._conn_map(), _abt)
             except Exception:
                 _don = []
+
+        _sel_kw = "SELECT DISTINCT" if (self._report_distinct() or (_has_any_distinct and not _don)) else "SELECT"
+
         if _don:
             _sel_kw = f"DISTINCT ON ({', '.join(_don)})"
             _don_ord0 = " ORDER BY " + ", ".join(f"{k} ASC" for k in _don)
