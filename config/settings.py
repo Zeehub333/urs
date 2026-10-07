@@ -58,7 +58,8 @@ MIDDLEWARE = [
 ROOT_URLCONF = 'config.urls'
 
 def _workspace_modals_dirs():
-    """Designer fragments: workspace settings modals first, legacy fallback."""
+    """Designer fragments: workspace settings modals first, shared engine
+    modals (rml_python/shared, fmlk_engine/shared), legacy fallback."""
     out = []
     try:
         for _ws in sorted(BASE_DIR.glob("workspace_*")):
@@ -67,6 +68,13 @@ def _workspace_modals_dirs():
                 out.append(_d)
     except Exception:
         pass
+    for _shared in (BASE_DIR / "rml_python" / "shared",
+                    BASE_DIR / "fmlk_engine" / "shared"):
+        try:
+            if _shared.is_dir() and _shared not in out:
+                out.append(_shared)
+        except Exception:
+            pass
     out.append(BASE_DIR / "odex" / "system" / "settings" / "modals")
     return out
 

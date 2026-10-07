@@ -188,6 +188,19 @@ def ensure_app_dir(app_name):
     return d
 
 
+def shared_modals_dirs():
+    """Single-source designer fragments: rml_python/shared + fmlk_engine/shared."""
+    out = []
+    for _shared in (BASE_DIR / "rml_python" / "shared",
+                    BASE_DIR / "fmlk_engine" / "shared"):
+        try:
+            if _shared.is_dir():
+                out.append(_shared)
+        except Exception:
+            continue
+    return out
+
+
 def settings_modals_dirs():
     """Existing */settings/modals dirs across roots (for template lookup)."""
     out = []
@@ -250,7 +263,14 @@ def documents_dir(app_name, create=True):
 
 
 def modals_dir():
-    """First existing settings/modals dir (designer fragments)."""
+    """First dir holding the designer fragments: shared engine dirs first,
+    then workspace settings/modals (custom overrides)."""
+    for d in shared_modals_dirs():
+        try:
+            if d.is_dir():
+                return d
+        except Exception:
+            continue
     for r in system_roots():
         try:
             d = r / "settings" / "modals"

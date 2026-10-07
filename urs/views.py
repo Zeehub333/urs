@@ -532,6 +532,15 @@ def _ws_remap_copied_conns(dst_app, new_conn, new_schema):
     return changed_files, changed_attrs
 
 
+# Single-sourced designer fragments — never cloned into workspaces
+# (they resolve from rml_python/shared + fmlk_engine/shared instead).
+_WS_SHARED_FRAGMENTS = frozenset({
+    "rml_wizard_modal.html", "rml_wizard_script.html",
+    "forms_wizard_modal.html", "forms_wizard_script.html",
+    "conn_stats.html",
+})
+
+
 def _ws_copy_settings_files(src_app, dst_app):
     """Copy settings-app definition files (modals + metadata + lists). Returns count."""
     import shutil as _sh
@@ -540,7 +549,7 @@ def _ws_copy_settings_files(src_app, dst_app):
         for pat in _WS_COPY_PATTERNS:
             for p in sorted(src_app.glob(pat)):
                 try:
-                    if p.is_file():
+                    if p.is_file() and p.name not in _WS_SHARED_FRAGMENTS:
                         _sh.copy2(str(p), str(dst_app / p.name))
                         n += 1
                 except Exception:
@@ -549,7 +558,8 @@ def _ws_copy_settings_files(src_app, dst_app):
             s, d = src_app / sub, dst_app / sub
             if s.is_dir():
                 try:
-                    _sh.copytree(str(s), str(d), dirs_exist_ok=True)
+                    _sh.copytree(str(s), str(d), dirs_exist_ok=True,
+                                 ignore=_sh.ignore_patterns(*_WS_SHARED_FRAGMENTS))
                     n += sum(1 for _ in d.rglob("*") if _.is_file())
                 except Exception:
                     pass
@@ -3650,12 +3660,25 @@ def api_apps_create(request):
 def _wizard_flags():
     """Designer modal files may be absent (restructuring) — pages degrade gracefully.
 
+    Single source: rml_python/shared (rml_*) + fmlk_engine/shared (forms_*),
+    with workspace settings/modals as override dirs.
     Also exposed as a template context processor (see config/settings.py).
     """
     try:
+        from .workspace import shared_modals_dirs as _smd
+        _shared = _smd()
+    except Exception:
+        _shared = []
+    try:
         d = ws_modals_dir()
-        rml = (d / "rml_wizard_modal.html").is_file() and (d / "rml_wizard_script.html").is_file()
-        fml = (d / "forms_wizard_modal.html").is_file() and (d / "forms_wizard_script.html").is_file()
+    except Exception:
+        d = None
+    try:
+        _dirs = ([d] if d is not None else []) + list(_shared or [])
+        _has = lambda *names: any(
+            (x / n).is_file() for x in _dirs if x is not None for n in names)
+        rml = _has("rml_wizard_modal.html") and _has("rml_wizard_script.html")
+        fml = _has("forms_wizard_modal.html") and _has("forms_wizard_script.html")
     except Exception:
         rml, fml = False, False
     return {"has_rml_wizard": bool(rml), "has_fml_wizard": bool(fml)}
@@ -4299,6 +4322,20 @@ def api_app_modal(request, app_name, file):
                 return HttpResponse(cand.read_text(encoding="utf-8"), content_type="text/html; charset=utf-8")
         except Exception:
             continue
+    # shared engine fragments (e.g. render="modals/conn_stats.html")
+    try:
+        from .workspace import shared_modals_dirs as _smd
+        _cands = [f, f.split("/")[-1]]
+        for _shared in _smd():
+            for _rel in _cands:
+                cand = _shared / _rel
+                try:
+                    if cand.exists() and cand.is_file() and str(cand.resolve()).startswith(str(_shared.resolve())):
+                        return HttpResponse(cand.read_text(encoding="utf-8"), content_type="text/html; charset=utf-8")
+                except Exception:
+                    continue
+    except Exception:
+        pass
     return HttpResponse("modal not found", status=404, content_type="text/plain; charset=utf-8")
 
 
@@ -7823,6 +7860,58 @@ def api_rml_values_source(request):
         return JsonResponse({"error": str(e)[:200]}, status=500)
 
 @csrf_exempt
+def api_search_excel_template(request):
+    """GET /api/search/excel-template/?column=<name> — قالب Excel لاستيراد قيم مطابقة سياسة.
+
+    ملف xlsx بسطر عناوين واحد باسم العمود المطلوب (يُقرأ أول عمود غير فارغ
+    عند الاستيراد عبر /api/search/import-excel/ — ضع قيمة في كل سطر).
+    """
+    try:
+        from django.http import HttpResponse as _HR
+        col = str(request.GET.get("column") or "").strip()
+        if not col or len(col) > 100:
+            return JsonResponse({"error": "column required (≤100 chars)"}, status=400)
+        import io as _io
+        from openpyxl import Workbook as _WB
+        from openpyxl.styles import Font as _Font, PatternFill as _Fill, Alignment as _Align
+        wb = _WB()
+        ws = wb.active
+        try:
+            ws.title = "values"
+        except Exception:
+            pass
+        try:
+            ws.sheet_view.rightToLeft = True
+        except Exception:
+            pass
+        ws["A1"] = col
+        try:
+            ws["A1"].font = _Font(bold=True, color="FFFFFF")
+            ws["A1"].fill = _Fill(start_color="059669", end_color="059669", fill_type="solid")
+            ws["A1"].alignment = _Align(horizontal="center", vertical="center")
+            ws.column_dimensions["A"].width = max(22, min(len(col) + 10, 60))
+        except Exception:
+            pass
+        buf = _io.BytesIO()
+        wb.save(buf)
+        try:
+            wb.close()
+        except Exception:
+            pass
+        data = buf.getvalue()
+        resp = _HR(data, content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        try:
+            from urllib.parse import quote as _quote
+            _fn = "template_%s.xlsx" % (_quote(col, safe="")[:80] or "values")
+            resp["Content-Disposition"] = "attachment; filename*=UTF-8''%s" % _fn
+        except Exception:
+            pass
+        return resp
+    except Exception as e:
+        return JsonResponse({"error": str(e)[:200]}, status=500)
+
+
+@csrf_exempt
 def api_search_import_excel(request):
     """POST /api/search/import-excel/ (multipart file=, ‏column_index?=) — قيم بحث من ملف.
 
@@ -9726,7 +9815,7 @@ def _write_doc_params_el(rml, _ET3, doc_params):
 
 
 def _render_rml_xml(prog_name, displayName, icon, category, schema, description, namespace,
-                    connections, fields, columns, charts, rules, report_type="master", detail=None, links=None, doc_template=None, groups=None, distinct=False, table_opts=None, group_levels=1, general_where=None, extra_meta=None, doc_params=None, doc_layout=None):
+                    connections, fields, columns, charts, rules, report_type="master", detail=None, links=None, doc_template=None, groups=None, distinct=False, table_opts=None, group_levels=1, general_where=None, extra_meta=None, doc_params=None, doc_layout=None, alt_row_color_1=None, alt_row_color_2=None):
     """Build pretty RML XML from wizard payload (shared by create/update)."""
     import xml.etree.ElementTree as ET, xml.dom.minidom
     rml = ET.Element("rml")
@@ -9761,6 +9850,15 @@ def _render_rml_xml(prog_name, displayName, icon, category, schema, description,
                 md.set(str(_k), str(_v))
     except Exception:
         pass
+    # alternate row colors: new designer values win (validated), else preserved above
+    import re as _re_alt
+    for _ak, _av in (("alt_row_color_1", alt_row_color_1), ("alt_row_color_2", alt_row_color_2)):
+        try:
+            _av = str(_av or "").strip()
+            if _av and _re_alt.fullmatch(r"#[0-9a-fA-F]{6}", _av or ""):
+                md.set(_ak, _av)
+        except Exception:
+            pass
     # rml_connections — auto-numbered id, single canonical connection_id attr
     if connections:
         conn_el = ET.SubElement(rml, "rml_connections")
@@ -10354,7 +10452,9 @@ def api_rml_draft(request, app_name):
             data.get("group_levels", data.get("groupLevels", 1)),
             data.get("general_where", data.get("generalWhere", "")), _keep,
             data.get("doc_params", data.get("docParams", [])),
-            doc_layout=data.get("doc_layout", data.get("docLayout", data.get("layout", ""))))
+            doc_layout=data.get("doc_layout", data.get("docLayout", data.get("layout", ""))),
+            alt_row_color_1=data.get("alt_row_color_1", data.get("altRowColor1", "")),
+            alt_row_color_2=data.get("alt_row_color_2", data.get("altRowColor2", "")))
         target.write_text(pretty, encoding="utf-8")
         job = _uuid.uuid4().hex[:16]
         with _RML_JOBS_LOCK:
@@ -10462,7 +10562,9 @@ def api_rml_fetch_query(request, app_name):
             data.get("group_levels", data.get("groupLevels", 1)),
             data.get("general_where", data.get("generalWhere", "")), {},
             data.get("doc_params", data.get("docParams", [])),
-            doc_layout=data.get("doc_layout", data.get("docLayout", data.get("layout", ""))))
+            doc_layout=data.get("doc_layout", data.get("docLayout", data.get("layout", ""))),
+            alt_row_color_1=data.get("alt_row_color_1", data.get("altRowColor1", "")),
+            alt_row_color_2=data.get("alt_row_color_2", data.get("altRowColor2", "")))
         fname = "__fetchq_%s.rml" % _uuid.uuid4().hex[:12]
         _ad, target, err = _resolve_rml_target(app_name, fname)
         if err or target is None:
@@ -10519,7 +10621,9 @@ def api_rml_design_preview(request, app_name):
             data.get("group_levels", data.get("groupLevels", 1)),
             data.get("general_where", data.get("generalWhere", "")), {},
             data.get("doc_params", data.get("docParams", [])),
-            doc_layout=data.get("doc_layout", data.get("docLayout", data.get("layout", ""))))
+            doc_layout=data.get("doc_layout", data.get("docLayout", data.get("layout", ""))),
+            alt_row_color_1=data.get("alt_row_color_1", data.get("altRowColor1", "")),
+            alt_row_color_2=data.get("alt_row_color_2", data.get("altRowColor2", "")))
         fname = "__preview_%s.rml" % _uuid.uuid4().hex[:12]
         _ad, target, err = _resolve_rml_target(app_name, fname)
         if err or target is None:
@@ -10625,15 +10729,24 @@ def api_update_rml(request, app_name):
         groups = data.get("groups", [])
         doc_template = data.get("doc_template", data.get("docTemplate", ""))
         general_where = data.get("general_where", data.get("generalWhere", ""))
+        _keep_meta = _rml_extra_meta_attrs(target) or {}
+        for _ak in ("alt_row_color_1", "alt_row_color_2"):
+            _nv = data.get(_ak, data.get("altRowColor" + _ak[-1], ""))
+            if str(_nv or "").strip():
+                _keep_meta[_ak] = str(_nv).strip()
+            else:
+                _keep_meta.pop(_ak, None)
         pretty = _render_rml_xml(prog_name, displayName, icon, category, schema, description,
                                  namespace, connections, fields, columns, charts, rules,
                                  report_type, detail, links, doc_template, groups,
                                  bool(data.get("distinct")),
                                  data.get("table_opts", data.get("tableOpts", [])),
                                  data.get("group_levels", data.get("groupLevels", 1)),
-                                 general_where, _rml_extra_meta_attrs(target),
+                                 general_where, _keep_meta,
                                  data.get("doc_params", data.get("docParams", [])),
-                                 doc_layout=data.get("doc_layout", data.get("docLayout", data.get("layout", ""))))
+                                 doc_layout=data.get("doc_layout", data.get("docLayout", data.get("layout", ""))),
+            alt_row_color_1=data.get("alt_row_color_1", data.get("altRowColor1", "")),
+            alt_row_color_2=data.get("alt_row_color_2", data.get("altRowColor2", "")))
         target.write_text(pretty, encoding="utf-8")
         return JsonResponse({"ok": True, "file": target.name, "path": str(target), "updated": True})
     except Exception as e:

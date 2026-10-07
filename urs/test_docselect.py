@@ -394,8 +394,8 @@ class StyleFreezeTests(SimpleTestCase):
     def test_designer_style_markup(self):
         import os as _os
         base = _os.path.dirname(__file__)
-        with open(_os.path.join(base, "..", "workspace_1", "apps", "settings",
-                                "modals", "rml_wizard_script.html"), encoding="utf-8") as f:
+        with open(_os.path.join(base, "..", "rml_python", "shared",
+                                 "rml_wizard_script.html"), encoding="utf-8") as f:
             js = f.read()
         for needle in ("التنسيق المرئي", "تجميد العمود", "تجميد المجموعة", "تنسيق رأس المجموعة",
                        "'color',this.value", "'frozen',this.checked", "updateWizardGroup("):
@@ -404,14 +404,73 @@ class StyleFreezeTests(SimpleTestCase):
     def test_preview_manual_only(self):
         import os as _os
         base = _os.path.dirname(__file__)
-        with open(_os.path.join(base, "..", "workspace_1", "apps", "settings",
-                                "modals", "rml_wizard_script.html"), encoding="utf-8") as f:
+        with open(_os.path.join(base, "..", "rml_python", "shared",
+                                "rml_wizard_script.html"), encoding="utf-8") as f:
             js = f.read()
         self.assertIn("rptPrevStale", js)
         self.assertIn("بلا إخفاء وبلا جلب من الخادم", js)
         self.assertIn("loadedOnce", js)
         # no debounced auto-fetch remains
         self.assertNotIn("setTimeout(()=>{ try{ rptPreviewFetch(false); }catch(e){} }, 700)", js)
+
+
+class AltRowColorsTests(SimpleTestCase):
+    def test_metadata_extract(self):
+        from rml_python.compiler import RMLReportCompiler
+        comp = RMLReportCompiler(xml_text=(
+            '<rml><rpt_metadata name="r" displayName="R" alt_row_color_1="#ff0000" '
+            'alt_row_color_2="#00ff00"/></rml>'))
+        md = comp.rpt_metadata()
+        self.assertEqual(md["alt_row_color_1"], "#ff0000")
+        self.assertEqual(md["altRowColor2"], "#00ff00")
+
+    def test_metadata_invalid_ignored(self):
+        from rml_python.compiler import RMLReportCompiler
+        comp = RMLReportCompiler(xml_text=(
+            '<rml><rpt_metadata name="r" displayName="R" alt_row_color_1="red" '
+            'alt_row_color_2="#12345"/></rml>'))
+        md = comp.rpt_metadata()
+        self.assertIsNone(md["alt_row_color_1"])
+        self.assertIsNone(md["alt_row_color_2"])
+
+    def test_writer_persists_and_clears(self):
+        import xml.etree.ElementTree as _ET
+        rml = _ET.Element("rml")
+        out = _v._render_rml_xml(
+            "r", "R", "fa-table", "HR", "s", "", None,
+            [], [], [{"id": "1", "name": "a", "alias": "A", "expr": "a"}], [], [],
+            "master", None, [], "", [], False, [], 1, "",
+            {}, [], None,
+            alt_row_color_1="#abcdef", alt_row_color_2="not-a-color")
+        md = _ET.fromstring(out.encode("utf-8")).find("rpt_metadata")
+        self.assertEqual(md.get("alt_row_color_1"), "#abcdef")
+        self.assertIsNone(md.get("alt_row_color_2"))
+
+    def test_player_zebra_markup(self):
+        import os as _os
+        base = _os.path.dirname(__file__)
+        with open(_os.path.join(base, "templates", "report_player.html"), encoding="utf-8") as f:
+            html = f.read()
+        for needle in ("zebraPair", "alt_row_color_1", "altRowColor2",
+                       "tbody tr:hover", "_zb", "closest('tr')"):
+            self.assertIn(needle, html)
+
+    def test_designer_alt_colors_markup(self):
+        import os as _os
+        base = _os.path.dirname(__file__)
+        with open(_os.path.join(base, "..", "rml_python", "shared",
+                                "rml_wizard_modal.html"), encoding="utf-8") as f:
+            modal = f.read()
+        self.assertIn('id="rmlAltRow1"', modal)
+        self.assertIn('id="rmlAltRow2"', modal)
+        self.assertIn("اللون 1", modal)
+        self.assertIn("اللون 2", modal)
+        with open(_os.path.join(base, "..", "rml_python", "shared",
+                                "rml_wizard_script.html"), encoding="utf-8") as f:
+            js = f.read()
+        for needle in ("rmlAltRowColors", "rmlAltRowLoad", "alt_row_color_1",
+                       "_zbPrev", "...rmlAltRowColors()"):
+            self.assertIn(needle, js)
 
 
 class DocPlayerMarkupTests(SimpleTestCase):
@@ -457,14 +516,81 @@ class DocPlayerMarkupTests(SimpleTestCase):
         self.assertIn('id="totalWrap"', html)
         self.assertIn("lazyTotalPages = -1", html)
 
+    def test_player_cells_centered(self):
+        html = self._html()
+        self.assertIn("#dataTable td.excel-cell", html)
+        self.assertIn("text-align: center", html)
+        self.assertIn("#dataTable thead th > div { justify-content: center", html)
+
+    def test_sort_sends_alias_not_formula(self):
+        # ORA-00972: sort payload must carry the alias; backend resolves ordinal
+        html = self._html()
+        self.assertIn("{column:activeSort.column, direction:activeSort.direction}", html)
+        self.assertNotIn("column:resolveDbField(activeSort.column)", html)
+
+    def test_doc_filter_identity_is_real_column(self):
+        # ORA-00904: doc filter field must be the real column, never the @ref
+        html = self._html()
+        self.assertIn("alias: p.column || p.field || p.name || p.param_refname", html)
+
     def test_designer_source_ui(self):
         import os as _os
         base = _os.path.dirname(__file__)
-        with open(_os.path.join(base, "..", "workspace_1", "apps", "settings",
-                                "modals", "rml_wizard_script.html"), encoding="utf-8") as f:
+        with open(_os.path.join(base, "..", "rml_python", "shared",
+                                 "rml_wizard_script.html"), encoding="utf-8") as f:
             js = f.read()
         for needle in ("src_conn", "src_table", "src_column", "searchable", "مصدر قيم صندوق الاختيار"):
             self.assertIn(needle, js)
+
+    def test_doc_filters_have_no_tags(self):
+        import os as _os
+        base = _os.path.dirname(__file__)
+        with open(_os.path.join(base, "templates", "report_player.html"), encoding="utf-8") as f:
+            html = f.read()
+        # doc-originated filters are marked and skipped in tag render (URL keeps the mark)
+        self.assertGreater(html.count("_doc: true"), 5)
+        self.assertIn("if(f && f._doc) return;", html)
+        self.assertIn("_doc: !!f._doc", html)
+
+    def test_rules_empty_states_have_add_button(self):
+        # rule-adding button must sit NEXT TO the "no rules" text (not only in foot)
+        import os as _os
+        import re as _re
+        base = _os.path.dirname(__file__)
+        with open(_os.path.join(base, "..", "rml_python", "shared",
+                                "rml_wizard_script.html"), encoding="utf-8") as f:
+            js = f.read()
+        for m in _re.finditer(r"لا (?:توجد )?قواعد بعد", js):
+            window = js[max(0, m.start() - 200):m.end() + 600]
+            self.assertIn("addWizardRule", window)
+
+    def test_compact_rule_sources_dropdown(self):
+        # 200-field wall replaced by searchable compact multi-select
+        import os as _os
+        base = _os.path.dirname(__file__)
+        with open(_os.path.join(base, "..", "rml_python", "shared",
+                                "rml_wizard_script.html"), encoding="utf-8") as f:
+            js = f.read()
+        for needle in ("ruleSrcDropHtml", "ruleSrcCheck", "ruleSrcAll",
+                       "ruleSrcFilter", "ruleSrcToggleDrop", "بحث عن حقل",
+                       "تحديد الكل", "مسح الكل"):
+            self.assertIn(needle, js)
+
+    def test_number_counter_locks_width(self):
+        import os as _os
+        base = _os.path.dirname(__file__)
+        with open(_os.path.join(base, "templates", "report_player.html"), encoding="utf-8") as f:
+            p_html = f.read()
+        with open(_os.path.join(base, "..", "rml_python", "shared",
+                                "rml_wizard_script.html"), encoding="utf-8") as f:
+            w_js = f.read()
+        for content, name in ((p_html, "player"), (w_js, "designer")):
+            self.assertIn("num-tnum", content, name)
+            self.assertIn("tabular-nums", content, name)
+            self.assertIn("minWidth", content, name)
+        for content, name in ((p_html, "player"), (w_js, "designer")):
+            self.assertIn("_colLockW", content, name)
+            self.assertIn("tableLayout", content, name)
 
     def test_param_refname_markup(self):
         import os as _os
@@ -473,12 +599,11 @@ class DocPlayerMarkupTests(SimpleTestCase):
             p_html = f.read()
         self.assertIn("param_refname", p_html)
 
-        for ws in ("workspace_1", "workspace_2"):
-            with open(_os.path.join(base, "..", ws, "apps", "settings",
-                                    "modals", "rml_wizard_script.html"), encoding="utf-8") as f:
-                w_html = f.read()
-            self.assertIn("param_refname", w_html)
-            self.assertIn("الاسم المرجعي للمدخل (param_refname)", w_html)
+        with open(_os.path.join(base, "..", "rml_python", "shared",
+                                "rml_wizard_script.html"), encoding="utf-8") as f:
+            w_html = f.read()
+        self.assertIn("param_refname", w_html)
+        self.assertIn("الاسم المرجعي للمدخل (param_refname)", w_html)
 
     def test_custom_doc_param_writer_and_compiler(self):
         import xml.etree.ElementTree as _ET
@@ -584,16 +709,15 @@ class DocPlayerMarkupTests(SimpleTestCase):
         self.assertIn("no_filter", p_html)
         self.assertIn("f.options", p_html)
 
-        for ws in ("workspace_1", "workspace_2"):
-            with open(_os.path.join(base, "..", ws, "apps", "settings",
-                                    "modals", "rml_wizard_modal.html"), encoding="utf-8") as f:
-                m_html = f.read()
-            self.assertIn("createCustomDocParam()", m_html)
-            self.assertIn("+ مدخل مخصص حر", m_html)
+        with open(_os.path.join(base, "..", "rml_python", "shared",
+                                "rml_wizard_modal.html"), encoding="utf-8") as f:
+            m_html = f.read()
+        self.assertIn("createCustomDocParam()", m_html)
+        self.assertIn("+ مدخل مخصص حر", m_html)
 
-            with open(_os.path.join(base, "..", ws, "apps", "settings",
-                                    "modals", "rml_wizard_script.html"), encoding="utf-8") as f:
-                s_html = f.read()
+        with open(_os.path.join(base, "..", "rml_python", "shared",
+                                "rml_wizard_script.html"), encoding="utf-8") as f:
+            s_html = f.read()
             self.assertIn("createCustomDocParam", s_html)
             self.assertIn("updateWizardDocParamOptionRow", s_html)
             self.assertIn("addWizardDocParamOption", s_html)

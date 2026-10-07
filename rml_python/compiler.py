@@ -27,6 +27,8 @@ class RMLMetadata:
     doc_layout: Optional[str] = None  # doc only: card (default, one record) | table (كشف واحد)
     distinct: bool = False  # صفوف مميزة فقط (SELECT DISTINCT) — يُضبط من المصمم
     group_levels: int = 1  # عدد مستويات المجموعات (رئيسية/فرعية) — يُضبط من المصمم
+    alt_row_color_1: Optional[str] = None  # لون الصفوف الفردية (zebra) — يُضبط من المصمم
+    alt_row_color_2: Optional[str] = None  # لون الصفوف الزوجية (zebra) — يُضبط من المصمم
     doc_params: List[Dict[str, Any]] = field(default_factory=list)  # مدخلات / عوامل تصفية مطلوبة للمستندي
     raw_attrs: Dict[str, str] = field(default_factory=dict)
 
@@ -48,6 +50,10 @@ class RMLMetadata:
             "distinct": self.distinct,
             "group_levels": self.group_levels,
             "groupLevels": self.group_levels,
+            "alt_row_color_1": self.alt_row_color_1,
+            "altRowColor1": self.alt_row_color_1,
+            "alt_row_color_2": self.alt_row_color_2,
+            "altRowColor2": self.alt_row_color_2,
             "doc_params": list(self.doc_params or []),
             "docParams": list(self.doc_params or []),
             "raw_attrs": dict(self.raw_attrs or {}),
@@ -558,6 +564,16 @@ class RMLReportCompiler:
         doc_layout = (get_attr("doc_layout", "docLayout", "layout", default="") or "").strip().lower() or None
         _dv = (get_attr("distinct", default="") or "").strip().lower()
         distinct = _dv in ("1", "true", "yes", "y")
+
+        def _hex(v):
+            try:
+                _s = str(v or "").strip()
+                import re as _re_hex
+                return _s if _re_hex.fullmatch(r"#[0-9a-fA-F]{6}", _s or "") else None
+            except Exception:
+                return None
+        alt1 = _hex(get_attr("alt_row_color_1", "altrowcolor1", "altRowColor1", "alt_color_1", "altColor1"))
+        alt2 = _hex(get_attr("alt_row_color_2", "altrowcolor2", "altRowColor2", "alt_color_2", "altColor2"))
         try:
             group_levels = max(1, min(int(str(get_attr("group_levels", "groupLevels", "levels", default="1") or 1)), 5))
         except (TypeError, ValueError):
@@ -576,6 +592,8 @@ class RMLReportCompiler:
             doc_layout=doc_layout,
             distinct=distinct,
             group_levels=group_levels,
+            alt_row_color_1=alt1,
+            alt_row_color_2=alt2,
             doc_params=[p.to_dict() for p in self.doc_params()],
             raw_attrs=dict(el.attrib),
         )

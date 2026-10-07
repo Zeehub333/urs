@@ -374,6 +374,85 @@ def _transpile_if_calls(text: str, _depth: int = 0) -> str:
     return _transpile_if_calls(text[:m.start()] + repl + text[k:], _depth + 1)
 
 
+_XLOOKUP_CALL_RE = re.compile(r"(?<![\w$#\.\"'\u0600-\u06FF])XLOOKUP\s*\(", re.IGNORECASE)
+_NUM_TEXT_RE = re.compile(r"^-?\d+(\.\d+)?$")
+_DATE_TEXT_RE = re.compile(r"^\d{4}-\d{2}-\d{2}([ T]\d{2}:\d{2}(:\d{2})?)?$")
+
+
+def _xlookup_cmp(lhs_sql: str, val_sql: str) -> str:
+    """Equality fragment for an XLOOKUP lookup: type-safe comparison.
+
+    Quoted non-numeric, non-date literals compare as TEXT (CAST ... VARCHAR)
+    so Oracle never attempts a crashing implicit conversion (ORA-01722);
+    numeric literals, dates and column-vs-column compares stay direct.
+    """
+    try:
+        s = str(val_sql or "").strip()
+        m = re.fullmatch(r"(?:[nN])?'(?:[^']|'')*'", s, re.DOTALL)
+        if m:
+            inner = s
+            if inner[:1].upper() == "N":
+                inner = inner[1:]
+            inner = inner[1:-1].replace("''", "'")
+            t = inner.strip().replace("،", ",").replace(",", "")
+            if t and not _NUM_TEXT_RE.match(t) and not _DATE_TEXT_RE.match(t):
+                return f"CAST({lhs_sql} AS VARCHAR(4000)) = {s}"
+    except Exception:
+        pass
+    return f"{lhs_sql} = {s}"
+
+
+def _transpile_xlookup_calls(text: str, _depth: int = 0) -> str:
+    """Rewrite same-scope `XLOOKUP(v, C, R[, D])` → `CASE WHEN C = v THEN R ELSE D/NULL END`.
+
+    Excel semantics restricted to the current query scope: inner refs stay
+    verbatim for the normal ref resolution/validation downstream (unknown
+    refs still raise their usual clear errors). Cross-connection lookups
+    cannot run in SQL — the planner's own routing errors apply as before.
+    Wrong arity raises a clear Arabic error (no database implements bare
+    XLOOKUP, so leaving it literal can only produce ORA-00904).
+    Unbalanced parens stay literal (same policy as IF).
+    """
+    if not text or _depth > 8:
+        return text
+    m = _XLOOKUP_CALL_RE.search(text)
+    if not m:
+        return text
+    depth, k, n = 1, m.end(), len(text)
+    while k < n and depth > 0:
+        ch = text[k]
+        if ch == "'":
+            j = k + 1
+            while j < n:
+                if text[j] == "'":
+                    if j + 1 < n and text[j + 1] == "'":
+                        j += 2
+                        continue
+                    break
+                j += 1
+            k = j + 1 if j < n else n
+            continue
+        if ch == '"':
+            j = text.find('"', k + 1)
+            k = n if j < 0 else j + 1
+            continue
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        k += 1
+    if depth != 0:
+        return text
+    args = [_transpile_xlookup_calls(a.strip(), _depth + 1)
+            for a in (_split_top_commas(text[m.end():k - 1]) or [])]
+    if len(args) not in (3, 4) or not args[0].strip() or not args[1].strip() or not args[2].strip():
+        raise ValueError("XLOOKUP يتطلب 3 أو 4 وسائط (القيمة، عمود البحث، عمود النتيجة [, قيمة عدم التطابق]) — راجع الصيغة")
+    cond = _xlookup_cmp(args[1], args[0])
+    els = args[3].strip() if len(args) == 4 else "NULL"
+    repl = f"CASE WHEN {cond} THEN {args[2].strip()} ELSE {els} END"
+    return _transpile_xlookup_calls(text[:m.start()] + repl + text[k:], _depth + 1)
+
+
 def resolve_ns_member(ns: str, member: str, registry: Dict[str, Tuple[str, pathlib.Path]],
                       visited: Optional[set] = None) -> Optional[str]:
     """Resolve `ns.member` to a SQL fragment, or None if not a known namespace.
@@ -473,13 +552,18 @@ def _resolve_expression(expr_text: str, fields: Optional[List[Any]],
     if not expr_text:
         return expr_text or ""
     _stripped = str(expr_text).lstrip()
-    if _stripped.startswith("=") and not _stripped.startswith("=="):
+    _is_formula = _stripped.startswith("=") and not _stripped.startswith("==")
+    if _is_formula:
         expr_text = _stripped[1:]
     # IF(cond, a, b) → CASE WHEN cond THEN a ELSE b END (XSQL-style).
     # Full-text pre-pass (runs before literal splitting because args often
     # contain N'...' literals). Literal-aware balanced scan; unknown arity
     # or unbalanced parens stay literal (DB error, as before this feature).
     expr_text = _transpile_if_calls(expr_text)
+    # Same-scope XLOOKUP(v, C, R[, D]) → CASE (formula context only, so a
+    # hypothetical native DB function of the same name is never shadowed).
+    if _is_formula:
+        expr_text = _transpile_xlookup_calls(expr_text)
     # T-SQL ISNULL(a, b) → COALESCE (works on Postgres + Oracle + SQL Server)
     expr_text = re.sub(r"(?i)\bISNULL\s*\(", "COALESCE(", expr_text)
     # T-SQL CAST targets → portable (DATETIME unknown to Postgres/Oracle)

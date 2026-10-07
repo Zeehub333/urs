@@ -181,6 +181,7 @@ urlpatterns = [
     path('api/rml/groups', urs_views.api_rml_groups, name='api_rml_groups'),
     path('api/rml/joins', urs_views.api_rml_joins, name='api_rml_joins'),
     path('api/search/import-excel/', urs_views.api_search_import_excel, name='api_search_import_excel'),
+    path('api/search/excel-template/', urs_views.api_search_excel_template, name='api_search_excel_template'),
     path('api/display-names/', urs_views.api_display_names, name='api_display_names'),
     path('api/display-names/save/', urs_views.api_display_names_save, name='api_display_names_save'),
     path('api/display-names/delete/', urs_views.api_display_names_delete, name='api_display_names_delete'),

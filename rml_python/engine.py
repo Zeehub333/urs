@@ -52,15 +52,35 @@ def _fmt_cell(v: Any) -> Any:
     return v
 
 def _find_column_for_field(field: str, columns: Optional[List] = None) -> Optional[Any]:
-    """Match a frontend field (alias, name, or expr) to its RMLColumn. Case-insensitive."""
+    """Match a frontend field (alias, name, or expr) to its RMLColumn. Case-insensitive.
+
+    Formula equality ignores a single leading '=' on either side (the player
+    sends resolved exprs like '=if(...)'; stored exprs may or may not carry it).
+    """
     if not field or not columns:
         return None
-    key = str(field).strip().lower()
+    def _norm(v):
+        v = str(v or "").strip().lower()
+        return v[1:] if v.startswith("=") else v
+    key, key_raw = _norm(field), str(field).strip().lower()
     for c in columns:
         for cand in (getattr(c, "alias", None), getattr(c, "name", None), getattr(c, "expr", None)):
-            if cand and str(cand).strip().lower() == key:
+            if cand and (str(cand).strip().lower() == key_raw or _norm(cand) == key):
                 return c
     return None
+
+
+def _looks_like_formula(text: str) -> bool:
+    """True when a sort/filter key is a raw formula, not a column identifier.
+
+    Quoting such text as an identifier yields invalid SQL (e.g. ORA-00972
+    on Oracle's 30-char identifiers) — callers must skip, never quote.
+    """
+    try:
+        s = str(text or "").strip()
+    except Exception:
+        return False
+    return s.startswith("=") or ("[" in s)
 
 
 def _db_expr_for_field(field: str, columns: Optional[List] = None) -> str:
@@ -551,6 +571,49 @@ def _date_safe_for_compare(v) -> bool:
 
 _BOOL_LITS = {"true", "false", "1", "0", "t", "f", "yes", "no", "y", "n", "on", "off"}
 
+def _lit_is_plain_text(v) -> bool:
+    """Non-numeric, non-date, non-empty string literal (codes like L1/o1).
+
+    Arabic-normalized strings are excluded (they keep the TRANSLATE path).
+    """
+    try:
+        if not isinstance(v, str):
+            return False
+        s = v.strip()
+        if not s:
+            return False
+        if _NUM_LIT_RE.match(s.replace("،", ",").replace(",", "")):
+            return False
+        if _is_date_only(s):
+            return False
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2})?", s):
+            return False
+        if _needs_ar_norm(v):
+            return False
+        return True
+    except Exception:
+        return False
+
+
+def _filter_needs_text_cast(f, numcol, is_date, type_known) -> bool:
+    """True when a filter must compare as TEXT to avoid conversion crashes
+    (ORA-01722): unknown-typed column + plain-text literal(s).
+
+    Only triggers where today CRASHES (unknown type + non-numeric literal);
+    every path that works today is byte-identical (numeric/date literals,
+    known text/date/numeric columns, Arabic TRANSLATE path).
+    """
+    try:
+        if numcol or is_date or type_known:
+            return False
+        vals = [f.get("value"), f.get("valFrom"), f.get("valTo")]
+        _vv = f.get("value")
+        if isinstance(_vv, (list, tuple)):
+            vals.extend(list(_vv))
+        return any(_lit_is_plain_text(v) for v in vals)
+    except Exception:
+        return False
+
 def _bool_col_kind(col, field_name: str = "", fmap=None) -> bool:
     try:
         return "BOOL" in _type_str_of(col, field_name, fmap)
@@ -578,7 +641,7 @@ def _build_where(filters: List[Dict[str, Any]], start_idx: int = 1, columns: Opt
                  fields: Optional[List] = None, table_map: Optional[Dict[str, str]] = None,
                  conn_map: Optional[Dict[str, str]] = None,
                  _join: str = "AND", rules: Optional[List[Any]] = None,
-                 default_tables: Optional[Any] = None) -> Tuple[str, Dict[str, Any]]:
+                 default_tables: Optional[Any] = None, drop_keys: Optional[set] = None) -> Tuple[str, Dict[str, Any]]:
     """
     Build dynamic WHERE clause from Odoo-style search tags.
     Each filter: {field: str, op: str, value: Any, valFrom/valTo for between}
@@ -587,6 +650,9 @@ def _build_where(filters: List[Dict[str, Any]], start_idx: int = 1, columns: Opt
     Returns (where_sql, params_dict) with :pN binds.
     `columns` is used to resolve Arabic aliases to real DB identifiers; fk_lookup
     display search uses EXISTS on the reference table.
+    `drop_keys`: lowercase field/refname keys (expression-only doc params) that
+    must never reach SQL — their values flow via expression expansion instead.
+    Param refs (@...) and raw formulas are ALWAYS skipped (never valid identifiers).
     """
     if not filters:
         return "", {}
@@ -647,7 +713,7 @@ def _build_where(filters: List[Dict[str, Any]], start_idx: int = 1, columns: Opt
                     subs, start_idx=1000000 + i * 1000,
                     columns=columns, fields=fields, table_map=table_map,
                     conn_map=conn_map, _join="OR", rules=rules,
-                    default_tables=default_tables)
+                    default_tables=default_tables, drop_keys=drop_keys)
                 if sub_where.startswith(" WHERE "):
                     clauses.append("(" + sub_where[len(" WHERE "):] + ")")
                     params.update(sub_params)
@@ -664,7 +730,7 @@ def _build_where(filters: List[Dict[str, Any]], start_idx: int = 1, columns: Opt
                     subs, start_idx=1500000 + i * 1000,
                     columns=columns, fields=fields, table_map=table_map,
                     conn_map=conn_map, _join="AND", rules=rules,
-                    default_tables=default_tables)
+                    default_tables=default_tables, drop_keys=drop_keys)
                 if sub_where.startswith(" WHERE "):
                     clauses.append("(" + sub_where[len(" WHERE "):] + ")")
                     params.update(sub_params)
@@ -677,6 +743,18 @@ def _build_where(filters: List[Dict[str, Any]], start_idx: int = 1, columns: Opt
         op = (f.get("op") or "equals").lower()
         if not field:
             continue
+        try:
+            _dk = drop_keys or set()
+            _fld_l = str(field).strip().lower()
+            _ref_l = str(f.get("refname") or f.get("param_refname") or "").strip().lower()
+            if (_fld_l and _fld_l in _dk) or (_ref_l and _ref_l in _dk):
+                continue  # expression-only doc param: value flows via expansion, never WHERE
+            if str(field).strip().startswith("@") or _looks_like_formula(field):
+                continue  # param refs / raw formulas are never DB identifiers (ORA-00904)
+            if re.fullmatch(r"(?i)v_custom_\d+", str(field).strip() or ""):
+                continue  # designer placeholder column (custom param never linked) — never real
+        except Exception:
+            pass
         # TRANSLATE() للأعمدة النصية فقط — وإلا Postgres يرفض translate(integer,...)
         _texty = _field_is_texty(field, _fmap)
         p = f"p{i}"
@@ -760,6 +838,12 @@ def _build_where(filters: List[Dict[str, Any]], start_idx: int = 1, columns: Opt
         _numcol = _col_is_numeric(col, field, _fmap)
         _tstr = _type_str_of(col, field, _fmap) if _numcol else ""
         _boolcol = _bool_col_kind(col, field, _fmap)
+        if _filter_needs_text_cast(f, _numcol, is_date,
+                                    bool(_type_str_of(col, field, _fmap).strip())):
+            # unknown-typed column + plain-text literal (codes like L1/o1):
+            # compare as TEXT so Oracle/PG never attempt a crashing implicit
+            # conversion (ORA-01722). All paths that work today are untouched.
+            qfield = f"CAST({qfield} AS VARCHAR(4000))"
         if op in ("equals", "=", "==", "eq"):
             if _numcol and not _num_safe_for_compare(f.get("value"), _tstr):
                 clauses.append("1=0")
@@ -988,7 +1072,9 @@ def _build_order_by(sort, columns=None) -> str:
     to duplicate aliases — e.g. MSSQL 209 "ambiguous column" when the same
     alias (تاريخ الحوالة ×2) appears twice — and valid in PG/Oracle/MSSQL,
     including computed/aggregated expressions. Falls back to the quoted
-    alias when the column isn't in the SELECT list (backward compat)."""
+    alias when the column isn't in the SELECT list (backward compat).
+    Raw formulas that match nothing are SKIPPED (never quoted as
+    identifiers — ORA-00972); empty result means natural DB order."""
     if not sort:
         return ""
     if isinstance(sort, dict):
@@ -1004,6 +1090,8 @@ def _build_order_by(sort, columns=None) -> str:
             pos = _select_ordinal(matched, columns)
             if pos > 0:
                 parts.append(f"{pos} {direction}")
+            elif _looks_like_formula(col):
+                continue
             else:
                 order_key = matched.alias if matched is not None and getattr(matched, "alias", None) else col
                 parts.append(f"{_q(order_key)} {direction}")
@@ -2002,7 +2090,10 @@ class RMLReportEngine:
         keys = set()
         dp_list = getattr(self, "doc_params", None) or (self.compiler.doc_params() if hasattr(self, "compiler") and hasattr(self.compiler, "doc_params") else [])
         for dp in dp_list or []:
-            if getattr(dp, "no_filter", False) or getattr(dp, "is_custom", False):
+            # ONLY the explicit no_filter flag excludes (expression-only intent).
+            # is_custom alone means user-created origin — a custom param linked
+            # to a real column with no_filter OFF must filter normally.
+            if getattr(dp, "no_filter", False):
                 for k in (getattr(dp, "column", None), getattr(dp, "param_refname", None), getattr(dp, "id", None)):
                     if k and str(k).strip():
                         keys.add(str(k).strip().lower())
@@ -2075,8 +2166,9 @@ class RMLReportEngine:
         if dp_list:
             s = self._expand_doc_params(s, dp_list, getattr(self, "_active_filters", None))
         try:
-            from .namespaces import _transpile_if_calls
+            from .namespaces import _transpile_if_calls, _transpile_xlookup_calls
             s = _transpile_if_calls(s)
+            s = _transpile_xlookup_calls(s)
         except Exception:
             pass
         segs = re.split(self._REFNAME_SEG_RE, s)
@@ -2537,6 +2629,81 @@ class RMLReportEngine:
             fa, ta = self._norm_table(l.get("from_table")), self._norm_table(l.get("to_table"))
             if (fa == a and ta == b) or (fa == b and ta == a):
                 return l
+        return None
+
+    def _link_chain(self, base_norm: str, target: str, max_depth: int = 4) -> Optional[List[str]]:
+        """Shortest explicit-link path [base, ..., target] (BFS), or None.
+
+        Only designer-authored <links> are followed (never inferred/FK hops),
+        so a chain always reflects an intended relationship. Direct links
+        come back as [base, target]; max_depth bounds runaway searches.
+        """
+        try:
+            base = self._norm_table(base_norm or "")
+            tgt = self._norm_table(target or "")
+        except Exception:
+            return None
+        if not base or not tgt:
+            return None
+        if base == tgt:
+            return [base]
+        try:
+            adj: Dict[str, set] = {}
+            for l in (self._link_index() or []):
+                try:
+                    fa = self._norm_table(l.get("from_table"))
+                    ta = self._norm_table(l.get("to_table"))
+                except Exception:
+                    continue
+                if not fa or not ta or fa == ta:
+                    continue
+                adj.setdefault(fa, set()).add(ta)
+                adj.setdefault(ta, set()).add(fa)
+            from collections import deque
+            prev = {base: None}
+            depth = {base: 0}
+            dq = deque([base])
+            while dq:
+                cur = dq.popleft()
+                if cur == tgt:
+                    break
+                if depth.get(cur, 0) >= max_depth:
+                    continue
+                for nb in sorted(adj.get(cur, ())):
+                    if nb not in prev:
+                        prev[nb] = cur
+                        depth[nb] = depth.get(cur, 0) + 1
+                        dq.append(nb)
+            if tgt not in prev:
+                return None
+            path = [tgt]
+            while prev[path[-1]] is not None:
+                path.append(prev[path[-1]])
+            return list(reversed(path))
+        except Exception:
+            return None
+
+    @staticmethod
+    def _orient_link_cols(link, parent_norm: str, child_norm: str):
+        """(parent_col, child_col) for an explicit link oriented parent→child.
+
+        Returns None when the link does not connect the two tables.
+        """
+        try:
+            fa = str(link.get("from_table") or "").strip().upper().split(".")[-1]
+            ta = str(link.get("to_table") or "").strip().upper().split(".")[-1]
+            fc = str(link.get("from_col") or "").strip()
+            tc = str(link.get("to_col") or "").strip()
+            p = str(parent_norm or "").strip().upper().split(".")[-1]
+            c = str(child_norm or "").strip().upper().split(".")[-1]
+            if not fc or not tc:
+                return None
+            if fa == p and ta == c:
+                return fc, tc
+            if fa == c and ta == p:
+                return tc, fc
+        except Exception:
+            pass
         return None
 
     def _transitive_link_error(self, base_norm: str, s: str, sec_all) -> Optional[str]:
@@ -4420,10 +4587,15 @@ class RMLReportEngine:
         # Route secondaries: local (same physical DB) vs remote
         local_sec: List[str] = []
         remote_sec: Dict[str, Any] = {}
+        chain_map: Dict[str, List[str]] = {}
         for s in sec_all:
-            _terr = self._transitive_link_error(base_norm, s, sec_all)
-            if _terr:
-                raise ValueError(_terr)
+            _chain = self._link_chain(base_norm, s)
+            if _chain is None:
+                _terr = self._transitive_link_error(base_norm, s, sec_all)
+                if _terr:
+                    raise ValueError(_terr)
+            else:
+                chain_map[s] = _chain
             sconn = self._conn_key_of_table(s)
             sdb = self._db_for_conn(sconn)
             _mspec = self._link_match_spec(base_norm, s)
@@ -7401,7 +7573,8 @@ class RMLReportEngine:
         where_clause, where_params = _build_where(filters or [], columns=columns,
                                                  fields=getattr(self, "fields", []), table_map=table_map,
                                                  conn_map=self._conn_map(), rules=getattr(self, "rules", []),
-                                                 default_tables=self._rx_defaults())
+                                                 default_tables=self._rx_defaults(),
+                                                 drop_keys=self._doc_no_filter_keys())
         where_clause = self._apply_general_where(where_clause, table_map, self._conn_map(),
                                                   plan.get("gw_base"))
         group_clause = ""
@@ -8682,7 +8855,8 @@ class RMLReportEngine:
         gfields = getattr(self, "fields", [])
         where_clause, params = _build_where(_gf or [], columns=_gp["columns"], fields=gfields,
                                             table_map=_gp["table_map"], conn_map=self._conn_map(), rules=getattr(self, "rules", []),
-                                            default_tables=self._rx_defaults())
+                                            default_tables=self._rx_defaults(),
+                                            drop_keys=self._doc_no_filter_keys())
         _gdb = _resolve_filter_field(key, _gp["columns"], gfields, _gp["table_map"], self._conn_map(), getattr(self, "rules", []),
                                      default_tables=self._rx_defaults())
         gdb = _gp["base_db"]
@@ -8792,7 +8966,7 @@ class RMLReportEngine:
         self._reject_deferred(_gp, "في التجميع")
         _gf = self._apply_remote_filters(filters, _gp)
         gfields = getattr(self, "fields", [])
-        where_clause, params = _build_where(_gf, columns=_gp["columns"], fields=gfields, table_map=_gp["table_map"], conn_map=self._conn_map(), rules=getattr(self, "rules", []), default_tables=self._rx_defaults())
+        where_clause, params = _build_where(_gf, columns=_gp["columns"], fields=gfields, table_map=_gp["table_map"], conn_map=self._conn_map(), rules=getattr(self, "rules", []), default_tables=self._rx_defaults(), drop_keys=self._doc_no_filter_keys())
         _gdb = _resolve_filter_field(group_by, _gp["columns"], gfields, _gp["table_map"], self._conn_map(), getattr(self, "rules", []), default_tables=self._rx_defaults())
         sql = f"SELECT {_gdb}, COUNT(*) as cnt FROM {_gp['from_q']}{where_clause} GROUP BY {_gdb} ORDER BY cnt DESC"
         gdb = _gp["base_db"]
@@ -9118,6 +9292,7 @@ class RMLReportEngine:
             table_map=exec_plan.get("table_map") or {},
             conn_map=self._conn_map(), rules=getattr(self, "rules", []),
             default_tables=self._rx_defaults(),
+            drop_keys=self._doc_no_filter_keys(),
         )
         where_clause = self._apply_general_where(
             where_clause, exec_plan.get("table_map") or {}, self._conn_map(),
@@ -9393,7 +9568,7 @@ class RMLReportEngine:
                     if tbl == base_norm:
                         _bd = plan.get("base_disp") or base_norm
                         from_q = f"{base_schema_q + '.' if base_schema_q else ''}{_q(_bd)}"
-                        wc, wp = _build_where(base_only_filters, columns=cols_for_summary, fields=fields, table_map=None, conn_map=self._conn_map(), rules=getattr(self, "rules", []), default_tables=self._rx_defaults())
+                        wc, wp = _build_where(base_only_filters, columns=cols_for_summary, fields=fields, table_map=None, conn_map=self._conn_map(), rules=getattr(self, "rules", []), default_tables=self._rx_defaults(), drop_keys=self._doc_no_filter_keys())
                         cur = self._exec_on(base_db, f"SELECT {expr} as s FROM {from_q}{wc}", wp)
                     else:
                         # Secondary table: same-DB -> EXISTS semi-join; cross-DB -> two-phase keys
@@ -9418,7 +9593,7 @@ class RMLReportEngine:
                             if _sm["match"] != "exact":
                                 continue  # best effort: no fuzzy semi-joins in summaries
                             bcol, scol = key
-                            bwc, bwp = _build_where(base_only_filters, columns=cols_for_summary, fields=fields, table_map=None, conn_map=self._conn_map(), rules=getattr(self, "rules", []), default_tables=self._rx_defaults())
+                            bwc, bwp = _build_where(base_only_filters, columns=cols_for_summary, fields=fields, table_map=None, conn_map=self._conn_map(), rules=getattr(self, "rules", []), default_tables=self._rx_defaults(), drop_keys=self._doc_no_filter_keys())
                             # qualify base refs inside EXISTS subquery to base table
                             _bd = plan.get("base_disp") or base_norm
                             bfrom = f"{base_schema_q + '.' if base_schema_q else ''}{_q(_bd)}"
@@ -9439,7 +9614,7 @@ class RMLReportEngine:
                             bcol, scol = key
                             _bd2 = plan.get("base_disp") or base_norm
                             bfrom = f"{base_schema_q + '.' if base_schema_q else ''}{_q(_bd2)}"
-                            bwc, bwp = _build_where(base_only_filters, columns=cols_for_summary, fields=fields, table_map=None, conn_map=self._conn_map(), rules=getattr(self, "rules", []), default_tables=self._rx_defaults())
+                            bwc, bwp = _build_where(base_only_filters, columns=cols_for_summary, fields=fields, table_map=None, conn_map=self._conn_map(), rules=getattr(self, "rules", []), default_tables=self._rx_defaults(), drop_keys=self._doc_no_filter_keys())
                             c0 = self._exec_on(base_db, f"SELECT DISTINCT {_q(bcol)} FROM {bfrom}{bwc}", bwp)
                             try:
                                 bkeys = [r[0] for r in c0.fetchall() if r[0] is not None]

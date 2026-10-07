@@ -698,7 +698,7 @@ class FormulasMigrateTests(SimpleTestCase):
 
     def test_wizard_autocomplete_fetch(self):
         import os as _os
-        path = "workspace_1/apps/settings/modals/rml_wizard_script.html"
+        path = "rml_python/shared/rml_wizard_script.html"
         with open(path, encoding="utf-8") as f:
             src = f.read()
         for token in ("fxEqMatches", "fxFnsFetch", "fxFnPool", "fxFnFilter",
@@ -746,6 +746,34 @@ class RmlSortDedupeTests(SimpleTestCase):
         self.assertEqual(_build_order_by({"column": "ghost", "direction": "xx"}, []),
                          ' ORDER BY "ghost" ASC')
 
+    def test_order_by_formula_matches_stored_expr(self):
+        # ORA-00972 regression: player sends the resolved formula; backend
+        # must resolve it to the SELECT ordinal, never quote it as identifier.
+        from types import SimpleNamespace as _NS
+        from rml_python.engine import _build_order_by
+        formula = "=if(@priceMethod=o1,[16.IAS_ITEM_PRICE.I_PRICE],[PRIMARY_COST])"
+        cols = [_NS(alias="رمز الصنف", name="I_CODE", expr="T0.I_CODE"),
+                _NS(alias="التسعير", name="price", expr=formula)]
+        self.assertEqual(_build_order_by({"column": formula, "direction": "desc"}, cols),
+                         " ORDER BY 2 DESC")
+
+    def test_order_by_formula_eq_insensitive(self):
+        from types import SimpleNamespace as _NS
+        from rml_python.engine import _build_order_by
+        cols = [_NS(alias="التسعير", name="price", expr="if(@x=1,[t.c],[d])")]
+        self.assertEqual(_build_order_by({"column": "=IF(@x=1,[t.c],[d])"}, cols),
+                         " ORDER BY 1 ASC")
+
+    def test_order_by_unresolvable_formula_skipped(self):
+        from types import SimpleNamespace as _NS
+        from rml_python.engine import _build_order_by
+        cols = [_NS(alias="A", name="a", expr="t.a")]
+        self.assertEqual(_build_order_by({"column": "=if(@p=1,[9.t.c],[d])", "direction": "desc"}, cols), "")
+        self.assertEqual(_build_order_by([{"column": "=sum([t.x])"}, {"column": "A", "direction": "desc"}], cols),
+                         " ORDER BY 1 DESC")
+        # plain (non-formula) unknowns keep the old quoted fallback
+        self.assertEqual(_build_order_by({"column": "ghost"}, cols), ' ORDER BY "ghost" ASC')
+
     def test_dedupe_select_items(self):
         from rml_python.engine import _dedupe_select_items
         items = ['"T0"."A" AS "x"', '"T0"."B" AS "y"', '"T0"."A" AS "x"',
@@ -753,6 +781,172 @@ class RmlSortDedupeTests(SimpleTestCase):
         self.assertEqual(_dedupe_select_items(items),
                          ['"T0"."A" AS "x"', '"T0"."B" AS "y"', '"T0"."C" AS "x"'])
         self.assertEqual(_dedupe_select_items([]), [])
+
+
+class WhereParamGuardTests(SimpleTestCase):
+    """ORA-00904 regression: doc-param refs (@LEV) and raw formulas must
+    never reach SQL WHERE as quoted identifiers."""
+
+    def test_unused_tables_never_enter_plan(self):
+        # importing a table's fields must not route/JOIN it anywhere until
+        # some expression actually references it (perf invariant).
+        from types import SimpleNamespace as _NS
+        from rml_python.engine import RMLReportEngine
+        eng = RMLReportEngine.__new__(RMLReportEngine)
+        cols = [_NS(alias="A", name="a", expr="[MST.A]")]
+        field_table = {"a": "MST", "f0": "BIG"}
+        used = eng._used_tables(
+            cols, [{"field": "A", "op": "equals", "value": "1"}],
+            None, None, field_table, "")
+        self.assertEqual(used, {"MST"})
+
+    def test_param_ref_and_formula_skipped(self):
+        from rml_python.engine import _build_where
+        sql, params = _build_where([
+            {"field": "@LEV", "op": "equals", "value": "L1"},
+            {"field": "=if(@x=1,[t.c],[d])", "op": "equals", "value": "v"},
+            {"field": "code", "op": "equals", "value": "x"},
+        ])
+        self.assertNotIn("@LEV", sql)
+        self.assertNotIn("=if(", sql)
+        self.assertIn('"code"', sql)
+        self.assertEqual(len(params), 1)
+        self.assertIn("x", list(params.values()))
+
+    def test_drop_keys_skip_expression_only_params(self):
+        from rml_python.engine import _build_where
+        sql, params = _build_where(
+            [{"field": "lev_no", "op": "equals", "value": "L1", "refname": "@LEV"},
+             {"field": "code", "op": "equals", "value": "x"}],
+            drop_keys={"@lev", "lev_no"})
+        self.assertNotIn("lev_no", sql.lower().replace('"code"', ''))
+        self.assertIn('"code"', sql)
+        self.assertEqual(len(params), 1)
+
+    def test_normal_filters_untouched(self):
+        from rml_python.engine import _build_where
+        sql, params = _build_where([
+            {"field": "code", "op": "equals", "value": "x"},
+            {"field": "name", "op": "contains", "value": "y"},
+        ])
+        self.assertIn('"code"', sql)
+        self.assertIn("LIKE", sql)
+        self.assertEqual(len(params), 2)
+
+    def test_unknown_type_plain_text_casts(self):
+        # ORA-01722: 'L1' vs unknown-typed LEV_NO → text compare, never converts
+        from rml_python.engine import _build_where
+        sql, params = _build_where([{"field": "LEV_NO", "op": "equals", "value": "L1"}])
+        self.assertIn('CAST("LEV_NO" AS VARCHAR(4000))=:p1', sql)
+        self.assertEqual(params, {"p1": "L1"})
+
+    def test_known_types_keep_legacy_paths(self):
+        from types import SimpleNamespace as _NS
+        from rml_python.engine import _build_where
+        num_fields = [_NS(name="lev", data_type="INTEGER")]
+        sql, _ = _build_where([{"field": "lev", "op": "equals", "value": "L1"}], fields=num_fields)
+        self.assertEqual(sql.strip(), "WHERE 1=0")
+        txt_fields = [_NS(name="code", data_type="VARCHAR")]
+        sql, params = _build_where([{"field": "code", "op": "equals", "value": "L1"}], fields=txt_fields)
+        self.assertIn('"code"=:p1', sql)
+        self.assertNotIn("CAST", sql)
+        sql, _ = _build_where([{"field": "LEV_NO", "op": "equals", "value": "5"}])
+        self.assertIn('"LEV_NO"=:p1', sql)
+        self.assertNotIn("CAST", sql)
+
+    def test_between_and_in_cast(self):
+        from rml_python.engine import _build_where
+        sql, _ = _build_where([{"field": "LEV_NO", "op": "between", "valFrom": "L1", "valTo": "L9"}])
+        self.assertIn("CAST(", sql)
+        self.assertIn("BETWEEN", sql)
+        sql, _ = _build_where([{"field": "LEV_NO", "op": "in", "value": ["L1", "L2"]}])
+        self.assertIn("CAST(", sql)
+        self.assertIn("IN (", sql)
+
+    def test_placeholder_custom_column_skipped(self):
+        from rml_python.engine import _build_where
+        sql, params = _build_where([
+            {"field": "v_custom_1", "op": "equals", "value": "L1"},
+            {"field": "code", "op": "equals", "value": "x"},
+        ])
+        self.assertNotIn("v_custom", sql)
+        self.assertIn('"code"', sql)
+        self.assertEqual(len(params), 1)
+
+    def test_no_filter_keys_require_explicit_flag(self):
+        from types import SimpleNamespace as _NS
+        from rml_python.engine import RMLReportEngine
+        eng = RMLReportEngine.__new__(RMLReportEngine)
+        dp_linked_custom = _NS(column="LEV_NO", param_refname="@LEV", id="dp_1",
+                               no_filter=False, is_custom=True)
+        dp_expr_only = _NS(column="v_custom_2", param_refname="@PM", id="dp_2",
+                           no_filter=True, is_custom=True)
+        eng.compiler = _NS(doc_params=lambda: [dp_linked_custom, dp_expr_only])
+        keys = eng._doc_no_filter_keys()
+        # linked custom WITHOUT the flag must filter normally
+        self.assertNotIn("lev_no", keys)
+        self.assertNotIn("@lev", keys)
+        # explicit expression-only flag still excludes (incl. its placeholder)
+        self.assertIn("v_custom_2", keys)
+        self.assertIn("@pm", keys)
+        # ...and the WHERE builder honors it end to end
+        from rml_python.engine import _build_where
+        sql, _ = _build_where(
+            [{"field": "LEV_NO", "op": "equals", "value": "1"}],
+            drop_keys=keys)
+        self.assertIn("LEV_NO", sql)
+
+
+class XlookupTranspileTests(SimpleTestCase):
+    """ORA-00904 regression: same-scope XLOOKUP() in RML formulas must
+    compile to CASE (never reach Oracle SQL verbatim)."""
+
+    def test_basic_three_args(self):
+        from rml_python.namespaces import _transpile_xlookup_calls
+        out = _transpile_xlookup_calls("XLOOKUP('L1', [LEV_NO], [I_PRICE])")
+        self.assertEqual(out, "CASE WHEN CAST([LEV_NO] AS VARCHAR(4000)) = 'L1' THEN [I_PRICE] ELSE NULL END")
+
+    def test_four_args_default(self):
+        from rml_python.namespaces import _transpile_xlookup_calls
+        out = _transpile_xlookup_calls("XLOOKUP('L1', [LEV_NO], [I_PRICE], 0)")
+        self.assertEqual(out, "CASE WHEN CAST([LEV_NO] AS VARCHAR(4000)) = 'L1' THEN [I_PRICE] ELSE 0 END")
+
+    def test_numeric_literal_stays_direct(self):
+        from rml_python.namespaces import _transpile_xlookup_calls
+        out = _transpile_xlookup_calls("XLOOKUP(1, [LEV_NO], [I_PRICE])")
+        self.assertEqual(out, "CASE WHEN [LEV_NO] = 1 THEN [I_PRICE] ELSE NULL END")
+
+    def test_case_insensitive_and_nested(self):
+        from rml_python.namespaces import _transpile_xlookup_calls
+        out = _transpile_xlookup_calls(
+            "xlookup('L1', [LEV_NO], IF(@priceMethod=o1, [I_PRICE], [PRIMARY_COST]))")
+        self.assertIn("CASE WHEN", out)
+        self.assertNotIn("XLOOKUP", out.upper().replace("CASE", ""))
+        self.assertIn("'L1'", out)
+
+    def test_string_literal_with_name_inside_untouched(self):
+        from rml_python.namespaces import _transpile_xlookup_calls
+        s = "SELECT 'XLOOKUP(' AS c"
+        self.assertEqual(_transpile_xlookup_calls(s), s)
+
+    def test_wrong_arity_raises_arabic(self):
+        from rml_python.namespaces import _transpile_xlookup_calls
+        with self.assertRaises(ValueError) as cm:
+            _transpile_xlookup_calls("XLOOKUP('L1', [LEV_NO])")
+        self.assertIn("XLOOKUP", str(cm.exception))
+
+    def test_non_formula_passthrough(self):
+        # hand-written SQL without leading '=' keeps XLOOKUP verbatim
+        from rml_python.namespaces import _resolve_expression
+        self.assertIn("XLOOKUP", _resolve_expression("XLOOKUP(a, b, c)", [], {}, set()))
+
+    def test_user_formula_end_to_end_shape(self):
+        from rml_python.namespaces import _transpile_xlookup_calls
+        out = _transpile_xlookup_calls(
+            "XLOOKUP('L1', [LEV_NO], CASE WHEN 'o1'='o1' THEN [I_PRICE] ELSE [PRIMARY_COST] END)")
+        self.assertTrue(out.startswith("CASE WHEN "))
+        self.assertIn("CAST([LEV_NO] AS VARCHAR(4000)) = 'L1'", out)
+        self.assertIn("ELSE NULL END", out)
 
 
 class RmlRefnameTests(SimpleTestCase):
@@ -880,7 +1074,7 @@ class RmlPaletteTests(SimpleTestCase):
         self.assertIn("اتصال", body.get("error", ""))
 
     def test_wizard_palette_markup(self):
-        with open("workspace_1/apps/settings/modals/rml_wizard_script.html", encoding="utf-8") as f:
+        with open("rml_python/shared/rml_wizard_script.html", encoding="utf-8") as f:
             src = f.read()
         for token in ("rpt-flex", "rptSideColsHTML", "rptPreviewFetch", "design-preview",
                       "rptDrag", "rptDrop", "rptPropsRender", "col_refname", "rptDetListHTML",
@@ -1077,7 +1271,7 @@ class JsonConnectionEndpointTests(SimpleTestCase):
         base = _os.path.dirname(__file__)
         with open(_os.path.join(base, "templates", "forms_player.html"), encoding="utf-8") as f:
             self.assertIn("CONN_JSON_ENGINES", f.read())
-        with open("workspace_1/apps/settings/modals/rml_wizard_script.html", encoding="utf-8") as f:
+        with open("rml_python/shared/rml_wizard_script.html", encoding="utf-8") as f:
             self.assertIn("json", f.read())
 
 
@@ -1394,3 +1588,46 @@ class OracleClientUtilTests(SimpleTestCase):
         self.assertIsNotNone(col_el)
         self.assertEqual(col_el.get("currency_symbol"), "EUR")
         self.assertEqual(col_el.get("is_amount"), "1")
+
+
+class PolicyExcelImportTests(SimpleTestCase):
+    """Policy match-values: per-source Excel template + import merge."""
+
+    def test_excel_template_download(self):
+        from openpyxl import load_workbook
+        import io as _io
+        rf = RequestFactory()
+        req = rf.get("/api/search/excel-template/", {"column": "BRANCH_CODE"})
+        res = _v.api_search_excel_template(req)
+        self.assertEqual(res.status_code, 200)
+        self.assertIn("spreadsheetml", res["Content-Type"])
+        self.assertIn("attachment", res["Content-Disposition"])
+        wb = load_workbook(filename=_io.BytesIO(res.content), read_only=True, data_only=True)
+        try:
+            ws = wb.active
+            self.assertEqual(ws["A1"].value, "BRANCH_CODE")
+        finally:
+            try:
+                wb.close()
+            except Exception:
+                pass
+
+    def test_excel_template_arabic_column(self):
+        rf = RequestFactory()
+        req = rf.get("/api/search/excel-template/", {"column": "رقم الحوالة"})
+        res = _v.api_search_excel_template(req)
+        self.assertEqual(res.status_code, 200)
+        self.assertIn("filename*=UTF-8''", res["Content-Disposition"])
+
+    def test_excel_template_requires_column(self):
+        rf = RequestFactory()
+        res = _v.api_search_excel_template(rf.get("/api/search/excel-template/"))
+        self.assertEqual(res.status_code, 400)
+
+    def test_policy_modal_excel_markup(self):
+        base = os.path.dirname(__file__)
+        with open(os.path.join(base, "templates", "app_detail.html"), encoding="utf-8") as f:
+            html = f.read()
+        for needle in ("rpDownloadTemplate", "rpImportExcel", "excel-template",
+                       "import-excel", "rpCnt-", "rpXl-", "قالب", "Excel"):
+            self.assertIn(needle, html)

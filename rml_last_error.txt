@@ -1,12 +1,13 @@
-TIME: 2026-10-06T11:01:47
-RML: confirmed_tr_report.rml | APP: transaction_reports
+TIME: 2026-10-07T15:43:37
+RML: sales_plan.rml | APP: sales_rpts
 PAYLOAD keys: ['activeTable', 'columnFilters', 'distributed', 'filters', 'page', 'pageSize', 'skipTotal', 'sort']
-PAYLOAD activeTable: vewOutgoingTransfersDeliveringReport
+PAYLOAD activeTable: IAS_ITM_MST
 PAYLOAD page: 1
 PAYLOAD pageSize: 2500
-FILTERS: 1
-SORT: {'column': '=get(vewOutgoingTransfersDeliveringReport.مبلغ الحوالة)', 'direction': 'desc'}
+FILTERS: 2
+SORT: {'column': 'التسعير', 'direction': 'asc'}
 ERROR FULL:
-Report execution failed: ('40001', '[40001] [Microsoft][ODBC Driver 18 for SQL Server][SQL Server]Transaction (Process ID 631) was deadlocked on lock | communication buffer resources with another process and has been chosen as the deadlock victim. Rerun the transaction. (1205) (SQLExecDirectW)')
-SQL: SELECT "T0"."الرقم العام" AS "الرقم العام", "T0"."رقم الحوالة" AS "رقم الحوالة", "T0"."المصدر" AS "المصدر", "T0"."المنطقة" AS "المنطقة", "T0"."الجهة" AS "الجهة", "T0"."مبلغ الحوالة" AS "مبلغ الحوالة", "T0"."عملة الحوالة" AS "عملة الحوالة", "T0"."المستلم" AS "المستلم", "T0"."هاتف المستلم" AS "هاتف المستلم", "T0"."المرسل" AS "المرسل", "T0"."هاتف المرسل" AS "هاتف المرسل", "T0"."عمولة الوكيل" AS "عمولة الوكيل", "T0"."تاريخ الحوالة" AS "تاريخ الحوالة", "T0"."وقت الإدخال" AS "وقت الإدخال", "T0"."الفرع" AS "الفرع", "T0"."الوكيل" AS "الوكيل", "T0"."ملاحظات" AS "ملاحظات", NULL AS "الرقم المرجعي", NULL AS "جهة الصرف", NULL AS "وقت الصرف", "T0"."DebitingMethod" AS "حساب الصرف", "T0"."معتمدة" AS "معتمدة", "T0"."الحالة" AS "الحالة", "T0"."النوع" AS "النوع", "T0"."ملاحظات" AS "_rmlj0", "T0"."ملاحظات" AS "_rmlj1", "T0"."ملاحظات" AS "_rmlj2" FROM "dbo"."vewOutgoingTransfersDeliveringReport" "T0" WHERE "T0"."تاريخ الحوالة" BETWEEN :p1 AND :p1_2 ORDER BY 6 DESC OFFSET :off ROWS FETCH NEXT :lim ROWS ONLY
-Params: {'p1': '2026-10-01', 'p1_2': '2026-10-06', 'off': 0, 'lim': 2500}
+Report execution failed: ORA-00904: "@LEV": invalid identifier
+Help: https://docs.oracle.com/error-help/db/ora-00904/
+SQL: SELECT "T0"."I_CODE" AS "رمز الصنف", "T0"."I_NAME" AS "اسم الصنف", XLOOKUP('L1',"T1"."LEV_NO", CASE WHEN 'o1'='o1' THEN "T1"."I_PRICE" ELSE "T0"."PRIMARY_COST" END) AS "التسعير", "T1"."LEV_NO" AS "مستوى التسعيرة" FROM "IAS20264"."IAS_ITM_MST" "T0" LEFT JOIN "IAS20264"."IAS_ITEM_PRICE" "T1" ON "T1"."I_CODE" = "T0"."I_CODE" WHERE "@LEV"=:p1 AND (("T0"."G_CODE" <> '9000' AND "T0"."G_CODE" <> '9200') AND ("T1"."I_PRICE" <> 0)) ORDER BY 3 ASC OFFSET :off ROWS FETCH NEXT :lim ROWS ONLY
+Params: {'p1': 'L1', 'off': 0, 'lim': 2500}

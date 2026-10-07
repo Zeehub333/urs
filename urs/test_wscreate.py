@@ -416,6 +416,64 @@ class WsCreateEndpointTests(TestCase):
         self.assertEqual(body.get("table_count"), 2)
 
 
+class WsSharedFragmentsTests(SimpleTestCase):
+    FRAGS = ["rml_wizard_modal.html", "rml_wizard_script.html",
+             "forms_wizard_modal.html", "forms_wizard_script.html",
+             "conn_stats.html"]
+
+    def test_no_workspace_shadows_shared(self):
+        import urs.workspace as _wsm
+        for ws in _wsm.workspace_dirs():
+            md = ws / "apps" / "settings" / "modals"
+            if not md.is_dir():
+                continue
+            for n in self.FRAGS:
+                self.assertFalse((md / n).exists(),
+                                 "shadowed shared fragment: %s/%s" % (ws.name, n))
+
+    def test_shared_dirs_resolve(self):
+        import urs.workspace as _wsm
+        dirs = _wsm.shared_modals_dirs()
+        self.assertEqual(len(dirs), 2)
+        for n in self.FRAGS:
+            self.assertTrue(any((d / n).is_file() for d in dirs), n)
+
+    def test_template_includes_resolve_from_shared(self):
+        from django.template import engines
+        for n in ("rml_wizard_modal.html", "rml_wizard_script.html",
+                  "forms_wizard_modal.html", "forms_wizard_script.html"):
+            t = engines["django"].get_template(n)
+            self.assertIn("shared", str(t.origin.name).replace("\\", "/"))
+
+    def test_wizard_flags_true(self):
+        self.assertEqual(_v._wizard_flags(),
+                         {"has_rml_wizard": True, "has_fml_wizard": True})
+
+    def test_app_modal_shared_fallback(self):
+        rf = RequestFactory()
+        req = rf.get("/api/apps/settings/modals/modals/conn_stats.html")
+        res = _v.api_app_modal(req, "settings", "modals/conn_stats.html")
+        self.assertEqual(res.status_code, 200)
+        self.assertIn("إحصائيات الاتصال", res.content.decode()[:5000])
+
+    def test_copy_skips_shared_fragments(self):
+        import tempfile as _tf
+        with _tf.TemporaryDirectory() as td:
+            import pathlib as _pl
+            src = _pl.Path(td) / "src"
+            (src / "modals").mkdir(parents=True)
+            (src / "modals" / "rml_wizard_script.html").write_text("x", encoding="utf-8")
+            (src / "modals" / "custom.html").write_text("y", encoding="utf-8")
+            (src / "m.fmlk").write_text("<fml/>", encoding="utf-8")
+            dst = _pl.Path(td) / "dst"
+            dst.mkdir()
+            n = _v._ws_copy_settings_files(src, dst)
+            self.assertFalse((dst / "modals" / "rml_wizard_script.html").exists())
+            self.assertTrue((dst / "modals" / "custom.html").is_file())
+            self.assertTrue((dst / "m.fmlk").is_file())
+            self.assertGreater(n, 0)
+
+
 class WsScopeTests(SimpleTestCase):
     def setUp(self):
         self._td = tempfile.TemporaryDirectory()

@@ -734,12 +734,17 @@
             </div>`;
             if(!RP.applyAll){
                 if(!srcs.length) html += `<div class="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">القاعدة بلا مصادر — حدد مصادر القاعدة من المصمم أولاً، أو اجعلها سياسة افتراضية (كل السجلات).</div>`;
-                srcs.forEach(s=>{
+                srcs.forEach((s, si)=>{
                     const sel = RP.matchSel[s] || new Set();
                     html += `<div class="bg-white border border-slate-200 rounded-xl p-3">
-                        <div class="flex items-center justify-between mb-2">
-                            <div class="text-xs font-bold text-slate-700">تطبيق السياسة على — <span class="font-bold text-slate-800">${rpEsc(rpSrcLabel(s))}</span> <span class="text-[10px] text-slate-400">(${sel.size} محدد)</span></div>
-                            <input placeholder="بحث..." oninput="rpFilterVals('${rpEsc(s)}',this.value)" class="w-32 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-[11px]">
+                        <div class="flex items-center justify-between gap-2 mb-2">
+                            <div class="text-xs font-bold text-slate-700 min-w-0">تطبيق السياسة على — <span class="font-bold text-slate-800">${rpEsc(rpSrcLabel(s))}</span> <span id="rpCnt-${si}" class="text-[10px] text-slate-400">(${sel.size} محدد)</span></div>
+                            <div class="flex items-center gap-1.5 shrink-0">
+                                <input placeholder="بحث..." oninput="rpFilterVals('${rpEsc(s)}',this.value)" class="w-24 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-[11px]">
+                                <button onclick="rpDownloadTemplate('${rpEsc(s)}')" title="تحميل قالب Excel لهذا العمود" class="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-lg text-[11px] font-bold whitespace-nowrap"><i class="fa-solid fa-file-excel"></i> قالب</button>
+                                <button onclick="document.getElementById('rpXl-${si}').click()" title="استيراد القيم من ملف Excel" class="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-[11px] font-bold whitespace-nowrap"><i class="fa-solid fa-file-import"></i> Excel</button>
+                                <input id="rpXl-${si}" type="file" accept=".xlsx,.xlsm,.xls,.csv,.txt" class="hidden" onchange="rpImportExcel('${rpEsc(s)}',${si},this)">
+                            </div>
                         </div>
                         <div id="rpVals-${rpEsc(s)}" class="max-h-40 overflow-y-auto space-y-1 text-xs"><p class="text-slate-400">جارٍ تحميل القيم...</p></div>
                     </div>`;
@@ -807,6 +812,41 @@
             box.innerHTML = list.map(v=>`<label class="flex items-center gap-2 px-2 py-1 hover:bg-amber-50 rounded-lg cursor-pointer"><input type="checkbox" ${sel.has(v)?'checked':''} onchange="rpToggleVal('${rpEsc(s)}',this)" data-v="${rpEsc(v)}" class="rounded text-amber-600"><span class="flex-1">${rpEsc(v)}</span></label>`).join('') || '<p class="text-slate-400">لا قيم مطابقة</p>';
         }
         function rpFilterVals(s, q){ rpPaintVals(s, RP.distinctCache[s] || [], q); }
+        function rpDownloadTemplate(s){
+            try{
+                const a = document.createElement('a');
+                a.href = '/api/search/excel-template/?column=' + encodeURIComponent(s);
+                document.body.appendChild(a);
+                a.click();
+                setTimeout(()=>{ try{ a.remove(); }catch(e){} }, 500);
+            }catch(e){ rpNotify('تعذر تحميل القالب', 'error'); }
+        }
+        async function rpImportExcel(s, si, input){
+            try{
+                if(!input || !input.files || !input.files.length) return;
+                rpNotify('جارٍ استيراد القيم من Excel...', 'info');
+                const fd = new FormData();
+                fd.append('file', input.files[0]);
+                const res = await fetch('/api/search/import-excel/', {method:'POST', body: fd});
+                const d = await res.json().catch(()=>({}));
+                if(!res.ok) throw new Error(d.error || 'فشل الاستيراد');
+                const vals = (d.values || []).map(String);
+                if(!RP.matchSel[s]) RP.matchSel[s] = new Set();
+                let added = 0;
+                vals.forEach(v=>{ if(!RP.matchSel[s].has(v)){ RP.matchSel[s].add(v); added++; } });
+                const cache = RP.distinctCache[s] || [];
+                const have = new Set(cache.map(String));
+                vals.forEach(v=>{ if(!have.has(v)){ cache.push(v); have.add(v); } });
+                RP.distinctCache[s] = cache;
+                rpPaintVals(s, cache, '');
+                const cnt = document.getElementById('rpCnt-' + si);
+                if(cnt) cnt.textContent = '(' + RP.matchSel[s].size + ' محدد)';
+                const hint = document.getElementById('rpOverlapHint');
+                if(hint) hint.innerHTML = rpOverlapHintHtml();
+                try{ input.value = ''; }catch(e){}
+                rpNotify('تم استيراد ' + vals.length + ' قيمة (' + added + ' جديدة محددة) ✓' + (d.truncated ? ' — مقتطع عند 5000' : ''), 'success');
+            }catch(e){ rpNotify('فشل الاستيراد: ' + String((e && e.message) || e).slice(0, 200), 'error'); }
+        }
         function rpToggleVal(s, cb){
             if(!RP.matchSel[s]) RP.matchSel[s] = new Set();
             const v = cb.dataset.v;

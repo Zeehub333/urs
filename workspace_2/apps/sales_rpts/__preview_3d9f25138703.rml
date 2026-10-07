@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <rml>
-  <rpt_metadata name="sales_plan" displayName="تقرير انحراف خطط العينات" category="الخطط والانحرافات" schema="IAS20264" icon="fa-chart-bar" type="doc" doc_layout="table" connection="ORCL_PROD" namespace="p"/>
+  <rpt_metadata name="__palette_preview__" displayName="معاينة اللوحة" category="preview" schema="IAS20264" icon="fa-table" type="doc" doc_layout="table" connection="ORCL_PROD" namespace="p"/>
   <rml_connections>
     <connection id="1" connection_id="16"/>
   </rml_connections>
@@ -779,9 +779,9 @@
     <link id="3" from_table="IAS_BILL_DTL" from_col="I_CODE" to_table="IAS_ITM_MST" to_col="I_CODE" rel_type="one_to_many"/>
   </links>
   <table_opts>
-    <table name="IAS_ITM_MST" conn="16" is_default="1" where="[IAS_ITM_MST.G_CODE] &lt;&gt; '9000' AND [IAS_ITM_MST.G_CODE] &lt;&gt; '9200'"/>
-    <table name="IAS_ITEM_PRICE" conn="16" where="[IAS_ITEM_PRICE.LEV_NO] = 1 AND [IAS_ITEM_PRICE.I_PRICE] &lt;&gt; 0"/>
-    <table name="IAS_BILL_DTL" conn="16" where="[IAS_BILL_DTL.CC_CODE] = '11'"/>
+    <table name="IAS_ITM_MST" conn="16" is_default="1"/>
+    <table name="IAS_ITEM_PRICE" conn="16"/>
+    <table name="IAS_BILL_DTL" conn="16"/>
     <table name="IAS_BILL_MST" conn="16"/>
   </table_opts>
   <groups>

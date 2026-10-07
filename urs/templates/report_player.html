@@ -18,6 +18,12 @@
             animation: cellValueUpdate 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
             will-change: background-color, color;
         }
+        .num-tnum { font-variant-numeric: tabular-nums !important; }
+        #dataTable { table-layout: fixed; }
+        #dataTable thead th > div > span:first-child { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        #dataTable thead th > div { justify-content: center !important; gap: .375rem; }
+        #dataTable td.excel-cell { overflow: hidden; text-align: center; }
+        #dataTable tbody tr:hover { background-color: rgba(226,232,240,.55) !important; }
 {% endblock %}
 {% block sidebar %}
     <!-- Sidebar — kept for navigation (Forms + Reports) — URS integration -->
@@ -888,7 +894,9 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
             const dparams = md.doc_params || md.docParams || (typeof DJANGO_RML_DOC_PARAMS !== 'undefined' ? DJANGO_RML_DOC_PARAMS : []) || [];
             if(dparams && dparams.length){
                 return dparams.map((p, idx)=>({
-                    alias: p.param_refname || p.column || p.field || p.name || ('dp_' + idx),
+                    // filter identity = the REAL column (param_refname is for expressions only);
+                    // expression-only custom params fall back to their ref.
+                    alias: p.column || p.field || p.name || p.param_refname || ('dp_' + idx),
                     label: (p.label || p.display || '').trim() || ((p.column && !/^col_\d+$/i.test(p.column) && !/^dp_\d+$/i.test(p.column)) ? p.column : '') || ('مدخل ' + (idx + 1)),
                     kind: (p.type === 'select' || (Array.isArray(p.options) && p.options.length)) ? 'select' : (p.type === 'datetime' ? 'date' : (p.type || 'text')),
                     op: p.op || (p.type === 'date' ? 'between' : (p.type === 'number' || p.type === 'select') ? 'equals' : 'contains'),
@@ -1284,13 +1292,13 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                 };
                 if(op === 'between'){
                     const a = gv('from'), b = gv('to');
-                    if(a && b) newFilters.push({field: f.alias, op: 'between', valFrom: a, valTo: b, refname: f.refname || ''});
-                    else if(a) newFilters.push({field: f.alias, op: 'gte', value: a, refname: f.refname || ''});
-                    else if(b) newFilters.push({field: f.alias, op: 'lte', value: b, refname: f.refname || ''});
+                    if(a && b) newFilters.push({field: f.alias, op: 'between', valFrom: a, valTo: b, refname: f.refname || '', _doc: true});
+                    else if(a) newFilters.push({field: f.alias, op: 'gte', value: a, refname: f.refname || '', _doc: true});
+                    else if(b) newFilters.push({field: f.alias, op: 'lte', value: b, refname: f.refname || '', _doc: true});
                     else if(f.required && !f.no_filter && !missingRequired){ missingRequired = true; missingName = f.label || f.alias; }
                 } else {
                     const v = gv('single');
-                    if(v !== '') newFilters.push({field: f.alias, op: op, value: v, refname: f.refname || ''});
+                    if(v !== '') newFilters.push({field: f.alias, op: op, value: v, refname: f.refname || '', _doc: true});
                     else if(f.required && !f.no_filter && !missingRequired){ missingRequired = true; missingName = f.label || f.alias; }
                 }
             });
@@ -1328,6 +1336,23 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                 cancelAnimationFrame(el._animCountId);
                 el._animCountId = null;
             }
+            // ثبات عرض العمود أثناء العد: قفل min-width على أعرض عينة + أرقام متساوية العرض
+            try{
+                const _samples = [];
+                try{ _samples.push(formatFn(start)); }catch(e){}
+                try{ _samples.push(formatFn((start + end) / 2)); }catch(e){}
+                try{ _samples.push(formatFn(end)); }catch(e){}
+                const _cs = getComputedStyle(el);
+                const _cv = animateNumberCount._cv || (animateNumberCount._cv = document.createElement('canvas'));
+                const _ctx = _cv.getContext('2d');
+                _ctx.font = [_cs.fontStyle, _cs.fontVariant, _cs.fontWeight, _cs.fontSize, _cs.fontFamily].join(' ');
+                const _pad = (parseFloat(_cs.paddingLeft) || 0) + (parseFloat(_cs.paddingRight) || 0);
+                let _need = 0;
+                _samples.forEach(t=>{ try{ _need = Math.max(_need, _ctx.measureText(String(t)).width); }catch(e){} });
+                _need = Math.ceil(_need + _pad + 2);
+                el.style.minWidth = Math.max(_need, el.offsetWidth || 0) + 'px';
+                el.classList.add('num-tnum');
+            }catch(e){}
             const startTime = performance.now();
             const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
             function step(now){
@@ -1341,6 +1366,7 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                 } else {
                     el.textContent = formatFn(end);
                     el._animCountId = null;
+                    try{ el.style.minWidth = ''; el.classList.remove('num-tnum'); }catch(e){}
                 }
             }
             el._animCountId = requestAnimationFrame(step);
@@ -1399,20 +1425,8 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                     cols.forEach(c => changedCols.add(c));
                 }
 
-                // Lock table layout and header widths so columns never jump or resize
-                const table = document.getElementById('dataTable');
-                if(table){
-                    const ths = table.querySelectorAll('thead th');
-                    ths.forEach(th => {
-                        const w = th.getBoundingClientRect().width;
-                        if(w > 0 && (!th.style.width || th.style.width === 'auto')){
-                            th.style.width = w + 'px';
-                            th.style.minWidth = w + 'px';
-                            th.style.maxWidth = w + 'px';
-                        }
-                    });
-                    table.style.tableLayout = 'fixed';
-                }
+                // ثبات التخطيط: ذاكرة العرض الدائمة (تُزرع من أول عرض ببيانات وتُعاد دائماً)
+                try{ lockPlayerColWidths(cols, true); }catch(e){}
 
                 const trs = Array.from(document.querySelectorAll('#tableBody tr:not(.rpt-detail-subrow)'));
                 trs.forEach((tr, ri) => {
@@ -1629,12 +1643,12 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                 const gv = (t)=>{ const el = document.querySelector('#docSearchFields [data-docf="' + f.alias.replace(/"/g, '\\"') + '"][data-doct="' + t + '"]'); return el ? (el.value || '').trim() : ''; };
                 if(op === 'between'){
                     const a = gv('dateFrom') || gv('numFrom'), b = gv('dateTo') || gv('numTo');
-                    if(a && b) activeFilters.push({field: f.alias, op: 'between', valFrom: a, valTo: b, refname: f.refname || ''});
-                    else if(a) activeFilters.push({field: f.alias, op: 'gte', value: a, refname: f.refname || ''});
-                    else if(b) activeFilters.push({field: f.alias, op: 'lte', value: b, refname: f.refname || ''});
+                    if(a && b) activeFilters.push({field: f.alias, op: 'between', valFrom: a, valTo: b, refname: f.refname || '', _doc: true});
+                    else if(a) activeFilters.push({field: f.alias, op: 'gte', value: a, refname: f.refname || '', _doc: true});
+                    else if(b) activeFilters.push({field: f.alias, op: 'lte', value: b, refname: f.refname || '', _doc: true});
                 } else {
                     const v = gv('single');
-                    if(v) activeFilters.push({field: f.alias, op: op, value: v, refname: f.refname || ''});
+                    if(v) activeFilters.push({field: f.alias, op: op, value: v, refname: f.refname || '', _doc: true});
                 }
             });
             if(!activeFilters.length){ notify('أدخل معايير البحث أولاً', 'info'); return; }
@@ -1705,7 +1719,7 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                     else if(f && f.field && f.op){
                         // فلاتر IN ضخمة (إكسل) لا تُحفظ في الرابط — تُتجاهل عند الاسترجاع
                         if(typeof f.value === 'string' && f.value.indexOf('__skipped_') === 0) return;
-                        activeFilters.push({field: f.field, op: f.op, value: f.value, valFrom: f.valFrom, valTo: f.valTo, refname: f.refname || ''});
+                        activeFilters.push({field: f.field, op: f.op, value: f.value, valFrom: f.valFrom, valTo: f.valTo, refname: f.refname || '', _doc: !!f._doc});
                     }
                 });
             }catch(e){}
@@ -1795,7 +1809,7 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                 else andF.push(mapF(f));
             });
             Object.values(ors).forEach(g=>{ andF.push(g.length > 1 ? {any: g} : g[0]); });
-            const payload = { activeTable, filters: andF, sort: activeSort.column?{column:resolveDbField(activeSort.column), direction:activeSort.direction}:undefined, page: page, pageSize: effPageSize };
+            const payload = { activeTable, filters: andF, sort: activeSort.column?{column:activeSort.column, direction:activeSort.direction}:undefined, page: page, pageSize: effPageSize };
             if(forceStageRefresh){ payload.refreshApi = true; forceStageRefresh = false; }
             payload.columnFilters = {};
             // Distributed execution: skip staging (5M-row copy) by joining
@@ -2327,6 +2341,48 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                 return a ? ` data-col="${a}"` : '';
             }catch(e){ return ''; }
         }
+        // ألوان الصفوف البديلة (zebra) من خصائص التقرير — [فردي، زوجي] أو null
+        function zebraPair(){
+            try{
+                const md = (lastApiData && lastApiData.metadata) || (typeof DJANGO_RML_METADATA !== 'undefined' ? DJANGO_RML_METADATA : {}) || {};
+                const ok = (v)=>{ v = String(v || '').trim(); return /^#[0-9a-fA-F]{6}$/.test(v) ? v : ''; };
+                const a = ok(md.alt_row_color_1 || md.altRowColor1);
+                const b = ok(md.alt_row_color_2 || md.altRowColor2);
+                return (a || b) ? [a, b] : null;
+            }catch(e){ return null; }
+        }
+        // ثبات عرض الأعمدة: ذاكرة عرض دائمة لكل تقرير تُطبق بعد كل بناء للرأس —
+        // تُزرع مرة واحدة من أول عرض ببيانات، ثم تُعاد على كل إعادة بناء (فلا يتمطط أبداً)
+        function lockPlayerColWidths(cols, canSeed){
+            try{
+                let _key = 'default';
+                try{ _key = (currentApp || '') + '::' + (currentRml || ''); }catch(e){}
+                window._colLockW = window._colLockW || {};
+                const _mem = window._colLockW[_key] || (window._colLockW[_key] = {});
+                const _table = document.getElementById('dataTable');
+                if(_table) _table.style.tableLayout = 'fixed';
+                const _ths = _table ? _table.querySelectorAll('thead th[data-col]') : [];
+                _ths.forEach(th=>{
+                    let _a = '';
+                    try{ _a = th.getAttribute('data-col'); }catch(e){}
+                    if(!_a) return;
+                    if(_mem[_a] && _mem[_a] > 0){
+                        th.style.width = _mem[_a] + 'px';
+                        th.style.minWidth = _mem[_a] + 'px';
+                        th.style.maxWidth = _mem[_a] + 'px';
+                    } else if(canSeed){
+                        let _w = 0;
+                        try{ _w = th.getBoundingClientRect().width; }catch(e){}
+                        if(_w > 0) _mem[_a] = Math.ceil(_w);
+                    }
+                });
+                try{
+                    const _alive = {};
+                    (cols || []).forEach(c=>{ const _a2 = c && (c.alias || c.name); if(_a2 && _mem[_a2]) _alive[_a2] = _mem[_a2]; });
+                    window._colLockW[_key] = _alive;
+                }catch(e){}
+            }catch(e){}
+        }
         // frozen set: designer column frozen + frozen-group members; leading run only
         function colFrozenRun(cols, groups){
             const set = {};
@@ -2368,7 +2424,14 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                         el.style.position = 'sticky';
                         el.style.right = off + 'px';
                         el.style.zIndex = z;
-                        if(!el.style.background) el.style.background = fb;
+                        if(!el.style.background){
+                            let _rb = '';
+                            try{
+                                const _tr = el.closest ? el.closest('tr') : null;
+                                _rb = (_tr && _tr.style && _tr.style.background) || '';
+                            }catch(e){}
+                            el.style.background = _rb || fb;
+                        }
                         el.style.boxShadow = 'inset -1px 0 0 #e2e8f0';
                     });
                     off += (widths[a] || 120);
@@ -2414,6 +2477,7 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                 } else {
                     thead.innerHTML = '<tr>' + (detailMode() ? '<th class="w-10 px-2 py-2 border-b border-slate-200 bg-slate-100"></th>' : '') + '<th class="w-12 px-3 py-2 text-center border-b border-slate-200 bg-slate-100 font-bold">#</th>' + cols.map(c=>{ const _cs = colTextStyle(c); return `<th${colDataAttr(c)} class="px-2 py-1 font-bold border-b border-slate-200 bg-slate-50 text-slate-700 cursor-pointer hover:bg-slate-100 select-none group"${(typeof colWidthStyle === 'function' ? colWidthStyle(c.alias || c.name) : '')}${_cs ? ` style="${_cs}"` : ''} onclick="openColumnMenu(event, '${c.alias}')"><div class="flex items-center justify-between"><span>${c.alias}</span><i class="fa-solid fa-chevron-down text-[10px] text-slate-400 group-hover:text-indigo-600"></i></div></th>`; }).join('') + '</tr>';
                 }
+                try{ lockPlayerColWidths(cols, rows.length > 0); }catch(e){}
             }
             const tbody = document.getElementById('tableBody');
             if(!append){
@@ -2424,9 +2488,14 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
             } else {
                 const startIdx = append ? (lazyLoadedRows.length - rows.length) : 0;
                 const fragment = document.createDocumentFragment();
+                const _zb = zebraPair();
                 rows.forEach((r, i) => {
                     const tr = document.createElement('tr');
                     tr.className = 'hover:bg-slate-50/80 transition';
+                    if(_zb){
+                        const _zc = (((startIdx + i) % 2) === 0) ? _zb[0] : _zb[1];
+                        if(_zc){ try{ tr.style.background = _zc; }catch(e){} }
+                    }
                     const idx = startIdx + i + 1;
                     let cells = detailExpandCell(r);
                     cells += `<td class="px-2 py-1 text-center text-slate-400 excel-cell">${idx}</td>`;
@@ -2692,9 +2761,14 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                 const cols = visCols((lastApiData && lastApiData.columns) || []);
                 tbody.innerHTML = '';
                 const fragment = document.createDocumentFragment();
+                const _zb2 = zebraPair();
                 lazyLoadedRows.forEach((r, i) => {
                     const tr = document.createElement('tr');
                     tr.className = 'hover:bg-slate-50/80 transition';
+                    if(_zb2){
+                        const _zc2 = ((i % 2) === 0) ? _zb2[0] : _zb2[1];
+                        if(_zc2){ try{ tr.style.background = _zc2; }catch(e){} }
+                    }
                     let cells = detailExpandCell(r);
                     cells += `<td class="px-2 py-1 text-center text-slate-400 excel-cell">${i+1}</td>`;
                     cols.forEach(c => {
@@ -3694,6 +3768,8 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
             const escT = (s)=>String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
             let html = '';
             activeFilters.forEach((f, idx) => {
+                // مدخلات التقرير المستندي ظاهرة أصلاً في الشريط الدائم — بلا تاغ مكرر
+                if(f && f._doc) return;
                 const isOr = !!f.orGroup;
                 let opSym, label, fullTitle = '', smartPop = '';
                 if(f && (Array.isArray(f.any) || Array.isArray(f.all))){

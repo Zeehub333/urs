@@ -96,13 +96,14 @@ function wizApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof 
             wizardGeneralWhere = '';
             wizardGroups = [];
             wizardGroupLevels = 1;
-            try{ rptPrev.loadedOnce = false; rptPrev.stale = false; rptPrevFilterValues = {}; }catch(e){}
+            try{ rptPrev.loadedOnce = false; rptPrev.stale = false; try{ window._colLockW = {}; }catch(e){} rptPrevFilterValues = {}; }catch(e){}
             wizardDocParams = [];
             const _dtEl = document.getElementById('wizardDocTemplate');
             if(_dtEl) _dtEl.value = '';
             const _dtPrev = document.getElementById('wizardDocTemplatePreview');
             if(_dtPrev){ _dtPrev.classList.add('hidden'); _dtPrev.innerHTML = ''; }
             ['rmlProgName','rmlDisplayName','rmlFileName','rmlNamespace','rmlDescription','rmlCategory'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
+            ['rmlAltRow1','rmlAltRow2'].forEach(id=>{ const el=document.getElementById(id); if(el){ delete el.dataset.on; delete el.dataset.off; } });
             document.getElementById('rmlCategory').value = 'HR';
             wizardSchema = '';
             document.getElementById('rmlIcon').value = 'fa-chart-bar';
@@ -147,10 +148,11 @@ function wizApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof 
                 document.getElementById('rmlFileName').value = file;
                 document.getElementById('rmlNamespace').value = md.namespace || '';
                 document.getElementById('rmlDescription').value = md.description || '';
+                try{ rmlAltRowLoad(md); }catch(e){}
                 wizardConnections = (data.connections || []).map(c=>String(c.connection_id));
                 wizardFields = (data.fields || []).map((f,i)=>({id:String(f.id||i+1), name:f.name||'', type:f.type||f.dataType||'', conn_id:String(f.conn_id||f.connection_id||''), table_source:f.table_source||f.tableSource||''}));
                 wizardColumns = (data.columns || []).map((c,i)=>({id:String(c.id||i+1), name:c.name||'', alias:c.alias||'', expr:c.expr||'', col_refname:(c.col_refname||c.colRefname||''), visible:!(String(c.visible ?? '1').toLowerCase() === '0' || ['false','no','off','hidden'].includes(String(c.visible ?? '1').toLowerCase())), width:(c.width !== undefined && c.width !== null ? c.width : null), data_type:c.dataType||c.data_type||'', max_chars:(c.max_chars ?? c.maxChars ?? ''), wrap:!!(c.wrap), decimals:(c.decimals ?? ''), date_format:(c.dateFormat||c.date_format||''), col_type:c.col_type||c.type||'direct', where_clause:c.where_clause||c.whereClause||'', icon:c.icon||'fa-hashtag', is_amount:!!(c.is_amount||c.isAmount), currency_symbol:c.currency_symbol||c.currencySymbol||'', is_distinct:!!(c.is_distinct||c.isDistinct||c.distinct), currency_field:c.currency_field||c.currencyField||'', is_status:!!(c.is_status||c.isStatus), status_map:((c.status_map||c.statusMap||[]).map(s=>({value:String(s.value??''), label:String(s.label??s.value??''), color:String(s.color??'')}))), refTable:_refT(c), refFk:_refF(c), refDisplay:_refD(c), join_type:(c.join_type||c.joinType||c.rel_type||c.relType||'one_to_one'), color:(c.color||''), bg:(c.bg||c.bgColor||''), weight:(c.weight||c.fontWeight||''), frozen:!!(c.frozen||c.freeze)}));
-                try{ rptPrev.loadedOnce = false; rptPrev.stale = false; }catch(e){}
+                try{ rptPrev.loadedOnce = false; rptPrev.stale = false; try{ window._colLockW = {}; }catch(e){} }catch(e){}
                 // Retroactive auto-detect: status-like columns get flagged for mapping
                 let _autoN = 0;
                 wizardColumns.forEach(c=>{
@@ -1031,6 +1033,56 @@ function wizApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof 
             return 'text';
         }
 
+        let tfModalMatchModeState = 'AND';
+        function onTfMatchModeChange(val){
+            tfModalMatchModeState = val === 'OR' ? 'OR' : 'AND';
+            updateTableFilterModalPreview();
+        }
+
+        function parseWhereToRows(whereStr){
+            if(!whereStr || !whereStr.trim()) return { rows: [], mode: 'AND' };
+            let clean = whereStr.trim();
+            if(clean.startsWith('(') && clean.endsWith(')')) clean = clean.slice(1, -1).trim();
+            const isOr = /\bOR\b/i.test(clean);
+            const mode = isOr ? 'OR' : 'AND';
+            const splitRegex = isOr ? /\s+\bOR\s+/i : /\s+\bAND\s+/i;
+            const parts = clean.split(splitRegex);
+            const rows = [];
+            parts.forEach(p => {
+                let cond = p.trim();
+                if(cond.startsWith('(') && cond.endsWith(')')) cond = cond.slice(1, -1).trim();
+                if(!cond) return;
+
+                let m = cond.match(/^\[?([^\]]+)\]?\s+(IS\s+NULL|IS\s+NOT\s+NULL|LIKE|<=>|<>|!=|>=|<=|>|<|=)\s*(.*)$/i);
+                if(m){
+                    let col = m[1].trim();
+                    let op = m[2].toUpperCase().trim();
+                    let rawVal = (m[3] || '').trim();
+                    let val = '', val2 = '';
+
+                    if(op === '<>') op = '!=';
+                    if(op === 'IS NULL') op = 'is_null';
+                    if(op === 'IS NOT NULL') op = 'not_null';
+
+                    if(rawVal.startsWith("'") && rawVal.endsWith("'")){
+                        val = rawVal.slice(1, -1).replace(/''/g, "'");
+                    } else {
+                        val = rawVal;
+                    }
+
+                    if(op === 'LIKE'){
+                        if(val.startsWith('%') && val.endsWith('%')){ op = 'contains'; val = val.slice(1, -1); }
+                        else if(val.startsWith('%')){ op = 'endswith'; val = val.slice(1); }
+                        else if(val.endsWith('%')){ op = 'startswith'; val = val.slice(0, -1); }
+                        else { op = '='; }
+                    }
+
+                    rows.push({ col, op, val, val2 });
+                }
+            });
+            return { rows, mode };
+        }
+
         async function openTableFilterModal(key){
             tfModalCurrentKey = key;
             const parts = String(key).split('||');
@@ -1051,11 +1103,35 @@ function wizApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof 
             );
             tfModalColsCache = matchingFields.map(f => ({ name: f.name, type: f.type || 'TEXT' }));
 
-            if(window.wizardTableFilterRows && window.wizardTableFilterRows[tfModalCurrentTable] && window.wizardTableFilterRows[tfModalCurrentTable].length){
-                tfModalFilterRowsState = JSON.parse(JSON.stringify(window.wizardTableFilterRows[tfModalCurrentTable]));
-            } else {
-                tfModalFilterRowsState = [];
+            window.wizardTableFilterMatchMode = window.wizardTableFilterMatchMode || {};
+            tfModalMatchModeState = window.wizardTableFilterMatchMode[tfModalCurrentKey]
+                || window.wizardTableFilterMatchMode[tfModalCurrentTable]
+                || 'AND';
+
+            let existingRows = null;
+            if(window.wizardTableFilterRows && window.wizardTableFilterRows[tfModalCurrentKey] && window.wizardTableFilterRows[tfModalCurrentKey].length){
+                existingRows = window.wizardTableFilterRows[tfModalCurrentKey];
+            } else if(window.wizardTableFilterRows && window.wizardTableFilterRows[tfModalCurrentTable] && window.wizardTableFilterRows[tfModalCurrentTable].length){
+                existingRows = window.wizardTableFilterRows[tfModalCurrentTable];
             }
+
+            if(existingRows && existingRows.length){
+                tfModalFilterRowsState = JSON.parse(JSON.stringify(existingRows));
+            } else {
+                let existingWhere = (typeof wizardTableOpts !== 'undefined' && wizardTableOpts[tfModalCurrentKey] && wizardTableOpts[tfModalCurrentKey].where)
+                    || (window.wizardTableConditions && window.wizardTableConditions[tfModalCurrentTable])
+                    || '';
+                if(existingWhere){
+                    const parsed = parseWhereToRows(existingWhere);
+                    tfModalFilterRowsState = parsed.rows;
+                    tfModalMatchModeState = parsed.mode;
+                } else {
+                    tfModalFilterRowsState = [];
+                }
+            }
+
+            const mmSel = document.getElementById('tfModalMatchMode');
+            if(mmSel) mmSel.value = tfModalMatchModeState;
 
             renderTableFilterModalRows();
             updateTableFilterModalPreview();
@@ -1360,7 +1436,9 @@ function wizApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof 
                     }
                 }
             }
-            return parts.join(' AND ');
+            if(!parts.length) return '';
+            const joinOp = (tfModalMatchModeState === 'OR') ? ' OR ' : ' AND ';
+            return (parts.length > 1 && tfModalMatchModeState === 'OR') ? `(${parts.join(joinOp)})` : parts.join(joinOp);
         }
 
         function updateTableFilterModalPreview(){
@@ -1381,13 +1459,20 @@ function wizApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof 
             const tbl = tfModalCurrentTable;
             if(!window.wizardTableConditions) window.wizardTableConditions = {};
             if(!window.wizardTableFilterRows) window.wizardTableFilterRows = {};
+            if(!window.wizardTableFilterMatchMode) window.wizardTableFilterMatchMode = {};
 
             if(tableWhere){
                 window.wizardTableConditions[tbl] = tableWhere;
                 window.wizardTableFilterRows[tbl] = JSON.parse(JSON.stringify(tfModalFilterRowsState));
+                window.wizardTableFilterRows[tfModalCurrentKey] = JSON.parse(JSON.stringify(tfModalFilterRowsState));
+                window.wizardTableFilterMatchMode[tbl] = tfModalMatchModeState;
+                window.wizardTableFilterMatchMode[tfModalCurrentKey] = tfModalMatchModeState;
             } else {
                 delete window.wizardTableConditions[tbl];
                 delete window.wizardTableFilterRows[tbl];
+                delete window.wizardTableFilterRows[tfModalCurrentKey];
+                delete window.wizardTableFilterMatchMode[tbl];
+                delete window.wizardTableFilterMatchMode[tfModalCurrentKey];
             }
 
             const allTableWheres = Object.values(window.wizardTableConditions).filter(Boolean);
@@ -2791,7 +2876,11 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
 .rpt-in{width:100%;background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:6px 8px;font-size:11px}
 .rpt-eye-big.on{color:#059669}.rpt-eye-big.no{color:#f43f5e}
 @keyframes cellValueUpdate{0%{background-color:rgba(99,102,241,0.25)!important;color:#3730a3!important}50%{background-color:rgba(199,210,254,0.2)!important}100%{background-color:transparent!important}}
-.cell-animate-update{animation:cellValueUpdate .7s cubic-bezier(0.16,1,0.3,1) forwards!important;will-change:background-color,color}`;
+.cell-animate-update{animation:cellValueUpdate .7s cubic-bezier(0.16,1,0.3,1) forwards!important;will-change:background-color,color}
+.num-tnum{font-variant-numeric:tabular-nums!important}
+#rptPrevBox .rpt-grid thead th{overflow:hidden}
+#rptPrevBox .rpt-grid thead th .truncate{min-width:0}
+#rptPrevBox .rpt-grid tbody td{overflow:hidden;text-overflow:ellipsis}`;
             document.head.appendChild(st);
         }
         function rptVis(c){ try{ const v = (c || {}).visible; if(v === false) return false; const s = String(v ?? '1').toLowerCase(); return !(s === '0' || s === 'false' || s === 'no' || s === 'off' || s === 'hidden'); }catch(e){ return true; } }
@@ -3065,6 +3154,34 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
             if(cntEl) cntEl.textContent = opts.length + ' خيار';
         }
         /* ── Report Properties Panel & Displacing Sidebar Helpers ── */
+        // ألوان الصفوف البديلة: تُرسل فقط عند اختيارها صراحة (✕ = مسح)
+        function rmlAltRowColors(){
+            const out = {alt_row_color_1: '', alt_row_color_2: ''};
+            [['rmlAltRow1', 'alt_row_color_1'], ['rmlAltRow2', 'alt_row_color_2']].forEach(([id, key])=>{
+                try{
+                    const el = document.getElementById(id);
+                    if(!el) return;
+                    if(el.dataset && el.dataset.on && !el.dataset.off){
+                        const v = String(el.value || '').trim();
+                        if(/^#[0-9a-fA-F]{6}$/.test(v)) out[key] = v;
+                    }
+                }catch(e){}
+            });
+            return out;
+        }
+        function rmlAltRowLoad(md){
+            try{
+                md = md || {};
+                [['rmlAltRow1', md.alt_row_color_1 || md.altRowColor1 || ''],
+                 ['rmlAltRow2', md.alt_row_color_2 || md.altRowColor2 || '']].forEach(([id, v])=>{
+                    const el = document.getElementById(id);
+                    if(!el) return;
+                    if(/^#[0-9a-fA-F]{6}$/.test(String(v || ''))){
+                        el.value = v; el.dataset.on = '1'; delete el.dataset.off;
+                    } else { delete el.dataset.on; delete el.dataset.off; }
+                });
+            }catch(e){}
+        }
         function rdSetReportTab(tab){
             const tabMeta = document.getElementById('rdRepTabMeta');
             const tabConns = document.getElementById('rdRepTabConns');
@@ -3694,8 +3811,41 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                 general_where: (typeof wizardGeneralWhere !== 'undefined' ? wizardGeneralWhere : ''),
                 doc_params: (typeof wizardDocParams !== 'undefined' ? wizardDocParams : []),
                 doc_layout: ((document.getElementById('rmlDocLayout') || {}).value || 'table'),
+                ...rmlAltRowColors(),
                 filters: (typeof rptPreviewGetFilters === 'function' ? rptPreviewGetFilters() : [])
             };
+        }
+        // ثبات عرض الأعمدة في المعاينة: ذاكرة عرض دائمة تُطبق بعد كل بناء للرأس
+        function lockRptPrevColWidths(cols, canSeed){
+            try{
+                let _key = 'designer';
+                try{ _key = 'designer::' + ((document.getElementById('rmlFileName') || {}).value || ''); }catch(e){}
+                window._colLockW = window._colLockW || {};
+                const _mem = window._colLockW[_key] || (window._colLockW[_key] = {});
+                const _box = document.getElementById('rptPrevBox');
+                const _table = _box ? _box.querySelector('table') : null;
+                if(_table) _table.style.tableLayout = 'fixed';
+                const _ths = _table ? _table.querySelectorAll('thead th[data-col]') : [];
+                _ths.forEach(th=>{
+                    let _a = '';
+                    try{ _a = th.getAttribute('data-col'); }catch(e){}
+                    if(!_a) return;
+                    if(_mem[_a] && _mem[_a] > 0){
+                        th.style.width = _mem[_a] + 'px';
+                        th.style.minWidth = _mem[_a] + 'px';
+                        th.style.maxWidth = _mem[_a] + 'px';
+                    } else if(canSeed){
+                        let _w = 0;
+                        try{ _w = th.getBoundingClientRect().width; }catch(e){}
+                        if(_w > 0) _mem[_a] = Math.ceil(_w);
+                    }
+                });
+                try{
+                    const _alive = {};
+                    (cols || []).forEach(c=>{ const _a2 = c && (c.alias || c.name); if(_a2 && _mem[_a2]) _alive[_a2] = _mem[_a2]; });
+                    window._colLockW[_key] = _alive;
+                }catch(e){}
+            }catch(e){}
         }
         function animateNumberCount(el, start, end, formatFn, duration = 450){
             if(start === end || isNaN(start) || isNaN(end)){
@@ -3706,6 +3856,23 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                 cancelAnimationFrame(el._animCountId);
                 el._animCountId = null;
             }
+            // ثبات عرض العمود أثناء العد: قفل min-width على أعرض عينة + أرقام متساوية العرض
+            try{
+                const _samples = [];
+                try{ _samples.push(formatFn(start)); }catch(e){}
+                try{ _samples.push(formatFn((start + end) / 2)); }catch(e){}
+                try{ _samples.push(formatFn(end)); }catch(e){}
+                const _cs = getComputedStyle(el);
+                const _cv = animateNumberCount._cv || (animateNumberCount._cv = document.createElement('canvas'));
+                const _ctx = _cv.getContext('2d');
+                _ctx.font = [_cs.fontStyle, _cs.fontVariant, _cs.fontWeight, _cs.fontSize, _cs.fontFamily].join(' ');
+                const _pad = (parseFloat(_cs.paddingLeft) || 0) + (parseFloat(_cs.paddingRight) || 0);
+                let _need = 0;
+                _samples.forEach(t=>{ try{ _need = Math.max(_need, _ctx.measureText(String(t)).width); }catch(e){} });
+                _need = Math.ceil(_need + _pad + 2);
+                el.style.minWidth = Math.max(_need, el.offsetWidth || 0) + 'px';
+                el.classList.add('num-tnum');
+            }catch(e){}
             const startTime = performance.now();
             const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
             function step(now){
@@ -3719,6 +3886,7 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                 } else {
                     el.textContent = formatFn(end);
                     el._animCountId = null;
+                    try{ el.style.minWidth = ''; el.classList.remove('num-tnum'); }catch(e){}
                 }
             }
             el._animCountId = requestAnimationFrame(step);
@@ -3989,7 +4157,7 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                 const w = parseInt(c.width, 10);
                 const style = (w >= 40) ? ` style="min-width:${Math.min(w, 1200)}px"` : '';
                 const rn = c.col_refname || c.colRefname || '';
-                return `<th draggable="true" ondragstart="rptDrag(event,'col',${i})" ondragover="rptOver(event)" ondrop="rptDrop(event,'col',${i})" onclick="rptSelectCol('col',${i})" title="اسحب للترتيب بدون أسهم — انقر للخصائص" class="rpt-th ${on ? 'onsel' : ''} ${vis ? '' : 'off'}"${style}>
+                return `<th data-col="${rptEsc(c.alias || c.name)}" draggable="true" ondragstart="rptDrag(event,'col',${i})" ondragover="rptOver(event)" ondrop="rptDrop(event,'col',${i})" onclick="rptSelectCol('col',${i})" title="اسحب للترتيب بدون أسهم — انقر للخصائص" class="rpt-th ${on ? 'onsel' : ''} ${vis ? '' : 'off'}"${style}>
                     <div class="flex items-center gap-1.5 justify-between">
                         <span class="flex items-center gap-1 truncate font-bold">
                             <i class="fa-solid fa-grip-vertical text-slate-300 text-[10px] cursor-grab"></i>
@@ -4014,10 +4182,15 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
             };
             const rows = rptPrev.rows || [];
             const totalCols = cols.length + (isDetailRpt ? 1 : 0);
+            let _alt = {alt_row_color_1: '', alt_row_color_2: ''};
+            try{ _alt = rmlAltRowColors(); }catch(e){}
+            const _altOk = (v)=>/^#[0-9a-fA-F]{6}$/.test(String(v || '').trim()) ? String(v).trim() : '';
+            const _alt1 = _altOk(_alt.alt_row_color_1), _alt2 = _altOk(_alt.alt_row_color_2);
             const body = rows.map((r, ri)=>{
                 const arr = Array.isArray(r) ? r : null;
                 const isExp = rptExpandedRows.has(ri);
-                let rowHtml = `<tr class="hover:bg-slate-50 transition border-b border-slate-100 ${isExp ? 'bg-indigo-50/20' : ''}">`;
+                const _zbPrev = (!isExp && (ri % 2 === 0)) ? _alt1 : (!isExp ? _alt2 : '');
+                let rowHtml = `<tr class="hover:bg-slate-50 transition border-b border-slate-100 ${isExp ? 'bg-indigo-50/20' : ''}"${_zbPrev ? ` style="background:${_zbPrev}"` : ''}>`;
                 if(isDetailRpt){
                     rowHtml += `<td class="w-8 text-center p-1 cursor-pointer select-none" onclick="rptToggleRow(${ri})" title="انقر لعرض تفاصيل هذا السجل"><i class="fa-solid ${isExp ? 'fa-chevron-down text-indigo-600' : 'fa-chevron-left text-slate-400'} text-xs"></i></td>`;
                 }
@@ -4079,6 +4252,7 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                 + `  </div>`
                 + `  <span class="text-slate-400 text-[10px]">عرض أول 20 صف • انقر على أي رأس عمود للخصائص</span>`
                 + `</div>`;
+            try{ lockRptPrevColWidths(cols, (rows || []).length > 0); }catch(e){}
         }
         function addWizardColumn(){
             const newIdx = wizardColumns.length;
@@ -4098,7 +4272,7 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
             const container = document.getElementById('wizardRulesList');
             if(!container) return;
             if(!wizardRules.length){
-                container.innerHTML='<p class="text-slate-400 text-center py-4">لا توجد قواعد — اضغط إضافة قاعدة</p>';
+                container.innerHTML='<div class="text-center py-6 bg-slate-50 rounded-xl border border-dashed border-slate-200"><p class="text-slate-400 text-xs mb-3">لا توجد قواعد بعد</p><button type="button" onclick="addWizardRule()" class="px-3.5 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-xs font-bold inline-flex items-center gap-1.5 shadow-sm transition"><i class="fa-solid fa-plus"></i> إضافة قاعدة</button></div>';
                 return;
             }
             const fldNames = (wizardFields || []).map(f=>f.name).filter(Boolean);
@@ -4153,6 +4327,93 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
             if(on && !r.sources.includes(fname)) r.sources.push(fname);
             if(!on) r.sources = r.sources.filter(s=>s!==fname);
             wbRefreshRules();
+        }
+        // صندوق اختيار مدمج قابل للبحث لحقول مصادر القاعدة (بدل جدار الـcheckboxes)
+        function ruleSrcLblText(idx){
+            const srcs = ((wizardRules[idx] || {}).sources || []);
+            if(!srcs.length) return 'اختر حقول المصادر...';
+            const nm = (n)=>{ try{ const f=(wizardFields||[]).find(x=>x&&x.name===n); return (f&&(f.alias||f.name))||n; }catch(e){ return n; } };
+            return 'محدد (' + srcs.length + '): ' + srcs.slice(0, 2).map(nm).join('، ') + (srcs.length > 2 ? '...' : '');
+        }
+        function ruleSrcDropHtml(idx){
+            const srcs = ((wizardRules[idx] || {}).sources || []);
+            const fldNames = [...new Set((wizardFields||[]).map(f=>f&&f.name).filter(Boolean))];
+            if(!fldNames.length) return '<p class="text-[10px] text-slate-400">استورد الحقول أولاً من ورقة الحقول</p>';
+            const items = fldNames.map(n=>{
+                const a = (()=>{ try{ const f=(wizardFields||[]).find(x=>x&&x.name===n); return wbEsc((f&&(f.alias||f.name))||n); }catch(e){ return wbEsc(n); } })();
+                const on = srcs.includes(n);
+                return '<label data-rsrchn="'+wbEsc(n).toLowerCase()+' '+a.toLowerCase()+'" class="flex items-center gap-1.5 px-2 py-1 rounded-lg hover:bg-slate-50 cursor-pointer text-[11px] text-slate-700">'
+                    + '<input type="checkbox" '+(on?'checked':'')+' onchange="ruleSrcCheck('+idx+",'"+n.replace(/'/g,"\\'")+"',this.checked)"+'" class="rounded text-emerald-600 shrink-0">'
+                    + '<span class="truncate font-mono" dir="ltr">'+wbEsc(n)+'</span>'
+                    + '<span class="truncate text-slate-400">('+a+')</span></label>';
+            }).join('');
+            return '<div class="relative" data-rulesrc="'+idx+'">'
+                + '<button type="button" onclick="ruleSrcToggleDrop('+idx+',event)" class="w-full flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg border '+(srcs.length?'bg-emerald-50 border-emerald-300 text-emerald-800':'bg-white border-slate-200 text-slate-600')+' hover:bg-slate-50 transition text-[11px]">'
+                + '<span class="truncate font-bold" id="ruleSrcLbl'+idx+'">'+wbEsc(ruleSrcLblText(idx))+'</span>'
+                + '<span class="flex items-center gap-1 shrink-0"><span class="text-[10px] bg-slate-200/70 text-slate-600 px-1.5 py-0.5 rounded-full font-bold">'+srcs.length+'</span><i class="fa-solid fa-chevron-down text-[10px]"></i></span></button>'
+                + '<div id="ruleSrcDrop'+idx+'" class="hidden absolute z-50 mt-1 right-0 w-full min-w-[240px] bg-white border border-slate-200 rounded-xl shadow-xl p-2 space-y-1.5">'
+                + '<input oninput="ruleSrcFilter('+idx+',this.value)" placeholder="بحث عن حقل..." class="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-[11px] focus:outline-none focus:border-emerald-500">'
+                + '<div class="flex gap-1.5"><button type="button" onclick="ruleSrcAll('+idx+',true)" class="flex-1 px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg text-[10px] font-bold">تحديد الكل</button>'
+                + '<button type="button" onclick="ruleSrcAll('+idx+',false)" class="flex-1 px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-[10px] font-bold">مسح الكل</button></div>'
+                + '<div class="max-h-52 overflow-y-auto custom-scroll">'+items+'</div>'
+                + '</div></div>';
+        }
+        function ruleSrcToggleDrop(idx, ev){
+            try{ if(ev){ ev.stopPropagation(); } }catch(e){}
+            try{
+                document.querySelectorAll('[id^="ruleSrcDrop"]').forEach(d=>{
+                    if(d.id !== 'ruleSrcDrop' + idx) d.classList.add('hidden');
+                });
+                const d = document.getElementById('ruleSrcDrop' + idx);
+                if(d){
+                    d.classList.toggle('hidden');
+                    if(!d.classList.contains('hidden')){
+                        const inp = d.querySelector('input[placeholder]');
+                        if(inp) inp.focus();
+                    }
+                }
+                if(!window._ruleSrcAway){
+                    window._ruleSrcAway = true;
+                    document.addEventListener('click', (e)=>{
+                        try{ if(e.target && e.target.closest && e.target.closest('[data-rulesrc]')) return; }catch(_e){}
+                        document.querySelectorAll('[id^="ruleSrcDrop"]').forEach(x=>x.classList.add('hidden'));
+                    });
+                }
+            }catch(e){}
+        }
+        function ruleSrcFilter(idx, q){
+            try{
+                q = String(q || '').trim().toLowerCase();
+                const d = document.getElementById('ruleSrcDrop' + idx);
+                if(!d) return;
+                d.querySelectorAll('[data-rsrchn]').forEach(l=>{
+                    const t = l.getAttribute('data-rsrchn') || '';
+                    l.style.display = (!q || t.includes(q)) ? '' : 'none';
+                });
+            }catch(e){}
+        }
+        function ruleSrcCheck(idx, fname, on){
+            try{
+                const r = wizardRules[idx]; if(!r) return;
+                r.sources = r.sources || [];
+                if(on && !r.sources.includes(fname)) r.sources.push(fname);
+                if(!on) r.sources = r.sources.filter(s=>s!==fname);
+                const lbl = document.getElementById('ruleSrcLbl' + idx);
+                if(lbl) lbl.textContent = ruleSrcLblText(idx);
+            }catch(e){}
+        }
+        function ruleSrcAll(idx, on){
+            try{
+                const r = wizardRules[idx]; if(!r) return;
+                const d = document.getElementById('ruleSrcDrop' + idx);
+                if(on){
+                    const all = [...new Set((wizardFields||[]).map(f=>f&&f.name).filter(Boolean))];
+                    r.sources = all.slice();
+                } else { r.sources = []; }
+                if(d) d.querySelectorAll('input[type="checkbox"]').forEach(c=>{ c.checked = !!on; });
+                const lbl = document.getElementById('ruleSrcLbl' + idx);
+                if(lbl) lbl.textContent = ruleSrcLblText(idx);
+            }catch(e){}
         }
         function addWizardRuleVar(idx){ const r = wizardRules[idx]; r.variables = r.variables || []; r.variables.push({name:'var'+(r.variables.length+1), display:'', type:'text', options:[]}); wbRefreshRules(); }
         function removeWizardRuleVar(idx, vi){ wizardRules[idx].variables.splice(vi,1); wbRefreshRules(); }
@@ -4760,7 +5021,8 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                 general_where: wizardGeneralWhere || '',
                 doc_template: ((document.getElementById('wizardDocTemplate') || {}).value || wizardDocTemplate || ''),
                 doc_params: wizardDocParams || [],
-                doc_layout: ((document.getElementById('rmlDocLayout') || {}).value || 'table')
+                doc_layout: ((document.getElementById('rmlDocLayout') || {}).value || 'table'),
+                ...rmlAltRowColors()
             };
             const _rtype = ((document.getElementById('rmlReportType') || {}).value || 'master');
             if(_rtype === 'detail'){
@@ -5390,7 +5652,7 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                         + '<div style="margin-bottom:8px"><label class="block text-[10px] font-bold text-slate-500">الوصف</label><input value="'+wbEsc(r.description||'')+'" onchange="updateWizardRule('+i+",'description',this.value)"+'" class="wb-cell"></div>'
                         + '<div style="margin-bottom:8px"><label class="block text-[10px] font-bold text-slate-500">التعبير (اختياري) — الحقول بين [ ]</label><div class="flex items-center gap-1"><input value="'+wbEsc(r.expr||'')+'" oninput="updateWizardRule('+i+",'expr',this.value);exprAuto(this,'rule:"+i+"')"+'" class="wb-cell flex-1 min-w-0 font-mono" dir="ltr" autocomplete="off">'+exprBtn(i,false,'rule')+'</div></div>'
                         + '<div style="margin-bottom:8px"><div class="text-[10px] font-bold text-slate-500" style="margin-bottom:4px">مصادر القاعدة — حقول تحديد السجلات في السياسات</div>'
-                        + (_fldNames.length ? '<div class="flex flex-wrap gap-1">'+_fldNames.map(n=>'<label class="inline-flex items-center gap-1 px-2 py-1 rounded-lg border text-[10px] cursor-pointer '+(_srcs.includes(n)?'bg-emerald-100 border-emerald-300 text-emerald-800':'bg-slate-50 border-slate-200 text-slate-600')+'"><input type="checkbox" '+(_srcs.includes(n)?'checked':'')+' onchange="toggleWizardRuleSource('+i+",'"+n.replace(/'/g,"\\'")+"',this.checked);wbRefreshRules()"+'" class="rounded text-emerald-600"><span>'+wbEsc(_fldAliasMap[n] || n)+'</span></label>').join('')+'</div>' : '<p class="text-[10px] text-slate-400">استورد الحقول أولاً من ورقة الحقول</p>')+'</div>'
+                        + ruleSrcDropHtml(i) + '</div>'
                         + '<div><div class="flex items-center gap-2" style="margin-bottom:4px"><span class="text-[10px] font-bold text-slate-500">المتغيرات ('+_vars.length+')</span><button onclick="addWizardRuleVar('+i+');wbRefreshRules()" class="wb-mini" title="إضافة متغير"><i class="fa-solid fa-plus"></i> متغير</button></div>'
                         + (_vars.length ? _vars.map((v,vi)=>'<div class="grid grid-cols-12 gap-1 items-end bg-slate-50 border border-slate-100 rounded-lg p-1.5" style="margin-bottom:4px">'
                             + '<div class="col-span-3"><input value="'+wbEsc(v.display||'')+'" onchange="updateWizardRuleVar('+i+','+vi+",'display',this.value)"+'" placeholder="الاسم المعروض" class="wb-cell"></div>'
@@ -5401,7 +5663,7 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                             + '</div>').join('') : '<p class="text-[10px] text-slate-400">لا متغيرات — أضف متغيراً ليُستخدم في السياسات</p>')
                         + '<p class="text-[10px] text-slate-400">حدد نوع بيانات كل متغير *. السياسات ('+_polN+') تُدار من السايدبار ← قواعد الأعمال بعد حفظ التقرير.</p></div>'
                         + '</div>';
-                }).join('') : '<p class="text-slate-400 text-center py-8">لا قواعد بعد — اضغط إضافة قاعدة</p>');
+                }).join('') : '<div class="text-center py-8"><p class="text-slate-400 text-xs mb-3">لا قواعد بعد</p><button type="button" onclick="addWizardRule();wbRefreshRules()" class="px-3.5 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-xs font-bold inline-flex items-center gap-1.5 shadow-sm transition"><i class="fa-solid fa-plus"></i> إضافة قاعدة</button></div>');
                 foot = '<button onclick="addWizardRule();wbRefreshRules()" class="wb-add"><i class="fa-solid fa-plus"></i> إضافة قاعدة</button>';
             }
             else if(wbSheet==='columns'){
