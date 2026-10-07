@@ -749,8 +749,8 @@ def _build_where(filters: List[Dict[str, Any]], start_idx: int = 1, columns: Opt
             _ref_l = str(f.get("refname") or f.get("param_refname") or "").strip().lower()
             if (_fld_l and _fld_l in _dk) or (_ref_l and _ref_l in _dk):
                 continue  # expression-only doc param: value flows via expansion, never WHERE
-            if str(field).strip().startswith("@") or _looks_like_formula(field):
-                continue  # param refs / raw formulas are never DB identifiers (ORA-00904)
+            if str(field).strip().startswith("@"):
+                continue  # param refs are never DB identifiers (ORA-00904)
             if re.fullmatch(r"(?i)v_custom_\d+", str(field).strip() or ""):
                 continue  # designer placeholder column (custom param never linked) — never real
         except Exception:
