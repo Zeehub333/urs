@@ -9,6 +9,15 @@
         .custom-scroll::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
         .excel-cell { border-right: 1px solid #e2e8f0; border-bottom: 1px solid #e2e8f0; }
         #selectorBar:has(#activeGroupIndicator.hidden) { display: none; }
+        @keyframes cellValueUpdate {
+            0% { background-color: rgba(99, 102, 241, 0.35) !important; color: #3730a3 !important; transform: scale(1.04); }
+            40% { background-color: rgba(199, 210, 254, 0.3) !important; transform: scale(1.02); }
+            100% { background-color: transparent !important; transform: scale(1); }
+        }
+        .cell-animate-update {
+            animation: cellValueUpdate 0.75s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
+            will-change: transform, background-color;
+        }
 {% endblock %}
 {% block sidebar %}
     <!-- Sidebar — kept for navigation (Forms + Reports) — URS integration -->
@@ -1116,7 +1125,7 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
         }
         function docHeaderSelectChanged(alias, val){
             if(val && !docHeaderMissingRequired()){
-                docHeaderFetch();
+                docHeaderFetch(true, alias);
             }
         }
         function docHeaderClear(){
@@ -1219,7 +1228,7 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                 </div>`;
             }).join('');
         }
-        function docHeaderFetch(){
+        function docHeaderFetch(inPlace, changedAlias){
             const fields = docSearchFields();
             const newFilters = [];
             let missingRequired = false;
@@ -1260,8 +1269,84 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
             if(p) p.classList.add('hidden');
             syncUrlFilters();
             renderSearchTags();
-            resetLazyState();
-            refreshApiData();
+            if(inPlace && lazyLoadedRows && lazyLoadedRows.length && isDocType()){
+                docFetchInPlace(changedAlias);
+            } else {
+                resetLazyState();
+                refreshApiData();
+            }
+        }
+        async function docFetchInPlace(changedAlias){
+            if(!lazyLoadedRows || !lazyLoadedRows.length){
+                resetLazyState();
+                refreshApiData();
+                return;
+            }
+            try{
+                const page = 1;
+                const effPageSize = lazyPageSize;
+                const payload = buildApiPayload(page, effPageSize);
+                payload.skipTotal = true;
+                const _ex = await postExecuteReport({rml: currentRml, app: currentApp, payload});
+                if(!_ex.ok || !_ex.data || _ex.data.error){
+                    resetLazyState();
+                    refreshApiData();
+                    return;
+                }
+                const data = _ex.data;
+                const newRows = data.rows || [];
+                const oldRows = lazyLoadedRows || [];
+                if(newRows.length !== oldRows.length){
+                    resetLazyState();
+                    refreshApiData();
+                    return;
+                }
+                const cols = visCols(data.columns || []);
+                const changedCols = new Set();
+                cols.forEach(c => {
+                    const a = c.alias || c.name;
+                    for(let ri = 0; ri < newRows.length; ri++){
+                        const ov = oldRows[ri] ? oldRows[ri][a] : null;
+                        const nv = newRows[ri] ? newRows[ri][a] : null;
+                        if(String(ov ?? '') !== String(nv ?? '')){
+                            changedCols.add(c);
+                            break;
+                        }
+                    }
+                });
+                if(!changedCols.size && changedAlias){
+                    const ca = String(changedAlias).toLowerCase();
+                    cols.forEach(c => {
+                        const expr = String(c.expr || '').toLowerCase();
+                        if(expr.includes(ca)){
+                            changedCols.add(c);
+                        }
+                    });
+                }
+                if(!changedCols.size){
+                    cols.forEach(c => changedCols.add(c));
+                }
+                changedCols.forEach(c => {
+                    const colName = c.alias || c.name;
+                    const cells = document.querySelectorAll(`#tableBody td[data-col="${colName}"]`);
+                    cells.forEach((td, ri) => {
+                        const row = newRows[ri];
+                        if(!row) return;
+                        const rawV = row[colName] !== undefined ? row[colName] : row[c.name];
+                        const disp = (fmtCell(rawV, c.is_amount || c.isAmount, c) ?? '') + amountSuffix(row, c, cols);
+                        td.classList.remove('cell-animate-update');
+                        void td.offsetWidth;
+                        td.innerHTML = disp;
+                        td.classList.add('cell-animate-update');
+                    });
+                });
+                lazyLoadedRows = newRows;
+                lastApiData = data;
+                updateLazyStats();
+            }catch(e){
+                resetLazyState();
+                refreshApiData();
+            }
         }
         const DOC_OPS = {
             text: [['contains','يحتوي'],['equals','يساوي'],['startswith','يبدأ بـ'],['endswith','ينتهي بـ'],['not_contains','لا يحتوي'],['not_equals','لا يساوي']],

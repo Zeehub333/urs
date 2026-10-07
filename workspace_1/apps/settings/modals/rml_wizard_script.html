@@ -2504,7 +2504,7 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
         let rptPrevFilterValues = {};
         function setRptPrevFilterVal(key, val){
             rptPrevFilterValues[key] = val;
-            rptPreviewFetch(true);
+            rptPreviewFetch(true, key);
         }
         function rptPreviewGetFilters(){
             const flts = [];
@@ -2789,7 +2789,9 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
 .rpt-btn:hover{background:#e2e8f0}
 .rpt-fl{font-size:11px;font-weight:700;color:#475569;margin-bottom:2px;display:block}
 .rpt-in{width:100%;background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:6px 8px;font-size:11px}
-.rpt-eye-big.on{color:#059669}.rpt-eye-big.no{color:#f43f5e}`;
+.rpt-eye-big.on{color:#059669}.rpt-eye-big.no{color:#f43f5e}
+@keyframes cellValueUpdate{0%{background-color:rgba(99,102,241,0.35)!important;color:#3730a3!important;transform:scale(1.04)}40%{background-color:rgba(199,210,254,0.3)!important;transform:scale(1.02)}100%{background-color:transparent!important;transform:scale(1)}}
+.cell-animate-update{animation:cellValueUpdate .75s cubic-bezier(0.16,1,0.3,1) forwards!important;will-change:transform,background-color}`;
             document.head.appendChild(st);
         }
         function rptVis(c){ try{ const v = (c || {}).visible; if(v === false) return false; const s = String(v ?? '1').toLowerCase(); return !(s === '0' || s === 'false' || s === 'no' || s === 'off' || s === 'hidden'); }catch(e){ return true; } }
@@ -3695,31 +3697,127 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                 filters: (typeof rptPreviewGetFilters === 'function' ? rptPreviewGetFilters() : [])
             };
         }
-        function rptPreviewFetch(manual){
+        function rptPreviewUpdateCells(oldRows, newRows, changedParam){
+            const cols = (wizardColumns || []);
+            const changedCols = new Set();
+            const getVal = (r, c, ci) => {
+                if(Array.isArray(r)) return r[ci] ?? '';
+                if(r && typeof r === 'object'){
+                    const k = c ? (c.alias || c.name) : null;
+                    const v = k && r[k] !== undefined ? r[k] : (c && r[c.name] !== undefined ? r[c.name] : '');
+                    return v === null || v === undefined ? '' : String(v);
+                }
+                return (r === null || r === undefined) ? '' : String(r);
+            };
+
+            cols.forEach((c, ci) => {
+                for(let ri = 0; ri < newRows.length; ri++){
+                    const ov = getVal(oldRows[ri], c, ci);
+                    const nv = getVal(newRows[ri], c, ci);
+                    if(String(ov ?? '') !== String(nv ?? '')){
+                        changedCols.add(c);
+                        break;
+                    }
+                }
+            });
+
+            if(!changedCols.size && changedParam){
+                const cp = String(changedParam).toLowerCase();
+                cols.forEach(c => {
+                    const expr = String(c.expr || '').toLowerCase();
+                    const colName = String(c.name || '').toLowerCase();
+                    const colAlias = String(c.alias || '').toLowerCase();
+                    const colRef = String(c.col_refname || c.colRefname || '').toLowerCase();
+                    if(expr.includes(cp) || colName === cp || colAlias === cp || colRef === cp){
+                        changedCols.add(c);
+                    }
+                });
+            }
+
+            if(!changedCols.size){
+                cols.forEach(c => changedCols.add(c));
+            }
+
+            const trs = Array.from(document.querySelectorAll('#rptPrevBox table tbody tr:not(.rpt-detail-subrow)'));
+            trs.forEach((tr, ri) => {
+                const row = newRows[ri];
+                if(!row) return;
+                changedCols.forEach(c => {
+                    const colKey = c ? (c.alias || c.name || '') : '';
+                    if(!colKey) return;
+                    const ci = cols.indexOf(c);
+                    const td = Array.from(tr.querySelectorAll('td[data-col]')).find(el => el.getAttribute('data-col') === colKey);
+                    if(!td) return;
+                    let val = getVal(row, c, ci);
+                    if(c && (c.is_amount || c.isAmount)){
+                        const num = parseFloat(String(val).replace(/,/g, ''));
+                        if(!isNaN(num)){
+                            val = num.toLocaleString('en-US', {maximumFractionDigits: 2});
+                        }
+                        const cs = c.currency_symbol || c.currencySymbol;
+                        if(cs && String(cs).trim()) val = val + ' ' + String(cs).trim();
+                    }
+                    td.title = String(val);
+                    td.textContent = String(val);
+                    td.classList.remove('cell-animate-update');
+                    void td.offsetWidth;
+                    td.classList.add('cell-animate-update');
+                });
+            });
+        }
+        function rptPreviewFetch(manual, changedParam){
             const box = document.getElementById('rptPrevBox');
             if(!box) return;
             let app = 'settings';
             try{ app = (typeof wizApp === 'function' ? wizApp() : (typeof APP_NAME !== 'undefined' ? APP_NAME : 'settings')) || 'settings'; }catch(e){}
-  rptPrev.loading = true;
-  rptPrev.stale = false;
-  try{ rptPrevStaleMark(); }catch(e){}
-  rptPreviewRender();
+            const hasExistingTable = Boolean(box.querySelector('table tbody tr') && rptPrev.rows && rptPrev.rows.length);
+            const inPlace = Boolean(changedParam && hasExistingTable);
+            if(!inPlace){
+                rptPrev.loading = true;
+                rptPrev.stale = false;
+                try{ rptPrevStaleMark(); }catch(e){}
+                rptPreviewRender();
+            }
+            const oldRows = (rptPrev.rows || []).slice();
             fetch('/api/apps/' + encodeURIComponent(app) + '/rml/design-preview/', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(rptPreviewPayload())})
                 .then(r=>r.json().then(d=>({ok:r.ok, d})))
                 .then(({ok, d})=>{
                     rptPrev.loading = false;
-                    if(!ok){ rptPrev.error = String((d && d.error) || 'فشل المعاينة'); rptPrev.rows = []; rptPrev.cols = []; rptPrev.total = 0; }
+                    if(!ok){
+                        rptPrev.error = String((d && d.error) || 'فشل المعاينة');
+                        if(!inPlace){ rptPrev.rows = []; rptPrev.cols = []; rptPrev.total = 0; }
+                        rptPreviewRender();
+                    }
                     else{
                         rptPrev.error = '';
                         rptPrev.cols = Array.isArray(d.columns) ? d.columns : [];
-                        rptPrev.rows = Array.isArray(d.rows) ? d.rows.slice(0, 20) : [];
+                        const newRows = Array.isArray(d.rows) ? d.rows.slice(0, 20) : [];
                         rptPrev.sql = d.sql || '';
-                        rptPrev.total = (d.total !== undefined ? d.total : rptPrev.rows.length);
+                        rptPrev.total = (d.total !== undefined ? d.total : newRows.length);
                         if(d.sql) _fetchQuerySql = d.sql;
+                        if(inPlace && newRows.length === oldRows.length){
+                            rptPrev.rows = newRows;
+                            rptPrev.stale = false;
+                            try{ rptPrevStaleMark(); }catch(e){}
+                            rptPreviewUpdateCells(oldRows, newRows, changedParam);
+                            try{
+                                const rb = document.getElementById('treeResultsBadge');
+                                if(rb){
+                                    const n = newRows.length;
+                                    rb.textContent = 'النتائج: ' + n + ' صف' + (rptPrev.total !== undefined && rptPrev.total > n ? ' (من ' + rptPrev.total + ')' : '');
+                                }
+                            }catch(e){}
+                        } else {
+                            rptPrev.rows = newRows;
+                            rptPreviewRender();
+                        }
                     }
-                    rptPreviewRender();
                 })
-                .catch(e=>{ rptPrev.loading = false; rptPrev.error = String((e && e.message) || e); rptPreviewRender(); });
+                .catch(e=>{
+                    rptPrev.loading = false;
+                    rptPrev.error = String((e && e.message) || e);
+                    rptPreviewRender();
+                });
         }
         function rptPrevStaleMark(){
             try{
@@ -3843,7 +3941,8 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                         if(cs && String(cs).trim()) val = val + ' ' + String(cs).trim();
                     }
                     const vis = rptVis(c);
-                    return `<td class="p-2 border-l border-slate-100 whitespace-nowrap text-slate-700 ${vis ? '' : 'opacity-50 bg-slate-50/40'}" title="${rptEsc(val)}">${rptEsc(val)}</td>`;
+                    const colKey = c ? (c.alias || c.name || '') : '';
+                    return `<td class="p-2 border-l border-slate-100 whitespace-nowrap text-slate-700 ${vis ? '' : 'opacity-50 bg-slate-50/40'}" data-col="${rptEsc(colKey)}" title="${rptEsc(val)}">${rptEsc(val)}</td>`;
                 }).join('');
                 rowHtml += `</tr>`;
                 if(isDetailRpt && isExp){
