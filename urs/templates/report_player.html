@@ -1336,23 +1336,7 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                 cancelAnimationFrame(el._animCountId);
                 el._animCountId = null;
             }
-            // ثبات عرض العمود أثناء العد: قفل min-width على أعرض عينة + أرقام متساوية العرض
-            try{
-                const _samples = [];
-                try{ _samples.push(formatFn(start)); }catch(e){}
-                try{ _samples.push(formatFn((start + end) / 2)); }catch(e){}
-                try{ _samples.push(formatFn(end)); }catch(e){}
-                const _cs = getComputedStyle(el);
-                const _cv = animateNumberCount._cv || (animateNumberCount._cv = document.createElement('canvas'));
-                const _ctx = _cv.getContext('2d');
-                _ctx.font = [_cs.fontStyle, _cs.fontVariant, _cs.fontWeight, _cs.fontSize, _cs.fontFamily].join(' ');
-                const _pad = (parseFloat(_cs.paddingLeft) || 0) + (parseFloat(_cs.paddingRight) || 0);
-                let _need = 0;
-                _samples.forEach(t=>{ try{ _need = Math.max(_need, _ctx.measureText(String(t)).width); }catch(e){} });
-                _need = Math.ceil(_need + _pad + 2);
-                el.style.minWidth = Math.max(_need, el.offsetWidth || 0) + 'px';
-                el.classList.add('num-tnum');
-            }catch(e){}
+            try{ el.classList.add('num-tnum'); }catch(e){}
             const startTime = performance.now();
             const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
             function step(now){
@@ -1366,7 +1350,7 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                 } else {
                     el.textContent = formatFn(end);
                     el._animCountId = null;
-                    try{ el.style.minWidth = ''; el.classList.remove('num-tnum'); }catch(e){}
+                    try{ el.classList.remove('num-tnum'); }catch(e){}
                 }
             }
             el._animCountId = requestAnimationFrame(step);
@@ -1693,7 +1677,7 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
         }
         function resolveDbField(field) {
             // Map Arabic alias / name / expr -> real DB expr for backend filtering
-            if (!field) return field;
+            if (!field || typeof field !== 'string' || field === 'undefined' || field.includes('PointerEvent')) return null;
             const key = String(field).trim().toLowerCase();
             const fromApi = (lastApiData && lastApiData.columns) || [];
             const pools = [];
@@ -1797,22 +1781,24 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                         const df = docSearchFields().find(d => d && (d.alias === f.field || (d.refname && d.refname === f.field)));
                         if(df && df.refname) rname = df.refname;
                     }catch(e){}
-                }
                 if(rname) res.refname = rname;
-                return res;
+                return res.field || res.any || res.all ? res : null;
             };
             const andF = [], ors = {};
             activeFilters.forEach(f=>{
+                const mapped = mapF(f);
+                if(!mapped) return;
                 if(f && Array.isArray(f.any)){
                     // مجموعة ذكية OR: فرّع عناصرها في سلة OR (تُدمج مع باقي التوكنات بـ OR)
-                    if(f.orGroup){ (ors[f.orGroup] = ors[f.orGroup] || []).push(...f.any.map(mapF)); }
-                    else andF.push(mapF(f));
+                    if(f.orGroup){ (ors[f.orGroup] = ors[f.orGroup] || []).push(...f.any.map(mapF).filter(Boolean)); }
+                    else andF.push(mapped);
                 }
-                else if(f.orGroup){ (ors[f.orGroup] = ors[f.orGroup] || []).push(mapF(f)); }
-                else andF.push(mapF(f));
+                else if(f.orGroup){ (ors[f.orGroup] = ors[f.orGroup] || []).push(mapped); }
+                else andF.push(mapped);
             });
+            const safeSort = (activeSort.column && typeof activeSort.column === 'string' && !activeSort.column.includes('PointerEvent')) ? {column: activeSort.column, direction: activeSort.direction} : undefined;
             Object.values(ors).forEach(g=>{ andF.push(g.length > 1 ? {any: g} : g[0]); });
-            const payload = { activeTable, filters: andF, sort: activeSort.column?{column:activeSort.column, direction:activeSort.direction}:undefined, page: page, pageSize: effPageSize };
+            const payload = { activeTable, filters: andF, sort: safeSort, page: page, pageSize: effPageSize };
             if(forceStageRefresh){ payload.refreshApi = true; forceStageRefresh = false; }
             payload.columnFilters = {};
             // Distributed execution: skip staging (5M-row copy) by joining
@@ -1821,7 +1807,8 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
             payload.distributed = true;
             for (const k in (columnFilters || {})) {
                 if (columnFilters[k] && columnFilters[k].length) {
-                    payload.columnFilters[resolveDbField(k)] = columnFilters[k];
+                    const rk = resolveDbField(k);
+                    if (rk) payload.columnFilters[rk] = columnFilters[k];
                 }
             }
             return payload;
@@ -3193,6 +3180,7 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
         }
         async function openColumnMenu(event, colName) {
             event.stopPropagation();
+            if (!colName || typeof colName !== 'string' || colName === 'undefined' || colName.includes('PointerEvent')) return;
             currentMenuColumn = colName;
             const menu = document.getElementById('columnDropdownMenu');
             menu.classList.remove('hidden');
