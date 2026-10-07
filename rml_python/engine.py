@@ -8211,21 +8211,43 @@ class RMLReportEngine:
                         break
 
             if error_columns:
-                # Generate a single dummy row containing the error codes
-                fake_row = {}
+                made_changes = False
                 for c in self.columns:
-                    if c.alias in error_columns:
-                        fake_row[c.alias] = error_columns[c.alias]['code']
-                        fake_row["@" + str(getattr(c, "col_refname", "") or "")] = error_columns[c.alias]['code']
-                    else:
-                        fake_row[c.alias] = ""
-                
-                result_rows = [fake_row]
-                total = 1
-                try:
-                    self._error_columns = error_columns
-                except:
-                    pass
+                    if c.alias in error_columns and c.alias not in getattr(self, "_errored_aliases", set()):
+                        c.expr = "NULL"
+                        if not hasattr(self, "_errored_aliases"):
+                            self._errored_aliases = set()
+                        self._errored_aliases.add(c.alias)
+                        made_changes = True
+
+                if made_changes:
+                    if not hasattr(self, "_error_columns"):
+                        self._error_columns = {}
+                    self._error_columns.update(error_columns)
+                    
+                    res = self.execute(payload)
+                    
+                    for row in res.get("rows", []):
+                        for alias, err_info in self._error_columns.items():
+                            row[alias] = err_info["code"]
+                            for c in self.columns:
+                                if c.alias == alias:
+                                    row["@" + str(getattr(c, "col_refname", "") or "")] = err_info["code"]
+                    return res
+                else:
+                    fake_row = {}
+                    for c in self.columns:
+                        if c.alias in error_columns:
+                            fake_row[c.alias] = error_columns[c.alias]['code']
+                            fake_row["@" + str(getattr(c, "col_refname", "") or "")] = error_columns[c.alias]['code']
+                        else:
+                            fake_row[c.alias] = ""
+                    result_rows = [fake_row]
+                    total = 1
+                    try:
+                        self._error_columns = error_columns
+                    except:
+                        pass
             else:
                 raise RuntimeError(f"Report execution failed: {e}\nSQL: {sql}\nParams: {params}") from e
 
