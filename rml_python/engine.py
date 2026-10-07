@@ -1486,6 +1486,10 @@ class RMLReportEngine:
             self.report_links = compiler.links() if hasattr(compiler, "links") else []
         except Exception:
             self.report_links = []
+        try:
+            self.doc_params = compiler.doc_params() if hasattr(compiler, "doc_params") else []
+        except Exception:
+            self.doc_params = []
         self.db = db_engine
         # Extra live engines by connection key (multi-DB reports); primary is self.db
         self.databases: Dict[str, Any] = dict(databases or {})
@@ -1951,11 +1955,86 @@ class RMLReportEngine:
                     found.add(k)
         return found
 
+    def _doc_param_val(self, dp: Any, filters: Optional[List[Dict[str, Any]]] = None) -> Any:
+        """Find active value of a doc_param from filters or default_value."""
+        ref = (getattr(dp, "param_refname", None) or getattr(dp, "refname", None) or "").strip().lower()
+        col = str(getattr(dp, "column", "") or "").strip().lower()
+        pid = str(getattr(dp, "id", "") or "").strip().lower()
+
+        def _check_f(f: Dict[str, Any]):
+            if not isinstance(f, dict):
+                return False, None
+            if isinstance(f.get("any"), list):
+                for sub in f["any"]:
+                    hit, val = _check_f(sub)
+                    if hit:
+                        return True, val
+            if isinstance(f.get("all"), list):
+                for sub in f["all"]:
+                    hit, val = _check_f(sub)
+                    if hit:
+                        return True, val
+            f_fld = str(f.get("field") or f.get("column") or f.get("name") or "").strip().lower()
+            f_ref = str(f.get("refname") or f.get("param_refname") or "").strip().lower()
+            if (ref and (f_ref == ref or f_fld == ref)) or (col and f_fld == col) or (pid and f_fld == pid):
+                v = f.get("value")
+                if v is not None and str(v).strip() != "":
+                    return True, v
+                vf = f.get("valFrom")
+                if vf is not None and str(vf).strip() != "":
+                    return True, vf
+            return False, None
+
+        for f in (filters or []):
+            hit, val = _check_f(f)
+            if hit:
+                return val
+        return getattr(dp, "default_value", "") or ""
+
+    def _expand_doc_params(self, text: str, doc_params: List[Any], filters: Optional[List[Dict[str, Any]]] = None) -> str:
+        """Expand @param_refname, [param_refname], and :param_refname in expressions.
+
+        Replaces references with the parameter's active value (from filters or default_value).
+        Operates only outside single-quoted strings so user string literals are preserved.
+        """
+        if not text or not doc_params:
+            return text or ""
+        ref_replacements = {}
+        for dp in doc_params:
+            ref = (getattr(dp, "param_refname", None) or getattr(dp, "refname", None) or "").strip()
+            if not ref:
+                continue
+            val = self._doc_param_val(dp, filters)
+            ptype = str(getattr(dp, "type", "text") or "text").strip().lower()
+            s_val = "" if val is None else str(val).strip()
+            if ptype == "number" and s_val and re.fullmatch(r"-?\d+(\.\d+)?", s_val):
+                sql_lit = s_val
+            else:
+                sql_lit = "'" + s_val.replace("'", "''") + "'"
+            ref_replacements[ref] = sql_lit
+
+        if not ref_replacements:
+            return text
+
+        segs = re.split(self._REFNAME_SEG_RE, str(text))
+        for i in range(0, len(segs), 2):
+            seg = segs[i]
+            for ref, sql_lit in ref_replacements.items():
+                r_esc = re.escape(ref)
+                seg = re.sub(r"(?<![\w$#@.\"'])@" + r_esc + r"(?![\w])", sql_lit, seg, flags=re.IGNORECASE)
+                seg = re.sub(r"\[" + r_esc + r"\]", sql_lit, seg, flags=re.IGNORECASE)
+                seg = re.sub(r"(?<![\w$#@.\"']):" + r_esc + r"(?![\w])", sql_lit, seg, flags=re.IGNORECASE)
+            segs[i] = seg
+        return "".join(segs)
+
     def _rewrite_value_expr(self, text, alias_of) -> str:
         """Replace @refname (and [refname]) with the referenced column's quoted SELECT alias."""
         s = str(text or "").lstrip()
         if s.startswith("=") and not s.startswith("=="):
             s = s[1:].lstrip()
+        dp_list = (self.compiler.doc_params() if hasattr(self, "compiler") and hasattr(self.compiler, "doc_params") else [])
+        if dp_list:
+            s = self._expand_doc_params(s, dp_list, getattr(self, "_active_filters", None))
         try:
             from .namespaces import _transpile_if_calls
             s = _transpile_if_calls(s)
@@ -2174,6 +2253,9 @@ class RMLReportEngine:
         """Expand @ColumnAlias in free text (general_where etc.). Idempotent."""
         if not text or "@" not in str(text):
             return text
+        dp_list = (self.compiler.doc_params() if hasattr(self, "compiler") and hasattr(self.compiler, "doc_params") else [])
+        if dp_list:
+            text = self._expand_doc_params(text, dp_list, getattr(self, "_active_filters", None))
         by_name, by_alias = self._at_column_maps()
         return self._sub_at_refs(str(text), by_name, by_alias, ())
 
@@ -2200,10 +2282,12 @@ class RMLReportEngine:
         outer_cols = ", ".join(_q(a) for a in report_aliases)
         return "SELECT %s FROM (%s) _tv%s%s" % (outer_cols, inner, order_clause, paginate_clause)
 
-    def _inline_column_refs(self, columns, scope_extra=None):
+    def _inline_column_refs(self, columns, scope_extra=None, filters=None):
         """Return column copies with [column]/@Alias refs inlined (fields untouched)."""
         import dataclasses
         by_name, by_alias = self._at_column_maps(columns, scope_extra)
+        eff_filters = filters if filters is not None else getattr(self, "_active_filters", None)
+        dp_list = (self.compiler.doc_params() if hasattr(self, "compiler") and hasattr(self.compiler, "doc_params") else [])
         out = []
         for c in (columns or []):
             cid = getattr(c, "id", None) or getattr(c, "name", "")
@@ -2220,6 +2304,11 @@ class RMLReportEngine:
                     raise
                 except Exception:
                     new_wc = _wc0
+            if dp_list:
+                if new_raw:
+                    new_raw = self._expand_doc_params(new_raw, dp_list, eff_filters)
+                if new_wc:
+                    new_wc = self._expand_doc_params(new_wc, dp_list, eff_filters)
             _kw = {}
             if new_raw != (c.expr or ""):
                 _kw["expr"] = new_raw
@@ -4212,8 +4301,16 @@ class RMLReportEngine:
         return used
 
     def _plan_cache_key(self, active_table, filters, sort, group_by) -> str:
-        """Structural cache key (fields/ops only — never values)."""
+        """Structural cache key (fields/ops only — never values, EXCEPT doc_param values which affect column expressions)."""
         import json as _json
+
+        dps = getattr(self, "doc_params", []) or []
+        dp_vals = []
+        if dps:
+            for dp in dps:
+                ref = (getattr(dp, "param_refname", None) or getattr(dp, "refname", None) or "").strip()
+                if ref:
+                    dp_vals.append((ref, self._doc_param_val(dp, filters)))
 
         def _shape(f):
             if isinstance(f, dict) and isinstance(f.get("any"), (list, tuple)):
@@ -4223,7 +4320,7 @@ class RMLReportEngine:
             return None
 
         try:
-            return _json.dumps([active_table, [_shape(f) for f in (filters or [])], sort, group_by],
+            return _json.dumps([active_table, [_shape(f) for f in (filters or [])], sort, group_by, dp_vals],
                                sort_keys=True, default=str)
         except Exception:
             return str(id(filters)) + str(active_table)
@@ -4265,7 +4362,7 @@ class RMLReportEngine:
         base_schema_q = _q(base_schema) if base_schema else ""
         fields = getattr(self, "fields", []) or []
         field_table = self._field_table_map()
-        inlined = self._inline_column_refs(self.columns)
+        inlined = self._inline_column_refs(self.columns, filters=filters)
         try:
             _gw_text = self.compiler.general_where() if hasattr(self.compiler, "general_where") else ""
         except Exception:
@@ -4273,6 +4370,8 @@ class RMLReportEngine:
         try:
             # @Alias first: routing/JOINs must see through to the real fields
             _gw_text = self._expand_at_aliases(_gw_text) if _gw_text else ""
+            if _gw_text and getattr(self, "doc_params", None):
+                _gw_text = self._expand_doc_params(_gw_text, self.doc_params, filters=filters)
         except ValueError:
             raise
         except Exception:

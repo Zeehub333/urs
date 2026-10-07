@@ -880,7 +880,8 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                     required: (p.required === undefined ? true : !!(p.required && p.required !== 'false' && p.required !== '0')),
                     defaultValue: p.default_value || p.defaultValue || '',
                     source: p.source || {connection: p.src_conn || p.srcConn || '', table: p.src_table || p.srcTable || '', column: p.src_column || p.srcColumn || ''},
-                    searchable: (p.searchable === undefined || p.searchable === null) ? true : (['0', 'false', 'no', 'off'].indexOf(String(p.searchable).toLowerCase()) < 0)
+                    searchable: (p.searchable === undefined || p.searchable === null) ? true : (['0', 'false', 'no', 'off'].indexOf(String(p.searchable).toLowerCase()) < 0),
+                    refname: p.param_refname || p.paramRefname || p.refname || p.ref_name || ''
                 }));
             }
             // كل أعمدة التقرير حقول تصفية للمستندي (لا أول عمود فقط)
@@ -1346,12 +1347,12 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                 const gv = (t)=>{ const el = document.querySelector('#docSearchFields [data-docf="' + f.alias.replace(/"/g, '\\"') + '"][data-doct="' + t + '"]'); return el ? (el.value || '').trim() : ''; };
                 if(op === 'between'){
                     const a = gv('dateFrom') || gv('numFrom'), b = gv('dateTo') || gv('numTo');
-                    if(a && b) activeFilters.push({field: f.alias, op: 'between', valFrom: a, valTo: b});
-                    else if(a) activeFilters.push({field: f.alias, op: 'gte', value: a});
-                    else if(b) activeFilters.push({field: f.alias, op: 'lte', value: b});
+                    if(a && b) activeFilters.push({field: f.alias, op: 'between', valFrom: a, valTo: b, refname: f.refname || ''});
+                    else if(a) activeFilters.push({field: f.alias, op: 'gte', value: a, refname: f.refname || ''});
+                    else if(b) activeFilters.push({field: f.alias, op: 'lte', value: b, refname: f.refname || ''});
                 } else {
                     const v = gv('single');
-                    if(v) activeFilters.push({field: f.alias, op: op, value: v});
+                    if(v) activeFilters.push({field: f.alias, op: op, value: v, refname: f.refname || ''});
                 }
             });
             if(!activeFilters.length){ notify('أدخل معايير البحث أولاً', 'info'); return; }
@@ -1490,7 +1491,9 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
             const mapF = (f)=>{
                 if(f && Array.isArray(f.any)) return {any: f.any.map(mapF)};
                 if(f && Array.isArray(f.all)) return {all: f.all.map(mapF)};
-                return {field:resolveDbField(f.field), op:f.op, value:f.value, valFrom:f.valFrom, valTo:f.valTo};
+                const res = {field:resolveDbField(f.field), op:f.op, value:f.value, valFrom:f.valFrom, valTo:f.valTo};
+                if(f && f.refname) res.refname = f.refname;
+                return res;
             };
             const andF = [], ors = {};
             activeFilters.forEach(f=>{

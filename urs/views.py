@@ -9651,6 +9651,9 @@ def _write_doc_params_el(rml, _ET3, doc_params):
         def_val = str(p.get("default_value") or p.get("defaultValue") or "").strip()
         if def_val:
             c_el.set("default_value", def_val)
+        prn = str(p.get("param_refname") or p.get("paramRefname") or p.get("refname") or p.get("ref_name") or "").strip()
+        if prn:
+            c_el.set("param_refname", prn)
         # value source for select boxes (designer-chosen: connection/table/column)
         # accepts {source:{connection,table,column}} or flat src_* keys
         _sinfo = p.get("source") if isinstance(p.get("source"), dict) else {}

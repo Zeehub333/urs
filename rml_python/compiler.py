@@ -67,6 +67,7 @@ class RMLDocParam:
     op: str = "equals"
     required: bool = True
     default_value: str = ""
+    param_refname: str = ""  # الاسم المرجعي للمدخل (param_refname / refname) للاستخدام في تعبيرات الأعمدة
     src_conn: str = ""
     src_table: str = ""
     src_column: str = ""
@@ -78,6 +79,9 @@ class RMLDocParam:
             "id": self.id,
             "column": self.column,
             "label": self.label or self.column,
+            "param_refname": self.param_refname or "",
+            "paramRefname": self.param_refname or "",
+            "refname": self.param_refname or "",
             "type": self.type or "text",
             "op": self.op or "equals",
             "required": self.required,
@@ -832,6 +836,7 @@ class RMLReportCompiler:
                         req_raw = get(el, "required", default="1").lower()
                         req = req_raw not in ("0", "false", "no")
                         def_val = get(el, "default_value", "defaultValue", default="")
+                        param_refname = get(el, "param_refname", "paramRefname", "refname", "ref_name", default="")
                         src = {str(k).lower(): v for k, v in (el.attrib or {}).items()}
 
                         def _src(*names):
@@ -849,6 +854,7 @@ class RMLReportCompiler:
                             op=op,
                             required=req,
                             default_value=def_val,
+                            param_refname=param_refname,
                             src_conn=_src("src_conn", "srcconn", "source_connection", "connection"),
                             src_table=_src("src_table", "srctable", "source_table", "table"),
                             src_column=_src("src_column", "srccolumn", "source_column", "column_name"),

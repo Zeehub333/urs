@@ -758,7 +758,8 @@ class WsScopedConnectionsTests(__import__("django.test", fromlist=["TestCase"]).
     def test_api_connection_tables_scoped_to_session_schema(self):
         req = self.rf.get(f"/api/connections/{self.c1.id}/tables/")
         req.session = {"workspace": "workspace_t", "fiscal_schema": "fiscal_2026"}
-        with mock.patch("urs.views._list_tables_obj", return_value=[{"name": "tbl1", "schema": "fiscal_2026", "full": "fiscal_2026.tbl1"}]) as mock_list:
+        with mock.patch("urs.views._ws_session_context", return_value=("workspace_t", "fiscal_2026", "ws_primary")), \
+             mock.patch("urs.views._list_tables_obj", return_value=[{"name": "tbl1", "schema": "fiscal_2026", "full": "fiscal_2026.tbl1"}]) as mock_list:
             res = _v.api_connection_tables(req, self.c1.id)
             data = json.loads(res.content.decode())
             self.assertEqual(res.status_code, 200)
@@ -768,7 +769,8 @@ class WsScopedConnectionsTests(__import__("django.test", fromlist=["TestCase"]).
     def test_api_connection_table_columns_scoped_to_session_schema(self):
         req = self.rf.get(f"/api/connections/{self.c1.id}/tables/users/columns/")
         req.session = {"workspace": "workspace_t", "fiscal_schema": "fiscal_2026"}
-        with mock.patch("urs.views._table_columns_obj", return_value=[{"name": "id", "type": "INTEGER", "db_type": "int"}]) as mock_cols:
+        with mock.patch("urs.views._ws_session_context", return_value=("workspace_t", "fiscal_2026", "ws_primary")), \
+             mock.patch("urs.views._table_columns_obj", return_value=[{"name": "id", "type": "INTEGER", "db_type": "int"}]) as mock_cols:
             res = _v.api_connection_table_columns(req, self.c1.id, "users")
             data = json.loads(res.content.decode())
             self.assertEqual(res.status_code, 200)

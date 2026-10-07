@@ -166,7 +166,7 @@ function wizApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof 
                 wizardRules = (data.rules || []).map((r,i)=>({id:String(r.id||i+1), name:r.name||'', display:r.display||r.name||'', icon:r.icon||'', description:r.description||'', expr:r.expr||'', connection_id:String(r.connection_id||''), sources:(r.sources||[]).map(String), variables:(r.variables||[]).map(v=>({name:v.name||'', display:v.display||v.name||'', type:v.type||'text', options:(v.options||[]).map(String)})), policies:(r.policies||[]).map(p=>({id:String(p.id||''), name:p.name||'', priority:(p.priority ?? 100), is_default:!!p.is_default, match:p.match||{}, values:p.values||{}}))}));
                 wizardGroups = (data.groups || []).map((g,i)=>({id:String(g.id||i+1), name:g.name||'', order:parseInt(g.order)||i+1, level:Math.max(1, Math.min(parseInt(g.level)||1, 5)), columns:(g.columns||[]).map(a=>String(a)), color:(g.color||''), bg:(g.bg||g.bgColor||''), weight:(g.weight||g.fontWeight||''), frozen:!!(g.frozen||g.freeze)}));
                 try{ wizardGroupLevels = Math.max(1, Math.min(parseInt(md.group_levels ?? md.groupLevels ?? 1) || 1, 5)); }catch(e){ wizardGroupLevels = 1; }
-                wizardDocParams = (data.doc_params || data.docParams || (md.doc_params || md.docParams) || []).map((p,i)=>({id:String(p.id||'dp_'+(i+1)), column:String(p.column||p.field||p.name||''), label:String(p.label||p.display||p.column||''), type:String(p.type||p.dataType||p.data_type||'text'), op:String(p.op||p.operator||'equals'), required:(p.required===undefined ? true : !!(p.required && p.required!=='false' && p.required!=='0')), default_value:String(p.default_value||p.defaultValue||'')}));
+                wizardDocParams = (data.doc_params || data.docParams || (md.doc_params || md.docParams) || []).map((p,i)=>({id:String(p.id||'dp_'+(i+1)), column:String(p.column||p.field||p.name||''), label:String(p.label||p.display||p.column||''), type:String(p.type||p.dataType||p.data_type||'text'), op:String(p.op||p.operator||'equals'), required:(p.required===undefined ? true : !!(p.required && p.required!=='false' && p.required!=='0')), default_value:String(p.default_value||p.defaultValue||''), param_refname:String(p.param_refname||p.paramRefname||p.refname||p.ref_name||'')}));
                 wizardDocTemplate = data.doc_template || data.docTemplate || (md.doc_template || md.docTemplate) || '';
                 wizardGeneralWhere = data.general_where || data.generalWhere || (md.general_where || md.generalWhere) || '';
                 const _dtEl2 = document.getElementById('wizardDocTemplate');
@@ -1906,6 +1906,10 @@ function wizApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof 
                 if(tb) push((cn ? cn + '.' : '') + tb + '.' + nm, nm, (cn ? 'اتصال ' + cn + ' • ' : '') + tb);
             });
             (wizardDetail?.columns || []).filter(f=>f.name).forEach(f=>push(f.name, f.name, 'فرعي'));
+            (wizardDocParams || []).forEach(dp=>{
+                const ref = (dp.param_refname || dp.refname || '').trim();
+                if(ref) push(ref, '@' + ref, 'مدخل مستندي: ' + (dp.label || dp.column || ref));
+            });
             return pool;
         }
         /* تحذير get() السياقي: المختصر get(col) خارج الجدول الافتراضي مرفوض في المحرك —
@@ -2092,6 +2096,10 @@ function wizApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof 
                 if(prev && /[\w$#@."'\u0600-\u06FF]/.test(prev)){ hideExprAC(); return; }
                 const part = (am[1] || '').replace(/\s+$/, '').toLowerCase();
                 const pool = [];
+                (wizardDocParams || []).forEach(dp=>{
+                    const _prn = (dp.param_refname || dp.refname || '').trim();
+                    if(_prn) pool.push({code: _prn, name: dp.label || dp.column || _prn, hint: 'مدخل مستندي: ' + (dp.label || dp.column || _prn), isDoc: true});
+                });
                 (wizardColumns || []).filter(c=>c.alias || c.name).forEach(c=>{
                     const _rn = c.col_refname || c.colRefname || '';
                     if(_rn) pool.push({code: _rn, name: c.alias || c.name, hint: 'قيمة ✓'});
@@ -2523,9 +2531,11 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                 const isSel = rptSel.kind === 'doc_param' && rptSel.idx === i;
                 const typeBadge = p.type === 'select' ? 'صندوق اختيار' : (p.type || 'text');
                 const badgeCls = p.type === 'select' ? 'bg-indigo-100 text-indigo-800' : 'bg-sky-100 text-sky-800';
+                const prn = String(p.param_refname || p.refname || '').trim();
                 return `<div class="rd-tree-leaf flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs cursor-pointer transition select-none ${isSel ? 'bg-sky-50 border border-sky-200 text-sky-900 font-bold' : 'hover:bg-slate-100 text-slate-700'}" onclick="rptSelectCol('doc_param', ${i})">
                     <i class="fa-solid fa-filter text-[10px] text-sky-500"></i>
                     <span class="flex-1 truncate" title="${rptEsc(p.label || p.column)}">${rptEsc(p.label || p.column || ('مدخل ' + (i+1)))}</span>
+                    ${prn ? `<span class="text-[9px] bg-violet-100 text-violet-800 px-1 rounded font-mono font-bold" title="الاسم المرجعي: @${rptEsc(prn)}">@${rptEsc(prn)}</span>` : ''}
                     <span class="text-[9px] ${badgeCls} px-1 rounded font-mono">${rptEsc(typeBadge)}</span>
                     ${p.required ? '<span class="text-[9px] text-rose-500 font-bold" title="إلزامي">*</span>' : ''}
                     <button type="button" class="text-slate-400 hover:text-rose-600 p-0.5" title="حذف" onclick="event.stopPropagation();deleteWizardDocParam(${i})"><i class="fa-solid fa-trash text-[10px]"></i></button>
@@ -2783,6 +2793,7 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                 op: op,
                 required: true,
                 default_value: '',
+                param_refname: '',
                 src_conn: '',
                 src_table: '',
                 src_column: '',
@@ -2811,7 +2822,8 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                     type: (dt === 'datetime' ? 'date' : dt),
                     op: op,
                     required: true,
-                    default_value: ''
+                    default_value: '',
+                    param_refname: ''
                 });
                 currentCols.add(String(name).trim().toLowerCase());
                 added++;
@@ -3070,6 +3082,16 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                     <div>
                         <label class="rpt-fl">العمود المرتبط من واقع التقرير *</label>
                         <select onchange="updateWizardDocParam(${i},'column',this.value)" class="rpt-in font-bold">${colOpts}</select>
+                    </div>
+                    <div class="p-2.5 rounded-xl border border-violet-200 bg-violet-50/70 space-y-1.5">
+                        <div class="flex items-center justify-between">
+                            <label class="rpt-fl text-violet-900 font-bold mb-0">الاسم المرجعي للمدخل (param_refname)</label>
+                            <span class="text-[10px] text-violet-700 font-mono font-bold">@param</span>
+                        </div>
+                        <input value="${rptEsc(p.param_refname || '')}" oninput="updateWizardDocParam(${i},'param_refname',this.value)" dir="ltr" class="rpt-in font-mono text-violet-900 border-violet-300 focus:border-violet-500 focus:ring-violet-200" placeholder="مثال: doc_type أو branch_id">
+                        <p class="text-[10px] text-violet-700 leading-relaxed">
+                            استخدم هذا الاسم للإشارة لقيمة هذا المدخل داخل تعابير الأعمدة عبر <code class="bg-violet-100 text-violet-900 px-1 py-0.5 rounded font-mono">@اسم_المدخل</code> أو <code class="bg-violet-100 text-violet-900 px-1 py-0.5 rounded font-mono">[اسم_المدخل]</code> (مثال: <code class="bg-white/80 px-1 rounded font-mono">IF(@doc_type = '1', 'نقداً', 'آجل')</code>).
+                        </p>
                     </div>
                     <div class="grid grid-cols-2 gap-2">
                         <div>

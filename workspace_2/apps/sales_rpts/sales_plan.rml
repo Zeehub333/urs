@@ -263,16 +263,15 @@
   <columns>
     <column id="1" name="col_1" alias="رمز الصنف" expr="=[I_CODE]" join_type="one_to_one" icon="fa-hashtag" distinct="1"/>
     <column id="2" name="col_2" alias="اسم الصنف" expr="=[16.IAS_ITM_MST.I_NAME]" join_type="one_to_one" icon="fa-hashtag"/>
-    <column id="3" name="col_3" alias="سعر التكلفة" expr="=[PRIMARY_COST]" join_type="one_to_one" icon="fa-hashtag" color="#d400ff" weight="bold" is_amount="1"/>
-    <column id="4" name="col_4" alias="سعر البيع الاقصى" expr="=([16.IAS_ITEM_PRICE.I_PRICE])" join_type="one_to_one" icon="fa-hashtag" color="#006aff" weight="bold" is_amount="1"/>
-    <column id="5" name="col_5" alias="تاريخ التسعيرة" expr="=[16.IAS_ITEM_PRICE.UP_DATE]" join_type="one_to_one" col_refname="up_date" icon="fa-hashtag"/>
+    <column id="3" name="col_3" alias="سعر التكلفة" expr="=[PRIMARY_COST]" join_type="one_to_one" icon="fa-hashtag" color="#d400ff" weight="bold" is_amount="1" currency_symbol="$" is_status="1"/>
+    <column id="4" name="col_4" alias="سعر البيع الاقصى" expr="=([16.IAS_ITEM_PRICE.I_PRICE])" join_type="one_to_one" icon="fa-hashtag" color="#006aff" weight="bold" is_amount="1" currency_symbol="$"/>
   </columns>
   <links>
     <link id="1" from_table="IAS_ITM_MST" from_col="I_CODE" to_table="IAS_ITEM_PRICE" to_col="I_CODE" rel_type="one_to_one"/>
   </links>
   <table_opts>
     <table name="IAS_ITM_MST" conn="16" is_default="1" where="[IAS_ITM_MST.G_CODE] &lt;&gt; '9000' AND [IAS_ITM_MST.G_CODE] &lt;&gt; '9200'"/>
-    <table name="IAS_ITEM_PRICE" conn="16"/>
+    <table name="IAS_ITEM_PRICE" conn="16" where="[IAS_ITEM_PRICE.LEV_NO] = 1"/>
   </table_opts>
   <groups>
     <group id="1" name="بيانات الصنف" order="1">
@@ -281,7 +280,8 @@
       <column alias="سعر البيع"/>
       <column alias="سعر التكلفة"/>
       <column alias="عمود 4"/>
+      <column alias="سعر البيع الاقصى"/>
     </group>
   </groups>
-  <general_where>([IAS_ITM_MST.G_CODE] &lt;&gt; '9000' AND [IAS_ITM_MST.G_CODE] &lt;&gt; '9200')</general_where>
+  <general_where>([IAS_ITM_MST.G_CODE] &lt;&gt; '9000' AND [IAS_ITM_MST.G_CODE] &lt;&gt; '9200') AND ([IAS_ITEM_PRICE.LEV_NO] = 1)</general_where>
 </rml>

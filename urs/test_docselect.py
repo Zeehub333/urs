@@ -64,6 +64,66 @@ class DocParamSourceModelTests(SimpleTestCase):
         self.assertEqual((p.src_conn, p.src_table, p.src_column), ("", "", ""))
         self.assertTrue(p.searchable)
 
+    def test_writer_emits_param_refname(self):
+        import xml.etree.ElementTree as _ET
+        rml = _ET.Element("rml")
+        ok = _v._write_doc_params_el(rml, _ET, [{
+            "column": "bill_type", "label": "نوع الفاتورة", "type": "select",
+            "op": "equals", "required": True,
+            "param_refname": "b_type",
+        }])
+        self.assertTrue(ok)
+        el = rml.find("doc_params/doc_param")
+        self.assertIsNotNone(el)
+        self.assertEqual(el.get("param_refname"), "b_type")
+
+    def test_compiler_extracts_param_refname(self):
+        from rml_python.compiler import RMLReportCompiler
+        comp = RMLReportCompiler(xml_text=(
+            '<rml><doc_params>'
+            '<doc_param id="dp_1" column="bill_type" label="نوع الفاتورة" type="text" '
+            'param_refname="b_type"/>'
+            '</doc_params></rml>'))
+        params = comp.doc_params()
+        self.assertEqual(len(params), 1)
+        p = params[0]
+        self.assertEqual(p.param_refname, "b_type")
+        d = p.to_dict()
+        self.assertEqual(d["param_refname"], "b_type")
+        self.assertEqual(d["paramRefname"], "b_type")
+        self.assertEqual(d["refname"], "b_type")
+
+    def test_engine_expands_param_refname_in_expressions(self):
+        from rml_python.compiler import RMLReportCompiler
+        from rml_python.engine import RMLReportEngine
+        xml = '''<rml>
+          <rpt_metadata name="test_doc" displayName="Test Doc" type="doc"/>
+          <doc_params>
+            <doc_param id="dp_1" column="type_id" param_refname="t_id" type="number" default_value="1"/>
+            <doc_param id="dp_2" column="mode_str" param_refname="m_str" type="text" default_value="CASH"/>
+          </doc_params>
+          <fields>
+            <field name="amt" table_source="t1" type="number"/>
+          </fields>
+          <columns>
+            <column id="1" name="c1" alias="calc1" expr="IF(@t_id = 1, [amt] * 2, [amt])"/>
+            <column id="2" name="c2" alias="calc2" expr="IF([m_str] = 'CASH', 'نقداً', 'آجل')"/>
+          </columns>
+        </rml>'''
+        comp = RMLReportCompiler(xml_text=xml)
+        eng = RMLReportEngine(comp, mock.Mock())
+        cols = eng._inline_column_refs(eng.columns, filters=[])
+        self.assertIn("1 = 1", cols[0].expr)
+        self.assertIn("'CASH' = 'CASH'", cols[1].expr)
+
+        filters = [
+            {"refname": "t_id", "value": "2"},
+            {"refname": "m_str", "value": "CREDIT"}
+        ]
+        cols2 = eng._inline_column_refs(eng.columns, filters=filters)
+        self.assertIn("2 = 1", cols2[0].expr)
+        self.assertIn("'CREDIT' = 'CASH'", cols2[1].expr)
+
 
 class ValuesSourceEndpointTests(SimpleTestCase):
     def setUp(self):
@@ -405,3 +465,17 @@ class DocPlayerMarkupTests(SimpleTestCase):
             js = f.read()
         for needle in ("src_conn", "src_table", "src_column", "searchable", "مصدر قيم صندوق الاختيار"):
             self.assertIn(needle, js)
+
+    def test_param_refname_markup(self):
+        import os as _os
+        base = _os.path.dirname(__file__)
+        with open(_os.path.join(base, "templates", "report_player.html"), encoding="utf-8") as f:
+            p_html = f.read()
+        self.assertIn("param_refname", p_html)
+
+        for ws in ("workspace_1", "workspace_2"):
+            with open(_os.path.join(base, "..", ws, "apps", "settings",
+                                    "modals", "rml_wizard_script.html"), encoding="utf-8") as f:
+                w_html = f.read()
+            self.assertIn("param_refname", w_html)
+            self.assertIn("الاسم المرجعي للمدخل (param_refname)", w_html)
