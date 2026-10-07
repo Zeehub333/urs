@@ -235,55 +235,53 @@
     <field id="228" name="HPS_USE_MORT_FLG" type="INTEGER" conn_id="16" table_source="IAS_ITM_MST"/>
     <field id="229" name="AD_TRMNL_NM" type="VARCHAR" conn_id="16" table_source="IAS_ITM_MST"/>
     <field id="230" name="UP_TRMNL_NM" type="VARCHAR" conn_id="16" table_source="IAS_ITM_MST"/>
-    <field id="231" name="I_CODE" type="VARCHAR" conn_id="16" table_source="IAS_ITM_DTL"/>
-    <field id="232" name="ITM_UNT" type="VARCHAR" conn_id="16" table_source="IAS_ITM_DTL"/>
-    <field id="233" name="P_SIZE" type="NUMERIC" conn_id="16" table_source="IAS_ITM_DTL"/>
-    <field id="234" name="ITM_UNT_L_DSC" type="VARCHAR" conn_id="16" table_source="IAS_ITM_DTL"/>
-    <field id="235" name="ITM_UNT_F_DSC" type="VARCHAR" conn_id="16" table_source="IAS_ITM_DTL"/>
-    <field id="236" name="MAIN_UNIT" type="INTEGER" conn_id="16" table_source="IAS_ITM_DTL"/>
-    <field id="237" name="SALE_UNIT" type="INTEGER" conn_id="16" table_source="IAS_ITM_DTL"/>
-    <field id="238" name="PUR_UNIT" type="INTEGER" conn_id="16" table_source="IAS_ITM_DTL"/>
-    <field id="239" name="STOCK_UNIT" type="INTEGER" conn_id="16" table_source="IAS_ITM_DTL"/>
-    <field id="240" name="PRICE_UNIT" type="INTEGER" conn_id="16" table_source="IAS_ITM_DTL"/>
-    <field id="241" name="TRNS_UNIT" type="INTEGER" conn_id="16" table_source="IAS_ITM_DTL"/>
-    <field id="242" name="CHF_UNT_FLG" type="INTEGER" conn_id="16" table_source="IAS_ITM_DTL"/>
-    <field id="243" name="NO_SALE" type="INTEGER" conn_id="16" table_source="IAS_ITM_DTL"/>
-    <field id="244" name="STORE_UNIT" type="INTEGER" conn_id="16" table_source="IAS_ITM_DTL"/>
-    <field id="245" name="WEIGHT_UNIT" type="NUMERIC" conn_id="16" table_source="IAS_ITM_DTL"/>
-    <field id="246" name="CSS_UNIT" type="INTEGER" conn_id="16" table_source="IAS_ITM_DTL"/>
-    <field id="247" name="BARCODE" type="VARCHAR" conn_id="16" table_source="IAS_ITM_DTL"/>
-    <field id="248" name="LVL_UNIT" type="NUMERIC" conn_id="16" table_source="IAS_ITM_DTL"/>
-    <field id="249" name="EXCPTN_DISC_CRD_FLG" type="INTEGER" conn_id="16" table_source="IAS_ITM_DTL"/>
-    <field id="250" name="QR_CODE_MTHD_NO" type="INTEGER" conn_id="16" table_source="IAS_ITM_DTL"/>
-    <field id="251" name="USE_SRLNO" type="INTEGER" conn_id="16" table_source="IAS_ITM_DTL"/>
-    <field id="252" name="INACTIVE" type="INTEGER" conn_id="16" table_source="IAS_ITM_DTL"/>
-    <field id="253" name="EXCLD_PNT_CLC_FLG" type="INTEGER" conn_id="16" table_source="IAS_ITM_DTL"/>
-    <field id="254" name="AUTO_BRCD_FLG" type="INTEGER" conn_id="16" table_source="IAS_ITM_DTL"/>
-    <field id="255" name="INACTIVE_RES" type="VARCHAR" conn_id="16" table_source="IAS_ITM_DTL"/>
-    <field id="256" name="INACTIVE_U_ID" type="INTEGER" conn_id="16" table_source="IAS_ITM_DTL"/>
-    <field id="257" name="INACTIVE_DATE" type="DATE" conn_id="16" table_source="IAS_ITM_DTL"/>
-    <field id="258" name="AD_U_ID" type="INTEGER" conn_id="16" table_source="IAS_ITM_DTL"/>
-    <field id="259" name="AD_DATE" type="DATE" conn_id="16" table_source="IAS_ITM_DTL"/>
-    <field id="260" name="UP_U_ID" type="INTEGER" conn_id="16" table_source="IAS_ITM_DTL"/>
-    <field id="261" name="UP_DATE" type="DATE" conn_id="16" table_source="IAS_ITM_DTL"/>
-    <field id="262" name="UP_CNT" type="INTEGER" conn_id="16" table_source="IAS_ITM_DTL"/>
+    <field id="231" name="LEV_NO" type="INTEGER" conn_id="16" table_source="IAS_ITEM_PRICE"/>
+    <field id="232" name="I_CODE" type="VARCHAR" conn_id="16" table_source="IAS_ITEM_PRICE"/>
+    <field id="233" name="ITM_UNT" type="VARCHAR" conn_id="16" table_source="IAS_ITEM_PRICE"/>
+    <field id="234" name="P_SIZE" type="NUMERIC" conn_id="16" table_source="IAS_ITEM_PRICE"/>
+    <field id="235" name="W_CODE" type="INTEGER" conn_id="16" table_source="IAS_ITEM_PRICE"/>
+    <field id="236" name="FROM_QTY" type="INTEGER" conn_id="16" table_source="IAS_ITEM_PRICE"/>
+    <field id="237" name="TO_QTY" type="INTEGER" conn_id="16" table_source="IAS_ITEM_PRICE"/>
+    <field id="238" name="EXPIRE_DATE" type="DATE" conn_id="16" table_source="IAS_ITEM_PRICE"/>
+    <field id="239" name="BATCH_NO" type="VARCHAR" conn_id="16" table_source="IAS_ITEM_PRICE"/>
+    <field id="240" name="I_PRICE" type="NUMERIC" conn_id="16" table_source="IAS_ITEM_PRICE"/>
+    <field id="241" name="MIN_ITM_PRICE" type="NUMERIC" conn_id="16" table_source="IAS_ITEM_PRICE"/>
+    <field id="242" name="MAX_ITM_PRICE" type="NUMERIC" conn_id="16" table_source="IAS_ITEM_PRICE"/>
+    <field id="243" name="DCTR_PRICE" type="NUMERIC" conn_id="16" table_source="IAS_ITEM_PRICE"/>
+    <field id="244" name="NOTE" type="VARCHAR" conn_id="16" table_source="IAS_ITEM_PRICE"/>
+    <field id="245" name="IMP_XLS" type="INTEGER" conn_id="16" table_source="IAS_ITEM_PRICE"/>
+    <field id="246" name="AD_U_ID" type="INTEGER" conn_id="16" table_source="IAS_ITEM_PRICE"/>
+    <field id="247" name="AD_DATE" type="DATE" conn_id="16" table_source="IAS_ITEM_PRICE"/>
+    <field id="248" name="UP_U_ID" type="INTEGER" conn_id="16" table_source="IAS_ITEM_PRICE"/>
+    <field id="249" name="UP_DATE" type="DATE" conn_id="16" table_source="IAS_ITEM_PRICE"/>
+    <field id="250" name="BRN_NO" type="INTEGER" conn_id="16" table_source="IAS_ITEM_PRICE"/>
+    <field id="251" name="UP_CNT" type="INTEGER" conn_id="16" table_source="IAS_ITEM_PRICE"/>
+    <field id="252" name="PR_REP" type="INTEGER" conn_id="16" table_source="IAS_ITEM_PRICE"/>
+    <field id="253" name="AD_TRMNL_NM" type="VARCHAR" conn_id="16" table_source="IAS_ITEM_PRICE"/>
+    <field id="254" name="UP_TRMNL_NM" type="VARCHAR" conn_id="16" table_source="IAS_ITEM_PRICE"/>
   </fields>
   <columns>
-    <column id="1" name="col_1" alias="رمز الصنف" expr="=[I_CODE]" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="1" name="col_1" alias="رمز الصنف" expr="=[I_CODE]" join_type="one_to_one" icon="fa-hashtag" distinct="1"/>
     <column id="2" name="col_2" alias="اسم الصنف" expr="=[16.IAS_ITM_MST.I_NAME]" join_type="one_to_one" icon="fa-hashtag"/>
-    <column id="3" name="col_3" alias="سعر البيع" expr="=[PRIMARY_COST]" join_type="one_to_one" icon="fa-hashtag" is_amount="1"/>
+    <column id="3" name="col_3" alias="سعر التكلفة" expr="=[PRIMARY_COST]" join_type="one_to_one" icon="fa-hashtag" color="#d400ff" weight="bold" is_amount="1"/>
+    <column id="4" name="col_4" alias="سعر البيع الاقصى" expr="=([16.IAS_ITEM_PRICE.I_PRICE])" join_type="one_to_one" icon="fa-hashtag" color="#006aff" weight="bold" is_amount="1"/>
+    <column id="5" name="col_5" alias="تاريخ التسعيرة" expr="=[16.IAS_ITEM_PRICE.UP_DATE]" join_type="one_to_one" col_refname="up_date" icon="fa-hashtag"/>
   </columns>
   <links>
-    <link id="1" from_table="IAS_ITM_MST" from_col="I_CODE" to_table="IAS_ITM_DTL" to_col="I_CODE" from_conn="16" to_conn="16" rel_type="one_to_one"/>
+    <link id="1" from_table="IAS_ITM_MST" from_col="I_CODE" to_table="IAS_ITEM_PRICE" to_col="I_CODE" rel_type="one_to_one"/>
   </links>
   <table_opts>
-    <table name="IAS_ITM_MST" conn="16" is_default="1"/>
+    <table name="IAS_ITM_MST" conn="16" is_default="1" where="[IAS_ITM_MST.G_CODE] &lt;&gt; '9000' AND [IAS_ITM_MST.G_CODE] &lt;&gt; '9200'"/>
+    <table name="IAS_ITEM_PRICE" conn="16"/>
   </table_opts>
   <groups>
     <group id="1" name="بيانات الصنف" order="1">
       <column alias="رمز الصنف"/>
       <column alias="اسم الصنف"/>
       <column alias="سعر البيع"/>
+      <column alias="سعر التكلفة"/>
+      <column alias="عمود 4"/>
     </group>
   </groups>
+  <general_where>([IAS_ITM_MST.G_CODE] &lt;&gt; '9000' AND [IAS_ITM_MST.G_CODE] &lt;&gt; '9200')</general_where>
 </rml>

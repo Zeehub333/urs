@@ -186,6 +186,7 @@ class RMLColumn:
     icon: Optional[str] = None  # UI icon
     is_amount: bool = False  # amount column (is_amount) -> formatted with thousands separators
     currency_field: Optional[str] = None  # optional currency source column (currency_field)
+    currency_symbol: Optional[str] = None  # optional currency symbol preset/text (currency_symbol)
     is_status: bool = False  # status column -> value mapped to label+color in player
     status_map: List[Dict[str, str]] = field(default_factory=list)  # [{value,label,color}]
     is_distinct: bool = False  # منع التكرار: DISTINCT ON (هذا العمود) — يُضبط من المصمم
@@ -232,6 +233,8 @@ class RMLColumn:
             "isAmount": self.is_amount,
             "currency_field": self.currency_field,
             "currencyField": self.currency_field,
+            "currency_symbol": self.currency_symbol,
+            "currencySymbol": self.currency_symbol,
             "is_status": self.is_status,
             "isStatus": self.is_status,
             "status_map": [dict(s) for s in self.status_map],
@@ -260,6 +263,9 @@ class RMLColumn:
         if self.ref_scope_table:
             base["refScopeTable"] = self.ref_scope_table
         return base
+
+
+Column = RMLColumn  # Convenience alias
 
 
 @dataclass
@@ -629,6 +635,7 @@ class RMLReportCompiler:
         icon = get("icon")
         is_amount = str(get("is_amount", "isAmount", "is-amount", default="") or "").strip().lower() in ("1", "true", "yes", "y")
         currency_field = get("currency_field", "currencyField", "currency_column", "currencyColumn", "currency")
+        currency_symbol = get("currency_symbol", "currencySymbol", "currency_sign", "currencySign")
         is_status = str(get("is_status", "isStatus", "is-status", default="") or "").strip().lower() in ("1", "true", "yes", "y")
         is_distinct = str(get("distinct", "is_distinct", "isDistinct", "is-distinct", default="") or "").strip().lower() in ("1", "true", "yes", "y")
         # Status map children: <status value="0" label="نشط" color="#16a34a"/>
@@ -736,6 +743,7 @@ class RMLReportCompiler:
             icon=str(icon) if icon else None,
             is_amount=is_amount,
             currency_field=str(currency_field) if currency_field else None,
+            currency_symbol=str(currency_symbol).strip() if currency_symbol and str(currency_symbol).strip() else None,
             is_status=is_status,
             status_map=status_map,
             is_distinct=is_distinct,

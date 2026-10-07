@@ -9485,6 +9485,9 @@ def _write_detail_el(rml, ET, detail):
             col_el.set("is_amount", "1")
         if col.get("currency_field") or col.get("currencyField"):
             col_el.set("currency_field", str(col.get("currency_field") or col.get("currencyField")))
+        _csym = col.get("currency_symbol") or col.get("currencySymbol")
+        if _csym and str(_csym).strip():
+            col_el.set("currency_symbol", str(_csym).strip())
         _dcr = col.get("col_refname") or col.get("colRefname") or col.get("refname")
         if _dcr and str(_dcr).strip():
             col_el.set("col_refname", str(_dcr).strip())
@@ -9814,6 +9817,9 @@ def _render_rml_xml(prog_name, displayName, icon, category, schema, description,
             col_el.set("is_amount", "1")
         if col.get("currency_field") or col.get("currencyField"):
             col_el.set("currency_field", str(col.get("currency_field") or col.get("currencyField")))
+        _csym = col.get("currency_symbol") or col.get("currencySymbol")
+        if _csym and str(_csym).strip():
+            col_el.set("currency_symbol", str(_csym).strip())
         _write_distinct_attr(col_el, col)
         _write_status_children(col_el, ET, col)
     _write_detail_el(rml, ET, detail)
@@ -10169,6 +10175,9 @@ def api_create_rml(request, app_name):
             col_el.set("is_amount", "1")
         if col.get("currency_field") or col.get("currencyField"):
             col_el.set("currency_field", str(col.get("currency_field") or col.get("currencyField")))
+        _csym = col.get("currency_symbol") or col.get("currencySymbol")
+        if _csym and str(_csym).strip():
+            col_el.set("currency_symbol", str(_csym).strip())
         _write_distinct_attr(col_el, col)
         _write_status_children(col_el, ET, col)
         _write_detail_el(rml, ET, data.get("detail"))

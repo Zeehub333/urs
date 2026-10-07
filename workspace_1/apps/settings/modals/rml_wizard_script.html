@@ -145,7 +145,7 @@ function wizApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof 
                 document.getElementById('rmlDescription').value = md.description || '';
                 wizardConnections = (data.connections || []).map(c=>String(c.connection_id));
                 wizardFields = (data.fields || []).map((f,i)=>({id:String(f.id||i+1), name:f.name||'', type:f.type||f.dataType||'', conn_id:String(f.conn_id||f.connection_id||''), table_source:f.table_source||f.tableSource||''}));
-                wizardColumns = (data.columns || []).map((c,i)=>({id:String(c.id||i+1), name:c.name||'', alias:c.alias||'', expr:c.expr||'', col_refname:(c.col_refname||c.colRefname||''), visible:!(String(c.visible ?? '1').toLowerCase() === '0' || ['false','no','off','hidden'].includes(String(c.visible ?? '1').toLowerCase())), width:(c.width !== undefined && c.width !== null ? c.width : null), data_type:c.dataType||c.data_type||'', max_chars:(c.max_chars ?? c.maxChars ?? ''), wrap:!!(c.wrap), decimals:(c.decimals ?? ''), date_format:(c.dateFormat||c.date_format||''), col_type:c.col_type||c.type||'direct', where_clause:c.where_clause||c.whereClause||'', icon:c.icon||'fa-hashtag', is_amount:!!(c.is_amount||c.isAmount), is_distinct:!!(c.is_distinct||c.isDistinct||c.distinct), currency_field:c.currency_field||c.currencyField||'', is_status:!!(c.is_status||c.isStatus), status_map:((c.status_map||c.statusMap||[]).map(s=>({value:String(s.value??''), label:String(s.label??s.value??''), color:String(s.color??'')}))), refTable:_refT(c), refFk:_refF(c), refDisplay:_refD(c), join_type:(c.join_type||c.joinType||c.rel_type||c.relType||'one_to_one'), color:(c.color||''), bg:(c.bg||c.bgColor||''), weight:(c.weight||c.fontWeight||''), frozen:!!(c.frozen||c.freeze)}));
+                wizardColumns = (data.columns || []).map((c,i)=>({id:String(c.id||i+1), name:c.name||'', alias:c.alias||'', expr:c.expr||'', col_refname:(c.col_refname||c.colRefname||''), visible:!(String(c.visible ?? '1').toLowerCase() === '0' || ['false','no','off','hidden'].includes(String(c.visible ?? '1').toLowerCase())), width:(c.width !== undefined && c.width !== null ? c.width : null), data_type:c.dataType||c.data_type||'', max_chars:(c.max_chars ?? c.maxChars ?? ''), wrap:!!(c.wrap), decimals:(c.decimals ?? ''), date_format:(c.dateFormat||c.date_format||''), col_type:c.col_type||c.type||'direct', where_clause:c.where_clause||c.whereClause||'', icon:c.icon||'fa-hashtag', is_amount:!!(c.is_amount||c.isAmount), currency_symbol:c.currency_symbol||c.currencySymbol||'', is_distinct:!!(c.is_distinct||c.isDistinct||c.distinct), currency_field:c.currency_field||c.currencyField||'', is_status:!!(c.is_status||c.isStatus), status_map:((c.status_map||c.statusMap||[]).map(s=>({value:String(s.value??''), label:String(s.label??s.value??''), color:String(s.color??'')}))), refTable:_refT(c), refFk:_refF(c), refDisplay:_refD(c), join_type:(c.join_type||c.joinType||c.rel_type||c.relType||'one_to_one'), color:(c.color||''), bg:(c.bg||c.bgColor||''), weight:(c.weight||c.fontWeight||''), frozen:!!(c.frozen||c.freeze)}));
                 try{ rptPrev.loadedOnce = false; rptPrev.stale = false; }catch(e){}
                 // Retroactive auto-detect: status-like columns get flagged for mapping
                 let _autoN = 0;
@@ -160,7 +160,7 @@ function wizApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof 
                 });
                 if(_autoN) notify('تم اكتشاف ' + _autoN + ' عمود حالة تلقائياً — عرّف حالاتها من زر تعريف الحالات', 'info');
                 const _dd = data.detail || null;
-                wizardDetail = _dd ? {table:_dd.table||'', master:_dd.master||_dd.masterKey||'', detail:_dd.detail||_dd.detailKey||'', rel_type:(_dd.rel_type||_dd.relType||_dd.rel||'one_to_many'), columns:((_dd.columns||[]).map((c,i)=>({id:String(c.id||i+1), name:c.name||'', alias:c.alias||'', expr:c.expr||'', col_refname:(c.col_refname||c.colRefname||''), visible:!(String(c.visible ?? '1').toLowerCase() === '0' || ['false','no','off','hidden'].includes(String(c.visible ?? '1').toLowerCase())), width:(c.width !== undefined && c.width !== null ? c.width : null), data_type:c.dataType||c.data_type||'', max_chars:(c.max_chars ?? c.maxChars ?? ''), wrap:!!(c.wrap), decimals:(c.decimals ?? ''), date_format:(c.dateFormat||c.date_format||''), col_type:c.col_type||c.type||'direct', icon:c.icon||'fa-hashtag', is_amount:!!(c.is_amount||c.isAmount), refTable:_refT(c), refFk:_refF(c), refDisplay:_refD(c), join_type:(c.join_type||c.joinType||c.rel_type||c.relType||'one_to_one')})))} : {table:'', master:'', detail:'', rel_type:'one_to_many', columns:[]};
+                wizardDetail = _dd ? {table:_dd.table||'', master:_dd.master||_dd.masterKey||'', detail:_dd.detail||_dd.detailKey||'', rel_type:(_dd.rel_type||_dd.relType||_dd.rel||'one_to_many'), columns:((_dd.columns||[]).map((c,i)=>({id:String(c.id||i+1), name:c.name||'', alias:c.alias||'', expr:c.expr||'', col_refname:(c.col_refname||c.colRefname||''), visible:!(String(c.visible ?? '1').toLowerCase() === '0' || ['false','no','off','hidden'].includes(String(c.visible ?? '1').toLowerCase())), width:(c.width !== undefined && c.width !== null ? c.width : null), data_type:c.dataType||c.data_type||'', max_chars:(c.max_chars ?? c.maxChars ?? ''), wrap:!!(c.wrap), decimals:(c.decimals ?? ''), date_format:(c.dateFormat||c.date_format||''), col_type:c.col_type||c.type||'direct', icon:c.icon||'fa-hashtag', is_amount:!!(c.is_amount||c.isAmount), currency_symbol:c.currency_symbol||c.currencySymbol||'', refTable:_refT(c), refFk:_refF(c), refDisplay:_refD(c), join_type:(c.join_type||c.joinType||c.rel_type||c.relType||'one_to_one')})))} : {table:'', master:'', detail:'', rel_type:'one_to_many', columns:[]};
                 document.getElementById('rmlReportType').value = (md.type || md.reportType || 'master');
                 wizardCharts = (data.charts || []).map((ch,i)=>({id:String(ch.id||i+1), type:ch.type||'bar', x:ch.x||'', y:ch.y||'', y2:ch.y2||'', title:ch.title||''}));
                 wizardRules = (data.rules || []).map((r,i)=>({id:String(r.id||i+1), name:r.name||'', display:r.display||r.name||'', icon:r.icon||'', description:r.description||'', expr:r.expr||'', connection_id:String(r.connection_id||''), sources:(r.sources||[]).map(String), variables:(r.variables||[]).map(v=>({name:v.name||'', display:v.display||v.name||'', type:v.type||'text', options:(v.options||[]).map(String)})), policies:(r.policies||[]).map(p=>({id:String(p.id||''), name:p.name||'', priority:(p.priority ?? 100), is_default:!!p.is_default, match:p.match||{}, values:p.values||{}}))}));
@@ -2369,7 +2369,7 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
         function addWizardDetailColumn(){
             if(!wizardDetail.columns) wizardDetail.columns = [];
             const newIdx = wizardDetail.columns.length;
-            wizardDetail.columns.push({id:String(newIdx+1), name:'dcol_'+(newIdx+1), alias:'عمود فرعي '+(newIdx+1), expr:'', col_refname:'', visible:true, width:null, col_type:'direct', icon:'fa-hashtag', is_amount:false, refFk:'', join_type:'one_to_one'});
+            wizardDetail.columns.push({id:String(newIdx+1), name:'dcol_'+(newIdx+1), alias:'عمود فرعي '+(newIdx+1), expr:'', col_refname:'', visible:true, width:null, col_type:'direct', icon:'fa-hashtag', is_amount:false, currency_symbol:'', refFk:'', join_type:'one_to_one'});
             rdTreeOpen.det = true;
             rdRenderElementsTree();
             if(!document.getElementById('rptPrevBox')){
@@ -3249,7 +3249,7 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                     </label>
                     <div class="flex flex-wrap items-center gap-3">
                         <label class="flex items-center gap-1.5 text-[11px] font-bold text-slate-600 cursor-pointer">
-                            <input type="checkbox" ${col.is_amount?'checked':''} onchange="${upd}'is_amount',this.checked);rptPreviewSoon();" class="rounded text-indigo-600">
+                            <input type="checkbox" ${col.is_amount?'checked':''} onchange="${upd}'is_amount',this.checked);rptPropsRender();rptPreviewSoon();" class="rounded text-indigo-600">
                             <span>مبلغ — فواصل الآلاف</span>
                         </label>
                         ${isD ? '' : `<label class="flex items-center gap-1.5 text-[11px] font-bold text-slate-600 cursor-pointer">
@@ -3257,6 +3257,19 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                             <span>منع التكرار (DISTINCT)</span>
                         </label>`}
                     </div>
+                    ${col.is_amount ? `
+                    <div class="p-2.5 bg-indigo-50/70 border border-indigo-200 rounded-xl space-y-1.5">
+                        <div class="flex items-center justify-between">
+                            <label class="block text-[11px] font-bold text-indigo-900">
+                                <i class="fa-solid fa-coins text-indigo-600"></i> رمز العملة (Currency Symbol)
+                            </label>
+                            <span class="text-[10px] text-indigo-500">يُرفق مع المبالغ</span>
+                        </div>
+                        <input list="rptCurrPresets" value="${rptEsc(col.currency_symbol || col.currencySymbol || '')}" oninput="${upd}'currency_symbol',this.value);rptPreviewSoon();" onchange="${upd}'currency_symbol',this.value);rptPreviewSoon();" placeholder="مثال: ر.س أو $ أو USD" class="rpt-in font-bold text-indigo-700 bg-white" autocomplete="off">
+                        <datalist id="rptCurrPresets">
+                            <option value="ر.س"><option value="$"><option value="USD"><option value="ر.ي"><option value="د.إ"><option value="د.ك"><option value="ج.م"><option value="€"><option value="EUR"><option value="د.ب"><option value="ر.ع"><option value="ر.ق">
+                        </datalist>
+                    </div>` : ''}
                     <div class="flex items-center gap-2">
                         <label class="flex items-center gap-1.5 text-[11px] font-bold text-slate-600 cursor-pointer">
                             <input type="checkbox" ${col.is_status?'checked':''} onchange="${upd}'is_status',this.checked);rptPropsRender();" class="rounded text-violet-600">
@@ -3486,7 +3499,15 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                     rowHtml += `<td class="w-8 text-center p-1 cursor-pointer select-none" onclick="rptToggleRow(${ri})" title="انقر لعرض تفاصيل هذا السجل"><i class="fa-solid ${isExp ? 'fa-chevron-down text-indigo-600' : 'fa-chevron-left text-slate-400'} text-xs"></i></td>`;
                 }
                 rowHtml += cols.map((c, i)=>{
-                    const val = arr ? (arr[i] ?? '') : cell(r, i);
+                    let val = arr ? (arr[i] ?? '') : cell(r, i);
+                    if(c && (c.is_amount || c.isAmount)){
+                        const num = parseFloat(String(val).replace(/,/g, ''));
+                        if(!isNaN(num)){
+                            val = num.toLocaleString('en-US', {maximumFractionDigits: 2});
+                        }
+                        const cs = c.currency_symbol || c.currencySymbol;
+                        if(cs && String(cs).trim()) val = val + ' ' + String(cs).trim();
+                    }
                     const vis = rptVis(c);
                     return `<td class="p-2 border-l border-slate-100 whitespace-nowrap text-slate-700 ${vis ? '' : 'opacity-50 bg-slate-50/40'}" title="${rptEsc(val)}">${rptEsc(val)}</td>`;
                 }).join('');
@@ -3531,7 +3552,7 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
         }
         function addWizardColumn(){
             const newIdx = wizardColumns.length;
-            wizardColumns.push({id:String(newIdx+1), name:'col_'+(newIdx+1), alias:'عمود '+(newIdx+1), expr:'', col_refname:'', visible:true, width:null, col_type:'direct', where_clause:'', icon:'fa-hashtag', is_amount:false, is_distinct:false, is_status:false, status_map:[], refTable:'', refFk:'', refDisplay:'', join_type:'one_to_one', color:'', bg:'', weight:'', frozen:false});
+            wizardColumns.push({id:String(newIdx+1), name:'col_'+(newIdx+1), alias:'عمود '+(newIdx+1), expr:'', col_refname:'', visible:true, width:null, col_type:'direct', where_clause:'', icon:'fa-hashtag', is_amount:false, currency_symbol:'', is_distinct:false, is_status:false, status_map:[], refTable:'', refFk:'', refDisplay:'', join_type:'one_to_one', color:'', bg:'', weight:'', frozen:false});
             rdTreeOpen.cols = true;
             rdRenderElementsTree();
             if(!document.getElementById('rptPrevBox')){
@@ -3623,7 +3644,7 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
         function colTypeSummary(col){
             const t = String((col && col.data_type) || '');
             if(t === 'text'){ const m = parseInt(col.max_chars, 10); return 'نص' + (m > 0 ? ' • ≤' + m : '') + (col.wrap ? ' • التفاف' : ''); }
-            if(t === 'number'){ const d = parseInt(col.decimals, 10); return 'رقم' + (col.is_amount ? ' • فواصل' : '') + (!isNaN(d) ? ' • ' + d : ''); }
+            if(t === 'number'){ const d = parseInt(col.decimals, 10); const cs = col.currency_symbol || col.currencySymbol; return 'رقم' + (col.is_amount ? (' • مبلغ' + (cs ? ' (' + cs + ')' : '')) : '') + (!isNaN(d) ? ' • ' + d : ''); }
             if(t === 'date' || t === 'datetime' || t === 'time') return (t === 'date' ? 'تاريخ' : t === 'datetime' ? 'تاريخ ووقت' : 'وقت') + (col.date_format ? ' • ' + col.date_format : '');
             if(t === 'list') return 'قائمة';
             if(t === 'status'){ const n = ((col && col.status_map) || []).length; return 'حالة' + (n ? ' (' + n + ')' : ''); }
@@ -3642,7 +3663,7 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
             if(!col) return;
             colTypeTarget = {isDetail: !!isDetail, idx: idx};
             colTypeDraft = {data_type: String(col.data_type || ''), max_chars: (col.max_chars ?? ''), wrap: !!col.wrap,
-                is_amount: !!col.is_amount, decimals: (col.decimals ?? ''), date_format: String(col.date_format || '')};
+                is_amount: !!col.is_amount, currency_symbol: String(col.currency_symbol || col.currencySymbol || ''), decimals: (col.decimals ?? ''), date_format: String(col.date_format || '')};
             colTypeListCache = null;
             document.getElementById('colTypeTitle').innerHTML = '<i class="fa-solid fa-shapes text-indigo-600"></i> نوع العمود وتنسيقه: ' + wbEsc(col.alias || col.name || '');
             document.getElementById('colTypeModal').classList.remove('hidden');
@@ -3685,8 +3706,17 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                     + `<div class="flex items-end pb-1"><label class="flex items-center gap-2 text-[11px] font-semibold text-slate-600 cursor-pointer"><input id="ctWrap" type="checkbox" ${colTypeDraft.wrap ? 'checked' : ''} class="rounded text-indigo-600"> التفاف النص (سطور متعددة)</label></div></div>`
                     + `<p class="text-[10px] text-slate-400">النص الطويل يُقص مع tooltip بالنص الكامل. بدون التفاف: سطر واحد بقطع.</p>`;
             } else if(t === 'number'){
-                h = `<div class="grid grid-cols-2 gap-2"><div class="flex items-end pb-1"><label class="flex items-center gap-2 text-[11px] font-semibold text-slate-600 cursor-pointer"><input id="ctIsAmount" type="checkbox" ${colTypeDraft.is_amount ? 'checked' : ''} class="rounded text-emerald-600"> مبلغ؟ (فواصل الآلاف)</label></div>`
-                    + `<div><label class="${lbl}">عدد الخانات العشرية (فارغ = تلقائي)</label><input id="ctDecimals" type="number" min="0" max="6" value="${wbEsc(colTypeDraft.decimals)}" class="${inp} font-mono" dir="ltr"></div></div>`;
+                h = `<div class="space-y-2">`
+                    + `<div class="grid grid-cols-2 gap-2">`
+                    + `<div class="flex items-end pb-1"><label class="flex items-center gap-2 text-[11px] font-semibold text-slate-600 cursor-pointer"><input id="ctIsAmount" type="checkbox" ${colTypeDraft.is_amount ? 'checked' : ''} onchange="colTypeDraft.is_amount=this.checked;document.getElementById('ctCurrBox')?.classList.toggle('hidden',!this.checked);" class="rounded text-emerald-600"> مبلغ؟ (فواصل الآلاف)</label></div>`
+                    + `<div><label class="${lbl}">عدد الخانات العشرية (فارغ = تلقائي)</label><input id="ctDecimals" type="number" min="0" max="6" value="${wbEsc(colTypeDraft.decimals)}" class="${inp} font-mono" dir="ltr"></div>`
+                    + `</div>`
+                    + `<div id="ctCurrBox" class="${colTypeDraft.is_amount ? '' : 'hidden'} p-2.5 bg-indigo-50/70 border border-indigo-200 rounded-xl space-y-1">`
+                    + `<label class="${lbl} text-indigo-900 font-bold mb-0.5"><i class="fa-solid fa-coins text-indigo-600"></i> رمز العملة (Currency Symbol)</label>`
+                    + `<input id="ctCurrencySymbol" list="ctCurrencyPresets" value="${wbEsc(colTypeDraft.currency_symbol)}" placeholder="مثال: ر.س أو $ أو USD" class="${inp} font-bold text-indigo-700 bg-white" autocomplete="off">`
+                    + `<datalist id="ctCurrencyPresets"><option value="ر.س"><option value="$"><option value="USD"><option value="ر.ي"><option value="د.إ"><option value="د.ك"><option value="ج.م"><option value="€"><option value="EUR"><option value="د.ب"><option value="ر.ع"><option value="ر.ق"></datalist>`
+                    + `<span class="text-[10px] text-slate-400">يُرفق رمز العملة تلقائياً مع المبالغ في التقرير والمعاينة.</span>`
+                    + `</div></div>`;
             } else if(t === 'date' || t === 'datetime' || t === 'time'){
                 h = `<div><label class="${lbl}">الصيغة</label><input id="ctDateFormat" list="ctDateFormats" value="${wbEsc(colTypeDraft.date_format)}" placeholder="YYYY-MM-DD" class="${inp} font-mono" dir="ltr"><datalist id="ctDateFormats">${DATE_FORMAT_PRESETS.map(f=>`<option value="${f}">`).join('')}</datalist></div>`
                     + `<p class="text-[10px] text-slate-400">الرموز: YYYY سنة • YY • MONTH/MON شهر نصي • MM شهر • DD يوم • DAY/DY اسم اليوم • HH/HH24 ساعة • MI دقيقة • SS ثانية • AM/PM ص/م — مثال: <span class="font-mono" dir="ltr">YYYY/MM/DD dddd</span>.</p>`;
@@ -3763,6 +3793,7 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                 col.wrap = gc('ctWrap');
             } else if(t === 'number'){
                 col.is_amount = gc('ctIsAmount');
+                col.currency_symbol = col.is_amount ? (gv('ctCurrencySymbol') || '').trim() : '';
                 const dc = parseInt(gv('ctDecimals'), 10);
                 col.decimals = !isNaN(dc) && dc >= 0 ? Math.min(dc, 6) : '';
             } else if(t === 'date' || t === 'datetime' || t === 'time'){
@@ -3773,6 +3804,8 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
             try{ if(document.getElementById('wizardColumnsList')) renderWizardColumns(); }catch(e){}
             try{ if(document.getElementById('wizardDetailColsList')) renderWizardDetail(); }catch(e){}
             try{ if(typeof wbRenderActiveSheet === 'function') wbRenderActiveSheet(); }catch(e){}
+            try{ if(typeof rptPropsRender === 'function') rptPropsRender(); }catch(e){}
+            try{ if(typeof rptPreviewSoon === 'function') rptPreviewSoon(); }catch(e){}
             notify('حُفظ نوع العمود: ' + colTypeSummary(col), 'success');
         }
         /* ── General report condition (WHERE) ── */
@@ -5322,7 +5355,8 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                 takeName.add(nm);
                 wizardColumns.push({id: String(wizardColumns.length + 1), name: nm, alias: c.alias || nm,
                     expr: c.expr || nm, data_type: c.dataType || 'VARCHAR', col_type: c.col_type || 'direct',
-                    where_clause: c.where_clause || '', icon: 'fa-hashtag', join_type: 'one_to_one'});
+                    where_clause: c.where_clause || '', icon: 'fa-hashtag', is_amount: !!(c.is_amount || c.isAmount),
+                    currency_symbol: c.currency_symbol || c.currencySymbol || '', join_type: 'one_to_one'});
                 nc++;
             });
             const existL = new Set((wizardLinks || []).map(l=>[l.from_table, l.from_col, l.to_table, l.to_col].join('||').toLowerCase()));

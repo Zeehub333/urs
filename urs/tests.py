@@ -1340,3 +1340,57 @@ class OracleClientUtilTests(SimpleTestCase):
             self.assertEqual(data["values"], ["val1", "val2", "val3"])
             self.assertEqual(data["total"], 3)
             self.assertEqual(data["column"], "A_CODE")
+
+    def test_column_currency_symbol_persistence_and_parsing(self):
+        from rml_python.compiler import RMLReportCompiler, Column
+        import xml.etree.ElementTree as ET
+        from urs.views import _write_detail_el
+
+        # 1. Column dataclass and to_dict
+        col = Column(id="1", name="salary", alias="الراتب", is_amount=True, currency_symbol="ر.س")
+        d = col.to_dict()
+        self.assertEqual(d["currency_symbol"], "ر.س")
+        self.assertEqual(d["currencySymbol"], "ر.س")
+        self.assertTrue(d["is_amount"])
+
+        # 2. RML parsing from XML
+        xml = """<report>
+            <metadata name="test_currency"/>
+            <columns>
+                <column id="1" name="amount" alias="المبلغ" is_amount="1" currency_symbol="USD"/>
+                <column id="2" name="tax" alias="الضريبة" is_amount="1" currency_symbol="ر.ي"/>
+            </columns>
+            <detail table="invoices" master="id" detail="customer_id">
+                <column id="1" name="item_total" alias="إجمالي البند" is_amount="1" currency_symbol="SAR"/>
+            </detail>
+        </report>"""
+        compiler = RMLReportCompiler.from_string(xml)
+        cols = compiler.columns()
+        self.assertEqual(len(cols), 2)
+        self.assertEqual(cols[0].currency_symbol, "USD")
+        self.assertTrue(cols[0].is_amount)
+        self.assertEqual(cols[1].currency_symbol, "ر.ي")
+
+        det = compiler.detail()
+        self.assertIsNotNone(det)
+        self.assertEqual(len(det.columns), 1)
+        self.assertEqual(det.columns[0].currency_symbol, "SAR")
+        self.assertTrue(det.columns[0].is_amount)
+
+        # 3. Serialization in _write_detail_el
+        root = ET.Element("report")
+        detail_data = {
+            "table": "inv_items",
+            "master": "inv_id",
+            "detail": "id",
+            "columns": [
+                {"id": "1", "name": "price", "alias": "السعر", "is_amount": True, "currency_symbol": "EUR"}
+            ]
+        }
+        _write_detail_el(root, ET, detail_data)
+        det_el = root.find("detail")
+        self.assertIsNotNone(det_el)
+        col_el = det_el.find("column")
+        self.assertIsNotNone(col_el)
+        self.assertEqual(col_el.get("currency_symbol"), "EUR")
+        self.assertEqual(col_el.get("is_amount"), "1")

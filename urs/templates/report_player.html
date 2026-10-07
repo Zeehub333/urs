@@ -618,6 +618,7 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                 where_clause: c.where_clause || c.whereClause || '',
                 is_amount: !!(c.is_amount || c.isAmount),
                 currency_field: c.currency_field || c.currencyField || '',
+                currency_symbol: c.currency_symbol || c.currencySymbol || '',
                 col_type: c.col_type || c.type || 'direct',
                 dataType: c.dataType || c.data_type || '',
                 data_type: c.dataType || c.data_type || '',
@@ -1914,11 +1915,15 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
         }
         function amountSuffix(row, c, cols){
             const cf = c && (c.currency_field || c.currencyField);
-            if(!cf) return '';
-            const list = cols || [];
-            const oc = list.find(o => (o.name||'') === cf || (o.alias||'') === cf);
-            let cur = oc ? (row[oc.alias] !== undefined ? row[oc.alias] : row[oc.name]) : row[cf];
-            return (cur === undefined || cur === null || cur === '') ? '' : ' ' + cur;
+            if(cf){
+                const list = cols || [];
+                const oc = list.find(o => (o.name||'') === cf || (o.alias||'') === cf);
+                let cur = oc ? (row[oc.alias] !== undefined ? row[oc.alias] : row[oc.name]) : row[cf];
+                if(cur !== undefined && cur !== null && cur !== '') return ' ' + cur;
+            }
+            const cs = c && (c.currency_symbol || c.currencySymbol);
+            if(cs && String(cs).trim()) return ' ' + String(cs).trim();
+            return '';
         }
         function buildGroupHeader(cols, data){
             const groups = (data && (data.groups || (data.metadata && data.metadata.groups))) || (lastApiData && (lastApiData.groups || (lastApiData.metadata && lastApiData.metadata.groups))) || [];
