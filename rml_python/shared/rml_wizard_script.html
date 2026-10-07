@@ -5869,6 +5869,25 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
             const tn = parts.slice(1).join('||').toLowerCase();
             wizardLinks = (wizardLinks||[]).filter(l=>String(l.from_table||'').toLowerCase()!==tn && String(l.to_table||'').toLowerCase()!==tn);
             delete wizardTableOpts[k];
+            
+            // Delete general conditions related to this table
+            const tnRaw = parts.slice(1).join('||');
+            if (window.wizardTableConditions) {
+                delete window.wizardTableConditions[k];
+                delete window.wizardTableConditions[tnRaw];
+                delete window.wizardTableConditions[tn];
+            }
+            if (window.wizardTableFilterRows) {
+                delete window.wizardTableFilterRows[k];
+                delete window.wizardTableFilterRows[tnRaw];
+                delete window.wizardTableFilterRows[tn];
+            }
+            if (window.wizardTableFilterMatchMode) {
+                delete window.wizardTableFilterMatchMode[k];
+                delete window.wizardTableFilterMatchMode[tnRaw];
+                delete window.wizardTableFilterMatchMode[tn];
+            }
+            
             renderWizardFields();
         }
         /* ── UNION: same table from another connection (engine merges rows) ── */
