@@ -1781,6 +1781,7 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                         const df = docSearchFields().find(d => d && (d.alias === f.field || (d.refname && d.refname === f.field)));
                         if(df && df.refname) rname = df.refname;
                     }catch(e){}
+                }
                 if(rname) res.refname = rname;
                 return res.field || res.any || res.all ? res : null;
             };
