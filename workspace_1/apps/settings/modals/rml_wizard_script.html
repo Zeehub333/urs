@@ -4011,6 +4011,8 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                 return;
             }
             const fldNames = (wizardFields || []).map(f=>f.name).filter(Boolean);
+            const fldAliasMap = {};
+            (wizardFields || []).forEach(f=>{ if(f && f.name) fldAliasMap[f.name] = f.alias || f.name; });
             container.innerHTML = wizardRules.map((r, idx)=>{
                 const srcs = r.sources || [];
                 const vars = r.variables || [];
@@ -4018,7 +4020,7 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                 return `
                 <div class="bg-emerald-50/50 border border-emerald-100 rounded-xl p-3 space-y-2">
                     <div class="flex items-center justify-between">
-                        <span class="text-[11px] font-bold text-slate-600">قاعدة #${idx+1} — تُستدعى في الأعمدة بصيغة <span class="font-mono" dir="ltr">$${wbEsc(r.name || 'rule')}.var$</span></span>
+                        <span class="text-[11px] font-bold text-slate-600">قاعدة #${idx+1}${r.display ? ' — ' + wbEsc(r.display) : (r.name ? ' — ' + wbEsc(r.name) : '')}</span>
                         <button onclick="removeWizardRule(${idx})" class="text-rose-500 hover:text-rose-700 text-xs"><i class="fa-solid fa-trash"></i></button>
                     </div>
                     <div class="grid grid-cols-2 gap-2">
@@ -4028,14 +4030,14 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                         <div><label class="block text-[11px] font-semibold text-slate-600">الاتصال</label><select onchange="updateWizardRule(${idx},'connection_id',this.value)" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs"><option value="">افتراضي</option>${wizardConnections.map(cid=>`<option value="${cid}" ${String(r.connection_id)==String(cid)?'selected':''}>${connLabel(cid)}</option>`).join('')}</select></div>
                     </div>
                     <div><label class="block text-[11px] font-semibold text-slate-600">الوصف</label><input value="${wbEsc(r.description || '')}" onchange="updateWizardRule(${idx},'description',this.value)" class="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs"></div>
-                    <div><label class="block text-[11px] font-semibold text-slate-600">التعبير (اختياري) — أسماء الحقول بين [ ]</label><div class="flex gap-1"><input value="${wbEsc(r.expr||'')}" oninput="updateWizardRule(${idx},'expr',this.value);exprAuto(this,'rule:${idx}')" onchange="updateWizardRule(${idx},'expr',this.value)" placeholder="[basic_salary] + [gross_salary]" autocomplete="off" class="flex-1 min-w-0 bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-mono" dir="ltr"><button onclick="openExprExpand(${idx}, false, 'rule')" title="تحرير موسع" class="px-2.5 rounded-lg bg-violet-50 hover:bg-violet-100 text-violet-700 shrink-0"><i class="fa-solid fa-expand text-[11px]"></i></button><button onclick="openExprBuilder(${idx}, false, 'rule')" title="اختيار الاتصال ← الجدول ← الحقل" class="px-2.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 shrink-0"><i class="fa-solid fa-magnifying-glass text-[11px]"></i></button></div></div>
+                    <div><label class="block text-[11px] font-semibold text-slate-600">التعبير (اختياري) — أسماء الحقول بين [ ]</label><div class="flex gap-1"><input value="${wbEsc(r.expr||'')}" oninput="updateWizardRule(${idx},'expr',this.value);exprAuto(this,'rule:${idx}')" onchange="updateWizardRule(${idx},'expr',this.value)" placeholder="[الراتب_الأساسي] + [الإجمالي]" autocomplete="off" class="flex-1 min-w-0 bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-mono" dir="ltr"><button onclick="openExprExpand(${idx}, false, 'rule')" title="تحرير موسع" class="px-2.5 rounded-lg bg-violet-50 hover:bg-violet-100 text-violet-700 shrink-0"><i class="fa-solid fa-expand text-[11px]"></i></button><button onclick="openExprBuilder(${idx}, false, 'rule')" title="اختيار الاتصال ← الجدول ← الحقل" class="px-2.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 shrink-0"><i class="fa-solid fa-magnifying-glass text-[11px]"></i></button></div></div>
                     <div class="bg-white border border-slate-200 rounded-lg p-2">
                         <div class="text-[11px] font-bold text-slate-600 mb-1">مصادر القاعدة — الحقول التي تُحدد السجلات في السياسات</div>
-                        ${fldNames.length ? `<div class="flex flex-wrap gap-1">${fldNames.map(n=>`<label class="inline-flex items-center gap-1 px-2 py-1 rounded-lg border text-[11px] cursor-pointer ${srcs.includes(n)?'bg-emerald-100 border-emerald-300 text-emerald-800':'bg-slate-50 border-slate-200 text-slate-600'}"><input type="checkbox" ${srcs.includes(n)?'checked':''} onchange="toggleWizardRuleSource(${idx},'${n.replace(/'/g,"\\'")}',this.checked)" class="rounded text-emerald-600"><span class="font-mono" dir="ltr">${wbEsc(n)}</span></label>`).join('')}</div>` : '<p class="text-[11px] text-slate-400">استورد الحقول أولاً من تبويب الحقول</p>'}
+                        ${fldNames.length ? `<div class="flex flex-wrap gap-1">${fldNames.map(n=>`<label class="inline-flex items-center gap-1 px-2 py-1 rounded-lg border text-[11px] cursor-pointer ${srcs.includes(n)?'bg-emerald-100 border-emerald-300 text-emerald-800':'bg-slate-50 border-slate-200 text-slate-600'}"><input type="checkbox" ${srcs.includes(n)?'checked':''} onchange="toggleWizardRuleSource(${idx},'${n.replace(/'/g,"\\'")}',this.checked)" class="rounded text-emerald-600"><span>${wbEsc(fldAliasMap[n] || n)}</span></label>`).join('')}</div>` : '<p class="text-[11px] text-slate-400">استورد الحقول أولاً من تبويب الحقول</p>'}
                     </div>
                     <div class="bg-white border border-slate-200 rounded-lg p-2 space-y-1.5">
                         <div class="flex items-center justify-between">
-                            <div class="text-[11px] font-bold text-slate-600">المتغيرات — تُستدعى بصيغة <span class="font-mono" dir="ltr">$${wbEsc(r.name || 'rule')}.var$</span></div>
+                            <div class="text-[11px] font-bold text-slate-600">المتغيرات (${vars.length})</div>
                             <button onclick="addWizardRuleVar(${idx})" class="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg text-[11px] font-bold"><i class="fa-solid fa-plus"></i> متغير</button>
                         </div>
                         ${vars.length ? vars.map((v, vi)=>`
@@ -5277,13 +5279,15 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
             }
             else if(wbSheet==='rules'){
                 const _fldNames = [...new Set((wizardFields||[]).map(f=>f.name).filter(Boolean))];
+                const _fldAliasMap = {};
+                (wizardFields || []).forEach(f=>{ if(f && f.name) _fldAliasMap[f.name] = f.alias || f.name; });
                 const _vtOpts = (sel)=>RULE_VAR_TYPES.map(v=>'<option value="'+v[0]+'" '+(String(sel||'text')===v[0]?'selected':'')+'>'+v[1]+'</option>').join('');
                 html = (wizardRules.length ? wizardRules.map((r,i)=>{
                     const _srcs = r.sources || [];
                     const _vars = r.variables || [];
                     const _polN = (r.policies || []).length;
                     return '<div class="wb-panel" style="margin-bottom:10px"><div class="wb-panel-title"><i class="fa-solid fa-square-root-variable text-emerald-600"></i> قاعدة #'+(i+1)
-                        + ' <span class="font-mono" dir="ltr">$'+wbEsc(r.name||'rule')+'.var$</span>'
+                        + (r.display ? ' — ' + wbEsc(r.display) : (r.name ? ' — ' + wbEsc(r.name) : ''))
                         + '<span style="margin-right:auto"></span><span class="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full">'+_polN+' سياسة</span>'
                         + '<button onclick="removeWizardRule('+i+');wbRefreshRules()" class="wb-del" title="حذف القاعدة"><i class="fa-solid fa-trash-can"></i></button></div>'
                         + '<div class="grid grid-cols-4 gap-2" style="margin-bottom:8px">'
@@ -5295,8 +5299,8 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                         + '<div style="margin-bottom:8px"><label class="block text-[10px] font-bold text-slate-500">الوصف</label><input value="'+wbEsc(r.description||'')+'" onchange="updateWizardRule('+i+",'description',this.value)"+'" class="wb-cell"></div>'
                         + '<div style="margin-bottom:8px"><label class="block text-[10px] font-bold text-slate-500">التعبير (اختياري) — الحقول بين [ ]</label><div class="flex items-center gap-1"><input value="'+wbEsc(r.expr||'')+'" oninput="updateWizardRule('+i+",'expr',this.value);exprAuto(this,'rule:"+i+"')"+'" class="wb-cell flex-1 min-w-0 font-mono" dir="ltr" autocomplete="off">'+exprBtn(i,false,'rule')+'</div></div>'
                         + '<div style="margin-bottom:8px"><div class="text-[10px] font-bold text-slate-500" style="margin-bottom:4px">مصادر القاعدة — حقول تحديد السجلات في السياسات</div>'
-                        + (_fldNames.length ? '<div class="flex flex-wrap gap-1">'+_fldNames.map(n=>'<label class="inline-flex items-center gap-1 px-2 py-1 rounded-lg border text-[10px] cursor-pointer '+(_srcs.includes(n)?'bg-emerald-100 border-emerald-300 text-emerald-800':'bg-slate-50 border-slate-200 text-slate-600')+'"><input type="checkbox" '+(_srcs.includes(n)?'checked':'')+' onchange="toggleWizardRuleSource('+i+",'"+n.replace(/'/g,"\\'")+"',this.checked);wbRefreshRules()"+'" class="rounded text-emerald-600"><span class="font-mono" dir="ltr">'+wbEsc(n)+'</span></label>').join('')+'</div>' : '<p class="text-[10px] text-slate-400">استورد الحقول أولاً من ورقة الحقول</p>')+'</div>'
-                        + '<div><div class="flex items-center gap-2" style="margin-bottom:4px"><span class="text-[10px] font-bold text-slate-500">المتغيرات — تُستدعى بصيغة <span class="font-mono" dir="ltr">$'+wbEsc(r.name||'rule')+'.var$</span></span><button onclick="addWizardRuleVar('+i+');wbRefreshRules()" class="wb-mini" title="إضافة متغير"><i class="fa-solid fa-plus"></i> متغير</button></div>'
+                        + (_fldNames.length ? '<div class="flex flex-wrap gap-1">'+_fldNames.map(n=>'<label class="inline-flex items-center gap-1 px-2 py-1 rounded-lg border text-[10px] cursor-pointer '+(_srcs.includes(n)?'bg-emerald-100 border-emerald-300 text-emerald-800':'bg-slate-50 border-slate-200 text-slate-600')+'"><input type="checkbox" '+(_srcs.includes(n)?'checked':'')+' onchange="toggleWizardRuleSource('+i+",'"+n.replace(/'/g,"\\'")+"',this.checked);wbRefreshRules()"+'" class="rounded text-emerald-600"><span>'+wbEsc(_fldAliasMap[n] || n)+'</span></label>').join('')+'</div>' : '<p class="text-[10px] text-slate-400">استورد الحقول أولاً من ورقة الحقول</p>')+'</div>'
+                        + '<div><div class="flex items-center gap-2" style="margin-bottom:4px"><span class="text-[10px] font-bold text-slate-500">المتغيرات ('+_vars.length+')</span><button onclick="addWizardRuleVar('+i+');wbRefreshRules()" class="wb-mini" title="إضافة متغير"><i class="fa-solid fa-plus"></i> متغير</button></div>'
                         + (_vars.length ? _vars.map((v,vi)=>'<div class="grid grid-cols-12 gap-1 items-end bg-slate-50 border border-slate-100 rounded-lg p-1.5" style="margin-bottom:4px">'
                             + '<div class="col-span-3"><input value="'+wbEsc(v.display||'')+'" onchange="updateWizardRuleVar('+i+','+vi+",'display',this.value)"+'" placeholder="الاسم المعروض" class="wb-cell"></div>'
                             + '<div class="col-span-3"><input value="'+wbEsc(v.name||'')+'" onchange="updateWizardRuleVar('+i+','+vi+",'name',this.value)"+'" placeholder="الاسم" class="wb-cell font-mono" dir="ltr"></div>'

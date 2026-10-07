@@ -645,6 +645,7 @@
     <script>
         let RP = {file:'', rule:null, editing:null, matchSel:{}, varVals:{}, applyAll:false, distinctCache:{}};
         function rpEsc(s){ return String(s ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+        function rpSrcLabel(s){ return (RP.rule && RP.rule.source_aliases && RP.rule.source_aliases[s]) || s; }
         function rpNotify(msg, kind){ if(typeof notify === 'function') notify(msg, kind || 'info'); else alert(msg); }
         async function openRulePolicies(file, name){
             try{
@@ -678,12 +679,12 @@
                 if(warns.length){
                     html += `<div class="bg-amber-50 border border-amber-300 rounded-xl p-3 text-[12px] text-amber-800 space-y-1">
                         <div class="font-bold flex items-center gap-2"><i class="fa-solid fa-triangle-exclamation"></i> تداخل سياسات (${warns.length}) — الأولوية الأصغر تفوز</div>`
-                        + warns.map(w=>`<div>«${rpEsc(w.a)}» × «${rpEsc(w.b)}» — مشترك في ${rpEsc((w.fields||[]).join('، '))}: ${(Object.values(w.values||{}).flat().slice(0,5)).map(rpEsc).join('، ')}${Object.values(w.values||{}).flat().length > 5 ? '…' : ''}</div>`).join('') + `</div>`;
+                        + warns.map(w=>`<div>«${rpEsc(w.a)}» × «${rpEsc(w.b)}» — مشترك في ${rpEsc((w.fields||[]).map(rpSrcLabel).join('، '))}: ${(Object.values(w.values||{}).flat().slice(0,5)).map(rpEsc).join('، ')}${Object.values(w.values||{}).flat().length > 5 ? '…' : ''}</div>`).join('') + `</div>`;
                 }
                 html += pols.length ? `<div class="space-y-2">` + pols.map(p=>{
                     const mKeys = Object.keys(p.match || {});
                     const isDef = !!p.is_default || !mKeys.length;
-                    const mTxt = isDef ? 'كل السجلات (افتراضية)' : mKeys.map(k=>`${rpEsc(k)} (${(p.match[k]||[]).length})`).join('، ');
+                    const mTxt = isDef ? 'كل السجلات (افتراضية)' : mKeys.map(k=>`${rpEsc(rpSrcLabel(k))} (${(p.match[k]||[]).length})`).join('، ');
                     return `<div class="flex items-center gap-2 p-3 rounded-xl border ${isDef ? 'border-emerald-300 bg-emerald-50/50' : 'border-slate-200 bg-white'} hover:border-amber-300">
                         <span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-600 shrink-0" title="الأولوية — الأصغر يُقيّم أولاً ويفوز عند التداخل">أ${p.priority ?? 100}</span>
                         <div class="flex-1 min-w-0">
@@ -695,7 +696,7 @@
                     </div>`;
                 }).join('') + `</div>` : `<p class="text-slate-400 text-center py-6">لا توجد سياسات بعد — أضف سياسة لتفعيل القاعدة في التقارير</p>`;
                 html += `<button onclick="rpNewPolicy()" class="w-full py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-sm font-bold"><i class="fa-solid fa-plus"></i> إضافة سياسة</button>`;
-                html += `<p class="text-[11px] text-slate-400">تُستخدم المتغيرات في تعبير العمود بالمصمم — اكتب <span class="font-mono" dir="ltr">$</span> واختر القاعدة والمتغير من القائمة. المحرك يستبدلها بقيمة السياسة المطابقة للسجل حسب الأولوية، والسجل بلا سياسة مطابقة يأخذ قيمة السياسة الافتراضية أو NULL (يُتجاهل الاستدعاء).</p>`;
+                html += `<p class="text-[11px] text-slate-400">تُستخدم المتغيرات في تعبير العمود بالمصمم — اكتب <span class="font-mono" dir="ltr">$</span> واختر القاعدة والمتغير من القائمة. المحرك يستبدلها بقيمة السياسة المطابقة للسجل حسب الأولوية، والسجل بلا سياسة مطابقة يأخذ قيمة السياسة الافتراضية أو قيمة فارغة (يُتجاهل الاستدعاء).</p>`;
             } else {
                 html = rpPolicyFormHtml();
             }
@@ -737,7 +738,7 @@
                     const sel = RP.matchSel[s] || new Set();
                     html += `<div class="bg-white border border-slate-200 rounded-xl p-3">
                         <div class="flex items-center justify-between mb-2">
-                            <div class="text-xs font-bold text-slate-700">تطبيق السياسة على — <span class="font-mono" dir="ltr">${rpEsc(s)}</span> <span class="text-[10px] text-slate-400">(${sel.size} محدد)</span></div>
+                            <div class="text-xs font-bold text-slate-700">تطبيق السياسة على — <span class="font-bold text-slate-800">${rpEsc(rpSrcLabel(s))}</span> <span class="text-[10px] text-slate-400">(${sel.size} محدد)</span></div>
                             <input placeholder="بحث..." oninput="rpFilterVals('${rpEsc(s)}',this.value)" class="w-32 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-[11px]">
                         </div>
                         <div id="rpVals-${rpEsc(s)}" class="max-h-40 overflow-y-auto space-y-1 text-xs"><p class="text-slate-400">جارٍ تحميل القيم...</p></div>
@@ -777,7 +778,7 @@
             if(t === 'number') return `<input type="number" step="any" dir="ltr" value="${rpEsc(val)}" oninput="RP.varVals['${rpEsc(v.name)}']=this.value" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-mono">`;
             if(t === 'date') return `<input type="date" data-uidate="single" value="${rpEsc(val)}" onchange="RP.varVals['${rpEsc(v.name)}']=this.value" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm">`;
             if(t === 'time') return `<input type="time" value="${rpEsc(val)}" onchange="RP.varVals['${rpEsc(v.name)}']=this.value" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm">`;
-            if(t === 'expression') return `<input dir="ltr" value="${rpEsc(val)}" oninput="RP.varVals['${rpEsc(v.name)}']=this.value" placeholder="تعبير — مثال: [punch_time]" class="w-full bg-slate-900 text-emerald-300 border border-slate-700 rounded-xl px-3 py-2 text-sm font-mono">`;
+            if(t === 'expression') return `<input dir="ltr" value="${rpEsc(val)}" oninput="RP.varVals['${rpEsc(v.name)}']=this.value" placeholder="تعبير — مثال: [وقت_البصمة]" class="w-full bg-slate-900 text-emerald-300 border border-slate-700 rounded-xl px-3 py-2 text-sm font-mono">`;
             return `<input value="${rpEsc(val)}" oninput="RP.varVals['${rpEsc(v.name)}']=this.value" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm">`;
         }
         async function rpLoadDistinct(){

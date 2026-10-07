@@ -8040,9 +8040,17 @@ def _scan_app_rules(app_name):
             try:
                 from rml_python.compiler import RMLReportCompiler
                 comp = RMLReportCompiler(path=p)
+                fld_map = {}
+                try:
+                    for f in comp.fields():
+                        if f.name:
+                            fld_map[f.name] = f.alias or f.name
+                except Exception:
+                    pass
                 for r in comp.rules():
                     d = r.to_dict()
                     d["file"] = p.name
+                    d["source_aliases"] = {s: fld_map.get(s, s) for s in (r.sources or [])}
                     out.append(d)
             except Exception:
                 continue
@@ -8109,7 +8117,8 @@ def api_app_rules(request, app_name):
                 _warns = []
             lite.append({"file": r.get("file"), "name": r.get("name"), "display": r.get("display"),
                          "icon": r.get("icon"), "description": r.get("description"),
-                         "sources": r.get("sources"), "variables": r.get("variables"),
+                         "sources": r.get("sources"), "source_aliases": r.get("source_aliases") or {},
+                         "variables": r.get("variables"),
                          "policies": r.get("policies"),
                          "policy_count": len(r.get("policies") or []),
                          "warnings": _warns})
