@@ -1060,6 +1060,7 @@ function wizApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof 
                 let m = cond.match(/^\[?([^\]]+)\]?\s+(IS\s+NULL|IS\s+NOT\s+NULL|LIKE|<=>|<>|!=|>=|<=|>|<|=)\s*(.*)$/i);
                 if(m){
                     let col = m[1].trim();
+                    if(col.includes('.')) col = col.split('.').pop();
                     let op = m[2].toUpperCase().trim();
                     let rawVal = (m[3] || '').trim();
                     let val = '', val2 = '';
