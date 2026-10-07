@@ -107,6 +107,10 @@ function wizApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof 
             wizardSchema = '';
             document.getElementById('rmlIcon').value = 'fa-chart-bar';
             document.getElementById('rmlReportType').value = 'master';
+            const _dlEl0 = document.getElementById('rmlDocLayout');
+            if(_dlEl0) _dlEl0.value = 'table';
+            const _dlw0 = document.getElementById('rmlDocLayoutWrap');
+            if(_dlw0) _dlw0.classList.add('hidden');
             document.getElementById('rmlCreateBtn').innerHTML = '<i class="fa-solid fa-floppy-disk ml-1"></i> إنشاء وحفظ';
             document.getElementById('rmlWizardTitle').innerHTML = '<i class="fa-solid fa-chart-line text-emerald-600"></i> إنشاء تقرير جديد';
             document.getElementById('rmlFileName').disabled = false;
@@ -162,6 +166,10 @@ function wizApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof 
                 const _dd = data.detail || null;
                 wizardDetail = _dd ? {table:_dd.table||'', master:_dd.master||_dd.masterKey||'', detail:_dd.detail||_dd.detailKey||'', rel_type:(_dd.rel_type||_dd.relType||_dd.rel||'one_to_many'), columns:((_dd.columns||[]).map((c,i)=>({id:String(c.id||i+1), name:c.name||'', alias:c.alias||'', expr:c.expr||'', col_refname:(c.col_refname||c.colRefname||''), visible:!(String(c.visible ?? '1').toLowerCase() === '0' || ['false','no','off','hidden'].includes(String(c.visible ?? '1').toLowerCase())), width:(c.width !== undefined && c.width !== null ? c.width : null), data_type:c.dataType||c.data_type||'', max_chars:(c.max_chars ?? c.maxChars ?? ''), wrap:!!(c.wrap), decimals:(c.decimals ?? ''), date_format:(c.dateFormat||c.date_format||''), col_type:c.col_type||c.type||'direct', icon:c.icon||'fa-hashtag', is_amount:!!(c.is_amount||c.isAmount), currency_symbol:c.currency_symbol||c.currencySymbol||'', refTable:_refT(c), refFk:_refF(c), refDisplay:_refD(c), join_type:(c.join_type||c.joinType||c.rel_type||c.relType||'one_to_one')})))} : {table:'', master:'', detail:'', rel_type:'one_to_many', columns:[]};
                 document.getElementById('rmlReportType').value = (md.type || md.reportType || 'master');
+                const _dlEl = document.getElementById('rmlDocLayout');
+                if(_dlEl) _dlEl.value = (md.doc_layout || md.docLayout || md.layout || 'table');
+                const _dlw = document.getElementById('rmlDocLayoutWrap');
+                if(_dlw) _dlw.classList.toggle('hidden', (md.type || md.reportType) !== 'doc');
                 wizardCharts = (data.charts || []).map((ch,i)=>({id:String(ch.id||i+1), type:ch.type||'bar', x:ch.x||'', y:ch.y||'', y2:ch.y2||'', title:ch.title||''}));
                 wizardRules = (data.rules || []).map((r,i)=>({id:String(r.id||i+1), name:r.name||'', display:r.display||r.name||'', icon:r.icon||'', description:r.description||'', expr:r.expr||'', connection_id:String(r.connection_id||''), sources:(r.sources||[]).map(String), variables:(r.variables||[]).map(v=>({name:v.name||'', display:v.display||v.name||'', type:v.type||'text', options:(v.options||[]).map(String)})), policies:(r.policies||[]).map(p=>({id:String(p.id||''), name:p.name||'', priority:(p.priority ?? 100), is_default:!!p.is_default, match:p.match||{}, values:p.values||{}}))}));
                 wizardGroups = (data.groups || []).map((g,i)=>({id:String(g.id||i+1), name:g.name||'', order:parseInt(g.order)||i+1, level:Math.max(1, Math.min(parseInt(g.level)||1, 5)), columns:(g.columns||[]).map(a=>String(a)), color:(g.color||''), bg:(g.bg||g.bgColor||''), weight:(g.weight||g.fontWeight||''), frozen:!!(g.frozen||g.freeze)}));
@@ -1626,6 +1634,8 @@ function wizApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof 
         }
         function toggleWizardDetailBox(){
             const t = ((document.getElementById('rmlReportType') || {}).value || 'master');
+            const dlw = document.getElementById('rmlDocLayoutWrap');
+            if(dlw) dlw.classList.toggle('hidden', t !== 'doc');
             const box = document.getElementById('wizardDetailBox');
             const nav = document.getElementById('colSubNav');
             const showSub = (t === 'detail' || t === 'doc');
@@ -4443,7 +4453,8 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                 rules: wizardRules,
                 general_where: wizardGeneralWhere || '',
                 doc_template: ((document.getElementById('wizardDocTemplate') || {}).value || wizardDocTemplate || ''),
-                doc_params: wizardDocParams || []
+                doc_params: wizardDocParams || [],
+                doc_layout: ((document.getElementById('rmlDocLayout') || {}).value || 'table')
             };
             const _rtype = ((document.getElementById('rmlReportType') || {}).value || 'master');
             if(_rtype === 'detail'){
@@ -4518,7 +4529,8 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                     rules: wizardRules,
                     general_where: wizardGeneralWhere || '',
                     doc_template: ((document.getElementById('wizardDocTemplate') || {}).value || wizardDocTemplate || ''),
-                    doc_params: wizardDocParams || []
+                    doc_params: wizardDocParams || [],
+                    doc_layout: ((document.getElementById('rmlDocLayout') || {}).value || 'table')
                 };
                 const _rtype = ((document.getElementById('rmlReportType') || {}).value || 'master');
                 if(_rtype === 'detail'){

@@ -9717,7 +9717,7 @@ def _write_doc_params_el(rml, _ET3, doc_params):
 
 
 def _render_rml_xml(prog_name, displayName, icon, category, schema, description, namespace,
-                    connections, fields, columns, charts, rules, report_type="master", detail=None, links=None, doc_template=None, groups=None, distinct=False, table_opts=None, group_levels=1, general_where=None, extra_meta=None, doc_params=None):
+                    connections, fields, columns, charts, rules, report_type="master", detail=None, links=None, doc_template=None, groups=None, distinct=False, table_opts=None, group_levels=1, general_where=None, extra_meta=None, doc_params=None, doc_layout=None):
     """Build pretty RML XML from wizard payload (shared by create/update)."""
     import xml.etree.ElementTree as ET, xml.dom.minidom
     rml = ET.Element("rml")
@@ -9729,6 +9729,9 @@ def _render_rml_xml(prog_name, displayName, icon, category, schema, description,
     md.set("icon", icon)
     if (report_type or "master").strip().lower() in ("detail", "doc"):
         md.set("type", (report_type or "master").strip().lower())
+    _dl = doc_layout or (extra_meta or {}).get("doc_layout") or (extra_meta or {}).get("docLayout") or (extra_meta or {}).get("layout")
+    if _dl and str(_dl).strip():
+        md.set("doc_layout", str(_dl).strip().lower())
     if description:
         md.set("description", description)
     md.set("connection", "ORCL_PROD")
@@ -10245,7 +10248,7 @@ def _rml_extra_meta_attrs(path):
             return {}
         known = {"name", "displayname", "category", "schema", "icon", "description",
                  "connection", "distinct", "group_levels", "grouplevels", "namespace", "ns",
-                 "type", "report_type", "reporttype", "doc_layout", "doclayout", "layout"}
+                 "type", "report_type", "reporttype"}
         return {k: v for k, v in md.attrib.items() if k.lower() not in known}
     except Exception:
         return {}
@@ -10341,7 +10344,8 @@ def api_rml_draft(request, app_name):
             data.get("table_opts", data.get("tableOpts", [])),
             data.get("group_levels", data.get("groupLevels", 1)),
             data.get("general_where", data.get("generalWhere", "")), _keep,
-            data.get("doc_params", data.get("docParams", [])))
+            data.get("doc_params", data.get("docParams", [])),
+            doc_layout=data.get("doc_layout", data.get("docLayout", data.get("layout", ""))))
         target.write_text(pretty, encoding="utf-8")
         job = _uuid.uuid4().hex[:16]
         with _RML_JOBS_LOCK:
@@ -10448,7 +10452,8 @@ def api_rml_fetch_query(request, app_name):
             data.get("table_opts", data.get("tableOpts", [])),
             data.get("group_levels", data.get("groupLevels", 1)),
             data.get("general_where", data.get("generalWhere", "")), {},
-            data.get("doc_params", data.get("docParams", [])))
+            data.get("doc_params", data.get("docParams", [])),
+            doc_layout=data.get("doc_layout", data.get("docLayout", data.get("layout", ""))))
         fname = "__fetchq_%s.rml" % _uuid.uuid4().hex[:12]
         _ad, target, err = _resolve_rml_target(app_name, fname)
         if err or target is None:
@@ -10504,7 +10509,8 @@ def api_rml_design_preview(request, app_name):
             data.get("table_opts", data.get("tableOpts", [])),
             data.get("group_levels", data.get("groupLevels", 1)),
             data.get("general_where", data.get("generalWhere", "")), {},
-            data.get("doc_params", data.get("docParams", [])))
+            data.get("doc_params", data.get("docParams", [])),
+            doc_layout=data.get("doc_layout", data.get("docLayout", data.get("layout", ""))))
         fname = "__preview_%s.rml" % _uuid.uuid4().hex[:12]
         _ad, target, err = _resolve_rml_target(app_name, fname)
         if err or target is None:
@@ -10608,7 +10614,8 @@ def api_update_rml(request, app_name):
                                  data.get("table_opts", data.get("tableOpts", [])),
                                  data.get("group_levels", data.get("groupLevels", 1)),
                                  general_where, _rml_extra_meta_attrs(target),
-                                 data.get("doc_params", data.get("docParams", [])))
+                                 data.get("doc_params", data.get("docParams", [])),
+                                 doc_layout=data.get("doc_layout", data.get("docLayout", data.get("layout", ""))))
         target.write_text(pretty, encoding="utf-8")
         return JsonResponse({"ok": True, "file": target.name, "path": str(target), "updated": True})
     except Exception as e:

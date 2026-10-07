@@ -72,6 +72,13 @@
                                         <div><label class="block text-[10px] font-bold text-slate-500 mb-1">النوع</label><select id="rmlReportType" onchange="toggleWizardDetailBox();wbSyncSheets()" class="wb-inp w-full"><option value="master">إجمالي (Master)</option><option value="detail">تحليلي (Detail)</option><option value="doc">مستندي (Doc)</option></select></div>
                                         <div><label class="block text-[10px] font-bold text-slate-500 mb-1">النطاق</label><input id="rmlNamespace" placeholder="hr" class="wb-inp w-full font-mono" dir="ltr"></div>
                                     </div>
+                                    <div id="rmlDocLayoutWrap" class="hidden">
+                                        <label class="block text-[10px] font-bold text-slate-500 mb-1">تخطيط المستندي</label>
+                                        <select id="rmlDocLayout" class="wb-inp w-full">
+                                            <option value="table">كشف جدول (عرض كافة السجلات)</option>
+                                            <option value="card">سجل فردي (مستند واحد بالتنقل)</option>
+                                        </select>
+                                    </div>
                                     <div><label class="block text-[10px] font-bold text-slate-500 mb-1">الوصف</label><input id="rmlDescription" placeholder="وصف مختصر" class="wb-inp w-full"></div>
                                 </div>
                             </div>
