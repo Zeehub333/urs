@@ -377,32 +377,66 @@ function wizApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof 
         }
         function updateWizardField(idx, field, val){ wizardFields[idx][field]=val; }
         function wbAddGroupFromField(fldName){
-            const existsCol = wizardColumns.find(c => c.expr === fldName || c.name === fldName || c.alias === fldName);
-            let alias = existsCol ? (existsCol.alias || existsCol.name) : fldName;
-            if(!existsCol){
-                const f = wizardFields.find(x=>x.name === fldName) || {name: fldName, type: 'VARCHAR', table_source: ''};
-                wizardColumns.push({
-                    id: String(wizardColumns.length + 1),
-                    name: f.name,
-                    alias: f.name,
-                    expr: f.name,
-                    type: f.type || 'VARCHAR',
-                    col_refname: (f.table_source || f.tableSource ? (String(f.table_source || f.tableSource) + '.') : '') + f.name,
-                    visible: true,
-                    col_type: 'direct',
-                    align: 'right',
-                    dir: 'rtl'
-                });
+            let m = document.getElementById('groupColModal');
+            if(!m){
+                m = document.createElement('div');
+                m.id = 'groupColModal';
+                m.className = 'hidden fixed inset-0 z-[70] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4';
+                m.setAttribute('onclick', 'if(event.target===this)closeGroupColModal()');
+                m.innerHTML = '<div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[88vh] overflow-hidden flex flex-col">'
+                    + '<div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-indigo-50 shrink-0"><h3 class="text-sm font-bold text-slate-800"><i class="fa-solid fa-layer-group text-indigo-600"></i> تجميع بحسب</h3><button onclick="closeGroupColModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button></div>'
+                    + '<div class="p-4 space-y-4 overflow-y-auto custom-scroll">'
+                    + '<div><label class="block text-[11px] font-bold text-slate-500 mb-1">تطبيق العملية على العمود</label><input type="text" id="gcmFldTarget" readonly class="wb-cell font-mono bg-slate-50 text-slate-500" dir="ltr"></div>'
+                    + '<div><label class="block text-[11px] font-bold text-slate-500 mb-1">تجميع بحسب (العمود المرجعي)</label><select id="gcmFldRef" class="wb-cell font-mono" dir="ltr"></select></div>'
+                    + '<div><label class="block text-[11px] font-bold text-slate-500 mb-1">العملية</label><select id="gcmOp" class="wb-cell font-bold"><option value="SUM">جمع SUM</option><option value="COUNT">عد COUNT</option><option value="AVG">متوسط AVG</option><option value="MIN">أدنى MIN</option><option value="MAX">أقصى MAX</option></select></div>'
+                    + '</div>'
+                    + '<div class="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2 shrink-0"><button onclick="closeGroupColModal()" class="px-4 py-1.5 bg-slate-100 rounded-xl text-xs">إلغاء</button><button onclick="applyGroupColModal()" class="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold">تطبيق وإضافة الحقل</button></div>'
+                    + '</div>';
+                document.body.appendChild(m);
             }
-            let mx = 0;
-            wizardGroups.forEach(g=>{ const n = parseInt(g.id); if(!isNaN(n)) mx = Math.max(mx, n); });
-            wizardGroups.push({id:String(mx + 1), name:'تجميع بحسب: '+alias, order:wizardGroups.length+1, level:1, columns:[alias], color:'', bg:'', weight:'', frozen:false});
+            
+            const f = wizardFields.find(x=>x.name === fldName);
+            const tblName = f ? String(f.table_source || f.tableSource || '') : '';
+            const sameTblFields = wizardFields.filter(x=>String(x.table_source || x.tableSource || '') === tblName);
+            
+            document.getElementById('gcmFldTarget').value = fldName;
+            document.getElementById('gcmFldRef').innerHTML = sameTblFields.map(c=>'<option value="'+wbEsc(c.name)+'">'+wbEsc(c.name)+'</option>').join('');
+            document.getElementById('groupColModal').classList.remove('hidden');
+        }
+        function closeGroupColModal(){
+            const m = document.getElementById('groupColModal');
+            if(m) m.classList.add('hidden');
+        }
+        function applyGroupColModal(){
+            const targetCol = document.getElementById('gcmFldTarget').value;
+            const refCol = document.getElementById('gcmFldRef').value;
+            const op = document.getElementById('gcmOp').value;
+            if(!targetCol || !refCol){ notify('اختر العمود المرجعي', 'error'); return; }
+            
+            const expr = `${op}([${targetCol}]) OVER (PARTITION BY [${refCol}])`;
+            const alias = `${op.toLowerCase()}_${targetCol}_by_${refCol}`;
+            
+            wizardColumns.push({
+                id: String(wizardColumns.length + 1),
+                name: alias,
+                alias: alias,
+                expr: expr,
+                type: 'NUMERIC',
+                col_refname: alias,
+                visible: true,
+                col_type: 'direct',
+                align: 'right',
+                dir: 'ltr'
+            });
+            
+            closeGroupColModal();
+            
             if(typeof rdRenderElementsTree === 'function') rdRenderElementsTree();
-            try{ renderWizardGroups(); }catch(e){}
+            try{ renderWizardColumns(); }catch(e){}
             try{ rptPreviewSoon(); }catch(e){}
             try{ wbPaintStatus(); }catch(e){}
-            try{ notify('تمت إضافة التجميع بنجاح', 'success'); }catch(e){}
-            if(typeof rdNavTo === 'function') rdNavTo('groups');
+            try{ notify('تم إنشاء حقل التجميع التحليلي وإضافته لأعمدة التقرير', 'success'); }catch(e){}
+            if(typeof rdNavTo === 'function') rdNavTo('columns');
         }
         // ── Field modal (create / edit: name + type + connection + table) ──
         let fieldEditIdx = -1;
