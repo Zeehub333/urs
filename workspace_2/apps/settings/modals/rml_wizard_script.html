@@ -96,7 +96,7 @@ function wizApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof 
             wizardGeneralWhere = '';
             wizardGroups = [];
             wizardGroupLevels = 1;
-            try{ rptPrev.loadedOnce = false; rptPrev.stale = false; }catch(e){}
+            try{ rptPrev.loadedOnce = false; rptPrev.stale = false; rptPrevFilterValues = {}; }catch(e){}
             wizardDocParams = [];
             const _dtEl = document.getElementById('wizardDocTemplate');
             if(_dtEl) _dtEl.value = '';
@@ -2469,6 +2469,7 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                             <i class="fa-solid fa-table-cells text-emerald-600"></i>
                             <span>معاينة حية في الوقت الحقيقي (أول 20 صف)</span>
                         </span>
+                        <span id="rptPrevResultBadge" class="text-[10px] bg-sky-50 text-sky-700 border border-sky-200 px-2 py-0.5 rounded-full font-bold">النتائج: ${rptPrev.rows.length} صف</span>
                         <span class="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-bold">الأعمدة: ${wizardColumns.length}</span>
                         <span class="text-[10px] bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full font-bold">الظاهرة: ${(wizardColumns.filter(rptVis)||[]).length}</span>
                         ${(wizardDetail.columns||[]).length ? `<span class="text-[10px] bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full font-bold">الفرعية: ${(wizardDetail.columns||[]).length}</span>` : ''}
@@ -2482,6 +2483,8 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                         <span id="rptPrevStale" class="hidden text-[10px] bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded-full font-bold">غير محدثة — اضغط «تحديث المعاينة»</span>
                     </div>
                 </div>
+                <!-- شريط المدخلات والخيارات للمعاينة الحية -->
+                <div id="rptPrevDocParamsBar" class="hidden px-3 py-1.5 bg-indigo-50/70 border-b border-indigo-100 shrink-0"></div>
                 <!-- 3. المعاينة الحية بشاشة كاملة مع دعم المجموعات والأعمدة والطي والتوسيع التحليلي -->
                 <div id="rptPrevBox" class="flex-1 min-h-0 flex flex-col overflow-hidden h-full"></div>
                 `;
@@ -2497,7 +2500,101 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
         }
         /* ── Report palette: flex sidebar + live preview + animated props ── */
         let rptSel = {kind: null, idx: -1};
-        let rptPrev = {cols: [], rows: [], loading: false, error: '', sql: '', stale: false, loadedOnce: false};
+        let rptPrev = {cols: [], rows: [], loading: false, error: '', sql: '', stale: false, loadedOnce: false, total: 0};
+        let rptPrevFilterValues = {};
+        function setRptPrevFilterVal(key, val){
+            rptPrevFilterValues[key] = val;
+            rptPreviewFetch(true);
+        }
+        function rptPreviewGetFilters(){
+            const flts = [];
+            (wizardDocParams || []).forEach((p, idx) => {
+                const key = p.param_refname || p.column || ('dp_' + idx);
+                let v = rptPrevFilterValues[key];
+                if(v === undefined || v === null || v === ''){
+                    v = p.default_value || '';
+                    if(!v && Array.isArray(p.options) && p.options.length){
+                        const f0 = p.options[0];
+                        v = (typeof f0 === 'object' && f0 !== null) ? (f0.name || f0.value || '') : String(f0);
+                    }
+                    rptPrevFilterValues[key] = v;
+                }
+                if(v !== undefined && v !== null && v !== ''){
+                    flts.push({
+                        field: p.column || p.param_refname || ('dp_' + idx),
+                        refname: p.param_refname || '',
+                        op: p.op || 'equals',
+                        value: v
+                    });
+                }
+            });
+            return flts;
+        }
+        function renderRptPrevDocParamsBar(){
+            const bar = document.getElementById('rptPrevDocParamsBar');
+            if(!bar) return;
+            const params = wizardDocParams || [];
+            if(!params.length){
+                bar.classList.add('hidden');
+                bar.innerHTML = '';
+                return;
+            }
+            bar.classList.remove('hidden');
+            let h = `
+            <div class="flex flex-wrap items-center justify-between gap-2">
+                <div class="flex flex-wrap items-center gap-2 flex-1 min-w-0">
+                    <span class="text-xs font-bold text-indigo-900 flex items-center gap-1.5 shrink-0">
+                        <i class="fa-solid fa-sliders text-indigo-600"></i>
+                        <span>مدخلات التقرير للمعاينة:</span>
+                    </span>
+            `;
+            params.forEach((p, idx)=>{
+                const key = p.param_refname || p.column || ('dp_' + idx);
+                let curVal = rptPrevFilterValues[key];
+                if(curVal === undefined || curVal === null || curVal === ''){
+                    curVal = p.default_value || '';
+                    if(!curVal && Array.isArray(p.options) && p.options.length){
+                        const f0 = p.options[0];
+                        curVal = (typeof f0 === 'object' && f0 !== null) ? (f0.name || f0.value || '') : String(f0);
+                    }
+                    rptPrevFilterValues[key] = curVal;
+                }
+                const label = p.label || p.column || ('مدخل ' + (idx + 1));
+                const refBadge = p.param_refname ? `<span class="font-mono text-[9px] text-violet-700 bg-violet-100 px-1 py-0.5 rounded ml-1 font-bold" dir="ltr" title="الاسم المرجعي المستخدم في التعبير">@${rptEsc(p.param_refname)}</span>` : '';
+                
+                let inputHtml = '';
+                if(p.type === 'select' || (Array.isArray(p.options) && p.options.length)){
+                    const opts = Array.isArray(p.options) ? p.options : [];
+                    inputHtml = `<select class="bg-white border border-indigo-200 rounded-lg px-2 py-1 text-xs font-semibold text-slate-800 focus:outline-none focus:border-indigo-500 shadow-2xs min-w-[140px]" onchange="setRptPrevFilterVal('${rptEsc(key)}', this.value)">` +
+                        opts.map(item => {
+                            const optName = typeof item === 'object' && item !== null ? (item.name || item.key || item.value || '') : String(item);
+                            const optVal = typeof item === 'object' && item !== null ? (item.value || item.label || item.name || '') : String(item);
+                            const isSel = String(curVal) === String(optName);
+                            return `<option value="${rptEsc(optName)}" ${isSel ? 'selected' : ''}>${rptEsc(optVal)} [${rptEsc(optName)}]</option>`;
+                        }).join('') +
+                    `</select>`;
+                } else if(p.type === 'date'){
+                    inputHtml = `<input type="date" value="${rptEsc(curVal)}" class="bg-white border border-indigo-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-indigo-500 shadow-2xs" onchange="setRptPrevFilterVal('${rptEsc(key)}', this.value)">`;
+                } else {
+                    inputHtml = `<input type="text" value="${rptEsc(curVal)}" placeholder="${rptEsc(p.default_value || 'القيمة...')}" class="bg-white border border-indigo-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-indigo-500 shadow-2xs min-w-[110px]" onchange="setRptPrevFilterVal('${rptEsc(key)}', this.value)" onkeydown="if(event.key==='Enter') setRptPrevFilterVal('${rptEsc(key)}', this.value)">`;
+                }
+                
+                h += `
+                <div class="flex items-center gap-1.5 bg-white border border-indigo-100 rounded-xl px-2.5 py-1 shadow-2xs">
+                    <span class="font-bold text-slate-700 text-xs whitespace-nowrap">${rptEsc(label)}${refBadge}:</span>
+                    <div>${inputHtml}</div>
+                </div>`;
+            });
+            h += `
+                </div>
+                <div class="flex items-center gap-2 shrink-0">
+                    <button type="button" onclick="rptPreviewFetch(true)" class="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-2xs transition">
+                        <i class="fa-solid fa-play text-[10px]"></i> تطبيق المدخلات وتحديث النتائج
+                    </button>
+                </div>
+            </div>`;
+            bar.innerHTML = h;
+        }
         let rptPrevTimer = null;
         let rdTreeOpen = {cols: true, det: true, groups: true, docParams: true};
         let rptExpandedRows = new Set();
@@ -3592,7 +3689,10 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                 group_levels: (typeof wizardGroupLevels !== 'undefined' ? wizardGroupLevels : 1),
                 charts: (typeof wizardCharts !== 'undefined' ? wizardCharts : []),
                 rules: (typeof wizardRules !== 'undefined' ? wizardRules : []),
-                general_where: (typeof wizardGeneralWhere !== 'undefined' ? wizardGeneralWhere : '')
+                general_where: (typeof wizardGeneralWhere !== 'undefined' ? wizardGeneralWhere : ''),
+                doc_params: (typeof wizardDocParams !== 'undefined' ? wizardDocParams : []),
+                doc_layout: ((document.getElementById('rmlDocLayout') || {}).value || 'table'),
+                filters: (typeof rptPreviewGetFilters === 'function' ? rptPreviewGetFilters() : [])
             };
         }
         function rptPreviewFetch(manual){
@@ -3608,12 +3708,14 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                 .then(r=>r.json().then(d=>({ok:r.ok, d})))
                 .then(({ok, d})=>{
                     rptPrev.loading = false;
-                    if(!ok){ rptPrev.error = String((d && d.error) || 'فشل المعاينة'); rptPrev.rows = []; rptPrev.cols = []; }
+                    if(!ok){ rptPrev.error = String((d && d.error) || 'فشل المعاينة'); rptPrev.rows = []; rptPrev.cols = []; rptPrev.total = 0; }
                     else{
                         rptPrev.error = '';
                         rptPrev.cols = Array.isArray(d.columns) ? d.columns : [];
                         rptPrev.rows = Array.isArray(d.rows) ? d.rows.slice(0, 20) : [];
                         rptPrev.sql = d.sql || '';
+                        rptPrev.total = (d.total !== undefined ? d.total : rptPrev.rows.length);
+                        if(d.sql) _fetchQuerySql = d.sql;
                     }
                     rptPreviewRender();
                 })
@@ -3671,6 +3773,12 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
         function rptPreviewRender(){
             const box = document.getElementById('rptPrevBox');
             if(!box) return;
+            try{ renderRptPrevDocParamsBar(); }catch(e){}
+            const rb = document.getElementById('rptPrevResultBadge');
+            if(rb){
+                const n = (rptPrev.rows || []).length;
+                rb.textContent = 'النتائج: ' + n + ' صف' + (rptPrev.total !== undefined && rptPrev.total > n ? ' (من ' + rptPrev.total + ')' : '');
+            }
             if(rptPrev.loading){ box.innerHTML = '<div class="flex-1 flex flex-col items-center justify-center p-8 text-slate-400 text-xs gap-2"><i class="fa-solid fa-circle-notch fa-spin text-xl text-emerald-600"></i><span>جارٍ جلب أول 20 صف من قاعدة البيانات للمعاينة الحية...</span></div>'; return; }
             if(rptPrev.error){ box.innerHTML = `<div class="m-3 p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-xs"><div class="font-bold mb-1"><i class="fa-solid fa-triangle-exclamation"></i> خطأ في استعلام المعاينة:</div><pre class="font-mono text-[11px] whitespace-pre-wrap">${rptEsc(rptPrev.error).slice(0, 800)}</pre></div>`; return; }
             const cols = (wizardColumns || []);
@@ -3774,7 +3882,13 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                 return rowHtml;
             }).join('');
             box.innerHTML = `<div class="rpt-gridwrap custom-scroll"><table class="rpt-grid ${hasGrp ? 'has-grp' : ''}"><thead>${grpHtml}<tr class="rpt-col-row">${head}</tr></thead><tbody>${body || `<tr><td colspan="${totalCols}" class="p-8 text-center text-slate-400">لا توجد بيانات مسترجعة من الاستعلام</td></tr>`}</tbody></table></div>`
-                + `<div class="px-3 py-1 bg-slate-50 text-[10px] text-slate-500 border-t border-slate-200 flex items-center justify-between shrink-0"><span>عرض أول ${rows.length} صف • السحب والإفلات لرؤوس الأعمدة للترتيب بدون أسهم • النقر على أي رأس لفتح لوحة الخصائص</span><span>الأعمدة المخفية (المعلمة بـ <i class="fa-solid fa-eye-slash text-rose-500"></i>) يمكن تعديل عرضها وإخفائها في المشغل لاحقاً</span></div>`;
+                + `<div class="px-3 py-1.5 bg-slate-50 text-[11px] text-slate-600 border-t border-slate-200 flex items-center justify-between shrink-0 font-medium">`
+                + `  <div class="flex items-center gap-2">`
+                + `    <span class="text-emerald-700 font-bold flex items-center gap-1"><i class="fa-solid fa-circle-check text-emerald-500"></i> تم جلب <strong>${rows.length}</strong> صف من قاعدة البيانات للمعاينة الحية</span>`
+                + `    ${rptPrev.sql ? `<button type="button" onclick="openFetchQuery()" class="text-indigo-600 hover:text-indigo-800 text-[10px] font-bold border border-indigo-200 bg-indigo-50/70 px-2 py-0.5 rounded-lg flex items-center gap-1 transition"><i class="fa-solid fa-code text-[9px]"></i> عرض استعلام SQL للمعاينة</button>` : ''}`
+                + `  </div>`
+                + `  <span class="text-slate-400 text-[10px]">عرض أول 20 صف • انقر على أي رأس عمود للخصائص</span>`
+                + `</div>`;
         }
         function addWizardColumn(){
             const newIdx = wizardColumns.length;

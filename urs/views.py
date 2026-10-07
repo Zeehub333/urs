@@ -10517,13 +10517,22 @@ def api_rml_design_preview(request, app_name):
             return JsonResponse({"error": err or "bad app"}, status=400)
         target.write_text(pretty, encoding="utf-8")
         pipe = _rml_get_pipeline(fname, app_name)
+        exec_payload = {"page": 1, "pageSize": 20}
+        flts = data.get("filters", [])
+        if flts:
+            exec_payload["filters"] = flts
         try:
-            result = pipe.execute({"page": 1, "pageSize": 20})
+            result = pipe.execute(exec_payload)
         except ValueError as ve:
             return JsonResponse({"error": str(ve)[:500]}, status=400)
         rows = result.get("rows") if isinstance(result, dict) else None
         if isinstance(rows, list):
             result["rows"] = rows[:20]
+        try:
+            if isinstance(result, dict) and hasattr(pipe, "rml_engine"):
+                result["sql"] = pipe.rml_engine.preview_real_sql(exec_payload)
+        except Exception:
+            pass
         return JsonResponse(result if isinstance(result, dict) else {"rows": []},
                             json_dumps_params={"ensure_ascii": False})
     except ValueError as e:
