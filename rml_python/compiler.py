@@ -72,6 +72,9 @@ class RMLDocParam:
     src_table: str = ""
     src_column: str = ""
     searchable: bool = True
+    options: List[str] = field(default_factory=list)  # خيارات مخصصة لمدخل القائمة
+    is_custom: bool = False  # مدخل مخصص حر (غير مقيد بعمود في الجدول)
+    no_filter: bool = False  # لا يطبق شرط فلترة على SQL مباشرة، بل مخصص للتعبيرات فقط
     raw_attrs: Dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -87,6 +90,17 @@ class RMLDocParam:
             "required": self.required,
             "default_value": self.default_value,
             "defaultValue": self.default_value,
+            "options": [
+                ({"name": o.get("name", o.get("value", "")), "value": o.get("value", o.get("name", ""))}
+                 if isinstance(o, dict) else (
+                    {"name": o.split(":", 1)[0].strip(), "value": o.split(":", 1)[1].strip()}
+                    if ":" in str(o) else {"name": str(o).strip(), "value": str(o).strip()}
+                )) for o in (self.options or [])
+            ],
+            "is_custom": bool(self.is_custom),
+            "isCustom": bool(self.is_custom),
+            "no_filter": bool(self.no_filter),
+            "noFilter": bool(self.no_filter),
             "src_conn": self.src_conn or "",
             "srcConn": self.src_conn or "",
             "src_table": self.src_table or "",
@@ -846,6 +860,51 @@ class RMLReportCompiler:
                                     return _vv.strip()
                             return ""
 
+                        # parse options from attr or child <option>/<opt> elements
+                        opts: List[Dict[str, str]] = []
+                        raw_opts = get(el, "options", default="")
+                        if raw_opts:
+                            for item in str(raw_opts).split(","):
+                                item = item.strip()
+                                if not item:
+                                    continue
+                                if ":" in item:
+                                    k, v = item.split(":", 1)
+                                    opts.append({"name": k.strip(), "value": v.strip()})
+                                else:
+                                    opts.append({"name": item, "value": item})
+                        for ch in list(el):
+                            if ch.tag.lower() in ("option", "opt"):
+                                nm = ch.get("name") or ch.get("key") or ch.get("code") or ch.get("id") or ""
+                                vl = ch.get("value") or ch.get("label") or ch.get("display") or ""
+                                txt = (ch.text or "").strip()
+                                if nm and vl:
+                                    opts.append({"name": nm.strip(), "value": vl.strip()})
+                                elif nm and txt:
+                                    opts.append({"name": nm.strip(), "value": txt.strip()})
+                                elif vl and txt:
+                                    opts.append({"name": txt.strip(), "value": vl.strip()})
+                                elif txt:
+                                    if ":" in txt:
+                                        k, v = txt.split(":", 1)
+                                        opts.append({"name": k.strip(), "value": v.strip()})
+                                    else:
+                                        opts.append({"name": txt.strip(), "value": txt.strip()})
+                                elif nm:
+                                    opts.append({"name": nm.strip(), "value": nm.strip()})
+                                elif vl:
+                                    opts.append({"name": vl.strip(), "value": vl.strip()})
+
+                        is_cust_raw = get(el, "is_custom", "iscustom", default="").lower()
+                        is_cust = is_cust_raw in ("1", "true", "yes")
+
+                        no_flt_raw = get(el, "no_filter", "nofilter", default="").lower()
+                        # Default for custom inputs without a real report column: no_filter=True
+                        if no_flt_raw:
+                            no_flt = no_flt_raw in ("1", "true", "yes")
+                        else:
+                            no_flt = is_cust
+
                         result.append(RMLDocParam(
                             id=pid,
                             column=col,
@@ -859,6 +918,9 @@ class RMLReportCompiler:
                             src_table=_src("src_table", "srctable", "source_table", "table"),
                             src_column=_src("src_column", "srccolumn", "source_column", "column_name"),
                             searchable=(_src("searchable") or "1").lower() not in ("0", "false", "no", "off"),
+                            options=opts,
+                            is_custom=is_cust,
+                            no_filter=no_flt,
                             raw_attrs=dict(el.attrib or {})
                         ))
                 break

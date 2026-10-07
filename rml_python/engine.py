@@ -1991,18 +1991,34 @@ class RMLReportEngine:
                 return val
         return getattr(dp, "default_value", "") or ""
 
+    def _doc_no_filter_keys(self) -> set:
+        """Set of lowercase field/column/name/refname keys for doc_params that should NOT be filtered in SQL."""
+        keys = set()
+        dp_list = getattr(self, "doc_params", None) or (self.compiler.doc_params() if hasattr(self, "compiler") and hasattr(self.compiler, "doc_params") else [])
+        for dp in dp_list or []:
+            if getattr(dp, "no_filter", False) or getattr(dp, "is_custom", False):
+                for k in (getattr(dp, "column", None), getattr(dp, "param_refname", None), getattr(dp, "id", None)):
+                    if k and str(k).strip():
+                        keys.add(str(k).strip().lower())
+        return keys
+
     def _expand_doc_params(self, text: str, doc_params: List[Any], filters: Optional[List[Dict[str, Any]]] = None) -> str:
         """Expand @param_refname, [param_refname], and :param_refname in expressions.
 
         Replaces references with the parameter's active value (from filters or default_value).
+        Also auto-quotes option names when compared unquoted (e.g. @V_1 = o1 -> @V_1 = 'o1').
         Operates only outside single-quoted strings so user string literals are preserved.
         """
         if not text or not doc_params:
             return text or ""
         ref_replacements = {}
+        option_replacements = []
         for dp in doc_params:
-            ref = (getattr(dp, "param_refname", None) or getattr(dp, "refname", None) or "").strip()
-            if not ref:
+            refs = set()
+            for rk in (getattr(dp, "param_refname", None), getattr(dp, "refname", None), getattr(dp, "column", None)):
+                if rk and str(rk).strip():
+                    refs.add(str(rk).strip())
+            if not refs:
                 continue
             val = self._doc_param_val(dp, filters)
             ptype = str(getattr(dp, "type", "text") or "text").strip().lower()
@@ -2011,14 +2027,31 @@ class RMLReportEngine:
                 sql_lit = s_val
             else:
                 sql_lit = "'" + s_val.replace("'", "''") + "'"
-            ref_replacements[ref] = sql_lit
+            for r in refs:
+                ref_replacements[r] = sql_lit
 
-        if not ref_replacements:
+            opts = getattr(dp, "options", None) or []
+            for opt in opts:
+                opt_name = (opt.get("name") if isinstance(opt, dict) else str(opt).split(":", 1)[0] if ":" in str(opt) else str(opt)).strip()
+                if opt_name and not re.fullmatch(r"-?\d+(\.\d+)?", opt_name):
+                    for r in refs:
+                        option_replacements.append((r, opt_name))
+
+        if not ref_replacements and not option_replacements:
             return text
 
         segs = re.split(self._REFNAME_SEG_RE, str(text))
         for i in range(0, len(segs), 2):
             seg = segs[i]
+            # Quote unquoted option names when compared with @ref / [ref]
+            for ref, opt_name in option_replacements:
+                r_esc = re.escape(ref)
+                o_esc = re.escape(opt_name)
+                pat1 = re.compile(r"((?:@|\[|:)" + r_esc + r"\]?\s*(?:==?|!=|<>)\s*)\b" + o_esc + r"\b", re.IGNORECASE)
+                pat2 = re.compile(r"\b" + o_esc + r"\b(\s*(?:==?|!=|<>)\s*(?:@|\[|:)" + r_esc + r"\]?)", re.IGNORECASE)
+                seg = pat1.sub(r"\g<1>'" + opt_name.replace("'", "''") + "'", seg)
+                seg = pat2.sub("'" + opt_name.replace("'", "''") + r"'\g<1>", seg)
+            # Expand parameter references to literals
             for ref, sql_lit in ref_replacements.items():
                 r_esc = re.escape(ref)
                 seg = re.sub(r"(?<![\w$#@.\"'])@" + r_esc + r"(?![\w])", sql_lit, seg, flags=re.IGNORECASE)
@@ -6978,25 +7011,36 @@ class RMLReportEngine:
     def _split_filters(self, filters, columns) -> Tuple[list, list]:
         """Split filters into (base_where, outer_alias) lists."""
         base, outer = [], []
+        no_flt_keys = self._doc_no_filter_keys()
+
+        def _is_no_flt(sf):
+            if not isinstance(sf, dict):
+                return False
+            fld = str(sf.get("field") or sf.get("column") or sf.get("name") or "").strip().lower()
+            ref = str(sf.get("refname") or sf.get("param_refname") or "").strip().lower()
+            return (fld and fld in no_flt_keys) or (ref and ref in no_flt_keys)
+
         for f in (filters or []):
+            if _is_no_flt(f):
+                continue
             if isinstance(f, dict) and isinstance(f.get("any"), (list, tuple)):
-                subs = [sf for sf in f["any"] if isinstance(sf, dict)]
+                subs = [sf for sf in f["any"] if isinstance(sf, dict) and not _is_no_flt(sf)]
                 if not subs:
                     continue
                 routes = {self._route_one(sf, columns) for sf in subs}
                 if "core" in routes or "outer" in routes:
-                    outer.append(f)
+                    outer.append(dict(f, any=subs))
                 else:
-                    base.append(f)
+                    base.append(dict(f, any=subs))
             elif isinstance(f, dict) and isinstance(f.get("all"), (list, tuple)):
-                subs = [sf for sf in f["all"] if isinstance(sf, dict)]
+                subs = [sf for sf in f["all"] if isinstance(sf, dict) and not _is_no_flt(sf)]
                 if not subs:
                     continue
                 routes = {self._route_one(sf, columns) for sf in subs}
                 if "core" in routes or "outer" in routes:
-                    outer.append(f)
+                    outer.append(dict(f, all=subs))
                 else:
-                    base.append(f)
+                    base.append(dict(f, all=subs))
             else:
                 (outer if self._route_one(f, columns) in ("outer", "core") else base).append(f)
         return base, outer
@@ -7619,13 +7663,30 @@ class RMLReportEngine:
         if req_params:
             for rp in req_params:
                 rp_col = str(getattr(rp, "column", None) or (rp.get("column") if isinstance(rp, dict) else "") or "").strip().lower()
-                cands = {rp_col} if rp_col else set()
+                rp_ref = str(getattr(rp, "param_refname", None) or getattr(rp, "refname", None) or (rp.get("param_refname") if isinstance(rp, dict) else "") or (rp.get("refname") if isinstance(rp, dict) else "") or "").strip().lower()
+                rp_id = str(getattr(rp, "id", None) or (rp.get("id") if isinstance(rp, dict) else "") or "").strip().lower()
+                cands = set()
+                if rp_col:
+                    cands.add(rp_col)
+                if rp_ref:
+                    cands.add(rp_ref)
+                if rp_id:
+                    cands.add(rp_id)
                 if rp_col:
                     for _c in rep_cols:
                         _keys = _col_keys(_c)
                         if rp_col in _keys:
                             cands |= _keys
-                if not any(str(f.get("field", "")).strip().lower() in cands for f in active_val_filters):
+                def _matches_rp(f):
+                    f_fld = str(f.get("field") or f.get("column") or f.get("name") or "").strip().lower()
+                    f_ref = str(f.get("refname") or f.get("param_refname") or "").strip().lower()
+                    if f_fld and f_fld in cands:
+                        return True
+                    if f_ref and (f_ref in cands or (rp_ref and f_ref == rp_ref)):
+                        return True
+                    return False
+
+                if not any(_matches_rp(f) for f in active_val_filters):
                     return True
             return False
         return not active_val_filters

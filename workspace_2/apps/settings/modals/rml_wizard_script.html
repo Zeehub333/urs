@@ -166,7 +166,40 @@ function wizApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof 
                 wizardRules = (data.rules || []).map((r,i)=>({id:String(r.id||i+1), name:r.name||'', display:r.display||r.name||'', icon:r.icon||'', description:r.description||'', expr:r.expr||'', connection_id:String(r.connection_id||''), sources:(r.sources||[]).map(String), variables:(r.variables||[]).map(v=>({name:v.name||'', display:v.display||v.name||'', type:v.type||'text', options:(v.options||[]).map(String)})), policies:(r.policies||[]).map(p=>({id:String(p.id||''), name:p.name||'', priority:(p.priority ?? 100), is_default:!!p.is_default, match:p.match||{}, values:p.values||{}}))}));
                 wizardGroups = (data.groups || []).map((g,i)=>({id:String(g.id||i+1), name:g.name||'', order:parseInt(g.order)||i+1, level:Math.max(1, Math.min(parseInt(g.level)||1, 5)), columns:(g.columns||[]).map(a=>String(a)), color:(g.color||''), bg:(g.bg||g.bgColor||''), weight:(g.weight||g.fontWeight||''), frozen:!!(g.frozen||g.freeze)}));
                 try{ wizardGroupLevels = Math.max(1, Math.min(parseInt(md.group_levels ?? md.groupLevels ?? 1) || 1, 5)); }catch(e){ wizardGroupLevels = 1; }
-                wizardDocParams = (data.doc_params || data.docParams || (md.doc_params || md.docParams) || []).map((p,i)=>({id:String(p.id||'dp_'+(i+1)), column:String(p.column||p.field||p.name||''), label:String(p.label||p.display||p.column||''), type:String(p.type||p.dataType||p.data_type||'text'), op:String(p.op||p.operator||'equals'), required:(p.required===undefined ? true : !!(p.required && p.required!=='false' && p.required!=='0')), default_value:String(p.default_value||p.defaultValue||''), param_refname:String(p.param_refname||p.paramRefname||p.refname||p.ref_name||'')}));
+                wizardDocParams = (data.doc_params || data.docParams || (md.doc_params || md.docParams) || []).map((p,i)=>({
+                    id: String(p.id || 'dp_' + (i + 1)),
+                    column: String(p.column || p.field || p.name || ''),
+                    label: String(p.label || p.display || p.column || ''),
+                    type: String(p.type || p.dataType || p.data_type || 'text'),
+                    op: String(p.op || p.operator || 'equals'),
+                    required: (p.required === undefined ? true : !!(p.required && p.required !== 'false' && p.required !== '0')),
+                    default_value: String(p.default_value || p.defaultValue || ''),
+                    param_refname: String(p.param_refname || p.paramRefname || p.refname || p.ref_name || ''),
+                    options: (Array.isArray(p.options) ? p.options : (typeof p.options === 'string' && p.options ? p.options.split(',').map(s=>s.trim()).filter(Boolean) : [])).map(item => {
+                        if(typeof item === 'object' && item !== null) {
+                            return {
+                                name: String(item.name || item.key || item.code || item.value || '').trim(),
+                                value: String(item.value || item.label || item.display || item.name || '').trim()
+                            };
+                        }
+                        const s = String(item).trim();
+                        if(s.includes(':')) {
+                            const parts = s.split(':');
+                            return {name: parts[0].trim(), value: parts.slice(1).join(':').trim()};
+                        }
+                        if(s.includes('=')) {
+                            const parts = s.split('=');
+                            return {name: parts[0].trim(), value: parts.slice(1).join('=').trim()};
+                        }
+                        return {name: s, value: s};
+                    }),
+                    is_custom: !!(p.is_custom || p.isCustom),
+                    no_filter: !!(p.no_filter || p.noFilter),
+                    src_conn: String(p.src_conn || p.srcConn || ''),
+                    src_table: String(p.src_table || p.srcTable || ''),
+                    src_column: String(p.src_column || p.srcColumn || ''),
+                    searchable: (p.searchable === undefined || p.searchable === null) ? true : (['0', 'false', 'no', 'off'].indexOf(String(p.searchable).toLowerCase()) < 0)
+                }));
                 wizardDocTemplate = data.doc_template || data.docTemplate || (md.doc_template || md.docTemplate) || '';
                 wizardGeneralWhere = data.general_where || data.generalWhere || (md.general_where || md.generalWhere) || '';
                 const _dtEl2 = document.getElementById('wizardDocTemplate');
@@ -1907,7 +1940,7 @@ function wizApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof 
             });
             (wizardDetail?.columns || []).filter(f=>f.name).forEach(f=>push(f.name, f.name, 'فرعي'));
             (wizardDocParams || []).forEach(dp=>{
-                const ref = (dp.param_refname || dp.refname || '').trim();
+                const ref = (dp.param_refname || dp.refname || (dp.is_custom ? dp.column : '') || '').trim();
                 if(ref) push(ref, '@' + ref, 'مدخل مستندي: ' + (dp.label || dp.column || ref));
             });
             return pool;
@@ -2097,7 +2130,7 @@ function wizApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof 
                 const part = (am[1] || '').replace(/\s+$/, '').toLowerCase();
                 const pool = [];
                 (wizardDocParams || []).forEach(dp=>{
-                    const _prn = (dp.param_refname || dp.refname || '').trim();
+                    const _prn = (dp.param_refname || dp.refname || (dp.is_custom ? dp.column : '') || '').trim();
                     if(_prn) pool.push({code: _prn, name: dp.label || dp.column || _prn, hint: 'مدخل مستندي: ' + (dp.label || dp.column || _prn), isDoc: true});
                 });
                 (wizardColumns || []).filter(c=>c.alias || c.name).forEach(c=>{
@@ -2533,8 +2566,9 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                 const badgeCls = p.type === 'select' ? 'bg-indigo-100 text-indigo-800' : 'bg-sky-100 text-sky-800';
                 const prn = String(p.param_refname || p.refname || '').trim();
                 return `<div class="rd-tree-leaf flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs cursor-pointer transition select-none ${isSel ? 'bg-sky-50 border border-sky-200 text-sky-900 font-bold' : 'hover:bg-slate-100 text-slate-700'}" onclick="rptSelectCol('doc_param', ${i})">
-                    <i class="fa-solid fa-filter text-[10px] text-sky-500"></i>
+                    <i class="fa-solid ${p.is_custom ? 'fa-wand-magic-sparkles text-purple-600' : 'fa-filter text-sky-500'} text-[10px]"></i>
                     <span class="flex-1 truncate" title="${rptEsc(p.label || p.column)}">${rptEsc(p.label || p.column || ('مدخل ' + (i+1)))}</span>
+                    ${p.is_custom ? `<span class="text-[9px] bg-purple-100 text-purple-700 px-1 rounded font-bold" title="مدخل مخصص حر (للتعبيرات)">مخصص</span>` : ''}
                     ${prn ? `<span class="text-[9px] bg-violet-100 text-violet-800 px-1 rounded font-mono font-bold" title="الاسم المرجعي: @${rptEsc(prn)}">@${rptEsc(prn)}</span>` : ''}
                     <span class="text-[9px] ${badgeCls} px-1 rounded font-mono">${rptEsc(typeBadge)}</span>
                     ${p.required ? '<span class="text-[9px] text-rose-500 font-bold" title="إلزامي">*</span>' : ''}
@@ -2836,6 +2870,91 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
             }
             try{ notify('تم استيراد ' + added + ' عمود كمدخلات مطلوبة ✓', 'success'); }catch(e){}
         }
+        function createCustomDocParam(){
+            const id = 'dp_custom_' + Date.now();
+            const idx = (wizardDocParams || []).length + 1;
+            const newP = {
+                id: id,
+                column: 'v_custom_' + idx,
+                label: 'مدخل مخصص ' + idx,
+                param_refname: 'V_' + idx,
+                type: 'select',
+                op: 'equals',
+                required: true,
+                default_value: 'o1',
+                options: [
+                    {name: 'o1', value: 'نقد'},
+                    {name: 'o2', value: 'اجل'}
+                ],
+                is_custom: true,
+                no_filter: true,
+                src_conn: '',
+                src_table: '',
+                src_column: '',
+                searchable: true
+            };
+            wizardDocParams.push(newP);
+            rdTreeOpen.docParams = true;
+            closeAddDocParamModal();
+            rdRenderElementsTree();
+            rptSelectCol('doc_param', wizardDocParams.length - 1);
+            try{ notify('تمت إضافة مدخل مخصص حر بنجاح ✓', 'success'); }catch(e){}
+        }
+        function updateWizardDocParamOptionRow(paramIdx, optIdx, field, val){
+            if(!wizardDocParams[paramIdx]) return;
+            let opts = wizardDocParams[paramIdx].options || [];
+            if(!opts[optIdx]){
+                opts[optIdx] = {name: '', value: ''};
+            }
+            if(typeof opts[optIdx] !== 'object' || opts[optIdx] === null){
+                opts[optIdx] = {name: String(opts[optIdx]), value: String(opts[optIdx])};
+            }
+            opts[optIdx][field] = String(val || '').trim();
+            wizardDocParams[paramIdx].options = opts;
+            const cntEl = document.getElementById('docParamOptCount_' + paramIdx);
+            if(cntEl) cntEl.textContent = opts.length + ' خيار';
+        }
+        function addWizardDocParamOption(paramIdx){
+            if(!wizardDocParams[paramIdx]) return;
+            let opts = wizardDocParams[paramIdx].options || [];
+            const nextNum = opts.length + 1;
+            opts.push({name: 'o' + nextNum, value: 'خيار ' + nextNum});
+            wizardDocParams[paramIdx].options = opts;
+            rptPropsRender();
+        }
+        function removeWizardDocParamOption(paramIdx, optIdx){
+            if(!wizardDocParams[paramIdx]) return;
+            let opts = wizardDocParams[paramIdx].options || [];
+            opts.splice(optIdx, 1);
+            wizardDocParams[paramIdx].options = opts;
+            rptPropsRender();
+        }
+        function toggleWizardDocParamBulk(paramIdx){
+            window._docParamBulkMode = !window._docParamBulkMode;
+            rptPropsRender();
+        }
+        function updateWizardDocParamOptionsBulk(paramIdx, text){
+            if(!wizardDocParams[paramIdx]) return;
+            const lines = String(text || '').split('\n').map(s=>s.trim()).filter(Boolean);
+            const opts = lines.map(line => {
+                if(line.includes(':')){
+                    const parts = line.split(':');
+                    return {name: parts[0].trim(), value: parts.slice(1).join(':').trim()};
+                }
+                if(line.includes('=')){
+                    const parts = line.split('=');
+                    return {name: parts[0].trim(), value: parts.slice(1).join('=').trim()};
+                }
+                if(line.includes(',')){
+                    const parts = line.split(',');
+                    return {name: parts[0].trim(), value: parts.slice(1).join(',').trim()};
+                }
+                return {name: line, value: line};
+            });
+            wizardDocParams[paramIdx].options = opts;
+            const cntEl = document.getElementById('docParamOptCount_' + paramIdx);
+            if(cntEl) cntEl.textContent = opts.length + ' خيار';
+        }
         /* ── Report Properties Panel & Displacing Sidebar Helpers ── */
         function rdSetReportTab(tab){
             const tabMeta = document.getElementById('rdRepTabMeta');
@@ -3060,12 +3179,12 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                 const srcConnOpts = `<option value="">— بدون مصدر (القيم الفريدة من التقرير) —</option>` + srcConnList.map(o=>`<option value="${rptEsc(o.id)}" ${String(p.src_conn || '') === o.id ? 'selected' : ''}>${rptEsc(o.name)}</option>`).join('');
 
                 elPanel.innerHTML = `
-                <div class="p-3 border-b border-sky-200 bg-sky-50/70 flex items-center justify-between shrink-0">
+                <div class="p-3 border-b ${p.is_custom ? 'border-purple-200 bg-purple-50/70' : 'border-sky-200 bg-sky-50/70'} flex items-center justify-between shrink-0">
                     <div class="flex items-center gap-2 min-w-0">
-                        <span class="w-7 h-7 rounded-lg bg-sky-100 text-sky-700 flex items-center justify-center text-xs shrink-0"><i class="fa-solid fa-filter"></i></span>
+                        <span class="w-7 h-7 rounded-lg ${p.is_custom ? 'bg-purple-100 text-purple-700' : 'bg-sky-100 text-sky-700'} flex items-center justify-center text-xs shrink-0"><i class="fa-solid ${p.is_custom ? 'fa-wand-magic-sparkles' : 'fa-filter'}"></i></span>
                         <div class="min-w-0">
                             <div class="font-bold text-slate-800 text-xs truncate">خصائص المدخل: ${rptEsc(p.label || p.column)}</div>
-                            <div class="text-[10px] text-sky-700">مدخل إلزامي للتقرير المستندي #${i + 1}</div>
+                            <div class="text-[10px] ${p.is_custom ? 'text-purple-700 font-bold' : 'text-sky-700'}">${p.is_custom ? 'مدخل مخصص حر (للتعبيرات) #' + (i + 1) : 'مدخل إلزامي للتقرير المستندي #' + (i + 1)}</div>
                         </div>
                     </div>
                     <div class="flex items-center gap-1 shrink-0">
@@ -3077,12 +3196,21 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                 <div class="flex-1 min-h-0 overflow-y-auto custom-scroll p-3 space-y-3 text-xs">
                     <div>
                         <label class="rpt-fl">تسمية المدخل المعروضة للمستخدم *</label>
-                        <input value="${rptEsc(p.label || '')}" oninput="updateWizardDocParam(${i},'label',this.value)" class="rpt-in font-bold text-slate-800" placeholder="مثال: رقم الحوالة">
+                        <input value="${rptEsc(p.label || '')}" oninput="updateWizardDocParam(${i},'label',this.value)" class="rpt-in font-bold text-slate-800" placeholder="مثال: نوع المستند أو خيار الاحتساب">
                     </div>
+                    ${p.is_custom ? `
+                    <div>
+                        <div class="flex items-center justify-between">
+                            <label class="rpt-fl text-purple-950 font-bold">معرّف المتغير (الكود الداخلي) *</label>
+                            <span class="text-[9px] bg-purple-200 text-purple-800 px-1.5 py-0.2 rounded font-bold">مخصص</span>
+                        </div>
+                        <input value="${rptEsc(p.column || '')}" oninput="updateWizardDocParam(${i},'column',this.value)" dir="ltr" class="rpt-in font-mono text-purple-900 border-purple-300 focus:border-purple-500" placeholder="مثال: custom_var أو pay_mode">
+                        <p class="text-[10px] text-slate-400 mt-0.5">معرف فريد لهذا المتغير المخصص.</p>
+                    </div>` : `
                     <div>
                         <label class="rpt-fl">العمود المرتبط من واقع التقرير *</label>
                         <select onchange="updateWizardDocParam(${i},'column',this.value)" class="rpt-in font-bold">${colOpts}</select>
-                    </div>
+                    </div>`}
                     <div class="p-2.5 rounded-xl border border-violet-200 bg-violet-50/70 space-y-1.5">
                         <div class="flex items-center justify-between">
                             <label class="rpt-fl text-violet-900 font-bold mb-0">الاسم المرجعي للمدخل (param_refname)</label>
@@ -3090,7 +3218,16 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                         </div>
                         <input value="${rptEsc(p.param_refname || '')}" oninput="updateWizardDocParam(${i},'param_refname',this.value)" dir="ltr" class="rpt-in font-mono text-violet-900 border-violet-300 focus:border-violet-500 focus:ring-violet-200" placeholder="مثال: doc_type أو branch_id">
                         <p class="text-[10px] text-violet-700 leading-relaxed">
-                            استخدم هذا الاسم للإشارة لقيمة هذا المدخل داخل تعابير الأعمدة عبر <code class="bg-violet-100 text-violet-900 px-1 py-0.5 rounded font-mono">@اسم_المدخل</code> أو <code class="bg-violet-100 text-violet-900 px-1 py-0.5 rounded font-mono">[اسم_المدخل]</code> (مثال: <code class="bg-white/80 px-1 rounded font-mono">IF(@doc_type = '1', 'نقداً', 'آجل')</code>).
+                            استخدم هذا الاسم للإشارة لقيمة هذا المدخل داخل تعابير الأعمدة عبر <code class="bg-violet-100 text-violet-900 px-1 py-0.5 rounded font-mono">@اسم_المدخل</code> أو <code class="bg-violet-100 text-violet-900 px-1 py-0.5 rounded font-mono">[اسم_المدخل]</code> (مثال: <code class="bg-white/80 px-1 rounded font-mono">IF(@${rptEsc(p.param_refname || p.column || 'doc_type')} = '1', 'نقداً', 'آجل')</code>).
+                        </p>
+                    </div>
+                    <div class="p-2.5 rounded-xl border border-purple-200 bg-purple-50/70 space-y-1">
+                        <label class="flex items-center gap-2 cursor-pointer font-bold text-purple-900">
+                            <input type="checkbox" ${p.no_filter ? 'checked' : ''} onchange="updateWizardDocParam(${i},'no_filter',this.checked)" class="rounded text-purple-600">
+                            <span>مدخل مخصص للتعبيرات فقط (بدون شرط SQL)</span>
+                        </label>
+                        <p class="text-[10px] text-purple-700 leading-relaxed">
+                            عند تفعيل هذا الخيار، لا يُضاف شرط فلترة على جداول قاعدة البيانات، وتُستخدم قيمة المدخل فقط للتعويض في تعابير الأعمدة عبر <code class="font-mono bg-purple-100 px-1 py-0.5 rounded">@${rptEsc(p.param_refname || p.column || 'var')}</code>.
                         </p>
                     </div>
                     <div class="grid grid-cols-2 gap-2">
@@ -3104,32 +3241,89 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                         </div>
                     </div>
                     ${p.type === 'select' ? `
-                    <div class="text-[11px] text-indigo-900 bg-indigo-50/90 border border-indigo-200 rounded-xl p-2.5 space-y-2">
-                        <div class="flex items-start gap-2">
-                            <i class="fa-solid fa-list-check text-indigo-600 mt-0.5 text-xs"></i>
-                            <div>
-                                <span class="font-bold">مصدر قيم صندوق الاختيار:</span>
-                                <p class="text-[10px] text-indigo-700 mt-0.5 leading-relaxed">اختر اتصالاً وجدولاً وعموداً لجلب القيم سريعاً (DISTINCT مباشر) مع بحث — اتركها فارغةً لجلب القيم الفريدة من التقرير نفسه (بطيء).</p>
-                            </div>
+                    <div class="text-[11px] text-indigo-900 bg-indigo-50/90 border border-indigo-200 rounded-xl p-2.5 space-y-2.5">
+                        <div class="flex items-center justify-between">
+                            <label class="rpt-fl text-indigo-900 font-bold mb-0">خيارات صندوق الاختيار المخصصة (الاسم والقيمة)</label>
+                            <span class="text-[10px] bg-indigo-200/80 text-indigo-800 px-1.5 py-0.2 rounded font-mono font-bold" id="docParamOptCount_${i}">${(p.options || []).length} خيار</span>
                         </div>
+                        <p class="text-[10px] text-indigo-700 leading-relaxed">
+                            عرّف خيارات القائمة بحقلين: <strong class="text-indigo-950">الاسم</strong> (الكود المستخدم في التعبير مثل <code class="font-mono bg-white px-1 py-0.2 rounded border border-indigo-200">o1</code>) و<strong class="text-indigo-950">القيمة</strong> (النص المعروض للمستخدم مثل <code class="bg-white px-1 py-0.2 rounded border border-indigo-200">نقد</code>).
+                        </p>
+
+                        ${window._docParamBulkMode ? `
                         <div>
-                            <label class="rpt-fl">الاتصال</label>
-                            <select onchange="updateWizardDocParam(${i},'src_conn',this.value)" class="rpt-in font-bold">${srcConnOpts}</select>
+                            <textarea rows="4" oninput="updateWizardDocParamOptionsBulk(${i}, this.value)" class="w-full bg-white border border-indigo-200 rounded-xl px-2.5 py-1.5 text-xs font-mono text-slate-800 focus:outline-none focus:border-indigo-500" placeholder="o1: نقد&#10;o2: اجل">${rptEsc((p.options || []).map(o => typeof o === 'object' && o !== null ? ((o.name || '') + ': ' + (o.value || '')) : String(o)).join('\n'))}</textarea>
+                            <p class="text-[9px] text-slate-400 mt-0.5">الصيغة: الاسم: القيمة في كل سطر (مثال: o1: نقد)</p>
                         </div>
-                        <div class="grid grid-cols-2 gap-2">
-                            <div>
-                                <label class="rpt-fl">الجدول</label>
-                                <input value="${rptEsc(p.src_table || '')}" oninput="updateWizardDocParam(${i},'src_table',this.value)" dir="ltr" class="rpt-in font-mono" placeholder="schema.table">
+                        ` : `
+                        <div class="space-y-1.5 max-h-56 overflow-y-auto custom-scroll p-1.5 bg-white/80 border border-indigo-200/80 rounded-xl" id="docParamOptsList_${i}">
+                            <div class="grid grid-cols-12 gap-1.5 px-2 py-1 bg-indigo-100/70 rounded-lg text-[10px] font-bold text-indigo-900">
+                                <div class="col-span-5 text-right">الاسم (في التعبير)</div>
+                                <div class="col-span-6 text-right">القيمة (المعروضة)</div>
+                                <div class="col-span-1 text-center"></div>
                             </div>
-                            <div>
-                                <label class="rpt-fl">العمود</label>
-                                <input value="${rptEsc(p.src_column || '')}" oninput="updateWizardDocParam(${i},'src_column',this.value)" dir="ltr" class="rpt-in font-mono" placeholder="column">
+                            ${(p.options || []).map((opt, optIdx) => {
+                                const oName = typeof opt === 'object' && opt !== null ? (opt.name || opt.key || opt.code || opt.value || '') : String(opt);
+                                const oVal = typeof opt === 'object' && opt !== null ? (opt.value || opt.label || opt.display || opt.name || '') : String(opt);
+                                return `<div class="grid grid-cols-12 gap-1.5 items-center px-1">
+                                    <div class="col-span-5">
+                                        <input value="${rptEsc(oName)}" oninput="updateWizardDocParamOptionRow(${i}, ${optIdx}, 'name', this.value)" dir="ltr" class="rpt-in font-mono text-center font-bold text-violet-900 border-violet-200 focus:border-violet-500 text-xs py-1" placeholder="مثال: o1">
+                                    </div>
+                                    <div class="col-span-6">
+                                        <input value="${rptEsc(oVal)}" oninput="updateWizardDocParamOptionRow(${i}, ${optIdx}, 'value', this.value)" class="rpt-in font-medium text-slate-800 border-slate-200 focus:border-indigo-500 text-xs py-1" placeholder="مثال: نقد">
+                                    </div>
+                                    <div class="col-span-1 flex items-center justify-center">
+                                        <button type="button" onclick="removeWizardDocParamOption(${i}, ${optIdx})" class="p-1 text-slate-400 hover:text-rose-600 transition" title="حذف الخيار"><i class="fa-solid fa-trash-can text-[10px]"></i></button>
+                                    </div>
+                                </div>`;
+                            }).join('')}
+                        </div>
+                        `}
+
+                        <div class="flex items-center justify-between gap-2 pt-0.5">
+                            <button type="button" onclick="addWizardDocParamOption(${i})" class="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[11px] font-bold transition flex items-center gap-1 shadow-2xs">
+                                <i class="fa-solid fa-plus text-[9px]"></i>
+                                <span>إضافة خيار</span>
+                            </button>
+                            <button type="button" onclick="toggleWizardDocParamBulk(${i})" class="text-[10px] text-indigo-600 hover:text-indigo-800 underline font-medium">
+                                ${window._docParamBulkMode ? 'العودة للجدول' : 'تحرير نصي سريع'}
+                            </button>
+                        </div>
+
+                        <!-- إرشاد التعبير -->
+                        <div class="p-2 bg-violet-50/80 rounded-lg border border-violet-200/80 text-[10px] text-violet-900 space-y-1">
+                            <div class="font-bold flex items-center gap-1 text-violet-950">
+                                <i class="fa-solid fa-lightbulb text-amber-500 text-[11px]"></i>
+                                <span>طريقة الاستدعاء في التعبير:</span>
+                            </div>
+                            <p class="leading-relaxed">
+                                يتم فحص القيمة بالاسم عبر: <code class="bg-white px-1.5 py-0.5 rounded font-mono font-bold text-violet-950 border border-violet-300">IF(@${rptEsc(p.param_refname || p.column || 'V_1')} = ${(p.options && p.options[0] && (p.options[0].name || p.options[0])) || 'o1'}, ..., ...)</code>
+                            </p>
+                        </div>
+
+                        <div class="pt-2 border-t border-indigo-200/80">
+                            <span class="font-bold text-[10px] text-indigo-800">أو مصدر قيم صندوق الاختيار من جدول بقاعدة البيانات:</span>
+                            <div class="mt-1.5 space-y-2">
+                                <div>
+                                    <label class="rpt-fl">الاتصال</label>
+                                    <select onchange="updateWizardDocParam(${i},'src_conn',this.value)" class="rpt-in font-bold">${srcConnOpts}</select>
+                                </div>
+                                <div class="grid grid-cols-2 gap-2">
+                                    <div>
+                                        <label class="rpt-fl">الجدول</label>
+                                        <input value="${rptEsc(p.src_table || '')}" oninput="updateWizardDocParam(${i},'src_table',this.value)" dir="ltr" class="rpt-in font-mono" placeholder="schema.table">
+                                    </div>
+                                    <div>
+                                        <label class="rpt-fl">العمود</label>
+                                        <input value="${rptEsc(p.src_column || '')}" oninput="updateWizardDocParam(${i},'src_column',this.value)" dir="ltr" class="rpt-in font-mono" placeholder="column">
+                                    </div>
+                                </div>
+                                <label class="flex items-center gap-2 cursor-pointer font-bold text-indigo-900">
+                                    <input type="checkbox" ${p.searchable === false ? '' : 'checked'} onchange="updateWizardDocParam(${i},'searchable',this.checked)" class="rounded text-indigo-600">
+                                    <span>قابل للبحث أثناء الكتابة</span>
+                                </label>
                             </div>
                         </div>
-                        <label class="flex items-center gap-2 cursor-pointer font-bold text-indigo-900">
-                            <input type="checkbox" ${p.searchable === false ? '' : 'checked'} onchange="updateWizardDocParam(${i},'searchable',this.checked)" class="rounded text-indigo-600">
-                            <span>قابل للبحث أثناء الكتابة</span>
-                        </label>
                     </div>` : ''}
                     <div>
                         <label class="rpt-fl">القيمة الافتراضية (اختياري)</label>

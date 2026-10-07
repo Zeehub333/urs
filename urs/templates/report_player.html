@@ -881,7 +881,18 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                     defaultValue: p.default_value || p.defaultValue || '',
                     source: p.source || {connection: p.src_conn || p.srcConn || '', table: p.src_table || p.srcTable || '', column: p.src_column || p.srcColumn || ''},
                     searchable: (p.searchable === undefined || p.searchable === null) ? true : (['0', 'false', 'no', 'off'].indexOf(String(p.searchable).toLowerCase()) < 0),
-                    refname: p.param_refname || p.paramRefname || p.refname || p.ref_name || ''
+                    refname: p.param_refname || p.paramRefname || p.refname || p.ref_name || '',
+                    options: (Array.isArray(p.options) ? p.options : (typeof p.options === 'string' && p.options ? p.options.split(',').map(s=>s.trim()).filter(Boolean) : [])).map(item => {
+                        if(typeof item === 'object' && item !== null) return item;
+                        const s = String(item).trim();
+                        if(s.includes(':')) {
+                            const parts = s.split(':');
+                            return {name: parts[0].trim(), value: parts.slice(1).join(':').trim()};
+                        }
+                        return {name: s, value: s};
+                    }),
+                    is_custom: !!(p.is_custom || p.isCustom),
+                    no_filter: !!(p.no_filter || p.noFilter)
                 }));
             }
             // كل أعمدة التقرير حقول تصفية للمستندي (لا أول عمود فقط)
@@ -1263,8 +1274,18 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
         }
         function docValInput(alias, kind, op, doct, val, ph, f){
             if(kind === 'select'){
+                const _opts = (f && Array.isArray(f.options) && f.options.length) ? f.options : null;
+                const _svCur = String(val == null ? (f.defaultValue || '') : val);
+                if(_opts){
+                    const optHtml = `<option value="">-- اختر --</option>` + _opts.map(item => {
+                        const optName = typeof item === 'object' && item !== null ? (item.name || item.key || item.code || item.value || '') : String(item);
+                        const optVal = typeof item === 'object' && item !== null ? (item.value || item.label || item.display || item.name || '') : String(item);
+                        const isSel = (_svCur === String(optName) || _svCur === String(optVal));
+                        return `<option value="${String(optName).replace(/"/g, '&quot;')}" ${isSel ? 'selected' : ''}>${String(optVal).replace(/</g, '&lt;')}</option>`;
+                    }).join('');
+                    return `<select data-docf="${alias}" data-doct="${doct}" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500">${optHtml}</select>`;
+                }
                 const _src = docParamSource(f || {});
-                const _svCur = String(val == null ? '' : val);
                 if(_src){
                     window._docSrcDef[alias] = _src;
                     window._docSrcDef[alias].searchable = !((f || {}).searchable === false);
@@ -3422,7 +3443,18 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                     label = `${f._smart || 'تفاصيل'} (${_n} ${_unit}) — ${f.field || ''}`;
                 } else {
                     opSym = ((o)=> o === 'gt' ? '>' : o === 'lt' ? '<' : o === 'gte' ? '≥' : o === 'lte' ? '≤' : o === 'contains' ? '∋' : o === 'startswith' ? '⇥' : o === 'endswith' ? '⇤' : o === 'not_contains' ? '∌' : o === 'not_equals' ? '≠' : o === 'inyear' ? 'سنة' : o === 'inmonth' ? 'شهر' : o === 'since' ? 'منذ' : o === 'inday' ? 'يوم' : o === 'between' ? '⇋' : '=')(f.op);
-                    label = `${f._smart ? (f._smart + ' ') : ''}${f.field} ${opSym} ${f.value !== undefined && f.value !== '' ? cleanMidnight(f.value) : ((cleanMidnight(f.valFrom) || '') + ' - ' + (cleanMidnight(f.valTo) || ''))}`;
+                    let dispVal = f.value !== undefined && f.value !== '' ? cleanMidnight(f.value) : ((cleanMidnight(f.valFrom) || '') + ' - ' + (cleanMidnight(f.valTo) || ''));
+                    try{
+                        const _dpList = docSearchFields();
+                        const _dp = (_dpList || []).find(d => d.alias === f.field || d.refname === f.field || (f.refname && d.refname === f.refname));
+                        if(_dp && Array.isArray(_dp.options)){
+                            const optObj = _dp.options.find(o => (typeof o === 'object' && o !== null) ? ((o.name || o.key || o.code || o.value) === f.value) : (String(o) === f.value));
+                            if(optObj && typeof optObj === 'object'){
+                                dispVal = optObj.value || optObj.label || optObj.display || dispVal;
+                            }
+                        }
+                    }catch(e){}
+                    label = `${f._smart ? (f._smart + ' ') : ''}${f.field} ${opSym} ${dispVal}`;
                 }
                 html += `<span class="inline-flex items-center gap-1.5 ${isOr ? 'bg-amber-50 text-amber-700' : 'bg-indigo-50 text-indigo-700'} px-2.5 py-1 rounded-lg text-xs font-semibold max-w-full">
                     ${isOr ? '<span class="text-[9px] font-bold bg-amber-200 rounded px-1">أو</span>' : ''}

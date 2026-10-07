@@ -9682,6 +9682,37 @@ def _write_doc_params_el(rml, _ET3, doc_params):
         _sch = p.get("searchable", p.get("searchAble", ""))
         if str(_sch).strip().lower() in ("0", "false", "no", "off"):
             c_el.set("searchable", "0")
+        if p.get("is_custom") or p.get("isCustom"):
+            c_el.set("is_custom", "1")
+        if p.get("no_filter") or p.get("noFilter"):
+            c_el.set("no_filter", "1")
+        # Custom options list for select type: [{'name': 'o1', 'value': 'نقد'}, ...] or strings
+        raw_opts = p.get("options") or []
+        if isinstance(raw_opts, (list, tuple)) and raw_opts:
+            for opt_item in raw_opts:
+                if isinstance(opt_item, dict):
+                    opt_name = str(opt_item.get("name") or opt_item.get("key") or opt_item.get("code") or "").strip()
+                    opt_val = str(opt_item.get("value") or opt_item.get("label") or opt_item.get("display") or opt_name).strip()
+                    if not opt_name:
+                        opt_name = opt_val
+                    if opt_name or opt_val:
+                        opt_el = _ET3.SubElement(c_el, "option")
+                        opt_el.set("name", opt_name)
+                        opt_el.set("value", opt_val)
+                        opt_el.text = opt_val
+                else:
+                    s_opt = str(opt_item).strip()
+                    if s_opt:
+                        opt_el = _ET3.SubElement(c_el, "option")
+                        if ":" in s_opt:
+                            k, v = s_opt.split(":", 1)
+                            opt_el.set("name", k.strip())
+                            opt_el.set("value", v.strip())
+                            opt_el.text = v.strip()
+                        else:
+                            opt_el.text = s_opt
+        elif isinstance(raw_opts, str) and raw_opts.strip():
+            c_el.set("options", raw_opts.strip())
     return True
 
 

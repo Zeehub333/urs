@@ -479,3 +479,128 @@ class DocPlayerMarkupTests(SimpleTestCase):
                 w_html = f.read()
             self.assertIn("param_refname", w_html)
             self.assertIn("الاسم المرجعي للمدخل (param_refname)", w_html)
+
+    def test_custom_doc_param_writer_and_compiler(self):
+        import xml.etree.ElementTree as _ET
+        from rml_python.compiler import RMLReportCompiler
+        rml = _ET.Element("rml")
+        ok = _v._write_doc_params_el(rml, _ET, [{
+            "column": "v_calc_type",
+            "label": "نوع الاحتساب",
+            "type": "select",
+            "op": "equals",
+            "required": True,
+            "param_refname": "V_1",
+            "options": [
+                {"name": "o1", "value": "نقد"},
+                {"name": "o2", "value": "اجل"}
+            ],
+            "is_custom": True,
+            "no_filter": True
+        }])
+        self.assertTrue(ok)
+        xml_str = _ET.tostring(rml, encoding="utf-8").decode("utf-8")
+        self.assertIn('is_custom="1"', xml_str)
+        self.assertIn('no_filter="1"', xml_str)
+        self.assertIn('name="o1"', xml_str)
+        self.assertIn('value="نقد"', xml_str)
+
+        comp = RMLReportCompiler(xml_text=xml_str)
+        params = comp.doc_params()
+        self.assertEqual(len(params), 1)
+        p = params[0]
+        self.assertEqual(p.column, "v_calc_type")
+        self.assertEqual(p.param_refname, "V_1")
+        self.assertTrue(p.is_custom)
+        self.assertTrue(p.no_filter)
+        self.assertEqual(p.options, [
+            {"name": "o1", "value": "نقد"},
+            {"name": "o2", "value": "اجل"}
+        ])
+
+        d = p.to_dict()
+        self.assertTrue(d["is_custom"])
+        self.assertTrue(d["no_filter"])
+        self.assertEqual(d["options"], [
+            {"name": "o1", "value": "نقد"},
+            {"name": "o2", "value": "اجل"}
+        ])
+
+    def test_custom_doc_param_engine_no_sql_filter(self):
+        from rml_python.compiler import RMLReportCompiler
+        from rml_python.engine import RMLReportEngine
+        xml = '''<rml>
+          <rpt_metadata name="doc_custom_test" displayName="Custom Test" type="doc"/>
+          <fields>
+            <field name="id" table_source="t1" type="number"/>
+          </fields>
+          <columns>
+            <column id="1" name="id" alias="رقم" expr="id"/>
+            <column id="2" name="mode_display" alias="الوضع المعروض" expr="IF(@V_1 = o1, 'نقداً', 'آجل')"/>
+          </columns>
+          <doc_params>
+            <doc_param id="dp_1" column="bill_id" label="رقم الفاتورة" type="text" op="equals" required="1"/>
+            <doc_param id="dp_2" column="v_mode" label="الوضع" type="select" op="equals" required="1"
+                       param_refname="V_1" is_custom="1" no_filter="1">
+              <option name="o1" value="نقد">نقد</option>
+              <option name="o2" value="اجل">اجل</option>
+            </doc_param>
+          </doc_params>
+        </rml>'''
+        comp = RMLReportCompiler(xml_text=xml)
+        eng = RMLReportEngine(comp, mock.Mock())
+
+        no_flt = eng._doc_no_filter_keys()
+        self.assertIn("v_mode", no_flt)
+        self.assertIn("v_1", no_flt)
+        self.assertIn("dp_2", no_flt)
+        self.assertNotIn("bill_id", no_flt)
+
+        filters = [
+            {"field": "bill_id", "op": "equals", "value": "1001"},
+            {"field": "v_mode", "op": "equals", "value": "o1", "refname": "V_1"}
+        ]
+        base_where, outer = eng._split_filters(filters, comp.columns())
+        # v_mode must NOT be present in base_where or outer
+        self.assertEqual(len(base_where), 1)
+        self.assertEqual(base_where[0]["field"], "bill_id")
+
+        # required missing check should see both as satisfied
+        self.assertFalse(eng._doc_required_missing(filters))
+
+        # expression expansion: @V_1 = o1 should auto-quote o1 and replace @V_1 with 'o1' -> 'o1' = 'o1'
+        eng._active_filters = filters
+        expanded = eng._rewrite_value_expr("IF(@V_1 = o1, 'نقداً', 'آجل')", {})
+        self.assertIn("'o1' = 'o1'", expanded)
+        self.assertNotIn("@V_1", expanded)
+
+    def test_custom_doc_param_ui_integration(self):
+        import os as _os
+        base = _os.path.dirname(__file__)
+        with open(_os.path.join(base, "templates", "report_player.html"), encoding="utf-8") as f:
+            p_html = f.read()
+        self.assertIn("options", p_html)
+        self.assertIn("is_custom", p_html)
+        self.assertIn("no_filter", p_html)
+        self.assertIn("f.options", p_html)
+
+        for ws in ("workspace_1", "workspace_2"):
+            with open(_os.path.join(base, "..", ws, "apps", "settings",
+                                    "modals", "rml_wizard_modal.html"), encoding="utf-8") as f:
+                m_html = f.read()
+            self.assertIn("createCustomDocParam()", m_html)
+            self.assertIn("+ مدخل مخصص حر", m_html)
+
+            with open(_os.path.join(base, "..", ws, "apps", "settings",
+                                    "modals", "rml_wizard_script.html"), encoding="utf-8") as f:
+                s_html = f.read()
+            self.assertIn("createCustomDocParam", s_html)
+            self.assertIn("updateWizardDocParamOptionRow", s_html)
+            self.assertIn("addWizardDocParamOption", s_html)
+            self.assertIn("خيارات صندوق الاختيار المخصصة", s_html)
+            self.assertIn("الاسم (في التعبير)", s_html)
+            self.assertIn("القيمة (المعروضة)", s_html)
+            self.assertIn("مدخل مخصص للتعبيرات فقط", s_html)
+            self.assertIn("is_custom", s_html)
+            self.assertIn("no_filter", s_html)
+
