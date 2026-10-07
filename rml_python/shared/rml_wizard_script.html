@@ -376,6 +376,34 @@ function wizApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof 
             try{ notify(`مُسحت الحقول (${nf}) والروابط (${nl})`, 'info'); }catch(e){}
         }
         function updateWizardField(idx, field, val){ wizardFields[idx][field]=val; }
+        function wbAddGroupFromField(fldName){
+            const existsCol = wizardColumns.find(c => c.expr === fldName || c.name === fldName || c.alias === fldName);
+            let alias = existsCol ? (existsCol.alias || existsCol.name) : fldName;
+            if(!existsCol){
+                const f = wizardFields.find(x=>x.name === fldName) || {name: fldName, type: 'VARCHAR', table_source: ''};
+                wizardColumns.push({
+                    id: String(wizardColumns.length + 1),
+                    name: f.name,
+                    alias: f.name,
+                    expr: f.name,
+                    type: f.type || 'VARCHAR',
+                    col_refname: (f.table_source || f.tableSource ? (String(f.table_source || f.tableSource) + '.') : '') + f.name,
+                    visible: true,
+                    col_type: 'direct',
+                    align: 'right',
+                    dir: 'rtl'
+                });
+            }
+            let mx = 0;
+            wizardGroups.forEach(g=>{ const n = parseInt(g.id); if(!isNaN(n)) mx = Math.max(mx, n); });
+            wizardGroups.push({id:String(mx + 1), name:'تجميع بحسب: '+alias, order:wizardGroups.length+1, level:1, columns:[alias], color:'', bg:'', weight:'', frozen:false});
+            if(typeof rdRenderElementsTree === 'function') rdRenderElementsTree();
+            try{ renderWizardGroups(); }catch(e){}
+            try{ rptPreviewSoon(); }catch(e){}
+            try{ wbPaintStatus(); }catch(e){}
+            try{ notify('تمت إضافة التجميع بنجاح', 'success'); }catch(e){}
+            if(typeof rdNavTo === 'function') rdNavTo('groups');
+        }
         // ── Field modal (create / edit: name + type + connection + table) ──
         let fieldEditIdx = -1;
         function openFieldModal(idx){
@@ -5632,7 +5660,7 @@ list.innerHTML = '<p class="text-slate-400 text-xs py-2">الأعمدة الفر
                         + (_rtype !== 'master' ? '<button onclick="wbSetSub(\''+wbEsc(k).replace(/'/g,"\\'")+'\')" class="wb-tctl '+(_isSub?'wb-tctl-on2':'')+'" title="الجدول الفرعي الافتراضي للتقرير التحليلي"><i class="fa-solid fa-list-check text-[10px]"></i> فرعي'+(_isSub?' ✓':'')+'</button>' : '')
                         + '</div>'
                         + (_hasWhere ? '<div class="px-2 py-1 bg-amber-50/90 border-b border-amber-200/70 text-[10px] text-amber-900 font-mono flex items-center justify-between gap-1" dir="ltr" title="شرط الجدول: '+wbEsc(_whereFull)+'"><span class="truncate flex-1 font-bold flex items-center gap-1"><i class="fa-solid fa-filter text-amber-600 text-[9px]" dir="rtl"></i><span>'+wbEsc(_whereFull)+'</span></span><button onclick="openTableFilterModal(\''+wbEsc(k).replace(/'/g,"\\'")+'\')" class="text-amber-700 hover:text-amber-900 shrink-0 font-sans px-1" title="تعديل الشرط"><i class="fa-solid fa-pen text-[9px]"></i></button></div>' : '')
-                        + g.rows.map(r=>'<div class="wb-drow" data-fld="'+wbEsc(r.f.name)+'"><span class="font-mono" dir="ltr">'+wbEsc(r.f.name)+'</span><span class="text-[10px] text-slate-400">'+wbEsc(r.f.type||'')+'</span><button onclick="removeWizardField('+r.i+')" class="wb-del" title="حذف الحقل"><i class="fa-solid fa-xmark text-[10px]"></i></button></div>').join('')
+                        + g.rows.map(r=>'<div class="wb-drow" data-fld="'+wbEsc(r.f.name)+'"><span class="font-mono" dir="ltr">'+wbEsc(r.f.name)+'</span><span class="text-[10px] text-slate-400">'+wbEsc(r.f.type||'')+'</span><button onclick="wbAddGroupFromField(\''+wbEsc(r.f.name).replace(/'/g,"\\'")+'\')" class="wb-del" style="color:#0ea5e9" title="تجميع بحسب"><i class="fa-solid fa-layer-group text-[10px]"></i></button><button onclick="removeWizardField('+r.i+')" class="wb-del" title="حذف الحقل"><i class="fa-solid fa-xmark text-[10px]"></i></button></div>').join('')
                         + '</div>';
                     }).join('') || '<p class="text-slate-400 text-center py-8">لا حقول بعد — استورد من جدول أو أضف حقلاً</p>')
                     + '</div></div></div></div>';
