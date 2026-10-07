@@ -1960,6 +1960,9 @@ class RMLReportEngine:
         ref = (getattr(dp, "param_refname", None) or getattr(dp, "refname", None) or "").strip().lower()
         col = str(getattr(dp, "column", "") or "").strip().lower()
         pid = str(getattr(dp, "id", "") or "").strip().lower()
+        alias = str(getattr(dp, "alias", None) or getattr(dp, "label", None) or getattr(dp, "name", None) or "").strip().lower()
+
+        eff_filters = filters if filters is not None else getattr(self, "_active_filters", None)
 
         def _check_f(f: Dict[str, Any]):
             if not isinstance(f, dict):
@@ -1976,7 +1979,10 @@ class RMLReportEngine:
                         return True, val
             f_fld = str(f.get("field") or f.get("column") or f.get("name") or "").strip().lower()
             f_ref = str(f.get("refname") or f.get("param_refname") or "").strip().lower()
-            if (ref and (f_ref == ref or f_fld == ref)) or (col and f_fld == col) or (pid and f_fld == pid):
+            if ((ref and (f_ref == ref or f_fld == ref)) or 
+                (col and (f_fld == col or f_ref == col)) or 
+                (pid and (f_fld == pid or f_ref == pid)) or 
+                (alias and (f_fld == alias or f_ref == alias))):
                 v = f.get("value")
                 if v is not None and str(v).strip() != "":
                     return True, v
@@ -1985,7 +1991,7 @@ class RMLReportEngine:
                     return True, vf
             return False, None
 
-        for f in (filters or []):
+        for f in (eff_filters or []):
             hit, val = _check_f(f)
             if hit:
                 return val
@@ -7705,6 +7711,8 @@ class RMLReportEngine:
         # we avoid the (very slow) staging copy and instead fetch each
         # connection independently, then join in Python. The user opts in
         # explicitly so we never break legacy reports by accident.
+        filters = payload.get("filters") or payload.get("activeFilters") or []
+        self._active_filters = filters
         try:
             if payload.get("distributed") or getattr(self, "_force_distributed", False):
                 return self._execute_distributed(payload)
@@ -7715,11 +7723,11 @@ class RMLReportEngine:
         except Exception:
             _refresh = False
         self._ensure_api_staged(refresh=_refresh)
-        filters = payload.get("filters") or payload.get("activeFilters") or []
         column_filters = payload.get("columnFilters") or {}
         for col, vals in column_filters.items():
             if vals:
                 filters.append({"field": col, "op": "in", "value": vals})
+        self._active_filters = filters
 
         sort = payload.get("sort") or payload.get("activeSort")
         page = payload.get("page") or payload.get("currentPage") or 1
@@ -8873,6 +8881,7 @@ class RMLReportEngine:
         from collections import defaultdict
         self._report_progress({"stage": "distributed", "text": "بدء التنفيذ الموزع…"})
         filters = payload.get("filters") or payload.get("activeFilters") or []
+        self._active_filters = filters
         sort = payload.get("sort") or payload.get("activeSort")
         page = int(payload.get("page") or 1)
         page_size = payload.get("pageSize") or payload.get("page_size") or 50

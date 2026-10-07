@@ -1170,27 +1170,39 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                 });
             }catch(e){}
 
+            function findActiveDocVal(f, type){
+                const af = (activeFilters || []).find(a => a && (
+                    a.field === f.alias || 
+                    (f.refname && (a.refname === f.refname || a.field === f.refname)) ||
+                    (f.alias && a.field === resolveDbField(f.alias))
+                ));
+                if(!af) return undefined;
+                if(type === 'from') return (af.valFrom !== undefined && af.valFrom !== null && af.valFrom !== '') ? af.valFrom : af.value;
+                if(type === 'to') return (af.valTo !== undefined && af.valTo !== null && af.valTo !== '') ? af.valTo : undefined;
+                return (af.value !== undefined && af.value !== null && af.value !== '') ? af.value : af.valFrom;
+            }
+
             wrap.innerHTML = fields.map((f)=>{
                 const op = f.op || docDefOp(f.kind);
                 let valInput = '';
                 if(f.kind === 'date' && op === 'between'){
-                    const vFrom = keep[f.alias + '||from'] ?? '';
-                    const vTo = keep[f.alias + '||to'] ?? '';
+                    const vFrom = keep[f.alias + '||from'] ?? findActiveDocVal(f, 'from') ?? '';
+                    const vTo = keep[f.alias + '||to'] ?? findActiveDocVal(f, 'to') ?? '';
                     valInput = `<div class="flex items-center gap-1">
                         <input data-dhf="${f.alias}" data-dht="from" value="${String(vFrom).replace(/"/g, '&quot;')}" type="date" class="bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-indigo-500 w-32" onchange="docHeaderSelectChanged('${f.alias}', this.value)" onkeydown="if(event.key==='Enter') docHeaderSelectChanged('${f.alias}', this.value)">
                         <span class="text-slate-400 text-[10px]">إلى</span>
                         <input data-dhf="${f.alias}" data-dht="to" value="${String(vTo).replace(/"/g, '&quot;')}" type="date" class="bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-indigo-500 w-32" onchange="docHeaderSelectChanged('${f.alias}', this.value)" onkeydown="if(event.key==='Enter') docHeaderSelectChanged('${f.alias}', this.value)">
                     </div>`;
                 } else if(f.kind === 'number' && op === 'between'){
-                    const vFrom = keep[f.alias + '||from'] ?? '';
-                    const vTo = keep[f.alias + '||to'] ?? '';
+                    const vFrom = keep[f.alias + '||from'] ?? findActiveDocVal(f, 'from') ?? '';
+                    const vTo = keep[f.alias + '||to'] ?? findActiveDocVal(f, 'to') ?? '';
                     valInput = `<div class="flex items-center gap-1">
                         <input data-dhf="${f.alias}" data-dht="from" value="${String(vFrom).replace(/"/g, '&quot;')}" type="text" inputmode="numeric" placeholder="من" class="bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-indigo-500 w-20 text-center" onchange="docHeaderSelectChanged('${f.alias}', this.value)" onkeydown="if(event.key==='Enter') docHeaderSelectChanged('${f.alias}', this.value)">
                         <span class="text-slate-400 text-[10px]">-</span>
                         <input data-dhf="${f.alias}" data-dht="to" value="${String(vTo).replace(/"/g, '&quot;')}" type="text" inputmode="numeric" placeholder="إلى" class="bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-indigo-500 w-20 text-center" onchange="docHeaderSelectChanged('${f.alias}', this.value)" onkeydown="if(event.key==='Enter') docHeaderSelectChanged('${f.alias}', this.value)">
                     </div>`;
                 } else if(f.kind === 'select' || (Array.isArray(f.options) && f.options.length)){
-                    let curV = keep[f.alias + '||single'] ?? f.defaultValue ?? '';
+                    let curV = keep[f.alias + '||single'] ?? findActiveDocVal(f, 'single') ?? f.defaultValue ?? '';
                     const _opts = (f && Array.isArray(f.options) && f.options.length) ? f.options : null;
                     if(_opts){
                         if(curV === '' && _opts.length){
@@ -1237,7 +1249,7 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                     }
                 } else {
                     const ph = f.kind === 'number' ? 'القيمة...' : (op === 'inyear' ? 'سنة...' : op === 'inmonth' ? 'شهر...' : 'القيمة...');
-                    const curV = keep[f.alias + '||single'] ?? f.defaultValue ?? '';
+                    const curV = keep[f.alias + '||single'] ?? findActiveDocVal(f, 'single') ?? f.defaultValue ?? '';
                     valInput = `<input data-dhf="${f.alias}" data-dht="single" value="${String(curV).replace(/"/g, '&quot;')}" type="${f.kind==='date'?'date':'text'}" ${f.kind==='number'?'inputmode="numeric"':''} placeholder="${ph}" class="bg-white border border-slate-200 rounded-lg px-2.5 py-1 text-xs focus:outline-none focus:border-indigo-500 min-w-[130px]" onchange="docHeaderSelectChanged('${f.alias}', this.value)" onkeydown="if(event.key==='Enter') docHeaderSelectChanged('${f.alias}', this.value)">`;
                 }
                 return `<div class="flex items-center gap-2 bg-white border border-slate-200/90 rounded-xl px-2.5 py-1 shadow-2xs">
@@ -1245,6 +1257,18 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                     <div class="min-w-0">${valInput}</div>
                 </div>`;
             }).join('');
+
+            fields.forEach(f => {
+                const op = f.op || docDefOp(f.kind);
+                const hasAf = activeFilters.some(a => a && (a.field === f.alias || (f.refname && a.refname === f.refname)));
+                if(!hasAf){
+                    const inp = document.querySelector(`#docHeaderControls [data-dhf="${f.alias}"][data-dht="single"]`);
+                    const val = inp ? (inp.value || '').trim() : '';
+                    if(val !== ''){
+                        activeFilters.push({field: f.alias, op: op, value: val, refname: f.refname || ''});
+                    }
+                }
+            });
         }
         function docHeaderFetch(inPlace, changedAlias){
             const fields = docSearchFields();
@@ -1570,7 +1594,7 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                     else if(f && f.field && f.op){
                         // فلاتر IN ضخمة (إكسل) لا تُحفظ في الرابط — تُتجاهل عند الاسترجاع
                         if(typeof f.value === 'string' && f.value.indexOf('__skipped_') === 0) return;
-                        activeFilters.push({field: f.field, op: f.op, value: f.value, valFrom: f.valFrom, valTo: f.valTo});
+                        activeFilters.push({field: f.field, op: f.op, value: f.value, valFrom: f.valFrom, valTo: f.valTo, refname: f.refname || ''});
                     }
                 });
             }catch(e){}
@@ -1639,7 +1663,14 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                 if(f && Array.isArray(f.any)) return {any: f.any.map(mapF)};
                 if(f && Array.isArray(f.all)) return {all: f.all.map(mapF)};
                 const res = {field:resolveDbField(f.field), op:f.op, value:f.value, valFrom:f.valFrom, valTo:f.valTo};
-                if(f && f.refname) res.refname = f.refname;
+                let rname = f.refname;
+                if(!rname && typeof docSearchFields === 'function'){
+                    try{
+                        const df = docSearchFields().find(d => d && (d.alias === f.field || (d.refname && d.refname === f.field)));
+                        if(df && df.refname) rname = df.refname;
+                    }catch(e){}
+                }
+                if(rname) res.refname = rname;
                 return res;
             };
             const andF = [], ors = {};
