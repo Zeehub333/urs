@@ -950,7 +950,11 @@ function wizApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof 
             for(const r of importFilterRowsState){
                 if(!r.col) continue;
                 const cat = getImportColTypeCategory(r.col);
-                const colRef = shortTbl ? `[${shortTbl}.${r.col}]` : `[${r.col}]`;
+                let cleanCol = r.col;
+                if (shortTbl && cleanCol.startsWith(shortTbl + '.')) {
+                    cleanCol = cleanCol.substring(shortTbl.length + 1);
+                }
+                const colRef = shortTbl ? `[${shortTbl}.${cleanCol}]` : `[${cleanCol}]`;
                 const val = String(r.val || '').trim();
                 const valEsc = val.replace(/'/g, "''");
                 const val2 = String(r.val2 || '').trim();
@@ -1387,7 +1391,11 @@ function wizApp(){ return (typeof APP_NAME !== 'undefined' ? APP_NAME : (typeof 
             for(const r of tfModalFilterRowsState){
                 if(!r.col) continue;
                 const cat = getTfColTypeCategory(r.col);
-                const colRef = shortTbl ? `[${shortTbl}.${r.col}]` : `[${r.col}]`;
+                let cleanCol = r.col;
+                if (shortTbl && cleanCol.startsWith(shortTbl + '.')) {
+                    cleanCol = cleanCol.substring(shortTbl.length + 1);
+                }
+                const colRef = shortTbl ? `[${shortTbl}.${cleanCol}]` : `[${cleanCol}]`;
                 const val = String(r.val || '').trim();
                 const valEsc = val.replace(/'/g, "''");
                 const val2 = String(r.val2 || '').trim();
