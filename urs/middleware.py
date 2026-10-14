@@ -17,7 +17,7 @@ _EXEMPT_EXACT = frozenset({
     "/api/master/status/",
     "/api/master/auth/",
 })
-_EXEMPT_PREFIXES_API = ("/api/workspaces/", "/api/lookup/lists/", "/api/lookup/tables/", "/api/connections/", "/api/nlp/")
+_EXEMPT_PREFIXES_API = ("/api/workspaces/", "/api/lookup/lists/", "/api/lookup/tables/", "/api/connections/", "/api/nlp/", "/api/setup/")
 _EXEMPT_PREFIXES = (
     "/settings/setup/",
     "/admin/",
