@@ -18,7 +18,6 @@ function wsMasterOpen(firstSet, cb) {
     m = document.createElement('div');
     m.id = 'wsMasterModal';
     m.className = 'fixed inset-0 z-[90] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4';
-    m.setAttribute('onclick', 'if(event.target===this)wsMasterClose()');
     const pwRow = (id, label, ph) =>
         '<div><label class="block font-semibold text-slate-700 mb-1">' + label + '</label>' +
         '<input id="' + id + '" type="password" dir="ltr" autocomplete="new-password" placeholder="' + ph + '" ' +

@@ -371,12 +371,15 @@ def junction_name(main_table: str, sub_table: str) -> str:
 
 def ensure_junction(main_table: str, sub_table: str, schema: str, connection: Any,
                     customs: List[Dict[str, Any]],
-                    refs: Optional[Dict[str, Any]] = None) -> Tuple[Optional[Dict[str, Any]], str]:
+                    refs: Optional[Dict[str, Any]] = None,
+                    detail_text: bool = False) -> Tuple[Optional[Dict[str, Any]], str]:
     """Build (+save) the junction custom model id/master_id/detail_id/[customs].
 
     Fixed shape in ALL cases (customs optional): "id" SERIAL PRIMARY KEY
     (auto serial, added by build_ddl) + master_id (master PK value) +
     detail_id (sub PK value = detail sub_key) + optional custom columns.
+    detail_text=True (external text keys, e.g. Oracle VARCHAR codes) makes
+    detail_id VARCHAR(200) instead of INTEGER.
 
     customs: [{name, alias?, data_type?/type?}] designer detail columns.
     refs: optional {master_table, master_col, sub_table, sub_col} recorded
@@ -384,11 +387,15 @@ def ensure_junction(main_table: str, sub_table: str, schema: str, connection: An
     Returns (model, error). Caller migrates it.
     """
     jn = junction_name(main_table, sub_table)
+    _detail_id = ({"name": "detail_id", "label": "المرجع الفرعي", "type": "VARCHAR",
+                   "length": 200, "nullable": False, "required": True}
+                  if detail_text else
+                  {"name": "detail_id", "label": "المرجع الفرعي", "type": "INTEGER",
+                   "nullable": False, "required": True})
     fields: List[Dict[str, Any]] = [
         {"name": "master_id", "label": "السجل الأساسي", "type": "INTEGER",
          "nullable": False, "required": True},
-        {"name": "detail_id", "label": "المرجع الفرعي", "type": "INTEGER",
-         "nullable": False, "required": True},
+        _detail_id,
     ]
     seen = {"id", "master_id", "detail_id"}
     for c in (customs or []):

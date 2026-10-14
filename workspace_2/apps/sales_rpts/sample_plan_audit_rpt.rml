@@ -1,0 +1,827 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rml>
+  <rpt_metadata name="sample_plan_audit_rpt" displayName="تقرير رقابة خطة العينات" category="الخطط والانحرافات" schema="IAS20264" icon="fa-chart-pie" doc_layout="table" connection="ORCL_PROD" namespace="p" alt_row_color_2="#f8fafc"/>
+  <rml_connections>
+    <connection id="1" connection_id="16"/>
+  </rml_connections>
+  <rml_chart>
+    <chart id="1" type="bar" title="المبيعات خلال الفترة" category="BILL_DATE" value="SALES_VAL" series="I_CODE"/>
+  </rml_chart>
+  <rules>
+    <rule id="1" name="plan_rates" display="تهيئة نسب خطط العينات" connection_id="16" entry_mode="batch">
+      <sources>
+        <source field="I_NAME"/>
+      </sources>
+      <variables>
+        <variable name="sample_pct" display="نسبة العينات %" type="number"/>
+      </variables>
+      <policies>
+        <policy id="p1" name="شريحة 5%" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>اكوابانت 40 مجم فيال</v>
+              <v>هيسون اكوى  100مجم فيال</v>
+              <v>اينوكسابارين تعافي 4000 ملجم  2 حقنة</v>
+              <v>اينوكسابارين تعافي 6000 ملجم  2 حقنة</v>
+              <v>افلودوز اكس ار  1 ش * 10</v>
+              <v>بايوبينيم 1جم فيال</v>
+              <v>بايوسيفيكسيم 100ملج 60 ML شراب</v>
+              <v>بايوسيفيكسيم 400 ملح 6 كبسول</v>
+              <v>بايوكسون 1جم فيال</v>
+              <v>بيوكسيغا  10 ملج 2ش * 14 قرص</v>
+              <v>بيوكسيغا 5 ملج  2ش * 14 قرص</v>
+              <v>جاسكيور  200 ملج شراب</v>
+              <v>جنتازون كريم 30جرام</v>
+              <v>سيتا فيا بلاس 1000/50 ملج  8 ش *7قرص</v>
+              <v>فاليستو  50 ملج  2ش * 14 قرص</v>
+              <v>فاليستو 100 ملج  2ش * 14 قرص</v>
+              <v>فوربيم 1جم فيال</v>
+              <v>ميوفيكس 150ملج  2ش * 10 قرص</v>
+            </on>
+          </match>
+          <values>
+            <v name="sample_pct">5</v>
+          </values>
+        </policy>
+        <policy id="p2" name="شريحة 10%" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>ميراكوى 1جم فيال</v>
+              <v>اكواسيبام 500/500 مجم فيال</v>
+              <v>تازوبيرث 4.5 جم فيال</v>
+              <v>اكلاف 1.2 جم فيال</v>
+              <v>بريدتش  40 مجم فيال</v>
+              <v>افسيناف 1جم فيال</v>
+              <v>سيفيبيم اكوا 1جم فيالة</v>
+              <v>تافيديم 1جم فيال</v>
+              <v>اوكسيريم 750 ملج فياله</v>
+              <v>اكوابرازون 1جم فيال</v>
+              <v>اكواراب 20 مجم فيال</v>
+              <v>اوسترا راف  200 ملج شراب</v>
+              <v>ازيرفين  500 ملج 3 ق</v>
+              <v>اكسوراف 2.5 ملج 3ش * 10ق</v>
+              <v>اكسوراف 15 ملج 3ش * 10ق</v>
+              <v>فوليراف بلس  2ش * 10 ق</v>
+              <v>كابيراف  0.5 ملج 4 ق</v>
+              <v>ايتامراف 500 ملج  2ش * 10 ق</v>
+              <v>بونماك راف  4*5  ملج شراب</v>
+              <v>بونماك راف 4 ق</v>
+              <v>نيترو راف 100ملج 2ش * 10 ق</v>
+              <v>رابيجاست 20ملجم 3ش*10ق</v>
+              <v>اف اف زد علب 30قرص</v>
+              <v>فرت فل 50ملجم 1ش*10ق</v>
+              <v>كالسينيوم زد دي3 اقراص 2ش*15ق</v>
+              <v>اوندون اقراص 500ملجم 3ش*10ق</v>
+              <v>زولكس 8 ملجم - 20 قرص</v>
+              <v>فيلتكس 50 ملجم - 30 قرص</v>
+              <v>ليفوتكس 5 ملجم - 10 قرص</v>
+              <v>تكساب 90 ملجم - 14 قرص</v>
+              <v>تكساب 120 ملجم - 7 قرص</v>
+              <v>اوندون اقراص 500ملجم 1ش*10ق</v>
+            </on>
+          </match>
+          <values>
+            <v name="sample_pct">10</v>
+          </values>
+        </policy>
+        <policy id="p_default" name="الافتراضي" priority="999" is_default="1">
+          <values>
+            <v name="sample_pct">0</v>
+          </values>
+        </policy>
+      </policies>
+    </rule>
+    <rule id="2" name="bounus_rates" display="تهيئة نسب خطط البونص" entry_mode="single">
+      <sources>
+        <source field="I_NAME"/>
+      </sources>
+      <variables>
+        <variable name="q1_b_rate" display="نسب البونص التجزئة%" type="number"/>
+        <variable name="q2_b_rate" display="نسب البونص الجملة%" type="number"/>
+      </variables>
+      <policies>
+        <policy id="p_single_1791878077445_1" name="ميراكوى 1جم فيال" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>ميراكوى 1جم فيال</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">40</v>
+            <v name="q2_b_rate">20</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_2" name="اكواسيبام 500/500 مجم فيال" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>اكواسيبام 500/500 مجم فيال</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">40</v>
+            <v name="q2_b_rate">20</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_3" name="تازوبيرث 4.5 جم فيال" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>تازوبيرث 4.5 جم فيال</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">40</v>
+            <v name="q2_b_rate">20</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_4" name="اكلاف 1.2 جم فيال" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>اكلاف 1.2 جم فيال</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">40</v>
+            <v name="q2_b_rate">20</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_5" name="اكوابانت 40 مجم فيال" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>اكوابانت 40 مجم فيال</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">100</v>
+            <v name="q2_b_rate">70</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_6" name="فيتوسوم  40 مجم فيال" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>فيتوسوم  40 مجم فيال</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">0</v>
+            <v name="q2_b_rate">10</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_7" name="هيسون اكوى  100مجم فيال" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>هيسون اكوى  100مجم فيال</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">100</v>
+            <v name="q2_b_rate">100</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_8" name="بريدتش  40 مجم فيال" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>بريدتش  40 مجم فيال</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">40</v>
+            <v name="q2_b_rate">20</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_9" name="افسيناف 1جم فيال" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>افسيناف 1جم فيال</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">40</v>
+            <v name="q2_b_rate">20</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_10" name="سيفيبيم اكوا 1جم فيالة" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>سيفيبيم اكوا 1جم فيالة</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">40</v>
+            <v name="q2_b_rate">20</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_11" name="تافيديم 1جم فيال" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>تافيديم 1جم فيال</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">40</v>
+            <v name="q2_b_rate">20</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_12" name="اوكسيريم 750 ملج فياله" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>اوكسيريم 750 ملج فياله</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">40</v>
+            <v name="q2_b_rate">20</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_13" name="اكوابرازون 1جم فيال" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>اكوابرازون 1جم فيال</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">40</v>
+            <v name="q2_b_rate">20</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_14" name="اكواراب 20 مجم فيال" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>اكواراب 20 مجم فيال</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">40</v>
+            <v name="q2_b_rate">20</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_15" name="سيفوتاكسيم اكوا 1 جم فيال" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>سيفوتاكسيم اكوا 1 جم فيال</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">0</v>
+            <v name="q2_b_rate">0</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_16" name="اوسترا راف  200 ملج شراب" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>اوسترا راف  200 ملج شراب</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">30.000000000000004</v>
+            <v name="q2_b_rate">20</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_17" name="جاسكيور  200 ملج شراب" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>جاسكيور  200 ملج شراب</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">50</v>
+            <v name="q2_b_rate">40</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_18" name="ازيرفين  500 ملج 3 ق" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>ازيرفين  500 ملج 3 ق</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">100</v>
+            <v name="q2_b_rate">100</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_19" name="اكسوراف 2.5 ملج 3ش * 10ق" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>اكسوراف 2.5 ملج 3ش * 10ق</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">30.000000000000004</v>
+            <v name="q2_b_rate">0</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_20" name="اكسوراف 15 ملج 3ش * 10ق" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>اكسوراف 15 ملج 3ش * 10ق</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">30.000000000000004</v>
+            <v name="q2_b_rate">0</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_21" name="فوليراف بلس  2ش * 10 ق" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>فوليراف بلس  2ش * 10 ق</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">30.000000000000004</v>
+            <v name="q2_b_rate">0</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_22" name="كابيراف  0.5 ملج 4 ق" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>كابيراف  0.5 ملج 4 ق</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">30.000000000000004</v>
+            <v name="q2_b_rate">20</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_23" name="ايتامراف 500 ملج  2ش * 10 ق" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>ايتامراف 500 ملج  2ش * 10 ق</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">30.000000000000004</v>
+            <v name="q2_b_rate">20</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_24" name="بونماك راف  4*5  ملج شراب" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>بونماك راف  4*5  ملج شراب</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">30.000000000000004</v>
+            <v name="q2_b_rate">20</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_25" name="بونماك راف 4 ق" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>بونماك راف 4 ق</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">30.000000000000004</v>
+            <v name="q2_b_rate">20</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_26" name="نيترو راف 100ملج 2ش * 10 ق" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>نيترو راف 100ملج 2ش * 10 ق</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">30.000000000000004</v>
+            <v name="q2_b_rate">20</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_27" name="محلول كلوريد الصوديوم 0.9% مع iv" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>محلول كلوريد الصوديوم 0.9% مع iv</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">0</v>
+            <v name="q2_b_rate">0</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_28" name="محلول كلوريد الصوديوم 0.9%  جلوكوز 5% حقن (500 مل )مع iv" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>محلول كلوريد الصوديوم 0.9%  جلوكوز 5% حقن (500 مل )مع iv</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">0</v>
+            <v name="q2_b_rate">0</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_29" name="محلول جلوكوز حقن  0.5%500ML مع vi" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>محلول جلوكوز حقن  0.5%500ML مع vi</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">0</v>
+            <v name="q2_b_rate">0</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_30" name="هيبارين تعافي 25000 U - فيالة" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>هيبارين تعافي 25000 U - فيالة</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">20</v>
+            <v name="q2_b_rate">10</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_31" name="اينوكسابارين تعافي 6000 ملجم  2 حقنة" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>اينوكسابارين تعافي 6000 ملجم  2 حقنة</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">20</v>
+            <v name="q2_b_rate">10</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_32" name="اينوكسابارين تعافي 4000 ملجم  2 حقنة" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>اينوكسابارين تعافي 4000 ملجم  2 حقنة</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">20</v>
+            <v name="q2_b_rate">10</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_33" name="رابيجاست 20ملجم 3ش*10ق" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>رابيجاست 20ملجم 3ش*10ق</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">40</v>
+            <v name="q2_b_rate">20</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_34" name="اف اف زد علب 30قرص" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>اف اف زد علب 30قرص</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">30.000000000000004</v>
+            <v name="q2_b_rate">20</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_35" name="فرت فل 50ملجم 1ش*10ق" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>فرت فل 50ملجم 1ش*10ق</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">40</v>
+            <v name="q2_b_rate">20</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_36" name="كالسينيوم زد دي3 اقراص 2ش*15ق" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>كالسينيوم زد دي3 اقراص 2ش*15ق</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">30.000000000000004</v>
+            <v name="q2_b_rate">20</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_37" name="جنتازون كريم 30جرام" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>جنتازون كريم 30جرام</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">40</v>
+            <v name="q2_b_rate">30.000000000000004</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_38" name="اوندون اقراص 500ملجم 3ش*10ق" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>اوندون اقراص 500ملجم 3ش*10ق</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">30.000000000000004</v>
+            <v name="q2_b_rate">20</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_39" name="اوندون اقراص 500ملجم 1ش*10ق" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>اوندون اقراص 500ملجم 1ش*10ق</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">30.000000000000004</v>
+            <v name="q2_b_rate">20</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_40" name="افلودوز اكس ار  1 ش * 10" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>افلودوز اكس ار  1 ش * 10</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">30.000000000000004</v>
+            <v name="q2_b_rate">20</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_41" name="زولكس 8 ملجم - 20 قرص" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>زولكس 8 ملجم - 20 قرص</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">10</v>
+            <v name="q2_b_rate">10</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_42" name="فيلتكس 50 ملجم - 30 قرص" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>فيلتكس 50 ملجم - 30 قرص</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">10</v>
+            <v name="q2_b_rate">10</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_43" name="ليفوتكس 5 ملجم - 10 قرص" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>ليفوتكس 5 ملجم - 10 قرص</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">10</v>
+            <v name="q2_b_rate">10</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_44" name="تكساب 90 ملجم - 14 قرص" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>تكساب 90 ملجم - 14 قرص</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">10</v>
+            <v name="q2_b_rate">10</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_45" name="تكساب 120 ملجم - 7 قرص" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>تكساب 120 ملجم - 7 قرص</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">10</v>
+            <v name="q2_b_rate">10</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_46" name="بايوسيفيكسيم 100ملج 60 ML شراب" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>بايوسيفيكسيم 100ملج 60 ML شراب</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">20</v>
+            <v name="q2_b_rate">20</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_47" name="بايوسيفيكسيم 400 ملح 6 كبسول" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>بايوسيفيكسيم 400 ملح 6 كبسول</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">20</v>
+            <v name="q2_b_rate">20</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_48" name="سيتا فيا بلاس 1000/50 ملج  8 ش *7قرص" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>سيتا فيا بلاس 1000/50 ملج  8 ش *7قرص</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">20</v>
+            <v name="q2_b_rate">20</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_49" name="بيوكسيغا  10 ملج 2ش * 14 قرص" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>بيوكسيغا  10 ملج 2ش * 14 قرص</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">10</v>
+            <v name="q2_b_rate">10</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_50" name="بيوكسيغا 5 ملج  2ش * 14 قرص" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>بيوكسيغا 5 ملج  2ش * 14 قرص</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">10</v>
+            <v name="q2_b_rate">10</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_51" name="ميوفيكس 150ملج  2ش * 10 قرص" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>ميوفيكس 150ملج  2ش * 10 قرص</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">20</v>
+            <v name="q2_b_rate">20</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_52" name="فاليستو  50 ملج  2ش * 14 قرص" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>فاليستو  50 ملج  2ش * 14 قرص</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">20</v>
+            <v name="q2_b_rate">20</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_53" name="فاليستو 100 ملج  2ش * 14 قرص" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>فاليستو 100 ملج  2ش * 14 قرص</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">20</v>
+            <v name="q2_b_rate">20</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_54" name="بايوكسون 1جم فيال" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>بايوكسون 1جم فيال</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">30.000000000000004</v>
+            <v name="q2_b_rate">30.000000000000004</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_55" name="فوربيم 1جم فيال" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>فوربيم 1جم فيال</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">30.000000000000004</v>
+            <v name="q2_b_rate">30.000000000000004</v>
+          </values>
+        </policy>
+        <policy id="p_single_1791878077445_56" name="بايوبينيم 1جم فيال" priority="100">
+          <match>
+            <on field="I_NAME">
+              <v>بايوبينيم 1جم فيال</v>
+            </on>
+          </match>
+          <values>
+            <v name="q1_b_rate">30.000000000000004</v>
+            <v name="q2_b_rate">30.000000000000004</v>
+          </values>
+        </policy>
+      </policies>
+    </rule>
+  </rules>
+  <fields>
+    <field id="1" name="I_NAME" type="VARCHAR" conn_id="16" table_source="VW_SAMPLE_PLAN_CTRL"/>
+    <field id="2" name="I_CODE" type="VARCHAR" conn_id="16" table_source="VW_SAMPLE_PLAN_CTRL"/>
+    <field id="3" name="ITM_UNT" type="VARCHAR" conn_id="16" table_source="VW_SAMPLE_PLAN_CTRL"/>
+    <field id="4" name="SELLING_PRICE" type="NUMERIC" conn_id="16" table_source="VW_SAMPLE_PLAN_CTRL"/>
+    <field id="5" name="COST_PRICE" type="NUMERIC" conn_id="16" table_source="VW_SAMPLE_PLAN_CTRL"/>
+    <field id="6" name="SALES_QTY" type="NUMERIC" conn_id="16" table_source="VW_SAMPLE_PLAN_CTRL"/>
+    <field id="7" name="SALES_BONUS" type="NUMERIC" conn_id="16" table_source="VW_SAMPLE_PLAN_CTRL"/>
+    <field id="8" name="SALES_VAL" type="NUMERIC" conn_id="16" table_source="VW_SAMPLE_PLAN_CTRL"/>
+    <field id="9" name="ACTUAL_QTY" type="NUMERIC" conn_id="16" table_source="VW_SAMPLE_PLAN_CTRL"/>
+    <field id="10" name="ACTUAL_BONUS" type="NUMERIC" conn_id="16" table_source="VW_SAMPLE_PLAN_CTRL"/>
+    <field id="11" name="BILL_DATE" type="DATE" conn_id="16" table_source="VW_SAMPLE_PLAN_CTRL"/>
+    <field id="12" name="BRN_NO" type="INTEGER" conn_id="16" table_source="VW_SAMPLE_PLAN_CTRL"/>
+    <field id="13" name="CUST_TYPE" type="VARCHAR" conn_id="16" table_source="VW_SAMPLE_PLAN_CTRL"/>
+    <field id="14" name="PAY_TYPE" type="VARCHAR" conn_id="16" table_source="VW_SAMPLE_PLAN_CTRL"/>
+  </fields>
+  <columns>
+    <column id="1" name="col_i_name" alias="اسم الصنف" expr="=[I_NAME]" join_type="one_to_one" icon="fa-pills"/>
+    <column id="2" name="col_i_code" alias="رقم الصنف" expr="=[I_CODE]" join_type="one_to_one" icon="fa-hashtag" distinct="1"/>
+    <column id="3" name="col_itm_unt" alias="الوحدة" expr="=[ITM_UNT]" join_type="one_to_one" icon="fa-box"/>
+    <column id="4" name="col_pricing" alias="التسعير" expr="=IF(@priceMethod='cost', [COST_PRICE], [SELLING_PRICE])" join_type="one_to_one" icon="fa-tag" is_amount="1"/>
+    <column id="5" name="col_sales_qty" alias="صافي كمية المبيعات" expr="=SUM([SALES_QTY])" col_type="aggregated" join_type="one_to_one" icon="fa-cart-shopping" is_amount="1"/>
+    <column id="6" name="col_sales_bonus" alias="بونص المبيعات" expr="=SUM([SALES_BONUS])" col_type="aggregated" join_type="one_to_one" icon="fa-gift" is_amount="1"/>
+    <column id="7" name="col_sales_val" alias="قيمة المبيعات" expr="=SUM([SALES_VAL])" col_type="aggregated" join_type="one_to_one" icon="fa-money-bill-wave" is_amount="1"/>
+    <column id="16" name="col_16" alias="نسبة" expr="=IF(@p_category='1', $plan_rates.sample_pct$, IF(@custType='wholesale', $bounus_rates.q2_b_rate$, $bounus_rates.q1_b_rate$))" join_type="one_to_one" icon="fa-hashtag" hide_blank="1" hide_zero="1"/>
+    <column id="8" name="col_plan_qty" alias="كمية الخطة" expr="=ROUND([col_sales_qty] * ([col_16] / 100), 2)" col_type="computed" join_type="one_to_one" icon="fa-calculator" is_amount="1"/>
+    <column id="9" name="col_plan_val" alias="قيمة الخطة" expr="=ROUND([col_plan_qty] * [col_pricing], 2)" col_type="computed" join_type="one_to_one" icon="fa-coins" is_amount="1"/>
+    <column id="10" name="col_act_pct" alias="النسبة الفعلية %" expr="=IF([col_sales_qty] &gt; 0, ROUND(([col_act_qty] / [col_sales_qty]) * 100, 2), 0)" col_type="computed" join_type="one_to_one" icon="fa-percent"/>
+    <column id="11" name="col_act_qty" alias="الكمية الفعلية" expr="=SUM([ACTUAL_QTY])" col_type="aggregated" join_type="one_to_one" icon="fa-clipboard-check" is_amount="1"/>
+    <column id="12" name="col_act_val" alias="القيمة الفعلية" expr="=ROUND([col_act_qty] * [col_pricing], 2)" col_type="computed" join_type="one_to_one" icon="fa-sack-dollar" is_amount="1"/>
+    <column id="13" name="col_dev_pct" alias="انحراف النسبة %" expr="=ROUND([col_16] - [col_act_pct], 2)" col_type="computed" join_type="one_to_one" icon="fa-percent"/>
+    <column id="14" name="col_dev_qty" alias="انحراف الكمية" expr="=[col_plan_qty] - [col_act_qty]" col_type="computed" join_type="one_to_one" icon="fa-arrows-split-up-and-left" is_amount="1"/>
+    <column id="15" name="col_dev_val" alias="انحراف القيمة" expr="=[col_plan_val] - [col_act_val]" col_type="computed" join_type="one_to_one" icon="fa-scale-unbalanced" is_amount="1"/>
+  </columns>
+  <table_opts>
+    <table name="VW_SAMPLE_PLAN_CTRL" conn="16" is_default="1" where_match="all"/>
+  </table_opts>
+  <groups>
+    <group id="1" name="بيانات الصنف" order="1" bg="#f8fafc">
+      <column alias="col_i_name"/>
+      <column alias="col_i_code"/>
+      <column alias="col_itm_unt"/>
+      <column alias="col_pricing"/>
+    </group>
+    <group id="2" name="صافي المبيعات" order="2" bg="#eff6ff">
+      <column alias="col_sales_qty"/>
+      <column alias="col_sales_bonus"/>
+      <column alias="col_sales_val"/>
+    </group>
+    <group id="3" name="الخطة" order="3" bg="#fefce8">
+      <column alias="col_plan_qty"/>
+      <column alias="col_plan_val"/>
+      <column alias="عمود 16"/>
+      <column alias="نسبة"/>
+    </group>
+    <group id="4" name="الفعلي" order="4" bg="#f0fdf4">
+      <column alias="col_act_pct"/>
+      <column alias="col_act_qty"/>
+      <column alias="col_act_val"/>
+    </group>
+    <group id="5" name="الانحراف" order="5" bg="#fef2f2">
+      <column alias="col_dev_pct"/>
+      <column alias="col_dev_qty"/>
+      <column alias="col_dev_val"/>
+    </group>
+  </groups>
+  <group_bys>
+    <gb field="I_CODE" order="1"/>
+    <gb field="I_NAME" order="2"/>
+    <gb field="ITM_UNT" order="3"/>
+    <gb field="SELLING_PRICE" order="4"/>
+    <gb field="COST_PRICE" order="5"/>
+  </group_bys>
+  <doc_params>
+    <doc_param column="branch" id="dp_branch" label="الفرع" type="select" op="equals" required="1" default_value="0" param_refname="branch" src_mode="table" src_conn="16" is_custom="1" no_filter="1" event="filter" src="static">
+      <option name="0" value="كافة الفروع">كافة الفروع</option>
+      <option name="1" value="الادارة العامة">الادارة العامة</option>
+      <option name="1012" value="تعافي فارما - فرع صنعاء">تعافي فارما - فرع صنعاء</option>
+      <option name="1022" value="تعافي فارما - فرع ذمار">تعافي فارما - فرع ذمار</option>
+      <option name="1032" value="تعافي فارما - فرع إب">تعافي فارما - فرع إب</option>
+      <option name="1042" value="تعافي فارما - فرع الحديدة">تعافي فارما - فرع الحديدة</option>
+      <option name="1052" value="تعافي فارما - فرع عمران">تعافي فارما - فرع عمران</option>
+      <option name="1062" value="تعافي فارما - فرع صعدة">تعافي فارما - فرع صعدة</option>
+    </doc_param>
+    <doc_param column="BILL_DATE" id="dp_bill_date" label="الفترة" type="date" op="between" required="0" default_value="2026-01-01" src_mode="table" src_conn="16" event="filter" src="input"/>
+    <doc_param column="custType" id="dp_cust_type" label="نوع العميل" type="select" op="equals" required="1" default_value="0" param_refname="custType" src_mode="table" src_conn="16" is_custom="1" no_filter="1" event="filter" src="static">
+      <option name="0" value="كلي">كلي</option>
+      <option name="wholesale" value="جملة">جملة</option>
+      <option name="retail" value="تجزئة">تجزئة</option>
+    </doc_param>
+    <doc_param column="payType" id="dp_pay_type" label="نوع المعاملة" type="select" op="equals" required="1" default_value="0" param_refname="payType" src_mode="table" src_conn="16" is_custom="1" no_filter="1" event="filter" src="static">
+      <option name="0" value="كلي">كلي</option>
+      <option name="cash" value="نقدي">نقدي</option>
+      <option name="credit" value="آجل">آجل</option>
+    </doc_param>
+    <doc_param column="priceMethod" id="dp_price_method" label="طريقة التسعير" type="select" op="equals" required="1" default_value="cost" param_refname="priceMethod" src_mode="table" src_conn="16" is_custom="1" no_filter="1" event="filter" src="static">
+      <option name="cost" value="بالتكلفة">بالتكلفة</option>
+      <option name="selling" value="بالبيع">بالبيع</option>
+    </doc_param>
+    <doc_param column="p_category" id="dp_custom_1791878184052" label="نوع النسبة" type="select" op="equals" required="1" default_value="1" param_refname="p_category" src_mode="table" src_conn="16" is_custom="1" no_filter="1" event="filter" src="static">
+      <option name="1" value="نسبة العينات">نسبة العينات</option>
+      <option name="2" value="نسبة البونص">نسبة البونص</option>
+    </doc_param>
+  </doc_params>
+  <general_where>(@branch = '0' OR [BRN_NO] = @branch OR (@branch = '1001' AND [BRN_NO] = 1)) AND (@custType = '0' OR [CUST_TYPE] = @custType OR [CUST_TYPE] = '0') AND (@payType = '0' OR [PAY_TYPE] = @payType OR [PAY_TYPE] = '0')</general_where>
+</rml>

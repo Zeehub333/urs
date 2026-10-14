@@ -1,0 +1,1096 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}إعدادات مساحة العمل ({{ workspace.name|default:ws_id }}) — Odex ERP{% endblock %}
+{% block topbar %}{% endblock %}
+{% block sidebar %}{% endblock %}
+{% block main %}
+<div class="flex-1 flex flex-col min-h-0 bg-slate-50/60">
+    <main class="p-4 md:p-6 space-y-5 max-w-6xl mx-auto w-full">
+        <!-- Header Banner -->
+        <div class="bg-gradient-to-l from-indigo-900 via-blue-900 to-indigo-800 rounded-3xl p-6 text-white relative overflow-hidden shadow-lg">
+            <div class="absolute -left-20 -bottom-20 w-72 h-72 bg-blue-500/20 rounded-full blur-3xl pointer-events-none"></div>
+            <div class="absolute right-10 top-0 w-56 h-56 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none"></div>
+            <div class="relative z-10 flex flex-wrap items-center justify-between gap-4">
+                <div class="flex items-center gap-3.5 min-w-0">
+                    <div class="w-12 h-12 rounded-2xl bg-white/15 border border-white/25 flex items-center justify-center text-xl shadow-sm shrink-0">
+                        <i class="fa-solid fa-gear text-emerald-300"></i>
+                    </div>
+                    <div class="min-w-0">
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <h1 class="text-lg md:text-xl font-extrabold tracking-wide">إعدادات مساحة العمل</h1>
+                            <span id="wsPageBadgeId" class="px-2.5 py-0.5 rounded-full bg-white/15 border border-white/20 font-mono text-xs font-bold" dir="ltr">{{ ws_id }}</span>
+                        </div>
+                        <p class="text-xs text-blue-200 mt-0.5">إدارة المعلومات العامة والبراند والاتصالات المتكاملة وترحيل كافة المودلز بدون استثناء</p>
+                    </div>
+                </div>
+                <div class="flex flex-wrap items-center gap-2">
+                    {% if workspaces %}
+                    <div class="flex items-center gap-1.5 bg-white/10 border border-white/20 rounded-xl px-2.5 py-1.5">
+                        <span class="text-[11px] text-blue-200 font-semibold">المساحة:</span>
+                        <select id="wsSwitcherSelect" onchange="if(this.value) location.href='/ws-settings/' + encodeURIComponent(this.value) + '/'" class="bg-transparent text-white text-xs font-bold focus:outline-none cursor-pointer" dir="ltr">
+                            {% for w in workspaces %}
+                            <option value="{{ w.id }}" class="text-slate-800" {% if w.id == ws_id %}selected{% endif %}>{{ w.id }} — {{ w.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    {% endif %}
+                    <a href="/enter/{{ ws_id }}/?mode=view" class="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition shadow-xs">
+                        <i class="fa-solid fa-right-to-bracket"></i>
+                        <span>دخول المساحة</span>
+                    </a>
+                    <a href="/" class="px-3.5 py-2 bg-white/15 hover:bg-white/25 border border-white/25 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition">
+                        <i class="fa-solid fa-arrow-right"></i>
+                        <span>مدير المساحات</span>
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Settings Card -->
+        <div id="wsSettingsPageCard" class="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden flex flex-col md:flex-row min-h-[72vh]">
+            <!-- Sidebar Tabs -->
+            <aside class="w-full md:w-56 shrink-0 border-b md:border-b-0 md:border-l border-slate-200 bg-slate-50/70 p-4 space-y-1.5">
+                <div class="text-[11px] font-bold text-slate-400 px-2 pb-1">أقسام الإعدادات</div>
+                <button data-wssec-btn="general" onclick="wsSecGo('general')" class="w-full text-right px-3.5 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition">
+                    <i class="fa-solid fa-circle-info"></i>
+                    <span>المعلومات العامة</span>
+                </button>
+                <button data-wssec-btn="brand" onclick="wsSecGo('brand')" class="w-full text-right px-3.5 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition">
+                    <i class="fa-solid fa-palette"></i>
+                    <span>البراند والهوية</span>
+                </button>
+                <button data-wssec-btn="conn" onclick="wsSecGo('conn')" class="w-full text-right px-3.5 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition">
+                    <i class="fa-solid fa-network-wired"></i>
+                    <span>الاتصال والتخويل</span>
+                </button>
+            </aside>
+
+            <!-- Content Body + Footer -->
+            <div class="flex-1 flex flex-col min-w-0 min-h-0">
+                <div class="px-5 py-3.5 border-b border-slate-200 flex items-center justify-between bg-indigo-50/60 shrink-0">
+                    <h2 class="text-sm font-bold text-slate-800 flex items-center gap-2">
+                        <i class="fa-solid fa-sliders text-indigo-600"></i>
+                        <span id="wsSettingsHeaderTitle">خصائص مساحة العمل ({{ workspace.name|default:ws_id }})</span>
+                    </h2>
+                    <div class="flex items-center gap-2">
+                        <button type="button" onclick="wsSettingsLoad(window._wsEditId)" title="إعادة تحميل البيانات" class="px-3 py-1.5 bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition shadow-2xs cursor-pointer">
+                            <i class="fa-solid fa-arrows-rotate text-indigo-600 text-[11px]"></i>
+                            <span>تحديث البيانات</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="p-5 md:p-6 space-y-4 text-xs flex-1" id="wsSettingsBody">
+                    <p class="text-slate-400 text-center py-8">جاري تحميل إعدادات مساحة العمل...</p>
+                </div>
+
+                <div class="px-5 py-3.5 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center justify-between gap-2 shrink-0">
+                    <div class="flex items-center gap-2">
+                        <button type="button" onclick="wsMasterEnsure(()=>wsMigrateTablesDo())" id="wsMigrateFooterBtn" title="ترحيل كافة المودلز بدون استثناء وإنشاء السكيما فورياً" class="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition shadow-xs cursor-pointer">
+                            <i class="fa-solid fa-database"></i>
+                            <span>ترحيل كافة المودلز</span>
+                        </button>
+                        <button type="button" onclick="location.reload()" title="تحديث الصفحة بالكامل" class="px-3.5 py-2 bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition shadow-2xs cursor-pointer">
+                            <i class="fa-solid fa-arrows-rotate text-slate-600"></i>
+                            <span>تحديث الصفحة</span>
+                        </button>
+                    </div>
+                    <span id="wsSettingsMsg" class="text-[11px] text-rose-600 font-bold mr-auto ml-2"></span>
+                    <div class="flex items-center gap-2">
+                        <a href="/" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold">عودة للمدير</a>
+                        <button onclick="wsSettingsSave()" class="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer">
+                            <i class="fa-solid fa-floppy-disk"></i>
+                            <span>حفظ الإعدادات</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{% static 'components/ws_master.js' %}"></script>
+<script>
+    {% include "UniDBPicker.js" %}
+</script>
+<script>
+    window._wsEditId = "{{ ws_id|escapejs }}";
+    window._wsSec = (new URLSearchParams(location.search).get('tab')) || 'general';
+
+    function wsSecGo(sec){
+        window._wsSec = sec;
+        document.querySelectorAll('[data-wssec-btn]').forEach(b=>{
+            const on = b.getAttribute('data-wssec-btn') === sec;
+            b.className = 'w-full text-right px-3.5 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition cursor-pointer ' + (on ? 'bg-indigo-600 text-white shadow' : 'text-slate-600 hover:bg-slate-100');
+        });
+        document.querySelectorAll('#wsSettingsBody [data-wssec]').forEach(d=>{
+            d.style.display = d.getAttribute('data-wssec') === sec ? '' : 'none';
+        });
+    }
+
+    function wsLogoPick(input){
+        const msg = document.getElementById('wsSettingsMsg');
+        try{
+            const f = input && input.files ? input.files[0] : null;
+            if(!f) return;
+            if(!String(f.type || '').startsWith('image/')){ if(msg) msg.textContent = 'اختر ملف صورة'; input.value = ''; return; }
+            if((f.size || 0) > 512 * 1024){ if(msg) msg.textContent = 'الصورة أكبر من 512KB'; input.value = ''; return; }
+            const rd = new FileReader();
+            rd.onload = ()=>{
+                const url = String(rd.result || '');
+                const t = document.getElementById('wsF_logo');
+                if(t) t.value = url;
+                const p = document.getElementById('wsF_logoPrev');
+                if(p) p.src = url;
+                if(msg) msg.textContent = '';
+            };
+            rd.readAsDataURL(f);
+        }catch(e){ if(msg) msg.textContent = 'تعذر قراءة الصورة'; }
+    }
+
+    function wsBrandPreview(){
+        try{
+            const p = document.getElementById('wsF_primary');
+            const a = document.getElementById('wsF_accent');
+            const bar = document.getElementById('wsBrandPrev');
+            if(bar) bar.style.background = (p && p.value) || '#4f46e5';
+            const btn = document.getElementById('wsBrandPrevBtn');
+            if(btn) btn.style.background = (a && a.value) || '#10b981';
+        }catch(e){}
+    }
+
+    async function wsSettingsLoad(id){
+        const box = document.getElementById('wsSettingsBody');
+        if(!box) return;
+        try{
+            const [wres, lres] = await Promise.all([fetch('/api/workspaces/'), fetch('/api/lookup/lists/')]);
+            const d = await wres.json();
+            const w = (d.workspaces || []).find(x=>x.id === id) || (d.workspaces || [])[0];
+            if(!w) throw new Error('مساحة غير معروفة');
+            const lists = await lres.json().catch(()=>({}));
+            window._wsEditId = w.id;
+            window._wsLists = {countries: lists.countries || [], currencies: lists.currencies || []};
+            const hdr = document.getElementById('wsSettingsHeaderTitle');
+            if(hdr) hdr.textContent = `خصائص مساحة العمل (${w.name || w.id})`;
+            const bdg = document.getElementById('wsPageBadgeId');
+            if(bdg) bdg.textContent = w.id;
+            const c = w.brand_colors || {};
+            const cp = w.connection_params || {};
+            const esc = (v)=>String(v ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+            const inp = (k, v, label, extra)=>`<div><label class="block font-semibold text-slate-700 mb-1">${label}</label><input id="wsF_${k}" value="${esc(v)}" ${extra||''} class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"></div>`;
+            const selMatch = (cur, code, ar)=>String(cur || '') === String(code) || String(cur || '') === String(ar);
+            const coOpts = (window._wsLists.countries || []).map(x=>`<option value="${esc(x.c)}" ${selMatch(w.country, x.c, x.ar)?'selected':''}>${esc(x.ar)} (${esc(x.c)})</option>`).join('');
+            const cuOpts = (window._wsLists.currencies || []).map(x=>`<option value="${esc(x.c)}" ${selMatch(w.currency, x.c, x.ar)?'selected':''}>${esc(x.ar)} (${esc(x.c)}${x.s ? ' ' + esc(x.s) : ''})</option>`).join('');
+            box.innerHTML = `
+            <div data-wssec="general" class="space-y-3">
+                ${inp('name', w.name, 'اسم مساحة العمل *')}
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    ${inp('company', w.company, 'اسم الشركة')}
+                    ${inp('domain', w.domain, 'الدومين الأساسي (لإيميلات الشركة)', 'dir="ltr" placeholder="company.com"')}
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div><label class="block font-semibold text-slate-700 mb-1">الدولة</label><select id="wsF_country" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"><option value="">— اختر —</option>${coOpts}</select></div>
+                    <div><label class="block font-semibold text-slate-700 mb-1">العملة</label><select id="wsF_currency" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"><option value="">— اختر —</option>${cuOpts}</select></div>
+                </div>
+            </div>
+            <div data-wssec="brand" class="space-y-3" style="display:none">
+                ${inp('brand', w.brand, 'اسم البراند')}
+                <div>
+                    <label class="block font-semibold text-slate-700 mb-1">الشعار (رفع صورة ≤512KB أو مسار/رابط)</label>
+                    <div class="flex items-center gap-2">
+                        <img id="wsF_logoPrev" src="${esc(w.logo)}" class="w-14 h-14 rounded-xl object-cover border border-slate-200 bg-slate-50 shrink-0" alt="">
+                        <input id="wsF_logoFile" type="file" accept="image/*" onchange="wsLogoPick(this)" class="flex-1 min-w-0 text-[11px] text-slate-500">
+                    </div>
+                    <input id="wsF_logo" value="${esc(w.logo)}" dir="ltr" placeholder="/static/logo.png أو https://..." class="mt-1 w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono" oninput="try{document.getElementById('wsF_logoPrev').src=this.value}catch(e){}">
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div><label class="block font-semibold text-slate-700 mb-1">اللون الأساسي</label><input id="wsF_primary" type="color" value="${/^#[0-9a-fA-F]{6}$/.test(c.primary||'')?c.primary:'#4f46e5'}" oninput="wsBrandPreview()" class="w-full h-10 bg-slate-50 border border-slate-200 rounded-xl px-1"></div>
+                    <div><label class="block font-semibold text-slate-700 mb-1">لون التمييز</label><input id="wsF_accent" type="color" value="${/^#[0-9a-fA-F]{6}$/.test(c.accent||'')?c.accent:'#10b981'}" oninput="wsBrandPreview()" class="w-full h-10 bg-slate-50 border border-slate-200 rounded-xl px-1"></div>
+                </div>
+                <div class="rounded-xl border border-slate-200 overflow-hidden">
+                    <div id="wsBrandPrev" class="px-3 py-2 text-white text-[11px] font-bold">معاينة حية — تُطبق الألوان على كامل الواجهة بعد الحفظ</div>
+                    <div class="p-2 bg-slate-50"><span id="wsBrandPrevBtn" class="inline-block px-3 py-1 rounded-lg text-white text-[11px] font-bold">زر تجريبي</span></div>
+                </div>
+            </div>
+            <div data-wssec="conn" class="space-y-3" style="display:none">
+                <div class="rounded-xl border border-indigo-200 bg-gradient-to-b from-indigo-50/60 to-white p-3.5 space-y-2.5 shadow-2xs">
+                    <div class="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                            <div class="text-xs font-black text-indigo-900 flex items-center gap-1.5"><i class="fa-solid fa-network-wired text-indigo-600"></i> إدارة الاتصالات المتكاملة</div>
+                            <div class="text-[10px] text-slate-500">إضافة وفحص الاتصالات • تبديل الوضع (محلي / خارجي) • تحديد اتصال وترحيل كافة المودلز بدون استثناء</div>
+                        </div>
+                        <div class="flex items-center gap-1.5">
+                            <button type="button" onclick="wsConnFormOpen()" class="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-[11px] font-bold flex items-center gap-1 shadow-2xs cursor-pointer"><i class="fa-solid fa-plus"></i> إضافة اتصال جديد</button>
+                            <button type="button" onclick="wsAuthConnsFetch()" title="تحديث قائمة الاتصالات" class="px-2.5 py-1.5 bg-white border border-slate-200 hover:bg-slate-100 text-slate-600 rounded-xl text-[11px] font-bold cursor-pointer"><i class="fa-solid fa-rotate"></i></button>
+                        </div>
+                    </div>
+                    <div class="flex flex-wrap items-center justify-between gap-2 bg-white border border-slate-200 rounded-xl p-2">
+                        <div class="text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
+                            <i class="fa-solid fa-sliders text-indigo-500"></i>
+                            <span>وضع اتصال المساحة الحالي:</span>
+                            <span id="wsConnModeBadge" class="px-2 py-0.5 rounded-lg text-[10px] font-black">${w.auth_conn ? 'خارجي للتخويل (' + esc(w.auth_conn) + ')' : 'محلي أساسي (' + esc(w.primary_connection || 'urs') + ')'}</span>
+                        </div>
+                        <div class="flex items-center gap-1">
+                            <button type="button" onclick="wsSetWorkspaceConnMode('local')" id="wsModeBtnLocal" class="px-2.5 py-1 rounded-lg text-[10px] font-bold transition cursor-pointer ${!w.auth_conn ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}"><i class="fa-solid fa-database"></i> وضع محلي (أساسي)</button>
+                            <button type="button" onclick="wsSetWorkspaceConnMode('external')" id="wsModeBtnExt" class="px-2.5 py-1 rounded-lg text-[10px] font-bold transition cursor-pointer ${w.auth_conn ? 'bg-amber-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}"><i class="fa-solid fa-globe"></i> وضع خارجي (تخويل / قراءة)</button>
+                        </div>
+                    </div>
+                    <div id="wsConnMgrList" class="space-y-1.5 max-h-60 overflow-y-auto pr-0.5">
+                        <p class="text-[11px] text-slate-400 text-center py-2">جارٍ تحميل الاتصالات...</p>
+                    </div>
+                    <div id="wsConnFormBox" class="hidden rounded-xl border border-indigo-300 bg-white p-3 space-y-2.5 shadow-sm">
+                        <div class="flex items-center justify-between border-b border-slate-100 pb-2">
+                            <div id="wsConnFormTitle" class="text-xs font-black text-indigo-800 flex items-center gap-1.5"><i class="fa-solid fa-plug-circle-plus text-indigo-600"></i> إضافة اتصال جديد وفحصه</div>
+                            <button type="button" onclick="wsConnFormClose()" class="text-slate-400 hover:text-rose-600 text-xs font-bold px-1.5 py-0.5 rounded cursor-pointer"><i class="fa-solid fa-xmark"></i> إغلاق</button>
+                        </div>
+                        <input type="hidden" id="wsCF_id" value="">
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                            <div><label class="block text-[11px] font-bold text-slate-700 mb-1">اسم الاتصال <span class="text-rose-500">*</span></label><input id="wsCF_name" dir="ltr" placeholder="e.g. local_pg / onyx_db" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 font-mono text-xs"></div>
+                            <div><label class="block text-[11px] font-bold text-slate-700 mb-1">المحرك (Engine)</label><select id="wsCF_engine" onchange="wsCFEngineChange()" dir="ltr" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 font-mono text-xs"><option value="postgres">PostgreSQL</option><option value="oracle">Oracle</option><option value="sqlserver">SQL Server</option><option value="mysql">MySQL / MariaDB</option></select></div>
+                            <div><label class="block text-[11px] font-bold text-slate-700 mb-1">وضع الاتصال (محلي / خارجي)</label><select id="wsCF_is_local" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-bold"><option value="1">محلي — قابل للترحيل والكتابة</option><option value="0">خارجي — قراءة وتخويل فقط</option></select></div>
+                        </div>
+                        <div class="grid grid-cols-1 sm:grid-cols-4 gap-2.5">
+                            <div class="sm:col-span-2"><label class="block text-[11px] font-bold text-slate-700 mb-1">الهوست (Host / IP) <span class="text-rose-500">*</span></label><input id="wsCF_host" dir="ltr" value="127.0.0.1" placeholder="127.0.0.1" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 font-mono text-xs"></div>
+                            <div><label class="block text-[11px] font-bold text-slate-700 mb-1">البورت (Port)</label><input id="wsCF_port" dir="ltr" value="5432" inputmode="numeric" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 font-mono text-xs"></div>
+                            <div><label class="block text-[11px] font-bold text-slate-700 mb-1">قاعدة البيانات / SID</label><input id="wsCF_instance" dir="ltr" value="urs" placeholder="urs / ORCL" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 font-mono text-xs"></div>
+                        </div>
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                            <div><label class="block text-[11px] font-bold text-slate-700 mb-1">اسم المستخدم</label><input id="wsCF_user" dir="ltr" value="postgres" autocomplete="off" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 font-mono text-xs"></div>
+                            <div><label class="block text-[11px] font-bold text-slate-700 mb-1">كلمة المرور</label><input id="wsCF_password" type="password" dir="ltr" placeholder="••••••" autocomplete="new-password" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 font-mono text-xs"></div>
+                            <div><label class="block text-[11px] font-bold text-slate-700 mb-1">السكيما (Schema)</label><input id="wsCF_schema" dir="ltr" value="${esc(w.schema || 'public')}" placeholder="public" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 font-mono text-xs"></div>
+                        </div>
+                        <div class="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-100">
+                            <p id="wsConnFormMsg" class="text-[11px] font-bold"></p>
+                            <div class="flex items-center gap-1.5">
+                                <button type="button" id="wsCFTestBtn" onclick="wsConnFormTest()" class="px-3 py-1.5 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"><i class="fa-solid fa-bolt"></i> فحص الاتصال</button>
+                                <button type="button" id="wsCFSaveBtn" onclick="wsConnFormSave(false)" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"><i class="fa-solid fa-floppy-disk"></i> حفظ الاتصال</button>
+                                <button type="button" id="wsCFSaveMigrateBtn" onclick="wsConnFormSave(true)" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"><i class="fa-solid fa-database"></i> حفظ + ترحيل كافة المودلز</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <datalist id="wsAllConnsList"></datalist>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    ${inp('primary_connection', w.primary_connection, 'الاتصال المحلي الأساسي (اختر أو اكتب)', 'dir="ltr" list="wsAllConnsList" onchange="wsPrimaryConnSelected(this.value); wsTablesFetch()"')}
+                    ${inp('schema', w.schema, 'السكيما (Schema) — تكامل models.py', 'dir="ltr" placeholder="public"')}
+                </div>
+                <div class="flex items-center justify-between p-3 bg-emerald-50/70 border border-emerald-200 rounded-xl">
+                    <div>
+                        <div class="text-[11px] font-bold text-emerald-800 flex items-center gap-1.5"><i class="fa-solid fa-database text-emerald-600"></i> تحديد الاتصال وترحيل كافة المودلز بدون استثناء (Migrate All Models)</div>
+                        <div class="text-[10px] text-emerald-600 mt-0.5">ينشئ السكيما ويرحل جميع جداول Django و models.py ونماذج FMLK/FML والمودلز المخصصة بدون استثناء</div>
+                    </div>
+                    <button type="button" id="wsMigrateBtn" onclick="wsMasterEnsure(()=>wsMigrateTablesDo())" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition shadow-sm cursor-pointer shrink-0">
+                        <i class="fa-solid fa-play"></i>
+                        <span>ترحيل كافة المودلز الآن</span>
+                    </button>
+                </div>
+                <div id="wsMigrateResultBox" class="hidden rounded-xl border border-emerald-300 bg-white p-2.5 text-[11px] font-bold text-slate-700 space-y-1"></div>
+                <div><label class="block font-semibold text-slate-700 mb-1">جدول المستخدمين الرئيسي (ابحث واختر)</label>
+                <div class="flex gap-1">
+                    <input id="wsF_users_table" value="${esc(w.users_table)}" dir="ltr" list="wsTablesList" placeholder="schema.table — اكتب للبحث" autocomplete="off" class="flex-1 min-w-0 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono">
+                    <button type="button" onclick="wsUsersTableSearch()" title="بحث في الجداول (UniDBPicker) — من اتصال التخويل إن حُدد وإلا المحلي" class="px-3 py-2 bg-white border border-slate-200 rounded-xl text-slate-500 hover:text-indigo-700 hover:border-indigo-300 text-xs shrink-0"><i class="fa-solid fa-magnifying-glass"></i></button>
+                    <button type="button" onclick="wsTablesFetch()" title="تحديث قائمة الجداول من الاتصال" class="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs shrink-0"><i class="fa-solid fa-rotate"></i></button>
+                </div>
+                <datalist id="wsTablesList"></datalist></div>
+                <div class="rounded-xl border border-slate-200 p-3 space-y-2 bg-slate-50/50">
+                    <div class="text-[11px] font-bold text-slate-600">مطابقة أعمدة الدخول من قاعدة البيانات <span class="font-normal text-slate-400">— فارغ = كشف تلقائي</span></div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div><label class="block font-semibold text-slate-700 mb-1">عمود اسم المستخدم</label><select id="wsF_user_column" data-cur="${esc(w.users_user_column)}" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono" dir="ltr"><option value="">— تلقائي —</option></select><p id="wsF_user_col_hint" class="text-[10px] text-slate-400 mt-1"></p></div>
+                        <div><label class="block font-semibold text-slate-700 mb-1">عمود كلمة المرور</label><select id="wsF_password_column" data-cur="${esc(w.users_password_column)}" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono" dir="ltr"><option value="">— تلقائي —</option></select><p id="wsF_password_col_hint" class="text-[10px] text-slate-400 mt-1"></p></div>
+                    </div>
+                </div>
+                <div class="rounded-xl border border-indigo-200 p-3 space-y-2 bg-indigo-50/40">
+                    <div class="text-[11px] font-bold text-indigo-800">مصدر التخويل الخارجي <span class="font-normal text-slate-400">— فارغ = الاتصال المحلي الأساسي (يبقى إنشاء المشرف والدخول المحلي)</span></div>
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div><label class="block font-semibold text-slate-700 mb-1">اتصال التخويل (قراءة فقط)</label><select id="wsF_auth_conn" data-cur="${esc(w.auth_conn)}" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono" dir="ltr"><option value="">— المحلي الأساسي —</option></select><p id="wsF_auth_conn_hint" class="text-[10px] text-slate-400 mt-1">أي اتصال خارجي (أوراكل/بوستجريس/SQLServer) — تُطابق بيانات الدخول مع سجلاته فقط</p></div>
+                        <div><label class="block font-semibold text-slate-700 mb-1">طريقة التشفير</label><select id="wsF_auth_hash" data-cur="${esc(w.auth_hash)}" onchange="wsAuthShiftToggle()" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono" dir="ltr"><option value="auto">تلقائي (كشف)</option><option value="plain">نص صريح (بلا تشفير)</option><option value="md5">MD5 (hex)</option><option value="sha1">SHA-1 (hex)</option><option value="sha256">SHA-256 (hex)</option><option value="mysql_sha1">MySQL (*SHA1)</option><option value="pg_md5">Postgres (md5+user)</option><option value="caesar">القيصر (إزاحة)</option><option value="atbash">أتباش (قلب الأبجدية)</option><option value="rot13">ROT-13</option></select><p class="text-[10px] text-slate-400 mt-1">الصريحة تُطابق نوعاً واحداً فقط — التلقائي يجرّب المعروف</p></div>
+                        <div id="wsF_auth_shift_wrap"><label class="block font-semibold text-slate-700 mb-1">مقدار إزاحة القيصر</label><input id="wsF_auth_shift" value="${esc(w.auth_shift || '3')}" dir="ltr" inputmode="numeric" placeholder="3" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono"><p class="text-[10px] text-slate-400 mt-1">عدد خانات الإزاحة (سالب مسموح) — يُستخدم عندما تخزن القاعدة القيمة الخام بلا بادئة</p></div>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div><label class="block font-semibold text-slate-700 mb-1">عمود اسم المستخدم</label><select id="wsF_auth_user_column" data-cur="${esc(w.auth_user_column)}" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono" dir="ltr"><option value="">— تلقائي —</option></select></div>
+                        <div><label class="block font-semibold text-slate-700 mb-1">عمود كلمة المرور</label><select id="wsF_auth_password_column" data-cur="${esc(w.auth_password_column)}" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono" dir="ltr"><option value="">— تلقائي —</option></select></div>
+                        <div><label class="block font-semibold text-slate-700 mb-1">عمود الاسم الكامل</label><select id="wsF_auth_full_column" data-cur="${esc(w.auth_full_column)}" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono" dir="ltr"><option value="">— تلقائي —</option></select></div>
+                    </div>
+                    <div class="flex items-end gap-2 bg-white border border-indigo-100 rounded-xl p-2">
+                        <div class="flex-1"><label class="block font-semibold text-slate-700 mb-1">تجربة اسم مستخدم (فحص بلا كلمة مرور)</label><input id="wsAuthDg_user" placeholder="username" autocomplete="off" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono" dir="ltr"></div>
+                        <button type="button" onclick="wsMasterEnsure(wsAuthDiag)" class="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shrink-0"><i class="fa-solid fa-stethoscope"></i> فحص المطابقة</button>
+                    </div>
+                    <p id="wsAuthDgMsg" class="text-[11px] font-bold whitespace-pre-line"></p>
+                </div>
+                <div class="rounded-xl border border-slate-200 p-3 space-y-3 bg-slate-50/50">
+                    <div class="text-[11px] font-bold text-slate-600">بيانات الاتصال المحلي الأساسي</div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div><label class="block font-semibold text-slate-700 mb-1">الهوست</label><input id="wsF_host" value="${esc(cp.host)}" dir="ltr" placeholder="127.0.0.1" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono"></div>
+                        <div><label class="block font-semibold text-slate-700 mb-1">البورت</label><input id="wsF_port" value="${esc(cp.port)}" dir="ltr" inputmode="numeric" placeholder="5432" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono"></div>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div><label class="block font-semibold text-slate-700 mb-1">اسم المستخدم</label><input id="wsF_user" value="${esc(cp.user)}" dir="ltr" autocomplete="off" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono"></div>
+                        <div><label class="block font-semibold text-slate-700 mb-1">كلمة المرور</label><input id="wsF_password" type="password" value="" dir="ltr" placeholder="•••••• — فارغة للإبقاء" autocomplete="new-password" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono"></div>
+                    </div>
+                    <div><label class="block font-semibold text-slate-700 mb-1">قاعدة البيانات</label><input id="wsF_instance" value="${esc(cp.instance)}" dir="ltr" placeholder="urs" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono"></div>
+                </div>
+                <div class="rounded-xl border border-amber-200 bg-amber-50/50 p-3 space-y-2">
+                    <div class="text-[11px] font-bold text-amber-700"><i class="fa-solid fa-crown"></i> المشرف العام — يُنشأ فقط عندما يكون جدول المستخدمين فارغاً</div>
+                    <div id="wsSuBox"><p class="text-slate-400 text-[11px]">...</p></div>
+                </div>
+                <div><label class="block font-semibold text-slate-700 mb-1">الحالة (تخويل الدخول للمساحة)</label><select id="wsF_status" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"><option value="active" ${w.status==='active'?'selected':''}>نشطة — مسموح الدخول</option><option value="archived" ${w.status==='archived'?'selected':''}>مؤرشفة</option><option value="disabled" ${w.status==='disabled'?'selected':''}>معطلة — ممنوع الدخول</option></select></div>
+                <p class="text-[11px] text-slate-400">الحالة «معطلة» تمنع الدخول والتفاعل مع كل محتويات المساحة خادمياً.</p>
+            </div>`;
+            wsSecGo(window._wsSec || 'general');
+            wsBrandPreview();
+            wsTablesFetch();
+            try{ await wsAuthConnsFetch(); }catch(e){}
+            wsColsFetch();
+            wsAuthColsFetch();
+            try{ const _ut = document.getElementById('wsF_users_table'); if(_ut && !(_ut.dataset.suBound)){ _ut.dataset.suBound = '1'; _ut.addEventListener('change', ()=>{ wsColsFetch(); wsAuthColsFetch(); wsSuRefresh(); }); } }catch(e){}
+            try{ const _ac = document.getElementById('wsF_auth_conn'); if(_ac && !(_ac.dataset.auBound)){ _ac.dataset.auBound = '1'; _ac.addEventListener('change', ()=>{ wsTablesFetch(); wsAuthColsFetch(); wsRefreshConnModeUI(); wsRenderConnMgrList(); }); } }catch(e){}
+            wsSuRefresh();
+        }catch(e){ box.innerHTML = `<p class="text-rose-500 text-center py-6">${String((e && e.message) || e)}</p>`; }
+    }
+
+    async function wsColsFetch(){
+        const escC = (v)=>String(v ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+        const uSel = document.getElementById('wsF_user_column'), pSel = document.getElementById('wsF_password_column');
+        const uHint = document.getElementById('wsF_user_col_hint'), pHint = document.getElementById('wsF_password_col_hint');
+        if(!uSel || !pSel || !window._wsEditId) return;
+        const tEl = document.getElementById('wsF_users_table');
+        const t = tEl ? String(tEl.value || '').trim() : '';
+        const keepU = uSel.value || uSel.dataset.cur || '', keepP = pSel.value || pSel.dataset.cur || '';
+        const fill = (sel, cols, keep, known)=>{
+            const cur = String(keep || '').toLowerCase();
+            let auto = '';
+            for(const k of known){ if(cols.some(c=>String(c.name || '').toLowerCase() === k)){ auto = k; break; } }
+            sel.innerHTML = '<option value="">— تلقائي —</option>' + cols.map(c=>`<option value="${escC(c.name)}">${escC(c.name)} <span class="text-slate-400">${escC(c.data_type || '')}</span></option>`).join('');
+            sel.value = cols.some(c=>String(c.name || '').toLowerCase() === cur) ? cols.find(c=>String(c.name || '').toLowerCase() === cur).name : '';
+            return auto;
+        };
+        if(!t){ uSel.innerHTML = '<option value="">— تلقائي —</option>'; pSel.innerHTML = '<option value="">— تلقائي —</option>'; if(uHint) uHint.textContent = ''; if(pHint) pHint.textContent = ''; return; }
+        try{
+            const res = await fetch('/api/workspaces/' + encodeURIComponent(window._wsEditId) + '/users-columns/?table=' + encodeURIComponent(t));
+            const d = await res.json();
+            if(!res.ok) throw new Error(d.error || '');
+            const cols = Array.isArray(d.columns) ? d.columns : [];
+            const autoU = fill(uSel, cols, keepU || d.user_column, ['username','user_name','login','login_name','email','mail']);
+            const autoP = fill(pSel, cols, keepP || d.password_column, ['password','passwd','pwd','password_hash','pass_hash','pass','user_password','pwd_hash']);
+            if(uHint) uHint.textContent = uSel.value ? ('مثبت: ' + uSel.value) : (autoU ? ('تلقائي: ' + autoU) : 'لا عمود مطابق — حدد يدوياً');
+            if(pHint) pHint.textContent = pSel.value ? ('مثبت: ' + pSel.value) : (autoP ? ('تلقائي: ' + autoP) : 'لا عمود مطابق — حدد يدوياً');
+        }catch(e){
+            if(uHint) uHint.textContent = String((e && e.message) || e).slice(0, 120);
+        }
+    }
+
+    async function wsTablesFetch(){
+        const escT = (v)=>String(v ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+        const dl = document.getElementById('wsTablesList');
+        const connEl = document.getElementById('wsF_primary_connection');
+        const cname = connEl ? String(connEl.value || '').trim() : '';
+        if(!dl) return;
+        const authEl = document.getElementById('wsF_auth_conn');
+        const aname = authEl ? String(authEl.value || '').trim() : '';
+        if(aname){
+            try{
+                const cid = wsAuthConnId(aname);
+                if(!cid) throw new Error('اتصال التخويل غير معروف');
+                const res = await fetch('/api/connections/' + encodeURIComponent(cid) + '/tables/');
+                const d = await res.json();
+                if(!res.ok) throw new Error(d.error || '');
+                dl.innerHTML = (d.tables || []).map(t=>`<option value="${escT(t.full || t.name)}">${escT(t.full || t.name)}</option>`).join('');
+                return;
+            }catch(e){ dl.innerHTML = ''; return; }
+        }
+        if(!cname){ dl.innerHTML = ''; return; }
+        try{
+            const res = await fetch('/api/lookup/tables/?connection=' + encodeURIComponent(cname));
+            const d = await res.json();
+            if(!res.ok) throw new Error(d.error || '');
+            dl.innerHTML = (d.tables || []).map(t=>`<option value="${escT(t.full)}">${escT(t.full)}</option>`).join('');
+        }catch(e){ dl.innerHTML = ''; }
+    }
+
+    function wsAuthShiftToggle(){
+        try{
+            const h = document.getElementById('wsF_auth_hash');
+            const w = document.getElementById('wsF_auth_shift_wrap');
+            if(w) w.style.display = (h && h.value === 'caesar') ? '' : 'none';
+        }catch(e){}
+    }
+
+    async function wsAuthDiag(){
+        const msg = document.getElementById('wsAuthDgMsg');
+        const id = window._wsEditId;
+        if(!id) return;
+        const gv = (k)=>{ const el = document.getElementById('wsF_' + k); return el ? String(el.value || '').trim() : ''; };
+        const uEl = document.getElementById('wsAuthDg_user');
+        const u = uEl ? String(uEl.value || '').trim() : '';
+        if(!u){ if(msg){ msg.textContent = 'أدخل اسم مستخدم للتجربة'; msg.className = 'text-[11px] text-amber-600 font-bold'; } return; }
+        if(msg){ msg.textContent = 'جارٍ فحص المصدر الخارجي...'; msg.className = 'text-[11px] text-indigo-600 font-bold'; }
+        try{
+            const tEl = document.getElementById('wsF_users_table');
+            const body = {username: u, table: tEl ? String(tEl.value || '').trim() : '',
+                conn: gv('auth_conn'), user_column: gv('auth_user_column'),
+                password_column: gv('auth_password_column'), full_column: gv('auth_full_column'),
+                hash: gv('auth_hash'), shift: gv('auth_shift')};
+            const res = await fetch('/api/workspaces/' + encodeURIComponent(id) + '/login-diag/', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+            const d = await res.json().catch(()=>({}));
+            if(!res.ok) throw new Error(d.error || 'فشل الفحص');
+            const ok = (d.verdict === 'ready');
+            if(msg){
+                msg.textContent = (ok ? '✓ ' : '• ') + 'المصدر: ' + (d.auth_conn || '') + ' — الجدول: ' + (d.table || '') +
+                    ' — المستخدم: ' + (d.found ? 'موجود' : 'غير موجود') +
+                    ' — الصيغة: ' + (d.shape_ok ? 'مطابقة لـ ' + (d.auth_hash || '') : 'غير مطابقة لـ ' + (d.auth_hash || '')) +
+                    '\n' + (d.hint || d.verdict || '');
+                msg.className = 'text-[11px] font-bold whitespace-pre-line ' + (ok ? 'text-emerald-600' : (d.found ? 'text-amber-600' : 'text-rose-600'));
+            }
+        }catch(e){ if(msg){ msg.textContent = String((e && e.message) || e).slice(0, 300); msg.className = 'text-[11px] text-rose-600 font-bold'; } }
+    }
+
+    let wsAuthConnsCache = [];
+    function wsUsersTableSearch(){
+        try{
+            if(typeof UniDBPicker === 'undefined'){ try{ notify('منتقي الجداول غير محمل', 'error'); }catch(e){} return; }
+            const authEl = document.getElementById('wsF_auth_conn');
+            const aname = authEl ? String(authEl.value || '').trim() : '';
+            let cname = aname;
+            if(!cname){
+                const connEl = document.getElementById('wsF_primary_connection');
+                cname = connEl ? String(connEl.value || '').trim() : '';
+            }
+            if(!cname){ try{ notify('حدد الاتصال أولاً', 'info'); }catch(e){} return; }
+            const hit = (wsAuthConnsCache || []).find(c=>String(c.name) === cname || String(c.id) === cname);
+            const cid = hit ? hit.id : '';
+            if(!cid){ try{ notify('الاتصال غير معروف — حدّث الصفحة', 'error'); }catch(e){} return; }
+            UniDBPicker.pickTable({conn: cid, title: 'بحث في جداول ' + cname, sub: aname ? 'اتصال التخويل' : 'المحلي الأساسي', onPick: (it)=>{
+                const tEl = document.getElementById('wsF_users_table');
+                if(tEl){
+                    tEl.value = it.value;
+                    try{ wsColsFetch(); }catch(e){}
+                    try{ wsAuthColsFetch(); }catch(e){}
+                    try{ wsSuRefresh(); }catch(e){}
+                }
+            }});
+        }catch(e){ try{ notify(String((e && e.message) || e), 'error'); }catch(_){} }
+    }
+
+    function wsAuthConnId(name){
+        try{
+            const n = String(name || '').trim();
+            if(!n) return '';
+            const hit = (wsAuthConnsCache || []).find(c=>String(c.name) === n || String(c.id) === n);
+            return hit ? hit.id : '';
+        }catch(e){ return ''; }
+    }
+
+    async function wsAuthConnsFetch(){
+        const sel = document.getElementById('wsF_auth_conn');
+        if(!sel) return;
+        const cur = sel.value || sel.dataset.cur || '';
+        try{
+            const res = await fetch('/api/connections/?all=1');
+            const d = await res.json();
+            wsAuthConnsCache = d.connections || [];
+            const escC = (v)=>String(v ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+            sel.innerHTML = '<option value="">— المحلي الأساسي —</option>' + wsAuthConnsCache.map(c=>`<option value="${escC(c.name)}">${escC(c.name)} (${escC(c.engine || '')})</option>`).join('');
+            if(cur && wsAuthConnsCache.some(c=>String(c.name) === String(cur))) sel.value = cur;
+            const hint = document.getElementById('wsF_auth_conn_hint');
+            if(hint && sel.value) hint.textContent = 'مصدر التخويل: ' + sel.value + ' — الدخول يُطابق سجلاته فقط (الإنشاء والإدارة محلياً)';
+        }catch(e){}
+        const hsel = document.getElementById('wsF_auth_hash');
+        if(hsel && hsel.dataset.cur) hsel.value = hsel.dataset.cur;
+        const shEl = document.getElementById('wsF_auth_shift');
+        if(shEl && !String(shEl.value || '').trim()) shEl.value = '3';
+        wsAuthShiftToggle();
+        try{
+            const dlAll = document.getElementById('wsAllConnsList');
+            const escC = (v)=>String(v ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+            if(dlAll) dlAll.innerHTML = (wsAuthConnsCache || []).map(c=>`<option value="${escC(c.name)}">${escC(c.name)} (${escC(c.engine || 'postgres')} — ${c.is_local ? 'محلي' : 'خارجي'})</option>`).join('');
+            wsRenderConnMgrList();
+            wsRefreshConnModeUI();
+        }catch(e){}
+    }
+
+    function wsRefreshConnModeUI(){
+        try{
+            const authSel = document.getElementById('wsF_auth_conn');
+            const pcInp = document.getElementById('wsF_primary_connection');
+            const ac = authSel ? String(authSel.value || '').trim() : '';
+            const pc = pcInp ? String(pcInp.value || 'urs').trim() : 'urs';
+            const badge = document.getElementById('wsConnModeBadge');
+            const btnL = document.getElementById('wsModeBtnLocal');
+            const btnE = document.getElementById('wsModeBtnExt');
+            if(badge){
+                if(ac){
+                    badge.textContent = 'خارجي للتخويل (' + ac + ')';
+                    badge.className = 'px-2 py-0.5 rounded-lg text-[10px] font-black bg-amber-100 text-amber-800';
+                }else{
+                    badge.textContent = 'محلي أساسي (' + pc + ')';
+                    badge.className = 'px-2 py-0.5 rounded-lg text-[10px] font-black bg-emerald-100 text-emerald-800';
+                }
+            }
+            if(btnL) btnL.className = 'px-2.5 py-1 rounded-lg text-[10px] font-bold transition cursor-pointer ' + (!ac ? 'bg-emerald-600 text-white shadow-2xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200');
+            if(btnE) btnE.className = 'px-2.5 py-1 rounded-lg text-[10px] font-bold transition cursor-pointer ' + (ac ? 'bg-amber-600 text-white shadow-2xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200');
+        }catch(e){}
+    }
+
+    function wsSetWorkspaceConnMode(mode){
+        try{
+            const authSel = document.getElementById('wsF_auth_conn');
+            if(!authSel) return;
+            if(mode === 'local'){
+                authSel.value = '';
+                const hint = document.getElementById('wsF_auth_conn_hint');
+                if(hint) hint.textContent = 'الوضع المحلي الأساسي مفعل — الدخول والإدارة من جدول المستخدمين المحلي';
+                wsTablesFetch();
+                wsAuthColsFetch();
+                wsRefreshConnModeUI();
+                wsRenderConnMgrList();
+                if(typeof notify === 'function') notify('تم التبديل إلى وضع الاتصال المحلي الأساسي ✓', 'info');
+            }else{
+                if(!authSel.value){
+                    const ext = (wsAuthConnsCache || []).find(c => !c.is_local) || (wsAuthConnsCache || [])[0];
+                    if(ext) authSel.value = ext.name;
+                }
+                wsTablesFetch();
+                wsAuthColsFetch();
+                wsRefreshConnModeUI();
+                wsRenderConnMgrList();
+                try{ authSel.scrollIntoView({behavior:'smooth', block:'center'}); authSel.focus(); }catch(e){}
+                if(typeof notify === 'function') notify('تم التبديل إلى وضع الاتصال الخارجي للتخويل — حدد اتصال التخويل وجدول المستخدمين', 'info');
+            }
+        }catch(e){}
+    }
+
+    function wsPrimaryConnSelected(name){
+        try{
+            const n = String(name || '').trim();
+            const hit = (wsAuthConnsCache || []).find(c => String(c.name) === n);
+            if(hit){
+                const setV = (id, val)=>{ const el = document.getElementById(id); if(el && val !== undefined && val !== null) el.value = val; };
+                setV('wsF_host', hit.host || '127.0.0.1');
+                setV('wsF_port', hit.port || 5432);
+                setV('wsF_user', hit.user || 'postgres');
+                setV('wsF_instance', hit.instance || 'urs');
+                if(hit.schema && !document.getElementById('wsF_schema')?.value){
+                    setV('wsF_schema', hit.schema);
+                }
+            }
+            wsRefreshConnModeUI();
+            wsRenderConnMgrList();
+        }catch(e){}
+    }
+
+    function wsRenderConnMgrList(){
+        const box = document.getElementById('wsConnMgrList');
+        if(!box) return;
+        const escC = (v)=>String(v ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+        const list = wsAuthConnsCache || [];
+        if(!list.length){
+            box.innerHTML = '<p class="text-[11px] text-slate-400 text-center py-2">لا توجد اتصالات مسجلة — اضغط «إضافة اتصال جديد»</p>';
+            return;
+        }
+        const curPrimary = String(document.getElementById('wsF_primary_connection')?.value || '').trim();
+        const curAuth = String(document.getElementById('wsF_auth_conn')?.value || '').trim();
+        box.innerHTML = list.map(c => {
+            const isPg = String(c.engine || 'postgres').toLowerCase() === 'postgres';
+            const isPrim = (String(c.name) === curPrimary);
+            const isAuth = (String(c.name) === curAuth);
+            const modeBadge = c.is_local
+                ? `<button type="button" onclick="wsConnToggleMode(${c.id}, false)" title="اضغط للتبديل إلى اتصال خارجي" class="px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-100 text-emerald-800 hover:bg-emerald-200 cursor-pointer transition"><i class="fa-solid fa-house-laptop"></i> محلي ⇄</button>`
+                : `<button type="button" onclick="wsConnToggleMode(${c.id}, true)" title="اضغط للتبديل إلى اتصال محلي" class="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-100 text-amber-800 hover:bg-amber-200 cursor-pointer transition"><i class="fa-solid fa-globe"></i> خارجي ⇄</button>`;
+            const statusDot = c.last_check_ok === true
+                ? '<span class="inline-block w-2 h-2 rounded-full bg-emerald-500" title="متصل"></span>'
+                : (c.last_check_ok === false ? '<span class="inline-block w-2 h-2 rounded-full bg-rose-500" title="فشل آخر فحص"></span>' : '<span class="inline-block w-2 h-2 rounded-full bg-slate-300" title="لم يُفحص بعد"></span>');
+            return `<div class="flex flex-wrap items-center justify-between gap-2 p-2 rounded-xl border ${isPrim ? 'border-emerald-300 bg-emerald-50/40' : (isAuth ? 'border-amber-300 bg-amber-50/40' : 'border-slate-200 bg-white')} text-xs">
+                <div class="flex items-center gap-2 min-w-0">
+                    ${statusDot}
+                    <span class="font-mono font-black text-slate-800 truncate" dir="ltr">${escC(c.name)}</span>
+                    <span class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-mono text-[10px]" dir="ltr">${escC(c.engine || 'postgres')}</span>
+                    ${modeBadge}
+                    ${isPrim ? '<span class="px-1.5 py-0.5 rounded bg-emerald-600 text-white text-[9px] font-bold">الأساسي الحالي</span>' : ''}
+                    ${isAuth ? '<span class="px-1.5 py-0.5 rounded bg-amber-600 text-white text-[9px] font-bold">التخويل الخارجي</span>' : ''}
+                    <span class="text-[10px] text-slate-400 font-mono truncate hidden sm:inline" dir="ltr">${escC(c.host || '')}:${escC(c.port || '')}/${escC(c.instance || '')}</span>
+                </div>
+                <div class="flex items-center gap-1 shrink-0">
+                    <span id="wsConnTestSt_${c.id}" class="text-[10px] font-bold"></span>
+                    <button type="button" onclick="wsConnTestById(${c.id})" title="فحص الاتصال" class="px-2 py-1 bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 rounded-lg text-[10px] font-bold cursor-pointer"><i class="fa-solid fa-bolt"></i> فحص</button>
+                    <button type="button" onclick="wsSelectConnAsPrimary('${escC(c.name)}')" title="تعيين كاتصال محلي أساسي للمساحة" class="px-2 py-1 ${isPrim ? 'bg-emerald-600 text-white' : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200'} rounded-lg text-[10px] font-bold cursor-pointer">أساسي</button>
+                    <button type="button" onclick="wsSelectConnAsAuth('${escC(c.name)}')" title="تعيين كاتصال خارجي للتخويل" class="px-2 py-1 ${isAuth ? 'bg-amber-600 text-white' : 'bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200'} rounded-lg text-[10px] font-bold cursor-pointer">خارجي</button>
+                    ${isPg ? `<button type="button" onclick="wsMasterEnsure(()=>wsMigrateTablesDo('${escC(c.name)}'))" title="تحديد هذا الاتصال وترحيل كافة المودلز بدون استثناء (Django + FMLK + Custom)" class="px-2 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[10px] font-bold cursor-pointer"><i class="fa-solid fa-database"></i> ترحيل الكل</button>` : ''}
+                    <button type="button" onclick="wsConnFormOpen(${c.id})" title="تعديل بيانات الاتصال" class="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-[10px] font-bold cursor-pointer"><i class="fa-solid fa-pen"></i></button>
+                </div>
+            </div>`;
+        }).join('');
+    }
+
+    async function wsConnTestById(connId){
+        const st = document.getElementById('wsConnTestSt_' + connId);
+        if(st){ st.textContent = 'جارٍ الفحص...'; st.className = 'text-[10px] font-bold text-sky-600'; }
+        try{
+            const res = await fetch('/api/connections/' + encodeURIComponent(connId) + '/test/');
+            const d = await res.json().catch(()=>({}));
+            const ok = !!(d.ok || d.status === 'connected');
+            if(st){
+                st.textContent = ok ? 'متصل ✓' : ('خطأ: ' + String(d.message || d.error || 'فشل').slice(0, 45));
+                st.className = 'text-[10px] font-bold ' + (ok ? 'text-emerald-600' : 'text-rose-600');
+            }
+            const hit = (wsAuthConnsCache || []).find(c => Number(c.id) === Number(connId));
+            if(hit) hit.last_check_ok = ok;
+            if(typeof notify === 'function') notify(ok ? 'الاتصال ناجح ✓' : ('فشل فحص الاتصال: ' + (d.message || d.error || '')), ok ? 'success' : 'error');
+        }catch(e){
+            if(st){ st.textContent = 'فشل الفحص'; st.className = 'text-[10px] font-bold text-rose-600'; }
+        }
+    }
+
+    async function wsConnToggleMode(connId, makeLocal){
+        try{
+            const res = await fetch('/api/connections/' + encodeURIComponent(connId) + '/update/', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({is_local: !!makeLocal})
+            });
+            const d = await res.json().catch(()=>({}));
+            if(!res.ok) throw new Error(d.error || 'تعذر تبديل وضع الاتصال');
+            await wsAuthConnsFetch();
+            if(typeof notify === 'function') notify('تم تبديل وضع الاتصال إلى ' + (makeLocal ? 'محلي (قابل للترحيل)' : 'خارجي (قراءة وتخويل)') + ' ✓', 'success');
+        }catch(e){
+            if(typeof notify === 'function') notify(String((e && e.message) || e), 'error');
+        }
+    }
+
+    function wsSelectConnAsPrimary(name){
+        const inp = document.getElementById('wsF_primary_connection');
+        if(inp){
+            inp.value = name;
+            wsPrimaryConnSelected(name);
+            wsTablesFetch();
+            if(typeof notify === 'function') notify('تم تحديد «' + name + '» كاتصال محلي أساسي للمساحة ✓', 'success');
+        }
+    }
+
+    function wsSelectConnAsAuth(name){
+        const sel = document.getElementById('wsF_auth_conn');
+        if(sel){
+            sel.value = (sel.value === name) ? '' : name;
+            wsTablesFetch();
+            wsAuthColsFetch();
+            wsRefreshConnModeUI();
+            wsRenderConnMgrList();
+            if(typeof notify === 'function') notify(sel.value ? ('تم تحديد «' + name + '» كاتصال خارجي للتخويل ✓') : 'تم إلغاء اتصال التخويل الخارجي والعودة للمحلي ✓', 'info');
+        }
+    }
+
+    function wsCFEngineChange(){
+        const eng = document.getElementById('wsCF_engine')?.value || 'postgres';
+        const portEl = document.getElementById('wsCF_port');
+        const isLocalEl = document.getElementById('wsCF_is_local');
+        const defPorts = {postgres: '5432', oracle: '1521', sqlserver: '1433', mysql: '3306'};
+        if(portEl && (!portEl.value || ['5432','1521','1433','3306'].includes(String(portEl.value).trim()))){
+            portEl.value = defPorts[eng] || '5432';
+        }
+        if(isLocalEl && eng !== 'postgres'){
+            isLocalEl.value = '0';
+        }
+    }
+
+    function wsConnFormOpen(connId){
+        const box = document.getElementById('wsConnFormBox');
+        const title = document.getElementById('wsConnFormTitle');
+        const msg = document.getElementById('wsConnFormMsg');
+        if(!box) return;
+        if(msg) msg.textContent = '';
+        const setV = (id, v)=>{ const el = document.getElementById(id); if(el) el.value = (v ?? ''); };
+        if(connId){
+            const hit = (wsAuthConnsCache || []).find(c => Number(c.id) === Number(connId));
+            if(!hit) return;
+            if(title) title.innerHTML = '<i class="fa-solid fa-pen-to-square text-indigo-600"></i> تعديل الاتصال: ' + String(hit.name || '');
+            setV('wsCF_id', hit.id);
+            setV('wsCF_name', hit.name || '');
+            setV('wsCF_engine', hit.engine || 'postgres');
+            setV('wsCF_is_local', hit.is_local ? '1' : '0');
+            setV('wsCF_host', hit.host || '127.0.0.1');
+            setV('wsCF_port', hit.port || 5432);
+            setV('wsCF_instance', hit.instance || 'urs');
+            setV('wsCF_user', hit.user || 'postgres');
+            setV('wsCF_password', '');
+            setV('wsCF_schema', hit.schema || document.getElementById('wsF_schema')?.value || 'public');
+        }else{
+            if(title) title.innerHTML = '<i class="fa-solid fa-plug-circle-plus text-indigo-600"></i> إضافة اتصال جديد وفحصه';
+            setV('wsCF_id', '');
+            setV('wsCF_name', '');
+            setV('wsCF_engine', 'postgres');
+            setV('wsCF_is_local', '1');
+            setV('wsCF_host', '127.0.0.1');
+            setV('wsCF_port', '5432');
+            setV('wsCF_instance', 'urs');
+            setV('wsCF_user', 'postgres');
+            setV('wsCF_password', '');
+            setV('wsCF_schema', document.getElementById('wsF_schema')?.value || 'public');
+        }
+        box.classList.remove('hidden');
+    }
+
+    function wsConnFormClose(){
+        const box = document.getElementById('wsConnFormBox');
+        if(box) box.classList.add('hidden');
+    }
+
+    function _wsCollectConnForm(){
+        const gv = (id)=>String(document.getElementById(id)?.value || '').trim();
+        return {
+            id: gv('wsCF_id'),
+            name: gv('wsCF_name'),
+            engine: gv('wsCF_engine') || 'postgres',
+            is_local: gv('wsCF_is_local') === '1',
+            host: gv('wsCF_host') || '127.0.0.1',
+            port: parseInt(gv('wsCF_port') || '5432', 10) || 5432,
+            instance: gv('wsCF_instance') || 'urs',
+            user: gv('wsCF_user') || 'postgres',
+            password: document.getElementById('wsCF_password')?.value || '',
+            schema: gv('wsCF_schema') || 'public'
+        };
+    }
+
+    async function wsConnFormTest(){
+        const msg = document.getElementById('wsConnFormMsg');
+        const btn = document.getElementById('wsCFTestBtn');
+        const f = _wsCollectConnForm();
+        if(!f.host){ if(msg){ msg.textContent = 'الهوست مطلوب للفحص'; msg.className = 'text-[11px] font-bold text-rose-600'; } return false; }
+        if(msg){ msg.textContent = 'جارٍ فحص الاتصال المباشر...'; msg.className = 'text-[11px] font-bold text-sky-600'; }
+        if(btn) btn.disabled = true;
+        try{
+            const res = await fetch('/api/connections/test/', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({form: f})
+            });
+            const d = await res.json().catch(()=>({}));
+            const ok = !!(d.ok || d.status === 'connected');
+            if(msg){
+                msg.textContent = ok ? ('✓ الاتصال ناجح: ' + (d.message || 'متصل بقاعدة البيانات')) : ('✗ فشل الاتصال: ' + (d.message || d.error || 'تعذر الاتصال'));
+                msg.className = 'text-[11px] font-bold ' + (ok ? 'text-emerald-600' : 'text-rose-600');
+            }
+            if(typeof notify === 'function') notify(ok ? 'فحص الاتصال ناجح ✓' : ('فشل الاتصال: ' + (d.message || d.error || '')), ok ? 'success' : 'error');
+            return ok;
+        }catch(e){
+            if(msg){ msg.textContent = '✗ خطأ: ' + String((e && e.message) || e); msg.className = 'text-[11px] font-bold text-rose-600'; }
+            return false;
+        }finally{
+            if(btn) btn.disabled = false;
+        }
+    }
+
+    async function wsConnFormSave(andMigrate){
+        const msg = document.getElementById('wsConnFormMsg');
+        const f = _wsCollectConnForm();
+        if(!f.name){ if(msg){ msg.textContent = 'اسم الاتصال مطلوب'; msg.className = 'text-[11px] font-bold text-rose-600'; } return; }
+        if(!f.host){ if(msg){ msg.textContent = 'الهوست مطلوب'; msg.className = 'text-[11px] font-bold text-rose-600'; } return; }
+        if(msg){ msg.textContent = 'جارٍ حفظ الاتصال...'; msg.className = 'text-[11px] font-bold text-indigo-600'; }
+        try{
+            const url = f.id ? ('/api/connections/' + encodeURIComponent(f.id) + '/update/') : '/api/connections/create/';
+            const payload = Object.assign({}, f, {upsert: true});
+            if(f.id && !f.password) delete payload.password;
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload)
+            });
+            const d = await res.json().catch(()=>({}));
+            if(!res.ok) throw new Error(d.error || 'فشل حفظ الاتصال');
+            await wsAuthConnsFetch();
+            if(f.is_local){
+                wsSelectConnAsPrimary(f.name);
+                if(f.schema && document.getElementById('wsF_schema')) document.getElementById('wsF_schema').value = f.schema;
+            }else{
+                wsSelectConnAsAuth(f.name);
+            }
+            if(msg){ msg.textContent = 'تم حفظ الاتصال «' + f.name + '» بنجاح ✓'; msg.className = 'text-[11px] font-bold text-emerald-600'; }
+            if(typeof notify === 'function') notify('تم حفظ الاتصال «' + f.name + '» ✓', 'success');
+            if(andMigrate){
+                wsConnFormClose();
+                wsMasterEnsure(()=>wsMigrateTablesDo(f.name));
+            }
+        }catch(e){
+            if(msg){ msg.textContent = '✗ ' + String((e && e.message) || e); msg.className = 'text-[11px] font-bold text-rose-600'; }
+        }
+    }
+
+    async function wsAuthColsFetch(){
+        const escC = (v)=>String(v ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+        const aU = document.getElementById('wsF_auth_user_column'), aP = document.getElementById('wsF_auth_password_column'), aF = document.getElementById('wsF_auth_full_column');
+        if(!aU || !aP || !aF || !window._wsEditId) return;
+        const connEl = document.getElementById('wsF_auth_conn');
+        const aname = connEl ? String(connEl.value || '').trim() : '';
+        const tEl = document.getElementById('wsF_users_table');
+        const t = tEl ? String(tEl.value || '').trim() : '';
+        const fill = (sel, cols, keep, known)=>{
+            const cur = String(keep || '').toLowerCase();
+            sel.innerHTML = '<option value="">— تلقائي —</option>' + cols.map(c=>`<option value="${escC(c.name)}">${escC(c.name)} <span class="text-slate-400">${escC(c.data_type || '')}</span></option>`).join('');
+            sel.value = cols.some(c=>String(c.name || '').toLowerCase() === cur) ? cols.find(c=>String(c.name || '').toLowerCase() === cur).name : '';
+        };
+        if(!aname || !t){
+            [aU, aP, aF].forEach(s=>{ s.innerHTML = '<option value="">— تلقائي —</option>'; });
+            return;
+        }
+        try{
+            const res = await fetch('/api/workspaces/' + encodeURIComponent(window._wsEditId) + '/users-columns/?table=' + encodeURIComponent(t) + '&conn=' + encodeURIComponent(aname));
+            const d = await res.json();
+            if(!res.ok) throw new Error(d.error || '');
+            const cols = Array.isArray(d.columns) ? d.columns : [];
+            fill(aU, cols, aU.value || aU.dataset.cur || '', ['username','user_name','login','login_name','email','mail']);
+            fill(aP, cols, aP.value || aP.dataset.cur || '', ['password','passwd','pwd','password_hash','pass_hash','pass','user_password','pwd_hash']);
+            fill(aF, cols, aF.value || aF.dataset.cur || '', ['full_name','fullname','name','display_name']);
+        }catch(e){}
+    }
+
+    async function wsSuRefresh(){
+        const box = document.getElementById('wsSuBox');
+        if(!box || !window._wsEditId) return;
+        box.innerHTML = '<p class="text-slate-400 text-[11px]">جارٍ فحص جدول المستخدمين...</p>';
+        try{
+            const tEl = document.getElementById('wsF_users_table');
+            const t = tEl ? String(tEl.value || '').trim() : '';
+            const res = await fetch('/api/workspaces/' + encodeURIComponent(window._wsEditId) + '/users-count/?table=' + encodeURIComponent(t));
+            const d = await res.json();
+            if(!res.ok) throw new Error(d.error || '');
+            if((d.count || 0) > 0){
+                box.innerHTML = `<p class="text-[11px] text-slate-500">المستخدمون المسجلون: <b>${d.count}</b> <span class="font-mono" dir="ltr">${String(d.table || '').replace(/</g,'&lt;')}</span></p>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div><input id="wsDg_user" value="admin" placeholder="اسم المستخدم" autocomplete="off" class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 font-mono" dir="ltr"></div>
+                    <div><input id="wsDg_pw" type="password" placeholder="كلمة جديدة (للتعيين فقط)" autocomplete="new-password" class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 font-mono" dir="ltr"></div>
+                </div>
+                <div class="flex gap-2">
+                    <button onclick="wsMasterEnsure(wsLoginDiag)" class="px-3 py-1.5 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs font-bold cursor-pointer"><i class="fa-solid fa-stethoscope"></i> فحص الدخول</button>
+                    <button onclick="wsMasterEnsure(wsLoginReset)" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold cursor-pointer"><i class="fa-solid fa-key"></i> تعيين كلمة</button>
+                </div>
+                <p id="wsDgMsg" class="text-[11px] text-slate-600 font-bold whitespace-pre-line"></p>`;
+                return;
+            }
+            const _escA = (v)=>String(v ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+            const _fList = Array.isArray(d.fields) && d.fields.length ? d.fields : (Array.isArray(d.required) ? d.required : []);
+            const renderField = (c)=>{
+                const fn = _escA(c.name);
+                const fl = _escA(c.label || c.name);
+                const isReq = !!c.is_required;
+                const reqBadge = isReq ? '<span class="text-rose-500 font-bold">*</span>' : '<span class="text-slate-400 text-[10px] font-normal">(اختياري)</span>';
+                const reqAttr = isReq ? 'required' : '';
+                const dt = _escA(c.data_type || '');
+                const it = c.input_type || 'text';
+                if(it === 'checkbox'){
+                    const isDefTrue = /true|1/i.test(String(c.default_value || '')) || c.name.toLowerCase() === 'is_active';
+                    return `<div class="col-span-2 sm:col-span-1 bg-white border border-slate-200 rounded-xl p-2.5 flex items-center justify-between">
+                        <div>
+                            <label class="block font-semibold text-slate-700 text-xs cursor-pointer" for="su_f_${fn}">${fl} ${reqBadge}</label>
+                            <span class="text-[9px] text-slate-400 font-mono">${fn} (${dt})</span>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" id="su_f_${fn}" data-ws-su-extra="${fn}" data-ws-su-type="checkbox" class="sr-only peer" ${isDefTrue ? 'checked' : ''}>
+                            <div class="w-8 h-4.5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3.5 after:w-3.5 after:transition-all peer-checked:bg-emerald-600"></div>
+                        </label>
+                    </div>`;
+                }
+                const defVal = (fn.toLowerCase() === 'role') ? 'admin' : '';
+                return `<div class="col-span-2 sm:col-span-1">
+                    <div class="flex items-center justify-between mb-1">
+                        <label class="block font-semibold text-slate-700">${fl} ${reqBadge}</label>
+                        <span class="text-[9px] text-slate-400 font-mono">${fn} (${dt})</span>
+                    </div>
+                    <input type="${it === 'number' ? 'number' : (it === 'date' ? 'date' : 'text')}" id="su_f_${fn}" data-ws-su-extra="${fn}" data-ws-su-type="${it}" value="${_escA(defVal)}" placeholder="${fl}" ${reqAttr} class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs">
+                </div>`;
+            };
+            box.innerHTML = `<p class="text-[11px] text-slate-600 font-medium">الجدول <span class="font-mono bg-white px-1.5 py-0.5 rounded border border-slate-200" dir="ltr">${String(d.table || '').replace(/</g,'&lt;')}</span> فارغ — أنشئ المشرف العام الأول:</p>
+            <div class="space-y-2.5 mt-2">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">اسم المستخدم <span class="text-rose-500 font-bold">*</span></label>
+                        <input id="wsSu_user" placeholder="admin" autocomplete="off" class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 font-mono text-xs" dir="ltr">
+                    </div>
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">الاسم الكامل</label>
+                        <input id="wsSu_name" placeholder="الاسم الكامل" class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs">
+                    </div>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">كلمة المرور <span class="text-rose-500 font-bold">* (6+)</span></label>
+                        <input id="wsSu_pw1" type="password" placeholder="••••••" autocomplete="new-password" class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 font-mono text-xs" dir="ltr">
+                    </div>
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">تأكيد كلمة المرور <span class="text-rose-500 font-bold">*</span></label>
+                        <input id="wsSu_pw2" type="password" placeholder="••••••" autocomplete="new-password" class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 font-mono text-xs" dir="ltr">
+                    </div>
+                </div>
+                ${_fList.length ? `<div class="border-t border-amber-200/60 pt-2"><div class="text-[10px] font-bold text-amber-800 mb-2">حقول إضافية من جدول المستخدمين (${_fList.length} حقل):</div><div class="grid grid-cols-2 gap-2.5">${_fList.map(renderField).join('')}</div></div>` : ''}
+            </div>
+            <p id="wsSuMsg" class="text-[11px] text-rose-600 font-bold min-h-[16px] mt-2"></p>
+            <button onclick="wsMasterEnsure(wsSuCreate)" class="mt-1 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition cursor-pointer"><i class="fa-solid fa-crown"></i> إنشاء مشرف عام</button>`;
+        }catch(e){ box.innerHTML = `<p class="text-rose-500 text-[11px]">${String((e && e.message) || e).slice(0, 200)}</p>`; }
+    }
+
+    async function wsSuCreate(){
+        const msg = document.getElementById('wsSuMsg');
+        const v = (id)=>{ const el = document.getElementById(id); return el ? el.value : ''; };
+        const username = String(v('wsSu_user') || '').trim();
+        const pw1 = String(v('wsSu_pw1') || ''), pw2 = String(v('wsSu_pw2') || '');
+        if(!username){ if(msg) msg.textContent = 'اسم المستخدم مطلوب'; return; }
+        if(pw1.length < 6){ if(msg) msg.textContent = 'كلمة المرور 6 أحرف فأكثر'; return; }
+        if(pw1 !== pw2){ if(msg) msg.textContent = 'تأكيد كلمة المرور غير مطابق'; return; }
+        const tEl = document.getElementById('wsF_users_table');
+        const extra = {};
+        try{
+            document.querySelectorAll('#wsSuBox [data-ws-su-extra]').forEach(el=>{
+                const k = el.getAttribute('data-ws-su-extra') || '';
+                if(!k) return;
+                const type = el.getAttribute('data-ws-su-type') || el.type || 'text';
+                if(type === 'checkbox') extra[k] = el.checked;
+                else { const val = String(el.value || '').trim(); if(val !== '') extra[k] = val; }
+            });
+        }catch(e){}
+        try{
+            const _csrf = (document.cookie.match(/(?:^|;\s*)csrftoken=([^;]*)/) || [])[1] || '';
+            const headers = {'Content-Type': 'application/json'};
+            if(_csrf) headers['X-CSRFToken'] = _csrf;
+            const res = await fetch('/api/workspaces/' + encodeURIComponent(window._wsEditId) + '/superuser/', {method:'POST', headers, body: JSON.stringify({username, password: pw1, full_name: String(v('wsSu_name') || '').trim(), table: tEl ? String(tEl.value || '').trim() : '', extra})});
+            const d = await res.json().catch(()=>({}));
+            if(!res.ok){
+                if(res.status === 403 && d.master_required){ wsMasterEnsure(wsSuCreate); return; }
+                throw new Error(d.error || 'فشل الإنشاء');
+            }
+            try{ notify('أُنشئ المشرف العام ✓', 'success'); }catch(e){}
+            wsSuRefresh();
+        }catch(e){ if(msg) msg.textContent = String((e && e.message) || e).slice(0, 200); }
+    }
+
+    async function wsLoginDiag(){
+        const msg = document.getElementById('wsDgMsg');
+        const uEl = document.getElementById('wsDg_user'), tEl = document.getElementById('wsF_users_table');
+        const u = uEl ? String(uEl.value || '').trim() : '';
+        if(!u){ if(msg) msg.textContent = 'اسم المستخدم مطلوب'; return; }
+        if(msg) msg.textContent = 'جارٍ الفحص...';
+        try{
+            const res = await fetch('/api/workspaces/' + encodeURIComponent(window._wsEditId) + '/login-diag/', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({username: u, table: tEl ? String(tEl.value || '').trim() : ''})});
+            const d = await res.json().catch(()=>({}));
+            if(!res.ok) throw new Error(d.error || 'فشل الفحص');
+            const L = [];
+            L.push('الجدول: ' + (d.table || '—'));
+            L.push('عمود المستخدم: ' + ((d.user_column||{}).name || '—') + (((d.user_column||{}).pinned) ? ' (مثبت)' : ' (تلقائي)'));
+            L.push('عمود كلمة المرور: ' + ((d.password_column||{}).name || '—') + (((d.password_column||{}).pinned) ? ' (مثبت)' : ' (تلقائي)'));
+            if(d.found === false){ L.push('النتيجة: المستخدم غير موجود'); }
+            else{
+                L.push('الصف: موجود' + (d.duplicates > 1 ? (' — مكرر ' + d.duplicates + ' مرات!') : ''));
+                L.push('نشط: ' + (d.is_active === false ? 'لا (موقوف)' : 'نعم'));
+                L.push('صيغة المخزن: ' + (d.hash_format || '؟') + ' (الطول ' + (d.hash_length ?? '?') + ')');
+                L.push('فحص الكود الذاتي: ' + (d.code_selftest ? 'سليم' : 'معطوب!'));
+                L.push('التشخيص: ' + (d.hint || d.verdict || ''));
+            }
+            if(msg){ msg.textContent = L.join('\n'); msg.className = 'text-[11px] text-slate-700 font-bold whitespace-pre-line'; }
+        }catch(e){ if(msg){ msg.textContent = String((e && e.message) || e).slice(0, 300); msg.className = 'text-[11px] text-rose-600 font-bold whitespace-pre-line'; } }
+    }
+
+    async function wsLoginReset(){
+        const msg = document.getElementById('wsDgMsg');
+        const uEl = document.getElementById('wsDg_user'), pEl = document.getElementById('wsDg_pw'), tEl = document.getElementById('wsF_users_table');
+        const u = uEl ? String(uEl.value || '').trim() : '', pw = pEl ? String(pEl.value || '') : '';
+        if(!u){ if(msg) msg.textContent = 'اسم المستخدم مطلوب'; return; }
+        if(pw.length < 6){ if(msg) msg.textContent = 'الكلمة الجديدة 6 أحرف فأكثر'; return; }
+        if(msg) msg.textContent = 'جارٍ التعيين...';
+        try{
+            const res = await fetch('/api/workspaces/' + encodeURIComponent(window._wsEditId) + '/login-reset/', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({username: u, new_password: pw, table: tEl ? String(tEl.value || '').trim() : ''})});
+            const d = await res.json().catch(()=>({}));
+            if(!res.ok) throw new Error(d.error || 'فشل التعيين');
+            if(msg){ msg.textContent = 'تم تعيين كلمة ' + (d.username || u) + ' — ادخل بها الآن'; msg.className = 'text-[11px] text-emerald-600 font-bold whitespace-pre-line'; }
+            if(pEl) pEl.value = '';
+        }catch(e){ if(msg){ msg.textContent = String((e && e.message) || e).slice(0, 300); msg.className = 'text-[11px] text-rose-600 font-bold whitespace-pre-line'; } }
+    }
+
+    async function wsSettingsSave(){
+        wsMasterEnsure(wsSettingsDo);
+    }
+
+    async function wsSettingsDo(){
+        const id = window._wsEditId;
+        const msg = document.getElementById('wsSettingsMsg');
+        if(!id) return;
+        const v = (k)=>{ const el = document.getElementById('wsF_' + k); return el ? el.value : ''; };
+        const conn = {host: v('host'), port: v('port'), user: v('user'), instance: v('instance')};
+        if(String(v('password') || '').trim() !== '') conn.password = v('password');
+        const body = {name: v('name'), brand: v('brand'), company: v('company'), domain: v('domain'),
+            logo: v('logo'), country: v('country'), currency: v('currency'),
+            brand_colors: {primary: v('primary'), accent: v('accent')},
+            primary_connection: v('primary_connection'),
+            schema: v('schema'),
+            users_table: v('users_table'),
+            users_user_column: v('user_column'), users_password_column: v('password_column'),
+            auth_conn: v('auth_conn'), auth_user_column: v('auth_user_column'),
+            auth_password_column: v('auth_password_column'), auth_full_column: v('auth_full_column'),
+            auth_hash: v('auth_hash'), auth_shift: v('auth_shift'),
+            status: v('status'), connection: conn};
+        if(!String(body.name).trim()){ if(msg) msg.textContent = 'اسم المساحة مطلوب'; return; }
+        if(msg){ msg.textContent = 'جارٍ حفظ الإعدادات...'; msg.className = 'text-[11px] text-indigo-600 font-bold mr-auto ml-2'; }
+        try{
+            const res = await fetch('/api/workspaces/' + encodeURIComponent(id) + '/save/', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+            const d = await res.json();
+            if(!res.ok) throw new Error(d.error || 'فشل الحفظ');
+            const okText = 'حُفظت إعدادات المساحة ✓' + (d.auth_conn ? ` — التخويل الخارجي: ${d.auth_conn}` : '') + (d.migrated ? ` — السكيما ${d.schema || ''} جاهزة (${d.migrate_tables || 0} جدول)` : '');
+            if(msg){ msg.textContent = okText; msg.className = 'text-[11px] text-emerald-600 font-bold mr-auto ml-2'; }
+            try{
+                if(d.migrate_error) notify('حُفظت الإعدادات — تعذر ترحيل models.py: ' + String(d.migrate_error).slice(0, 150), 'warning');
+                else notify(okText, 'success');
+            }catch(e){}
+        }catch(e){
+            if(msg){ msg.textContent = String((e && e.message) || e).slice(0, 200); msg.className = 'text-[11px] text-rose-600 font-bold mr-auto ml-2'; }
+        }
+    }
+
+    async function wsMigrateTablesDo(targetConnName){
+        if(targetConnName && typeof targetConnName === 'string'){ wsSelectConnAsPrimary(targetConnName); }
+        const id = window._wsEditId;
+        const msg = document.getElementById('wsSettingsMsg');
+        const btn = document.getElementById('wsMigrateBtn');
+        const fBtn = document.getElementById('wsMigrateFooterBtn');
+        if(!id) return;
+        const v = (k)=>{ const el = document.getElementById('wsF_' + k); return el ? el.value : ''; };
+        const schema = (v('schema') || '').trim();
+        if(msg) { msg.textContent = 'جارٍ ترحيل كافة المودلز بدون استثناء...'; msg.className = 'text-[11px] text-indigo-600 font-bold mr-auto ml-2'; }
+        if(btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> جاري الترحيل...'; }
+        if(fBtn) { fBtn.disabled = true; }
+        try{
+            const conn = {host: v('host'), port: v('port'), user: v('user'), instance: v('instance')};
+            if(String(v('password') || '').trim() !== '') conn.password = v('password');
+            const res = await fetch('/api/workspaces/' + encodeURIComponent(id) + '/migrate/', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({connection_name: (targetConnName && typeof targetConnName === 'string') ? targetConnName : v('primary_connection'), schema: schema, connection: conn})
+            });
+            const d = await res.json();
+            if(!res.ok) throw new Error(d.error || 'فشل الترحيل');
+            const tCount = d.table_count || (d.tables ? d.tables.length : 0);
+            const sName = d.schema || schema || '';
+            const fCount = d.fmlk_migrated || 0;
+            const cCount = d.custom_migrated || 0;
+            const successMsg = `تم ترحيل كافة المودلز بدون استثناء ✓ (${tCount} جدول في السكيما ${sName} — نماذج FMLK: ${fCount}، مودلز مخصصة: ${cCount})`;
+            const resBox = document.getElementById('wsMigrateResultBox');
+            if(resBox){
+                resBox.classList.remove('hidden');
+                resBox.innerHTML = `<div class="flex flex-wrap items-center justify-between gap-2 text-emerald-700"><span><i class="fa-solid fa-circle-check"></i> ${successMsg}</span><span class="font-mono text-[10px] bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200" dir="ltr">${d.connection || v('primary_connection')} / ${sName}</span></div>` +
+                    ((d.tables && d.tables.length) ? `<div class="text-[10px] text-slate-500 font-mono max-h-24 overflow-y-auto pt-1 border-t border-slate-100" dir="ltr">${d.tables.join(' • ')}</div>` : '');
+            }
+            if(msg) { msg.textContent = successMsg; msg.className = 'text-[11px] text-emerald-600 font-bold mr-auto ml-2'; }
+            if(typeof notify === 'function') notify(successMsg, 'success');
+            if(typeof wsTablesFetch === 'function') wsTablesFetch();
+            if(typeof wsColsFetch === 'function') wsColsFetch();
+        }catch(e){
+            const errText = 'تعذر ترحيل الجداول: ' + String((e && e.message) || e).slice(0, 200);
+            if(msg) { msg.textContent = errText; msg.className = 'text-[11px] text-rose-600 font-bold mr-auto ml-2'; }
+            if(typeof notify === 'function') notify(errText, 'danger');
+        }finally{
+            if(btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-play"></i> <span>ترحيل كافة المودلز الآن</span>'; }
+            if(fBtn) { fBtn.disabled = false; }
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', function(){
+        wsMasterEnsure(()=>{ wsSettingsLoad(window._wsEditId); });
+    });
+</script>
+{% endblock %}

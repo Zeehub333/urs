@@ -19,21 +19,32 @@
         <main class="p-6 space-y-6 max-w-7xl mx-auto w-full">
 
             <!-- Hero Section -->
-            <div class="bg-gradient-to-l from-blue-900 via-indigo-900 to-blue-800 rounded-3xl p-8 text-white relative overflow-hidden shadow-lg">
-                <div class="absolute -left-20 -bottom-20 w-80 h-80 bg-blue-600/20 rounded-full blur-3xl pointer-events-none"></div>
-                <div class="absolute right-10 top-0 w-60 h-60 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none"></div>
+            <div class="bg-gradient-to-l from-blue-900 via-indigo-900 to-blue-800 rounded-3xl p-8 text-white relative shadow-lg z-30">
+                <!-- Background blur effects clipped inside rounded container -->
+                <div class="absolute inset-0 rounded-3xl overflow-hidden pointer-events-none">
+                    <div class="absolute -left-20 -bottom-20 w-80 h-80 bg-blue-600/20 rounded-full blur-3xl pointer-events-none"></div>
+                    <div class="absolute right-10 top-0 w-60 h-60 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none"></div>
+                </div>
 
                 <div class="relative z-10 text-center max-w-2xl mx-auto space-y-4">
                     <h1 class="text-2xl md:text-3xl font-extrabold tracking-wide">تطبيقات النظام</h1>
                     <p class="text-xs md:text-sm text-blue-200 leading-relaxed">اختر التطبيق المطلوب لبدء العمل، أو اكتب أي اسم، رقم، أو وصف للبحث الشامل</p>
                     
-                    <div class="relative mt-4">
+                    <div class="relative mt-4 z-40" id="nlpSearchWrapper">
                         <span class="absolute inset-y-0 right-0 flex items-center pr-4 pointer-events-none text-gray-400">
-                            <i class="fa-solid fa-magnifying-glass"></i>
+                            <i class="fa-solid fa-wand-magic-sparkles text-indigo-500" id="nlpSearchIcon"></i>
                         </span>
-                        <input id="appSearch" type="text" placeholder="ابحث عن أي اسم مثل: (تقرير مبيعات، كشف راتب، العملاء...)" class="w-full bg-white/95 text-gray-800 placeholder-gray-400 text-xs md:text-sm rounded-2xl py-3.5 pr-11 pl-20 focus:outline-none focus:ring-2 focus:ring-emerald-400 shadow-md transition">
-                        <div class="absolute inset-y-0 left-0 flex items-center pl-3">
-                            <span class="bg-gray-100 text-gray-500 text-[10px] font-bold px-2 py-1 rounded-lg border border-gray-200">Ctrl + K</span>
+                        <input id="appSearch" type="text" autocomplete="off" placeholder="اكتب سؤالك أو اسم الصنف (مثل: سعر ميراكوى بالتكلفة، مبيعات يناير، تقارير...)" class="w-full bg-white text-gray-800 placeholder-gray-400 text-xs md:text-sm rounded-2xl py-3.5 pr-11 pl-28 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-md transition">
+                        <div class="absolute inset-y-0 left-0 flex items-center pl-2">
+                            <button id="nlpSearchBtn" type="button" onclick="triggerNlpSearch()" class="px-4 py-2 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 active:scale-95 text-white text-xs font-bold rounded-xl shadow transition flex items-center gap-1.5 cursor-pointer">
+                                <i class="fa-solid fa-magnifying-glass text-xs"></i>
+                                <span>بحث</span>
+                            </button>
+                        </div>
+
+                        <!-- Smart NLP Results Dropdown (Scoped strictly to Current Workspace) -->
+                        <div id="nlpSearchDropdown" class="hidden absolute top-full right-0 left-0 mt-2 bg-white rounded-3xl shadow-2xl border border-indigo-100 z-[100] text-right text-gray-800 max-h-[85vh] overflow-y-auto animate-in fade-in zoom-in-95 duration-150">
+                            <div id="nlpSearchContent" class="p-4 space-y-4"></div>
                         </div>
                     </div>
                 </div>
@@ -172,7 +183,7 @@
     </div>
 
     {% block modals %}{% include "partials/support_modal.html" %}
-    <div id="addAppModal" class="hidden fixed inset-0 z-[80] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4" onclick="if(event.target===this)closeAddApp()">
+    <div id="addAppModal" class="hidden fixed inset-0 z-[80] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
         <div class="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden">
             <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-indigo-50">
                 <h3 class="text-sm font-bold text-slate-800 flex items-center gap-2"><i class="fa-solid fa-plus text-indigo-600"></i> إضافة تطبيق جديد</h3>
@@ -193,7 +204,7 @@
                             <span id="addAppIconName" class="font-mono text-[11px]" dir="ltr">fa-cube</span>
                             <i class="fa-solid fa-chevron-down mr-auto text-slate-400 text-[10px]"></i>
                         </button>
-                        <div id="addAppIconPanel" class="hidden fixed inset-0 z-[95] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4" onclick="if(event.target===this)closeAppIconPanel()">
+                        <div id="addAppIconPanel" class="hidden fixed inset-0 z-[95] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
                             <div class="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden">
                                 <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-indigo-50 shrink-0">
                                     <h3 class="text-sm font-bold text-slate-800 flex items-center gap-2"><i class="fa-solid fa-icons text-indigo-600"></i> اختر الأيقونة</h3>
@@ -237,74 +248,489 @@
     {% block scripts %}
     <script src="{% static 'components/ws_master.js' %}"></script>
     <script>
-        // Dynamic search — filters app-card via /api/apps/?q=...
+        {% include "UniDBPicker.js" %}
+    </script>
+    <script>
+        // Current Workspace ID (strictly isolated to current workspace)
+        function getActiveWorkspaceId() {
+            try {
+                const urlParams = new URLSearchParams(window.location.search);
+                const fromUrl = urlParams.get('workspace') || urlParams.get('settings');
+                if (fromUrl && fromUrl.trim()) return fromUrl.trim();
+            } catch (e) {}
+            const serverWs = "{{ current_workspace.id|default:current_workspace.name|default:'' }}";
+            if (serverWs && serverWs.trim()) return serverWs.trim();
+            return "";
+        }
+
         const searchInput = document.getElementById('appSearch');
         const appsGrid = document.getElementById('appsGrid');
         const noResults = document.getElementById('noResults');
+        const nlpDropdown = document.getElementById('nlpSearchDropdown');
+        const nlpContent = document.getElementById('nlpSearchContent');
+        const nlpIcon = document.getElementById('nlpSearchIcon');
         let allApps = Array.from(document.querySelectorAll('.app-card'));
+        let nlpDebounceTimer = null;
 
-        async function fetchApps(q) {
+        function formatNumber(num) {
+            if (num === null || num === undefined || isNaN(num)) return '0';
+            return Number(num).toLocaleString('en-US');
+        }
+
+        async function executeNlpSearch(q) {
+            if (!q) {
+                closeNlpDropdown();
+                document.querySelectorAll('.app-card').forEach(c => c.style.display = '');
+                noResults.classList.add('hidden');
+                return;
+            }
+
+            if (nlpIcon) nlpIcon.className = 'fa-solid fa-circle-notch fa-spin text-indigo-500';
+
             try {
-                const res = await fetch(`/api/apps/?q=${encodeURIComponent(q)}`);
+                const curWs = getActiveWorkspaceId();
+                const res = await fetch(`/api/nlp/search/?q=${encodeURIComponent(q)}&workspace=${encodeURIComponent(curWs)}`);
                 const data = await res.json();
-                // Re-render grid dynamically — link to /app/<name>/ with الادخالات/التقارير
-                appsGrid.innerHTML = data.apps.map(app => `
-                    <a href="/app/${app.name}/" class="bg-white p-5 rounded-3xl border border-gray-200 shadow-sm hover:shadow-md transition relative flex flex-col justify-between group text-right">
-                        <button class="absolute top-4 left-4 text-gray-300 hover:text-amber-400 transition text-sm" onclick="event.preventDefault();"><i class="fa-regular fa-star"></i></button>
-                        <div>
-                            <div class="w-12 h-12 ${app.icon_bg} ${app.icon_color} rounded-2xl flex items-center justify-center text-lg mb-4 shadow-sm">
-                                ${appIconHtml(app)}
-                            </div>
-                            <h3 class="text-sm font-bold text-gray-800 mb-1">${app.ar}</h3>
-                            <p class="text-[11px] text-gray-500 leading-relaxed mb-4">${app.description || ''}</p>
-                        </div>
-                        <div class="flex items-center gap-2">
-                            ${app.is_new ? '<span class="inline-block bg-emerald-50 text-emerald-600 text-[10px] font-bold px-2.5 py-0.5 rounded-full">جديد</span>' : ''}
-                            <span class="text-[10px] text-gray-400">${app.version}</span>
-                            <span class="mr-auto text-[10px] text-indigo-600">عرض →</span>
-                        </div>
-                    </a>
-                `).join('') + addAppCardHtml();
-                noResults.classList.toggle('hidden', data.apps.length > 0);
-            } catch(e) {
-                // Fallback: client-side filter
-                const ql = q.toLowerCase();
-                let visible = 0;
-                allApps.forEach(card => {
-                    const name = (card.dataset.name + ' ' + card.dataset.ar + ' ' + card.dataset.desc).toLowerCase();
-                    const show = !ql || name.includes(ql);
-                    card.style.display = show ? '' : 'none';
-                    if(show) visible++;
-                });
-                noResults.classList.toggle('hidden', visible > 0);
-                if(q) {
-                    // Also try API in background
-                    fetch(`/api/apps/?q=${encodeURIComponent(q)}`).then(r=>r.json()).then(d=>{
-                        if(d.apps.length !== visible) fetchApps(q);
-                    });
-                }
+                renderNlpResults(data);
+            } catch (err) {
+                console.error('NLP search error:', err);
+            } finally {
+                if (nlpIcon) nlpIcon.className = 'fa-solid fa-magnifying-glass text-gray-400';
             }
         }
 
-        let searchTimeout;
-        searchInput.addEventListener('input', (e) => {
-            clearTimeout(searchTimeout);
-            searchTimeout = setTimeout(() => fetchApps(e.target.value.trim()), 300);
-        });
-        // Ctrl+K focus
-        document.addEventListener('keydown', (e) => {
-            if((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
-                e.preventDefault();
+        function closeNlpDropdown() {
+            if (nlpDropdown) nlpDropdown.classList.add('hidden');
+        }
+
+        function renderNlpResults(data) {
+            if (!data || !data.ok) {
+                closeNlpDropdown();
+                return;
+            }
+
+            nlpDropdown.classList.remove('hidden');
+            let html = '';
+
+            // 1. شريط التحليل الذكي ومستوى الثقة
+            let intentBadge = '';
+            let intentColor = 'bg-slate-100 text-slate-700';
+            if (data.domain_ar) {
+                intentBadge = `<i class="fa-solid ${data.domain_icon || 'fa-chart-pie'} ml-1"></i> ${data.domain_ar}`;
+                intentColor = data.domain_color || 'bg-indigo-100 text-indigo-800';
+            } else if (data.intent === 'CONVERSATIONAL_ASSISTANT') {
+                intentBadge = '💬 المساعد الذكي';
+                intentColor = 'bg-indigo-100 text-indigo-800';
+            } else if (data.intent === 'ITEM_KPI') {
+                intentBadge = '🎯 صنف ومؤشرات أداء (KPIs)';
+                intentColor = 'bg-emerald-100 text-emerald-800';
+            } else if (data.intent === 'REPORT_SEARCH') {
+                intentBadge = '📊 تقرير في النظام';
+                intentColor = 'bg-blue-100 text-blue-800';
+            } else if (data.intent === 'APP_SEARCH') {
+                intentBadge = '🚀 تطبيق نظام';
+                intentColor = 'bg-purple-100 text-purple-800';
+            } else if (data.intent === 'RML_XSQL_GENERATE') {
+                intentBadge = '⚡ توليد استعلام XSQL / RML';
+                intentColor = 'bg-amber-100 text-amber-800';
+            } else if (data.intent === 'WORKSPACE_MISMATCH') {
+                intentBadge = '⚠️ تنبيه مساحة العمل';
+                intentColor = 'bg-amber-100 text-amber-800';
+            } else {
+                intentBadge = '🔍 استنتاج ذكي';
+                intentColor = 'bg-slate-100 text-slate-700';
+            }
+
+            html += `
+            <div class="flex items-center justify-between pb-3 border-b border-gray-100 text-xs">
+                <div class="flex items-center gap-2 flex-wrap">
+                    <span class="px-2.5 py-1 rounded-full font-bold text-[11px] ${intentColor}">${intentBadge}</span>
+                    ${data.pattern_ar ? `<span class="px-2 py-0.5 rounded-full font-semibold text-[10px] bg-slate-100 text-slate-600"><i class="fa-solid ${data.pattern_icon || 'fa-tag'} ml-1"></i> ${data.pattern_ar}</span>` : ''}
+                    <span class="text-[11px] text-gray-400 font-mono">دقة الفهم: ${Math.round((data.confidence || 0) * 100)}%</span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span class="text-[10px] text-gray-400 font-semibold px-2 py-0.5 bg-gray-50 rounded-lg border border-gray-200">
+                        <i class="fa-solid fa-shield-halved text-emerald-500 ml-1"></i> مساحة العمل: <strong>${data.workspace}</strong>
+                    </span>
+                    <button type="button" onclick="closeNlpDropdown()" class="w-6 h-6 rounded-full hover:bg-gray-100 text-gray-400 hover:text-gray-600 flex items-center justify-center transition cursor-pointer">
+                        <i class="fa-solid fa-xmark text-xs"></i>
+                    </button>
+                </div>
+            </div>`;
+
+            // 2. تنبيه حالة وجود التقرير في النظام ديناميكياً
+            if (data.report_note) {
+                const isAvail = data.report_status === 'AVAILABLE';
+                const repTargetUrl = data.filtered_report_url || (data.matched_reports && data.matched_reports[0] && data.matched_reports[0].url) || '#';
+                html += `
+                <div class="p-3 rounded-2xl border text-xs flex items-center justify-between gap-3 ${isAvail ? 'bg-emerald-50/90 border-emerald-200 text-emerald-900' : 'bg-amber-50/90 border-amber-200 text-amber-900'}">
+                    <div class="font-semibold flex items-center gap-2 flex-1 leading-relaxed">
+                        <i class="fa-solid ${isAvail ? 'fa-circle-check text-emerald-600' : 'fa-triangle-exclamation text-amber-600'} text-sm shrink-0"></i>
+                        <span>${data.report_note}</span>
+                    </div>
+                    ${(data.matched_reports && data.matched_reports.length > 0 && isAvail) ? `
+                        <a href="${repTargetUrl}" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-[11px] font-bold shrink-0 transition flex items-center gap-1.5 shadow-2xs">
+                            <i class="fa-solid fa-filter text-[10px]"></i>
+                            <span>فتح التقرير المفلتر</span>
+                            <i class="fa-solid fa-arrow-left text-[10px]"></i>
+                        </a>` : ''}
+                </div>`;
+            }
+
+            // 3. الواجهة الأولى: النص عند السؤال بسؤال محدد (TEXT_DIRECT)
+            if (data.ui_mode === 'TEXT_DIRECT' && data.hero_metric) {
+                const hm = data.hero_metric;
+                const repTargetUrl = data.filtered_report_url || (data.matched_reports && data.matched_reports[0] && data.matched_reports[0].url);
+                html += `
+                <div class="bg-gradient-to-l from-slate-900 via-indigo-950 to-slate-900 rounded-2xl p-4 text-white shadow-md border border-indigo-500/30 space-y-3">
+                    <div class="flex items-center justify-between border-b border-white/10 pb-2">
+                        <span class="text-xs text-indigo-200 font-bold flex items-center gap-2">
+                            <i class="fa-solid ${hm.icon || 'fa-receipt'} text-emerald-400 text-sm"></i>
+                            <span>${hm.label}</span>
+                        </span>
+                        <span class="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                            إجابة مباشرة دقيقة
+                        </span>
+                    </div>
+                    <div class="py-1">
+                        <div class="text-2xl sm:text-3xl font-black text-white tracking-tight flex items-baseline gap-2">
+                            <span>${hm.val}</span>
+                        </div>
+                        ${hm.sub ? `<div class="text-xs text-indigo-200/90 font-medium mt-1">${hm.sub}</div>` : ''}
+                    </div>
+                    <div class="text-xs text-slate-200 leading-relaxed bg-white/5 p-3 rounded-xl border border-white/10">
+                        <p class="font-semibold">${data.ai_explanation}</p>
+                    </div>
+                    ${repTargetUrl ? `
+                    <div class="pt-2 border-t border-white/10 flex items-center justify-between text-xs flex-wrap gap-2">
+                        <span class="text-indigo-200 text-[11px] flex items-center gap-1">
+                            <i class="fa-solid fa-filter text-emerald-400"></i>
+                            <span>المحدد بالسؤال: <strong class="text-white">${data.filter_label || 'المعايير المحددة'}</strong></span>
+                        </span>
+                        <a href="${repTargetUrl}" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm">
+                            <i class="fa-solid fa-chart-pie text-xs"></i>
+                            <span>فتح التقرير المفلتر بالسؤال</span>
+                            <i class="fa-solid fa-arrow-left text-[10px]"></i>
+                        </a>
+                    </div>` : ''}
+                </div>`;
+            }
+
+            // 4. الواجهة الثانية: المقارنة والمخطط البياني (CHART_COMPARISON)
+            if (data.ui_mode === 'CHART_COMPARISON' && data.comparison_data) {
+                const cd = data.comparison_data;
+                const repTargetUrl = data.filtered_report_url || (data.matched_reports && data.matched_reports[0] && data.matched_reports[0].url);
+                html += `
+                <div class="bg-white rounded-2xl p-4 border border-indigo-100 shadow-xs space-y-3">
+                    <div class="flex items-center justify-between pb-2 border-b border-gray-100">
+                        <h4 class="text-xs sm:text-sm font-extrabold text-indigo-950 flex items-center gap-2">
+                            <i class="fa-solid fa-chart-simple text-indigo-600"></i>
+                            <span>${cd.title}</span>
+                        </h4>
+                        <span class="text-[10px] font-bold px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded-md border border-indigo-100">
+                            مقارنة بيانية تفاعلية
+                        </span>
+                    </div>
+                    <p class="text-xs text-gray-600 leading-relaxed">${data.ai_explanation}</p>
+                    <div class="space-y-3 pt-1">
+                        ${cd.items.map(it => `
+                            <div class="space-y-1">
+                                <div class="flex items-center justify-between text-xs font-bold">
+                                    <span class="text-gray-800 flex items-center gap-1.5 truncate">
+                                        <span class="w-2.5 h-2.5 rounded-full ${it.color || 'bg-indigo-600'} shrink-0"></span>
+                                        <span class="truncate">${it.label}</span>
+                                    </span>
+                                    <div class="flex items-center gap-2 shrink-0">
+                                        <span class="font-extrabold text-indigo-900">${it.val}</span>
+                                        ${it.delta ? `<span class="text-[10px] px-1.5 py-0.2 rounded font-bold ${it.delta.startsWith('+') ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-700'}">${it.delta}</span>` : ''}
+                                    </div>
+                                </div>
+                                <div class="w-full h-2.5 bg-gray-100 rounded-full overflow-hidden">
+                                    <div class="h-full rounded-full ${it.color || 'bg-indigo-600'} transition-all duration-500" style="width: ${Math.min(100, Math.max(8, it.pct))}%;"></div>
+                                </div>
+                                ${it.sub ? `<div class="text-[10px] text-gray-400 font-medium">${it.sub}</div>` : ''}
+                            </div>
+                        `).join('')}
+                    </div>
+                    ${repTargetUrl ? `
+                    <div class="pt-2 border-t border-gray-100 flex items-center justify-between text-xs flex-wrap gap-2">
+                        <span class="text-gray-500 text-[11px] flex items-center gap-1">
+                            <i class="fa-solid fa-filter text-indigo-600"></i>
+                            <span>المحدد بالسؤال: <strong class="text-gray-800">${data.filter_label || 'المعايير المحددة'}</strong></span>
+                        </span>
+                        <a href="${repTargetUrl}" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm">
+                            <i class="fa-solid fa-chart-pie text-xs"></i>
+                            <span>فتح التقرير المفلتر بالسؤال</span>
+                            <i class="fa-solid fa-arrow-left text-[10px]"></i>
+                        </a>
+                    </div>` : ''}
+                </div>`;
+            }
+
+            // 5. الواجهة الثالثة: المؤشرات عند البحث عن اسم صنف أو جهة (KPIS_ENTITY)
+            if (data.intent === 'ITEM_KPI' && data.kpi_data) {
+                const k = data.kpi_data;
+                html += `
+                <div class="bg-gradient-to-br from-indigo-50/70 via-white to-blue-50/50 rounded-2xl p-4 border border-indigo-100 shadow-xs space-y-3">
+                    <div class="flex items-start justify-between gap-3 flex-wrap">
+                        <div>
+                            <div class="flex items-center gap-2">
+                                <span class="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center text-sm shadow-sm">
+                                    <i class="fa-solid fa-box-archive"></i>
+                                </span>
+                                <div>
+                                    <h3 class="text-sm md:text-base font-extrabold text-gray-900">${k.item_name}</h3>
+                                    <div class="flex items-center gap-2 mt-0.5 text-[11px] text-gray-500 font-mono flex-wrap">
+                                        <span>رمز الصنف: <strong class="text-gray-700">${k.item_code || '---'}</strong></span>
+                                        <span>•</span>
+                                        <span>الوحدة: <strong class="text-gray-700">${k.unit || 'فيالة'}</strong></span>
+                                        <span>•</span>
+                                        <span>سعر البيع: <strong class="text-blue-700">${formatNumber(k.selling_price)} ر.ي</strong></span>
+                                        <span>•</span>
+                                        <span>سعر التكلفة: <strong class="text-emerald-700">${formatNumber(k.cost_price)} ر.ي</strong></span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <a href="${data.filtered_report_url || k.report_url}" class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition shadow-sm cursor-pointer">
+                            <i class="fa-solid fa-filter text-xs"></i>
+                            <span>فتح تقرير الصنف المفلتر</span>
+                            <i class="fa-solid fa-arrow-left text-[10px]"></i>
+                        </a>
+                    </div>
+
+                    <!-- شبكة المؤشرات KPIs بناء على RML المحلي -->
+                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-1">
+                        <div class="bg-white p-3 rounded-xl border border-blue-100 shadow-2xs">
+                            <span class="text-[10px] text-blue-600 font-bold block mb-1 flex items-center gap-1">
+                                <i class="fa-solid fa-cart-shopping"></i> صافي كمية المبيعات
+                            </span>
+                            <span class="text-base font-extrabold text-gray-800">${formatNumber(k.sales_qty)}</span>
+                            <span class="text-[10px] text-gray-400 block">${k.unit || ''}</span>
+                        </div>
+
+                        <div class="bg-white p-3 rounded-xl border border-emerald-100 shadow-2xs">
+                            <span class="text-[10px] text-emerald-600 font-bold block mb-1 flex items-center gap-1">
+                                <i class="fa-solid fa-money-bill-wave"></i> قيمة المبيعات
+                            </span>
+                            <span class="text-base font-extrabold text-emerald-700">${formatNumber(k.sales_val)}</span>
+                            <span class="text-[10px] text-gray-400 block">ريال يمني</span>
+                        </div>
+
+                        <div class="bg-white p-3 rounded-xl border border-purple-100 shadow-2xs">
+                            <span class="text-[10px] text-purple-600 font-bold block mb-1 flex items-center gap-1">
+                                <i class="fa-solid fa-gift"></i> بونص المبيعات
+                            </span>
+                            <span class="text-base font-extrabold text-purple-700">${formatNumber(k.sales_bonus)}</span>
+                            <span class="text-[10px] text-gray-400 block">${k.unit || ''}</span>
+                        </div>
+
+                        <div class="bg-white p-3 rounded-xl border border-amber-100 shadow-2xs">
+                            <span class="text-[10px] text-amber-600 font-bold block mb-1 flex items-center gap-1">
+                                <i class="fa-solid fa-warehouse"></i> الرصيد الفعلي بالمخزن
+                            </span>
+                            <span class="text-base font-extrabold text-amber-700">${formatNumber(k.actual_qty)}</span>
+                            <span class="text-[10px] text-gray-400 block">${k.unit || ''}</span>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center justify-between text-[11px] text-gray-500 pt-1 border-t border-indigo-50">
+                        <span><i class="fa-solid fa-file-invoice text-indigo-500 ml-1"></i> مصدر المؤشرات: <strong>${k.source_report}</strong> (${k.source_file})</span>
+                        <a href="${data.filtered_report_url || k.report_url}" class="text-indigo-600 font-bold hover:underline">عرض التحليل المفلتر بالصنف ←</a>
+                    </div>
+                </div>`;
+            } else if (data.ui_mode !== 'TEXT_DIRECT' && data.ui_mode !== 'CHART_COMPARISON' && data.kpis_summary && data.kpis_summary.length > 0) {
+                // بطاقات المؤشرات العامة لجهة أو قطاع
+                html += `
+                <div class="bg-white rounded-2xl p-4 border border-indigo-100 shadow-xs space-y-3">
+                    <div class="flex items-start gap-3">
+                        <div class="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-sm text-sm">
+                            <i class="fa-solid fa-wand-magic-sparkles"></i>
+                        </div>
+                        <div class="min-w-0 flex-1">
+                            <h4 class="text-xs font-extrabold text-indigo-900">${data.ai_title || 'مؤشرات الأداء المستنتجة'}</h4>
+                            <p class="text-xs text-gray-700 mt-1 leading-relaxed">${data.ai_explanation}</p>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 border-t border-indigo-50">
+                        ${data.kpis_summary.map(k => `
+                            <div class="bg-slate-50/80 p-2.5 rounded-xl border border-slate-200/70 shadow-2xs">
+                                <span class="text-[10px] text-gray-500 font-bold block mb-0.5 truncate flex items-center gap-1">
+                                    <i class="fa-solid ${k.icon || 'fa-chart-pie'} text-indigo-500 text-[11px]"></i> ${k.label}
+                                </span>
+                                <span class="text-xs sm:text-sm font-extrabold text-gray-900 block truncate">${k.val}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>`;
+            }
+
+            // اقتراحات المتابعة التفاعلية
+            if (data.suggestions && data.suggestions.length > 0) {
+                html += `
+                <div class="p-3 bg-indigo-50/50 rounded-2xl border border-indigo-100/60 flex flex-wrap items-center gap-1.5">
+                    <span class="text-[10px] font-bold text-gray-500"><i class="fa-solid fa-lightbulb text-amber-500 mr-1"></i> أسئلة متابعة مقترحة:</span>
+                    ${data.suggestions.map(s => `
+                        <button type="button" onclick="executeNlpSamplePrompt('${s.prompt}')" class="px-2.5 py-1 bg-white hover:bg-indigo-600 hover:text-white rounded-lg border border-indigo-200 text-indigo-700 text-[11px] font-semibold transition shadow-2xs flex items-center gap-1.5 cursor-pointer">
+                            <i class="fa-solid ${s.icon || 'fa-magnifying-glass'} text-[10px]"></i>
+                            <span>${s.label}</span>
+                        </button>
+                    `).join('')}
+                </div>`;
+            }
+
+            // 4. في حالة طلب توليد XSQL أو RML
+            if (data.intent === 'RML_XSQL_GENERATE' && data.command && data.command.xsql_query) {
+                const cmd = data.command;
+                html += `
+                <div class="bg-slate-900 rounded-2xl p-4 text-white space-y-3 shadow-md nlp-code-block">
+                    <div class="flex items-center justify-between text-xs flex-wrap gap-2 border-b border-slate-800 pb-2.5">
+                        <div class="flex items-center gap-2">
+                            <span class="w-6 h-6 rounded-lg bg-amber-400/20 text-amber-400 flex items-center justify-center text-xs">
+                                <i class="fa-solid fa-terminal"></i>
+                            </span>
+                            <span class="text-amber-400 font-bold text-xs">${cmd.suggested_title || 'استعلام XSQL مولد بواسطة المحرك'}</span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span class="text-[10px] text-slate-400 font-mono px-2 py-0.5 bg-slate-800 rounded">الجدول: ${cmd.target_table}</span>
+                            <button type="button" onclick="copyNlpSql(this)" class="px-2.5 py-1 bg-slate-800 hover:bg-indigo-600 text-slate-200 hover:text-white rounded-lg text-[10px] font-bold transition flex items-center gap-1 cursor-pointer">
+                                <i class="fa-regular fa-copy"></i>
+                                <span>نسخ SQL</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    ${(cmd.group_labels && cmd.group_labels.length > 0) ? `
+                    <div class="flex items-center gap-2 text-[11px] text-slate-300 flex-wrap">
+                        <span class="text-slate-400 text-[10px]"><i class="fa-solid fa-layer-group text-indigo-400 ml-1"></i> الأبعاد المستنتجة:</span>
+                        ${cmd.group_labels.map(l => `<span class="px-2 py-0.5 bg-slate-800 rounded-md border border-slate-700 text-indigo-300 font-semibold">${l}</span>`).join('')}
+                    </div>` : ''}
+
+                    <pre class="bg-black/50 p-3 rounded-xl font-mono text-[11px] text-emerald-400 overflow-x-auto text-left leading-relaxed border border-slate-800/80" dir="ltr">${cmd.xsql_query}</pre>
+                </div>`;
+            }
+
+            // 5. التقارير المطابقة في مساحة العمل
+            if (data.matched_reports && data.matched_reports.length > 0) {
+                html += `
+                <div>
+                    <h4 class="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                        <i class="fa-solid fa-file-lines text-indigo-500"></i> التقارير المطابقة في مساحة العمل
+                    </h4>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        ${data.matched_reports.map(r => `
+                            <a href="${r.url}" class="p-2.5 bg-slate-50 hover:bg-indigo-50/60 rounded-xl border border-slate-200/70 hover:border-indigo-200 flex items-center justify-between transition group">
+                                <div class="flex items-center gap-2.5 min-w-0">
+                                    <div class="w-8 h-8 rounded-lg bg-indigo-100 text-indigo-600 flex items-center justify-center text-xs shrink-0 group-hover:bg-indigo-600 group-hover:text-white transition">
+                                        <i class="fa-solid ${r.icon || 'fa-chart-pie'}"></i>
+                                    </div>
+                                    <div class="min-w-0">
+                                        <h5 class="text-xs font-bold text-gray-800 truncate group-hover:text-indigo-600">${r.name}</h5>
+                                        <span class="text-[10px] text-gray-400 font-mono block truncate">${r.file} • ${r.app}</span>
+                                    </div>
+                                </div>
+                                <span class="text-[11px] text-indigo-600 font-bold shrink-0 mr-2">فتح ←</span>
+                            </a>
+                        `).join('')}
+                    </div>
+                </div>`;
+            }
+
+            // 6. التطبيقات المطابقة في مساحة العمل
+            if (data.matched_apps && data.matched_apps.length > 0) {
+                html += `
+                <div>
+                    <h4 class="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                        <i class="fa-solid fa-cubes text-purple-500"></i> التطبيقات المطابقة
+                    </h4>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        ${data.matched_apps.map(a => `
+                            <a href="${a.url}" class="p-2.5 bg-slate-50 hover:bg-purple-50/60 rounded-xl border border-slate-200/70 hover:border-purple-200 flex items-center justify-between transition group">
+                                <div class="flex items-center gap-2.5 min-w-0">
+                                    <div class="w-8 h-8 rounded-lg bg-purple-100 text-purple-600 flex items-center justify-center text-xs shrink-0 group-hover:bg-purple-600 group-hover:text-white transition">
+                                        <i class="fa-solid ${a.icon || 'fa-cube'}"></i>
+                                    </div>
+                                    <div class="min-w-0">
+                                        <h5 class="text-xs font-bold text-gray-800 truncate group-hover:text-purple-600">${a.ar}</h5>
+                                        <span class="text-[10px] text-gray-400 block truncate">${a.description || a.name}</span>
+                                    </div>
+                                </div>
+                                <span class="text-[11px] text-purple-600 font-bold shrink-0 mr-2">دخول →</span>
+                            </a>
+                        `).join('')}
+                    </div>
+                </div>`;
+            }
+
+            // Footer
+            html += `
+            <div class="pt-2 border-t border-gray-100 flex items-center justify-between text-[10px] text-gray-400">
+                <span>مدعوم بمحرك <strong>nlp_engine</strong> المطور</span>
+                <span>اضغط <kbd class="px-1.5 py-0.5 bg-gray-100 border border-gray-200 rounded font-mono">Esc</kbd> للإغلاق</span>
+            </div>`;
+
+            nlpContent.innerHTML = html;
+        }
+
+        window.executeNlpSamplePrompt = function(promptText) {
+            if (searchInput) {
+                searchInput.value = promptText;
                 searchInput.focus();
+                executeNlpSearch(promptText);
+            }
+        };
+
+        window.copyNlpSql = function(btn) {
+            const block = btn.closest('.nlp-code-block');
+            if (!block) return;
+            const pre = block.querySelector('pre');
+            if (!pre) return;
+            navigator.clipboard.writeText(pre.innerText).then(() => {
+                const orig = btn.innerHTML;
+                btn.innerHTML = '<i class="fa-solid fa-check text-emerald-400"></i> تم النسخ!';
+                setTimeout(() => { btn.innerHTML = orig; }, 1800);
+            });
+        };
+
+        window.triggerNlpSearch = function() {
+            if (!searchInput) return;
+            const q = searchInput.value.trim();
+            if (!q) {
+                closeNlpDropdown();
+                return;
+            }
+            executeNlpSearch(q);
+        };
+
+        // إغلاق أي نتائج سابقة فوراً عند الكتابة حتى لا تظهر إلا بالضغط على زر البحث
+        searchInput.addEventListener('input', () => {
+            closeNlpDropdown();
+        });
+
+        // تظهر النتائج فقط عند الضغط على زر البحث أو ضغط Enter (ولا تظهر فورياً أثناء الكتابة)
+        searchInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                triggerNlpSearch();
+            } else if (e.key === 'Escape') {
+                closeNlpDropdown();
             }
         });
-        // Also support direct typing without API (instant)
-        searchInput.addEventListener('input', (e) => {
-            const q = e.target.value.toLowerCase();
-            if(!q) {
-                // If API not yet, show all
-                document.querySelectorAll('.app-card').forEach(c=>c.style.display='');
-                noResults.classList.add('hidden');
+
+        // إغلاق القائمة المنبثقة عند النقر في أي مكان خارج شريط البحث
+        document.addEventListener('click', (e) => {
+            const wrapper = document.getElementById('nlpSearchWrapper');
+            if (wrapper && !wrapper.contains(e.target)) {
+                closeNlpDropdown();
+            }
+        });
+
+        // Ctrl+K focus
+        document.addEventListener('keydown', (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+                e.preventDefault();
+                searchInput.focus();
+                searchInput.select();
             }
         });
         // Real favorites total from this device (keys: favorites_<app> + my_reports)
@@ -497,606 +923,7 @@
             renderAppIcons();
         }
         function closeAddApp(){ closeModal('addAppModal'); }
-        // ── إعدادات مساحة العمل (من بطاقة المدير ?settings=<id>) ──
-        function wsSettingsOpen(id){
-            let m = document.getElementById('wsSettingsModal');
-            if(m) m.remove();
-            m = document.createElement('div');
-            m.id = 'wsSettingsModal';
-            m.className = 'fixed inset-0 z-[80] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4';
-            m.setAttribute('onclick', 'if(event.target===this)wsSettingsClose()');
-            m.innerHTML = `<div class="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex">
-                <aside class="w-44 shrink-0 border-l border-slate-200 bg-slate-50/60 p-3 space-y-1">
-                    <button data-wssec-btn="general" onclick="wsSecGo('general')" class="w-full text-right px-3 py-2 rounded-xl text-xs font-bold"><i class="fa-solid fa-circle-info ml-1"></i> المعلومات العامة</button>
-                    <button data-wssec-btn="brand" onclick="wsSecGo('brand')" class="w-full text-right px-3 py-2 rounded-xl text-xs font-bold"><i class="fa-solid fa-palette ml-1"></i> البراند</button>
-                    <button data-wssec-btn="conn" onclick="wsSecGo('conn')" class="w-full text-right px-3 py-2 rounded-xl text-xs font-bold"><i class="fa-solid fa-plug ml-1"></i> الاتصال والتخويل</button>
-                </aside>
-                <div class="flex-1 flex flex-col min-w-0 min-h-0">
-                    <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-indigo-50 shrink-0">
-                        <h3 class="text-sm font-bold text-slate-800 flex items-center gap-2">
-                            <i class="fa-solid fa-gear text-indigo-600"></i> إعدادات مساحة العمل
-                        </h3>
-                        <div class="flex items-center gap-2">
-                            <button type="button" onclick="location.reload()" title="تحديث الصفحة بالكامل" class="px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition shadow-xs cursor-pointer">
-                                <i class="fa-solid fa-arrows-rotate text-indigo-600 text-[11px]"></i>
-                                <span>تحديث الصفحة</span>
-                            </button>
-                            <button onclick="wsSettingsClose()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
-                        </div>
-                    </div>
-                    <div class="p-5 space-y-3 text-xs overflow-y-auto custom-scroll flex-1 min-h-0" id="wsSettingsBody">
-                        <p class="text-slate-400 text-center py-4">جاري التحميل...</p>
-                    </div>
-                    <div class="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-2 shrink-0">
-                        <div class="flex items-center gap-2">
-                            <button type="button" onclick="wsMasterEnsure(wsMigrateTablesDo)" id="wsMigrateBtn" title="ترحيل جداول models.py وإنشاء السكيما فورياً" class="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition shadow-sm cursor-pointer">
-                                <i class="fa-solid fa-database"></i>
-                                <span>ترحيل الجداول</span>
-                            </button>
-                            <button type="button" onclick="location.reload()" title="تحديث الصفحة بالكامل" class="px-3.5 py-1.5 bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition shadow-xs cursor-pointer">
-                                <i class="fa-solid fa-arrows-rotate text-slate-600"></i>
-                                <span>تحديث الصفحة</span>
-                            </button>
-                        </div>
-                        <span id="wsSettingsMsg" class="text-[11px] text-rose-600 font-bold mr-auto ml-2"></span>
-                        <div class="flex items-center gap-2">
-                            <button onclick="wsSettingsClose()" class="px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs">إلغاء</button>
-                            <button onclick="wsSettingsSave()" class="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold">حفظ</button>
-                        </div>
-                    </div>
-                </div>
-            </div>`;
-            document.body.appendChild(m);
-            try{ if(typeof lockScroll === 'function') lockScroll(); }catch(e){}
-            window._wsSec = 'general';
-            wsSettingsLoad(id);
-        }
-        function wsSecGo(sec){
-            window._wsSec = sec;
-            document.querySelectorAll('#wsSettingsModal [data-wssec-btn]').forEach(b=>{
-                const on = b.getAttribute('data-wssec-btn') === sec;
-                b.className = 'w-full text-right px-3 py-2 rounded-xl text-xs font-bold transition ' + (on ? 'bg-indigo-600 text-white shadow' : 'text-slate-600 hover:bg-slate-100');
-            });
-            document.querySelectorAll('#wsSettingsBody [data-wssec]').forEach(d=>{
-                d.style.display = d.getAttribute('data-wssec') === sec ? '' : 'none';
-            });
-        }
-        function wsLogoPick(input){
-            const msg = document.getElementById('wsSettingsMsg');
-            try{
-                const f = input && input.files ? input.files[0] : null;
-                if(!f) return;
-                if(!String(f.type || '').startsWith('image/')){ if(msg) msg.textContent = 'اختر ملف صورة'; input.value = ''; return; }
-                if((f.size || 0) > 512 * 1024){ if(msg) msg.textContent = 'الصورة أكبر من 512KB'; input.value = ''; return; }
-                const rd = new FileReader();
-                rd.onload = ()=>{
-                    const url = String(rd.result || '');
-                    const t = document.getElementById('wsF_logo');
-                    if(t) t.value = url;
-                    const p = document.getElementById('wsF_logoPrev');
-                    if(p) p.src = url;
-                    if(msg) msg.textContent = '';
-                };
-                rd.readAsDataURL(f);
-            }catch(e){ if(msg) msg.textContent = 'تعذر قراءة الصورة'; }
-        }
-        function wsBrandPreview(){
-            try{
-                const p = document.getElementById('wsF_primary');
-                const a = document.getElementById('wsF_accent');
-                const bar = document.getElementById('wsBrandPrev');
-                if(bar) bar.style.background = (p && p.value) || '#4f46e5';
-                const btn = document.getElementById('wsBrandPrevBtn');
-                if(btn) btn.style.background = (a && a.value) || '#10b981';
-            }catch(e){}
-        }
-        function wsSettingsClose(){ const m = document.getElementById('wsSettingsModal'); if(m) m.remove(); window._wsEditId = null; try{ if(typeof unlockScroll === 'function') unlockScroll(); }catch(e){} }
-        async function wsSettingsLoad(id){
-            const box = document.getElementById('wsSettingsBody');
-            try{
-                const [wres, lres] = await Promise.all([fetch('/api/workspaces/'), fetch('/api/lookup/lists/')]);
-                const d = await wres.json();
-                const w = (d.workspaces || []).find(x=>x.id === id);
-                if(!w) throw new Error('مساحة غير معروفة');
-                const lists = await lres.json().catch(()=>({}));
-                window._wsEditId = id;
-                window._wsLists = {countries: lists.countries || [], currencies: lists.currencies || []};
-                const c = w.brand_colors || {};
-                const cp = w.connection_params || {};
-                const esc = (v)=>String(v ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
-                const inp = (k, v, label, extra)=>`<div><label class="block font-semibold text-slate-700 mb-1">${label}</label><input id="wsF_${k}" value="${esc(v)}" ${extra||''} class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"></div>`;
-                const selMatch = (cur, code, ar)=>String(cur || '') === String(code) || String(cur || '') === String(ar);
-                const coOpts = (window._wsLists.countries || []).map(x=>`<option value="${esc(x.c)}" ${selMatch(w.country, x.c, x.ar)?'selected':''}>${esc(x.ar)} (${esc(x.c)})</option>`).join('');
-                const cuOpts = (window._wsLists.currencies || []).map(x=>`<option value="${esc(x.c)}" ${selMatch(w.currency, x.c, x.ar)?'selected':''}>${esc(x.ar)} (${esc(x.c)}${x.s ? ' ' + esc(x.s) : ''})</option>`).join('');
-                box.innerHTML = `
-                <div data-wssec="general" class="space-y-3">
-                    ${inp('name', w.name, 'اسم مساحة العمل *')}
-                    <div class="grid grid-cols-2 gap-3">
-                        ${inp('company', w.company, 'اسم الشركة')}
-                        ${inp('domain', w.domain, 'الدومين الأساسي (لإيميلات الشركة)', 'dir="ltr" placeholder="company.com"')}
-                    </div>
-                    <div class="grid grid-cols-2 gap-3">
-                        <div><label class="block font-semibold text-slate-700 mb-1">الدولة</label><select id="wsF_country" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"><option value="">— اختر —</option>${coOpts}</select></div>
-                        <div><label class="block font-semibold text-slate-700 mb-1">العملة</label><select id="wsF_currency" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"><option value="">— اختر —</option>${cuOpts}</select></div>
-                    </div>
-                </div>
-                <div data-wssec="brand" class="space-y-3" style="display:none">
-                    ${inp('brand', w.brand, 'اسم البراند')}
-                    <div>
-                        <label class="block font-semibold text-slate-700 mb-1">الشعار (رفع صورة ≤512KB أو مسار/رابط)</label>
-                        <div class="flex items-center gap-2">
-                            <img id="wsF_logoPrev" src="${esc(w.logo)}" class="w-14 h-14 rounded-xl object-cover border border-slate-200 bg-slate-50 shrink-0" alt="">
-                            <input id="wsF_logoFile" type="file" accept="image/*" onchange="wsLogoPick(this)" class="flex-1 min-w-0 text-[11px] text-slate-500">
-                        </div>
-                        <input id="wsF_logo" value="${esc(w.logo)}" dir="ltr" placeholder="/static/logo.png أو https://..." class="mt-1 w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono" oninput="try{document.getElementById('wsF_logoPrev').src=this.value}catch(e){}">
-                    </div>
-                    <div class="grid grid-cols-2 gap-3">
-                        <div><label class="block font-semibold text-slate-700 mb-1">اللون الأساسي</label><input id="wsF_primary" type="color" value="${/^#[0-9a-fA-F]{6}$/.test(c.primary||'')?c.primary:'#4f46e5'}" oninput="wsBrandPreview()" class="w-full h-10 bg-slate-50 border border-slate-200 rounded-xl px-1"></div>
-                        <div><label class="block font-semibold text-slate-700 mb-1">لون التمييز</label><input id="wsF_accent" type="color" value="${/^#[0-9a-fA-F]{6}$/.test(c.accent||'')?c.accent:'#10b981'}" oninput="wsBrandPreview()" class="w-full h-10 bg-slate-50 border border-slate-200 rounded-xl px-1"></div>
-                    </div>
-                    <div class="rounded-xl border border-slate-200 overflow-hidden">
-                        <div id="wsBrandPrev" class="px-3 py-2 text-white text-[11px] font-bold">معاينة حية — تُطبق الألوان على كامل الواجهة بعد الحفظ</div>
-                        <div class="p-2 bg-slate-50"><span id="wsBrandPrevBtn" class="inline-block px-3 py-1 rounded-lg text-white text-[11px] font-bold">زر تجريبي</span></div>
-                    </div>
-                </div>
-                <div data-wssec="conn" class="space-y-3" style="display:none">
-                    <div class="grid grid-cols-2 gap-3">
-                        ${inp('primary_connection', w.primary_connection, 'الاتصال المحلي الأساسي', 'dir="ltr" onchange="wsTablesFetch()"')}
-                        ${inp('schema', w.schema, 'السكيما (Schema) — تكامل models.py', 'dir="ltr" placeholder="public"')}
-                    </div>
-                    <div class="flex items-center justify-between p-3 bg-emerald-50/70 border border-emerald-200 rounded-xl">
-                        <div>
-                            <div class="text-[11px] font-bold text-emerald-800 flex items-center gap-1.5"><i class="fa-solid fa-database text-emerald-600"></i> ترحيل الجداول وتكامل Models.py</div>
-                            <div class="text-[10px] text-emerald-600 mt-0.5">ينشئ السكيما إذا لم تكن موجودة ويرحل كافة جداول models.py فورياً</div>
-                        </div>
-                        <button type="button" onclick="wsMasterEnsure(wsMigrateTablesDo)" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition shadow-sm cursor-pointer shrink-0">
-                            <i class="fa-solid fa-play"></i>
-                            <span>ترحيل الجداول الآن</span>
-                        </button>
-                    </div>
-                    <div><label class="block font-semibold text-slate-700 mb-1">جدول المستخدمين الرئيسي (ابحث واختر)</label>
-                    <div class="flex gap-1">
-                        <input id="wsF_users_table" value="${esc(w.users_table)}" dir="ltr" list="wsTablesList" placeholder="schema.table — اكتب للبحث" autocomplete="off" class="flex-1 min-w-0 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono">
-                        <button type="button" onclick="wsTablesFetch()" title="تحديث قائمة الجداول من الاتصال" class="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs shrink-0"><i class="fa-solid fa-rotate"></i></button>
-                    </div>
-                    <datalist id="wsTablesList"></datalist></div>
-                    <div class="rounded-xl border border-slate-200 p-3 space-y-2 bg-slate-50/50">
-                        <div class="text-[11px] font-bold text-slate-600">مطابقة أعمدة الدخول من قاعدة البيانات <span class="font-normal text-slate-400">— فارغ = كشف تلقائي</span></div>
-                        <div class="grid grid-cols-2 gap-3">
-                            <div><label class="block font-semibold text-slate-700 mb-1">عمود اسم المستخدم</label><select id="wsF_user_column" data-cur="${esc(w.users_user_column)}" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono" dir="ltr"><option value="">— تلقائي —</option></select><p id="wsF_user_col_hint" class="text-[10px] text-slate-400 mt-1"></p></div>
-                            <div><label class="block font-semibold text-slate-700 mb-1">عمود كلمة المرور</label><select id="wsF_password_column" data-cur="${esc(w.users_password_column)}" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono" dir="ltr"><option value="">— تلقائي —</option></select><p id="wsF_password_col_hint" class="text-[10px] text-slate-400 mt-1"></p></div>
-                        </div>
-                    </div>
-                    <div class="rounded-xl border border-slate-200 p-3 space-y-3 bg-slate-50/50">
-                        <div class="text-[11px] font-bold text-slate-600">بيانات الاتصال المحلي الأساسي</div>
-                        <div class="grid grid-cols-2 gap-3">
-                            <div><label class="block font-semibold text-slate-700 mb-1">الهوست</label><input id="wsF_host" value="${esc(cp.host)}" dir="ltr" placeholder="127.0.0.1" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono"></div>
-                            <div><label class="block font-semibold text-slate-700 mb-1">البورت</label><input id="wsF_port" value="${esc(cp.port)}" dir="ltr" inputmode="numeric" placeholder="5432" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono"></div>
-                        </div>
-                        <div class="grid grid-cols-2 gap-3">
-                            <div><label class="block font-semibold text-slate-700 mb-1">اسم المستخدم</label><input id="wsF_user" value="${esc(cp.user)}" dir="ltr" autocomplete="off" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono"></div>
-                            <div><label class="block font-semibold text-slate-700 mb-1">كلمة المرور</label><input id="wsF_password" type="password" value="" dir="ltr" placeholder="•••••• — فارغة للإبقاء" autocomplete="new-password" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono"></div>
-                        </div>
-                        <div><label class="block font-semibold text-slate-700 mb-1">قاعدة البيانات</label><input id="wsF_instance" value="${esc(cp.instance)}" dir="ltr" placeholder="urs" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono"></div>
-                    </div>
-                    <div class="rounded-xl border border-amber-200 bg-amber-50/50 p-3 space-y-2">
-                        <div class="text-[11px] font-bold text-amber-700"><i class="fa-solid fa-crown"></i> المشرف العام — يُنشأ فقط عندما يكون جدول المستخدمين فارغاً</div>
-                        <div id="wsSuBox"><p class="text-slate-400 text-[11px]">...</p></div>
-                    </div>
-                    <div><label class="block font-semibold text-slate-700 mb-1">الحالة (تخويل الدخول للمساحة)</label><select id="wsF_status" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"><option value="active" ${w.status==='active'?'selected':''}>نشطة — مسموح الدخول</option><option value="archived" ${w.status==='archived'?'selected':''}>مؤرشفة</option><option value="disabled" ${w.status==='disabled'?'selected':''}>معطلة — ممنوع الدخول</option></select></div>
-                    <p class="text-[11px] text-slate-400">الحالة «معطلة» تمنع الدخول والتفاعل مع كل محتويات المساحة خادمياً.</p>
-                </div>`;
-                wsSecGo(window._wsSec || 'general');
-                wsBrandPreview();
-                wsTablesFetch();
-                wsColsFetch();
-                try{ const _ut = document.getElementById('wsF_users_table'); if(_ut && !(_ut.dataset.suBound)){ _ut.dataset.suBound = '1'; _ut.addEventListener('change', ()=>{ wsColsFetch(); wsSuRefresh(); }); } }catch(e){}
-                wsSuRefresh();
-            }catch(e){ box.innerHTML = `<p class="text-rose-500 text-center py-6">${String((e && e.message) || e)}</p>`; }
-        }
-        async function wsColsFetch(){
-            const escC = (v)=>String(v ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
-            const uSel = document.getElementById('wsF_user_column'), pSel = document.getElementById('wsF_password_column');
-            const uHint = document.getElementById('wsF_user_col_hint'), pHint = document.getElementById('wsF_password_col_hint');
-            if(!uSel || !pSel || !window._wsEditId) return;
-            const tEl = document.getElementById('wsF_users_table');
-            const t = tEl ? String(tEl.value || '').trim() : '';
-            const keepU = uSel.value || uSel.dataset.cur || '', keepP = pSel.value || pSel.dataset.cur || '';
-            const fill = (sel, cols, keep, known)=>{
-                const cur = String(keep || '').toLowerCase();
-                let auto = '';
-                for(const k of known){ if(cols.some(c=>String(c.name || '').toLowerCase() === k)){ auto = k; break; } }
-                sel.innerHTML = '<option value="">— تلقائي —</option>' + cols.map(c=>`<option value="${escC(c.name)}">${escC(c.name)} <span class="text-slate-400">${escC(c.data_type || '')}</span></option>`).join('');
-                sel.value = cols.some(c=>String(c.name || '').toLowerCase() === cur) ? cols.find(c=>String(c.name || '').toLowerCase() === cur).name : '';
-                return auto;
-            };
-            if(!t){ uSel.innerHTML = '<option value="">— تلقائي —</option>'; pSel.innerHTML = '<option value="">— تلقائي —</option>'; if(uHint) uHint.textContent = ''; if(pHint) pHint.textContent = ''; return; }
-            try{
-                const res = await fetch('/api/workspaces/' + encodeURIComponent(window._wsEditId) + '/users-columns/?table=' + encodeURIComponent(t));
-                const d = await res.json();
-                if(!res.ok) throw new Error(d.error || '');
-                const cols = Array.isArray(d.columns) ? d.columns : [];
-                const autoU = fill(uSel, cols, keepU || d.user_column, ['username','user_name','login','login_name','email','mail']);
-                const autoP = fill(pSel, cols, keepP || d.password_column, ['password','passwd','pwd','password_hash','pass_hash','pass','user_password','pwd_hash']);
-                if(uHint) uHint.textContent = uSel.value ? ('مثبت: ' + uSel.value) : (autoU ? ('تلقائي: ' + autoU) : 'لا عمود مطابق — حدد يدوياً');
-                if(pHint) pHint.textContent = pSel.value ? ('مثبت: ' + pSel.value) : (autoP ? ('تلقائي: ' + autoP) : 'لا عمود مطابق — حدد يدوياً');
-            }catch(e){
-                if(uHint) uHint.textContent = String((e && e.message) || e).slice(0, 120);
-            }
-        }
-        async function wsTablesFetch(){
-            const escT = (v)=>String(v ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
-            const dl = document.getElementById('wsTablesList');
-            const connEl = document.getElementById('wsF_primary_connection');
-            const cname = connEl ? String(connEl.value || '').trim() : '';
-            if(!dl) return;
-            if(!cname){ dl.innerHTML = ''; return; }
-            try{
-                const res = await fetch('/api/lookup/tables/?connection=' + encodeURIComponent(cname));
-                const d = await res.json();
-                if(!res.ok) throw new Error(d.error || '');
-                dl.innerHTML = (d.tables || []).map(t=>`<option value="${escT(t.full)}">${escT(t.full)}</option>`).join('');
-            }catch(e){ dl.innerHTML = ''; }
-        }
-        async function wsSuRefresh(){
-            const box = document.getElementById('wsSuBox');
-            if(!box || !window._wsEditId) return;
-            box.innerHTML = '<p class="text-slate-400 text-[11px]">جارٍ فحص جدول المستخدمين...</p>';
-            try{
-                const tEl = document.getElementById('wsF_users_table');
-                const t = tEl ? String(tEl.value || '').trim() : '';
-                const res = await fetch('/api/workspaces/' + encodeURIComponent(window._wsEditId) + '/users-count/?table=' + encodeURIComponent(t));
-                const d = await res.json();
-                if(!res.ok) throw new Error(d.error || '');
-                if((d.count || 0) > 0){
-                    box.innerHTML = `<p class="text-[11px] text-slate-500">المستخدمون المسجلون: <b>${d.count}</b> <span class="font-mono" dir="ltr">${String(d.table || '').replace(/</g,'&lt;')}</span></p>
-                    <div class="grid grid-cols-2 gap-2">
-                        <div><input id="wsDg_user" value="admin" placeholder="اسم المستخدم" autocomplete="off" class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 font-mono" dir="ltr"></div>
-                        <div><input id="wsDg_pw" type="password" placeholder="كلمة جديدة (للتعيين فقط)" autocomplete="new-password" class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 font-mono" dir="ltr"></div>
-                    </div>
-                    <div class="flex gap-2">
-                        <button onclick="wsMasterEnsure(wsLoginDiag)" class="px-3 py-1.5 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs font-bold"><i class="fa-solid fa-stethoscope"></i> فحص الدخول</button>
-                        <button onclick="wsMasterEnsure(wsLoginReset)" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold"><i class="fa-solid fa-key"></i> تعيين كلمة</button>
-                    </div>
-                    <p id="wsDgMsg" class="text-[11px] text-slate-600 font-bold whitespace-pre-line"></p>`;
-                    return;
-                }
-                const _escA = (v)=>String(v ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
-                const _fList = Array.isArray(d.fields) && d.fields.length ? d.fields : (Array.isArray(d.required) ? d.required : []);
-                const renderField = (c)=>{
-                    const fn = _escA(c.name);
-                    const fl = _escA(c.label || c.name);
-                    const isReq = !!c.is_required;
-                    const reqBadge = isReq ? '<span class="text-rose-500 font-bold">*</span>' : '<span class="text-slate-400 text-[10px] font-normal">(اختياري)</span>';
-                    const reqAttr = isReq ? 'required' : '';
-                    const dt = _escA(c.data_type || '');
-                    const it = c.input_type || 'text';
-
-                    if(it === 'checkbox'){
-                        const isDefTrue = /true|1/i.test(String(c.default_value || '')) || c.name.toLowerCase() === 'is_active';
-                        return `<div class="col-span-2 sm:col-span-1 bg-white border border-slate-200 rounded-xl p-2.5 flex items-center justify-between">
-                            <div>
-                                <label class="block font-semibold text-slate-700 text-xs cursor-pointer" for="su_f_${fn}">${fl} ${reqBadge}</label>
-                                <span class="text-[9px] text-slate-400 font-mono">${fn} (${dt})</span>
-                            </div>
-                            <label class="relative inline-flex items-center cursor-pointer">
-                                <input type="checkbox" id="su_f_${fn}" data-ws-su-extra="${fn}" data-ws-su-type="checkbox" class="sr-only peer" ${isDefTrue ? 'checked' : ''}>
-                                <div class="w-8 h-4.5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3.5 after:w-3.5 after:transition-all peer-checked:bg-emerald-600"></div>
-                            </label>
-                        </div>`;
-                    }
-                    if(it === 'date'){
-                        return `<div class="col-span-2 sm:col-span-1">
-                            <div class="flex items-center justify-between mb-1">
-                                <label class="block font-semibold text-slate-700">${fl} ${reqBadge}</label>
-                                <span class="text-[9px] text-slate-400 font-mono">${fn} (${dt})</span>
-                            </div>
-                            <input type="date" id="su_f_${fn}" data-ws-su-extra="${fn}" data-ws-su-type="date" ${reqAttr} class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs">
-                        </div>`;
-                    }
-                    if(it === 'datetime-local'){
-                        return `<div class="col-span-2 sm:col-span-1">
-                            <div class="flex items-center justify-between mb-1">
-                                <label class="block font-semibold text-slate-700">${fl} ${reqBadge}</label>
-                                <span class="text-[9px] text-slate-400 font-mono">${fn} (${dt})</span>
-                            </div>
-                            <input type="datetime-local" id="su_f_${fn}" data-ws-su-extra="${fn}" data-ws-su-type="datetime" ${reqAttr} class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs">
-                        </div>`;
-                    }
-                    if(it === 'email'){
-                        const domRaw = (document.getElementById('wsF_domain')?.value || d.domain || '').trim().replace(/^@+/, '');
-                        const domDisplay = domRaw ? ('@' + domRaw) : '@domain.com';
-                        return `<div class="col-span-2 sm:col-span-1">
-                            <div class="flex items-center justify-between mb-1">
-                                <label class="block font-semibold text-slate-700">${fl} ${reqBadge}</label>
-                                <span class="text-[9px] text-slate-400 font-mono">${fn} (${dt})</span>
-                            </div>
-                            <div class="flex items-stretch rounded-xl border border-slate-200 overflow-hidden bg-white shadow-xs focus-within:ring-2 focus-within:ring-amber-500/20 focus-within:border-amber-500" dir="ltr">
-                                <div class="relative flex-1 min-w-0">
-                                    <input type="text" id="su_f_${fn}" data-ws-su-email-local="${fn}" data-ws-su-label="${fl}" placeholder="admin" dir="ltr" ${reqAttr} oninput="this.dataset.userEdited='1'" class="w-full h-full bg-transparent px-3 py-2 font-mono text-xs text-slate-800 outline-none border-0">
-                                </div>
-                                <div class="flex items-center bg-slate-100 border-l border-slate-200 px-2 select-none">
-                                    <input type="text" id="su_f_${fn}_dom" data-ws-su-email-domain="${fn}" value="${_escA(domDisplay)}" readonly tabindex="-1" title="دومين مساحة العمل (غير قابل للتعديل إلا من إعدادات مساحة العمل)" dir="ltr" class="w-32 sm:w-40 bg-transparent font-mono text-xs font-bold text-slate-600 outline-none border-0 cursor-not-allowed select-none">
-                                </div>
-                            </div>
-                            <div class="flex items-center justify-between mt-1 text-[10px] text-slate-400">
-                                <span class="flex items-center gap-1"><i class="fa-solid fa-lock text-[9px] text-slate-400"></i> دومين مساحة العمل (غير قابل للتعديل إلا من الإعدادات)</span>
-                                <button type="button" onclick="wsSecGo('general'); try{document.getElementById('wsF_domain').focus();}catch(e){}" class="text-amber-600 hover:text-amber-700 font-bold hover:underline cursor-pointer">تعديل الدومين &larr;</button>
-                            </div>
-                        </div>`;
-                    }
-                    if(it === 'tel'){
-                        return `<div class="col-span-2 sm:col-span-1">
-                            <div class="flex items-center justify-between mb-1">
-                                <label class="block font-semibold text-slate-700">${fl} ${reqBadge}</label>
-                                <span class="text-[9px] text-slate-400 font-mono">${fn} (${dt})</span>
-                            </div>
-                            <div class="relative">
-                                <input type="tel" id="su_f_${fn}" data-ws-su-extra="${fn}" data-ws-su-type="tel" placeholder="+966..." dir="ltr" ${reqAttr} class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 font-mono text-xs pr-3 pl-8">
-                                <span class="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs pointer-events-none"><i class="fa-solid fa-phone"></i></span>
-                            </div>
-                        </div>`;
-                    }
-                    if(it === 'number'){
-                        return `<div class="col-span-2 sm:col-span-1">
-                            <div class="flex items-center justify-between mb-1">
-                                <label class="block font-semibold text-slate-700">${fl} ${reqBadge}</label>
-                                <span class="text-[9px] text-slate-400 font-mono">${fn} (${dt})</span>
-                            </div>
-                            <input type="number" step="any" id="su_f_${fn}" data-ws-su-extra="${fn}" data-ws-su-type="number" placeholder="0" dir="ltr" ${reqAttr} class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 font-mono text-xs">
-                        </div>`;
-                    }
-                    if(it === 'textarea'){
-                        return `<div class="col-span-2">
-                            <div class="flex items-center justify-between mb-1">
-                                <label class="block font-semibold text-slate-700">${fl} ${reqBadge}</label>
-                                <span class="text-[9px] text-slate-400 font-mono">${fn} (${dt})</span>
-                            </div>
-                            <textarea id="su_f_${fn}" data-ws-su-extra="${fn}" data-ws-su-type="text" placeholder="${fl}" rows="2" ${reqAttr} class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs"></textarea>
-                        </div>`;
-                    }
-                    const defVal = (fn.toLowerCase() === 'role') ? 'admin' : '';
-                    return `<div class="col-span-2 sm:col-span-1">
-                        <div class="flex items-center justify-between mb-1">
-                            <label class="block font-semibold text-slate-700">${fl} ${reqBadge}</label>
-                            <span class="text-[9px] text-slate-400 font-mono">${fn} (${dt})</span>
-                        </div>
-                        <input type="text" id="su_f_${fn}" data-ws-su-extra="${fn}" data-ws-su-type="text" value="${_escA(defVal)}" placeholder="${fl}" ${reqAttr} class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs">
-                    </div>`;
-                };
-                box.innerHTML = `<p class="text-[11px] text-slate-600 font-medium">الجدول <span class="font-mono bg-white px-1.5 py-0.5 rounded border border-slate-200" dir="ltr">${String(d.table || '').replace(/</g,'&lt;')}</span> فارغ — أنشئ المشرف العام الأول:</p>
-                <div class="space-y-2.5 mt-2">
-                    <div class="grid grid-cols-2 gap-2.5">
-                        <div>
-                            <label class="block font-semibold text-slate-700 mb-1">اسم المستخدم <span class="text-rose-500 font-bold">*</span></label>
-                            <input id="wsSu_user" placeholder="admin" autocomplete="off" class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 font-mono text-xs" dir="ltr">
-                        </div>
-                        <div>
-                            <label class="block font-semibold text-slate-700 mb-1">الاسم الكامل</label>
-                            <input id="wsSu_name" placeholder="الاسم الكامل" class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs">
-                        </div>
-                    </div>
-                    <div class="grid grid-cols-2 gap-2.5">
-                        <div>
-                            <label class="block font-semibold text-slate-700 mb-1">كلمة المرور <span class="text-rose-500 font-bold">* (6+)</span></label>
-                            <input id="wsSu_pw1" type="password" placeholder="••••••" autocomplete="new-password" class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 font-mono text-xs" dir="ltr">
-                        </div>
-                        <div>
-                            <label class="block font-semibold text-slate-700 mb-1">تأكيد كلمة المرور <span class="text-rose-500 font-bold">*</span></label>
-                            <input id="wsSu_pw2" type="password" placeholder="••••••" autocomplete="new-password" class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 font-mono text-xs" dir="ltr">
-                        </div>
-                    </div>
-                    ${_fList.length ? `<div class="border-t border-amber-200/60 pt-2"><div class="text-[10px] font-bold text-amber-800 mb-2">حقول إضافية من جدول المستخدمين (${_fList.length} حقل):</div><div class="grid grid-cols-2 gap-2.5">${_fList.map(renderField).join('')}</div></div>` : ''}
-                </div>
-                <p id="wsSuMsg" class="text-[11px] text-rose-600 font-bold min-h-[16px] mt-2"></p>
-                <button onclick="wsMasterEnsure(wsSuCreate)" class="mt-1 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition cursor-pointer"><i class="fa-solid fa-crown"></i> إنشاء مشرف عام</button>`;
-                try{
-                    const _domInput = document.getElementById('wsF_domain');
-                    if(_domInput && !(_domInput.dataset.suDomBound)){
-                        _domInput.dataset.suDomBound = '1';
-                        _domInput.addEventListener('input', ()=>{
-                            const raw = String(_domInput.value || '').trim().replace(/^@+/, '');
-                            const disp = raw ? ('@' + raw) : '@domain.com';
-                            document.querySelectorAll('#wsSuBox [data-ws-su-email-domain]').forEach(inp=>{
-                                inp.value = disp;
-                            });
-                        });
-                    }
-                }catch(e){}
-                try{
-                    const _uInp = document.getElementById('wsSu_user');
-                    if(_uInp && !(_uInp.dataset.suSyncBound)){
-                        _uInp.dataset.suSyncBound = '1';
-                        _uInp.addEventListener('input', ()=>{
-                            const uval = _uInp.value.trim();
-                            document.querySelectorAll('#wsSuBox [data-ws-su-email-local]').forEach(emInp=>{
-                                if(!emInp.dataset.userEdited){
-                                    emInp.value = uval;
-                                }
-                            });
-                        });
-                    }
-                }catch(e){}
-            }catch(e){ box.innerHTML = `<p class="text-rose-500 text-[11px]">${String((e && e.message) || e).slice(0, 200)}</p>`; }
-        }
-        async function wsSuCreate(){
-            const msg = document.getElementById('wsSuMsg');
-            const v = (id)=>{ const el = document.getElementById(id); return el ? el.value : ''; };
-            const username = String(v('wsSu_user') || '').trim();
-            const pw1 = String(v('wsSu_pw1') || ''), pw2 = String(v('wsSu_pw2') || '');
-            if(!username){ if(msg) msg.textContent = 'اسم المستخدم مطلوب'; return; }
-            if(pw1.length < 6){ if(msg) msg.textContent = 'كلمة المرور 6 أحرف فأكثر'; return; }
-            if(pw1 !== pw2){ if(msg) msg.textContent = 'تأكيد كلمة المرور غير مطابق'; return; }
-            for(const el of document.querySelectorAll('#wsSuBox [data-ws-su-email-local][required]')){
-                if(!String(el.value || '').trim()){
-                    const lbl = el.getAttribute('data-ws-su-label') || 'البريد الإلكتروني';
-                    if(msg) msg.textContent = `حقل "${lbl}" مطلوب`;
-                    el.focus();
-                    return;
-                }
-            }
-            const tEl = document.getElementById('wsF_users_table');
-            const extra = {};
-            try{
-                document.querySelectorAll('#wsSuBox [data-ws-su-extra]').forEach(el=>{
-                    const k = el.getAttribute('data-ws-su-extra') || '';
-                    if(!k) return;
-                    const type = el.getAttribute('data-ws-su-type') || el.type || 'text';
-                    if(type === 'checkbox'){
-                        extra[k] = el.checked;
-                    } else {
-                        const val = String(el.value || '').trim();
-                        if(val !== '') extra[k] = val;
-                    }
-                });
-                document.querySelectorAll('#wsSuBox [data-ws-su-email-local]').forEach(el=>{
-                    const k = el.getAttribute('data-ws-su-email-local') || '';
-                    if(!k) return;
-                    const local = String(el.value || '').trim();
-                    if(!local) return;
-                    const domEl = document.querySelector(`#wsSuBox [data-ws-su-email-domain="${k}"]`);
-                    let dom = domEl ? String(domEl.value || '').trim().replace(/^@+/, '') : '';
-                    if(!dom) dom = String(document.getElementById('wsF_domain')?.value || '').trim().replace(/^@+/, '');
-                    if(local.includes('@')){
-                        extra[k] = local;
-                    } else if(dom){
-                        extra[k] = local + '@' + dom;
-                    } else {
-                        extra[k] = local;
-                    }
-                });
-                if(!extra['role'] && document.querySelector('#wsSuBox [data-ws-su-extra="role"]')){
-                    extra['role'] = 'admin';
-                }
-            }catch(e){}
-            try{
-                const _csrf = (document.cookie.match(/(?:^|;\s*)csrftoken=([^;]*)/) || [])[1] || '';
-                const headers = {'Content-Type': 'application/json'};
-                if(_csrf) headers['X-CSRFToken'] = _csrf;
-                const res = await fetch('/api/workspaces/' + encodeURIComponent(window._wsEditId) + '/superuser/', {method:'POST', headers, body: JSON.stringify({username, password: pw1, full_name: String(v('wsSu_name') || '').trim(), table: tEl ? String(tEl.value || '').trim() : '', extra})});
-                const d = await res.json().catch(()=>({}));
-                if(!res.ok){
-                    if(res.status === 403 && d.master_required){
-                        wsMasterEnsure(wsSuCreate);
-                        return;
-                    }
-                    throw new Error(d.error || 'فشل الإنشاء');
-                }
-                try{ notify('أُنشئ المشرف العام ✓', 'success'); }catch(e){}
-                wsSuRefresh();
-            }catch(e){ if(msg) msg.textContent = String((e && e.message) || e).slice(0, 200); }
-        }
-        async function wsLoginDiag(){
-            const msg = document.getElementById('wsDgMsg');
-            const uEl = document.getElementById('wsDg_user'), tEl = document.getElementById('wsF_users_table');
-            const u = uEl ? String(uEl.value || '').trim() : '';
-            if(!u){ if(msg) msg.textContent = 'اسم المستخدم مطلوب'; return; }
-            if(msg) msg.textContent = 'جارٍ الفحص...';
-            try{
-                const res = await fetch('/api/workspaces/' + encodeURIComponent(window._wsEditId) + '/login-diag/', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({username: u, table: tEl ? String(tEl.value || '').trim() : ''})});
-                const d = await res.json().catch(()=>({}));
-                if(!res.ok) throw new Error(d.error || 'فشل الفحص');
-                const L = [];
-                L.push('الجدول: ' + (d.table || '—'));
-                L.push('عمود المستخدم: ' + ((d.user_column||{}).name || '—') + (((d.user_column||{}).pinned) ? ' (مثبت)' : ' (تلقائي)'));
-                L.push('عمود كلمة المرور: ' + ((d.password_column||{}).name || '—') + (((d.password_column||{}).pinned) ? ' (مثبت)' : ' (تلقائي)'));
-                if(d.found === false){ L.push('النتيجة: المستخدم غير موجود'); }
-                else{
-                    L.push('الصف: موجود' + (d.duplicates > 1 ? (' — مكرر ' + d.duplicates + ' مرات!') : ''));
-                    L.push('نشط: ' + (d.is_active === false ? 'لا (موقوف)' : 'نعم'));
-                    L.push('صيغة المخزن: ' + (d.hash_format || '؟') + ' (الطول ' + (d.hash_length ?? '?') + ')');
-                    L.push('فحص الكود الذاتي: ' + (d.code_selftest ? 'سليم' : 'معطوب!'));
-                    L.push('التشخيص: ' + (d.hint || d.verdict || ''));
-                }
-                if(msg){ msg.textContent = L.join('\n'); msg.className = 'text-[11px] text-slate-700 font-bold whitespace-pre-line'; }
-            }catch(e){ if(msg){ msg.textContent = String((e && e.message) || e).slice(0, 300); msg.className = 'text-[11px] text-rose-600 font-bold whitespace-pre-line'; } }
-        }
-        async function wsLoginReset(){
-            const msg = document.getElementById('wsDgMsg');
-            const uEl = document.getElementById('wsDg_user'), pEl = document.getElementById('wsDg_pw'), tEl = document.getElementById('wsF_users_table');
-            const u = uEl ? String(uEl.value || '').trim() : '', pw = pEl ? String(pEl.value || '') : '';
-            if(!u){ if(msg) msg.textContent = 'اسم المستخدم مطلوب'; return; }
-            if(pw.length < 6){ if(msg) msg.textContent = 'الكلمة الجديدة 6 أحرف فأكثر'; return; }
-            if(msg) msg.textContent = 'جارٍ التعيين...';
-            try{
-                const res = await fetch('/api/workspaces/' + encodeURIComponent(window._wsEditId) + '/login-reset/', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({username: u, new_password: pw, table: tEl ? String(tEl.value || '').trim() : ''})});
-                const d = await res.json().catch(()=>({}));
-                if(!res.ok) throw new Error(d.error || 'فشل التعيين');
-                if(msg){ msg.textContent = 'تم تعيين كلمة ' + (d.username || u) + ' — ادخل بها الآن'; msg.className = 'text-[11px] text-emerald-600 font-bold whitespace-pre-line'; }
-                if(pEl) pEl.value = '';
-            }catch(e){ if(msg){ msg.textContent = String((e && e.message) || e).slice(0, 300); msg.className = 'text-[11px] text-rose-600 font-bold whitespace-pre-line'; } }
-        }
-        async function wsSettingsSave(){
-            wsMasterEnsure(wsSettingsDo);
-        }
-        async function wsSettingsDo(){
-            const id = window._wsEditId;
-            const msg = document.getElementById('wsSettingsMsg');
-            if(!id) return;
-            const v = (k)=>{ const el = document.getElementById('wsF_' + k); return el ? el.value : ''; };
-            const conn = {host: v('host'), port: v('port'), user: v('user'), instance: v('instance')};
-            if(String(v('password') || '').trim() !== '') conn.password = v('password');
-            const body = {name: v('name'), brand: v('brand'), company: v('company'), domain: v('domain'),
-                logo: v('logo'), country: v('country'), currency: v('currency'),
-                brand_colors: {primary: v('primary'), accent: v('accent')},
-                primary_connection: v('primary_connection'),
-                schema: v('schema'),
-                users_table: v('users_table'),
-                users_user_column: v('user_column'), users_password_column: v('password_column'),
-                status: v('status'), connection: conn};
-            if(!String(body.name).trim()){ if(msg) msg.textContent = 'اسم المساحة مطلوب'; return; }
-            try{
-                const res = await fetch('/api/workspaces/' + encodeURIComponent(id) + '/save/', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
-                const d = await res.json();
-                if(!res.ok) throw new Error(d.error || 'فشل الحفظ');
-                try{
-                    if(d.migrate_error) notify('حُفظت الإعدادات — تعذر ترحيل models.py: ' + String(d.migrate_error).slice(0, 150), 'warning');
-                    else notify('حُفظت إعدادات المساحة ✓' + (d.migrated ? ` — السكيما ${d.schema || ''} جاهزة وتكاملت مع models.py (${d.migrate_tables || 0} جدول)` : ''), 'success');
-                }catch(e){}
-                wsSettingsClose();
-                setTimeout(()=>location.reload(), 600);
-            }catch(e){ if(msg) msg.textContent = String((e && e.message) || e).slice(0, 200); }
-        }
-        async function wsMigrateTablesDo(){
-            const id = window._wsEditId;
-            const msg = document.getElementById('wsSettingsMsg');
-            const btn = document.getElementById('wsMigrateBtn');
-            if(!id) return;
-            const v = (k)=>{ const el = document.getElementById('wsF_' + k); return el ? el.value : ''; };
-            const schema = (v('schema') || '').trim();
-            if(msg) { msg.textContent = 'جارٍ ترحيل الجداول وتكامل models.py...'; msg.className = 'text-[11px] text-indigo-600 font-bold'; }
-            if(btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> جاري الترحيل...'; }
-            try{
-                const conn = {host: v('host'), port: v('port'), user: v('user'), instance: v('instance')};
-                if(String(v('password') || '').trim() !== '') conn.password = v('password');
-                const res = await fetch('/api/workspaces/' + encodeURIComponent(id) + '/migrate/', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({schema: schema, connection: conn})
-                });
-                const d = await res.json();
-                if(!res.ok) throw new Error(d.error || 'فشل الترحيل');
-                const tCount = d.table_count || (d.tables ? d.tables.length : 0);
-                const sName = d.schema || schema || '';
-                const successMsg = `تم ترحيل الجداول بنجاح ✓ (${tCount} جدول في السكيما ${sName})`;
-                if(msg) { msg.textContent = successMsg; msg.className = 'text-[11px] text-emerald-600 font-bold'; }
-                if(typeof notify === 'function') notify(successMsg, 'success');
-                if(typeof wsTablesFetch === 'function') wsTablesFetch();
-                if(typeof wsColsFetch === 'function') wsColsFetch();
-            }catch(e){
-                const errText = 'تعذر ترحيل الجداول: ' + String((e && e.message) || e).slice(0, 200);
-                if(msg) { msg.textContent = errText; msg.className = 'text-[11px] text-rose-600 font-bold'; }
-                if(typeof notify === 'function') notify(errText, 'danger');
-            }finally{
-                if(btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-database"></i> <span>ترحيل الجداول</span>'; }
-            }
-        }
-        (function(){
-            try{
-                const sid = new URLSearchParams(location.search).get('settings');
-                if(sid) wsSettingsOpen(sid);
-            }catch(e){}
-        })();
+        function wsSettingsOpen(id){ location.href = '/ws-settings/' + encodeURIComponent(id || '') + '/'; }
         async function submitAddApp(){
             const box = document.getElementById('addAppMsg');
             box.classList.add('hidden');

@@ -90,7 +90,7 @@
                 </div>{% endif %}
             </div>
 
-            {% if app_rules %}
+            {% if app_rules or ws_can_design and rml_files %}
             <!-- قواعد الأعمال -->
             <details class="urs-cat" data-persist="sideSecRules" open>
                 <summary class="text-xs font-bold text-gray-700 flex items-center gap-2 cursor-pointer list-none">
@@ -109,6 +109,8 @@
                         </span>
                         <span class="text-[10px] px-1.5 py-0.5 rounded-full {% if r.policy_count %}bg-emerald-100 text-emerald-700{% else %}bg-slate-100 text-slate-500{% endif %} shrink-0">{{ r.policy_count }} سياسة</span>
                     </button>
+                    {% empty %}
+                    <p class="text-[11px] text-gray-400 text-center py-2">لا توجد قواعد بعد</p>
                     {% endfor %}
                 </div>
                 </div>
@@ -214,7 +216,7 @@
                                 <span class="w-6 h-6 rounded-full bg-indigo-50 text-indigo-600 flex items-center justify-center"><i class="fa-solid {% if ch.type == 'bar' %}fa-chart-column{% elif ch.type == 'line' %}fa-chart-line{% elif ch.type == 'pie' %}fa-chart-pie{% else %}fa-chart-bar{% endif %} text-[10px]"></i></span>
                                 <span class="font-semibold text-slate-700">{{ ch.title|default:"مخطط" }}</span>
                                 <span class="text-slate-400">({{ ch.type }})</span>
-                                <span class="mr-auto text-slate-500">{{ ch.x }} ← {{ ch.y }}{% if ch.y2 %} + {{ ch.y2 }}{% endif %}</span>
+                                <span class="mr-auto text-slate-500">{{ ch.category|default:ch.x|default:"—" }} ← {{ ch.value|default:ch.y|default:"—" }}{% if ch.series|default:ch.y2 %} + {{ ch.series|default:ch.y2 }}{% endif %}</span>
                                 <select onchange="changeChartLimit('{{ f.file|escapejs }}','{{ ch.id|escapejs }}',this.value)" title="عدد النقاط" class="text-[10px] bg-slate-50 border border-slate-200 rounded-lg px-1 py-0.5 text-slate-600 focus:outline-none">
                                     <option value="5">5</option>
                                     <option value="10" selected>10</option>
@@ -265,7 +267,7 @@
 {% block modals %}
     {% if has_rml_wizard %}{% include "rml_wizard_modal.html" %}{% endif %}
     <!-- Chart Fullscreen Modal -->
-    <div id="chartFullscreenModal" class="hidden fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-4" onclick="if(event.target===this) closeChartFullscreen()">
+    <div id="chartFullscreenModal" class="hidden fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-6xl overflow-hidden flex flex-col" style="height:85vh">
             <div class="px-6 py-3 border-b border-slate-200 flex items-center justify-between bg-slate-50">
                 <h3 id="chartFullscreenTitle" class="text-sm font-bold text-slate-800">مخطط</h3>
@@ -430,9 +432,12 @@
         function previewRml(file){ window.location.href = `/app/${APP_NAME}/report/${encodeURIComponent(file)}/`; }
         function openAddRmlModal(){ document.getElementById('addRmlModal').classList.remove('hidden'); }
         function closeAddRmlModal(){ document.getElementById('addRmlModal').classList.add('hidden'); document.getElementById('rmlError').classList.add('hidden'); }
+        {% if has_rml_wizard %}{% include "UniDBPicker.js" %}{% endif %}
+        {% if has_rml_wizard %}{% include "UniExpression.js" %}{% endif %}
+        {% if has_rml_wizard %}{% include "UniCondition.js" %}{% endif %}
         {% if has_rml_wizard %}{% include "rml_wizard_script.html" %}{% endif %}
         // --- Overview charts (Chart.js) ---
-        const OVERVIEW_CHARTS = [{% for f in rml_files %}{% if f.charts %}{file: "{{ f.file|escapejs }}", displayName: "{{ f.metadata.displayName|escapejs }}", charts: [{% for ch in f.charts %}{id:"{{ ch.id|escapejs }}", type:"{{ ch.type|escapejs }}", x:"{{ ch.x|escapejs }}", y:"{{ ch.y|escapejs }}", y2:"{{ ch.y2|default:''|escapejs }}", title:"{{ ch.title|escapejs }}"},{% endfor %}]},{% endif %}{% endfor %}];
+        const OVERVIEW_CHARTS = [{% for f in rml_files %}{% if f.charts %}{file: "{{ f.file|escapejs }}", displayName: "{{ f.metadata.displayName|escapejs }}", charts: [{% for ch in f.charts %}{id:"{{ ch.id|escapejs }}", type:"{{ ch.type|escapejs }}", x:"{{ ch.category|default:ch.x|default:''|escapejs }}", y:"{{ ch.value|default:ch.y|default:''|escapejs }}", y2:"{{ ch.series|default:ch.y2|default:''|escapejs }}", title:"{{ ch.title|escapejs }}"},{% endfor %}]},{% endif %}{% endfor %}];
         const OVERVIEW_CHART_DATA = {};
         const OVERVIEW_CHART_LIMIT = {};
         const OVERVIEW_CHART_FILTER = {};
@@ -630,11 +635,17 @@
     <!-- مودال سياسات قاعدة الأعمال -->
     <div id="rulePolicyModal" class="hidden fixed inset-0 z-[90] flex items-center justify-center p-4">
         <div class="absolute inset-0 bg-slate-900/60" onclick="closeRulePolicies()"></div>
-        <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden">
+        <div id="rpModalCard" class="relative bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden transition-all duration-200">
             <div class="px-5 py-4 border-b border-slate-100 flex items-center gap-3">
                 <span class="w-10 h-10 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0"><i id="rpIcon" class="fa-solid fa-scale-balanced"></i></span>
                 <div class="flex-1 min-w-0">
-                    <h3 id="rpTitle" class="font-bold text-slate-800">سياسات القاعدة</h3>
+                    <div class="flex items-center gap-2 flex-wrap">
+                        <h3 id="rpTitle" class="font-bold text-slate-800">سياسات القاعدة</h3>
+                        <div id="rpModeSwitcher" class="inline-flex rounded-lg border border-slate-200 bg-slate-100 p-0.5 text-xs font-bold mr-2">
+                            <button type="button" onclick="rpSetEntryMode('batch')" id="rpBtnBatch" class="px-2.5 py-1 rounded-md transition text-slate-600">إدخال دفعة</button>
+                            <button type="button" onclick="rpSetEntryMode('single')" id="rpBtnSingle" class="px-2.5 py-1 rounded-md transition text-slate-600">إدخال منفرد</button>
+                        </div>
+                    </div>
                     <p id="rpSub" class="text-[11px] text-slate-500"></p>
                 </div>
                 <button onclick="closeRulePolicies()" class="w-8 h-8 rounded-full hover:bg-slate-100 text-slate-500"><i class="fa-solid fa-xmark"></i></button>
@@ -642,8 +653,57 @@
             <div id="rpBody" class="flex-1 overflow-y-auto p-5 space-y-4"></div>
         </div>
     </div>
+    <!-- مودال اختيار سجلات من مصدر القاعدة (للإدخال المنفرد) -->
+    <div id="rpSinglePickModal" class="hidden fixed inset-0 z-[100] flex items-center justify-center p-4">
+        <div class="absolute inset-0 bg-slate-900/60" onclick="rpCloseSinglePicker()"></div>
+        <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col overflow-hidden animate-in fade-in zoom-in duration-150">
+            <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-3 bg-slate-50/50">
+                <div class="flex items-center gap-2.5">
+                    <span class="w-9 h-9 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center text-sm shadow-sm"><i class="fa-solid fa-list-check"></i></span>
+                    <div>
+                        <h4 class="font-bold text-slate-800 text-sm">اختيار سجلات من المصدر</h4>
+                        <p id="rpSinglePickSub" class="text-[11px] text-slate-500 font-medium"></p>
+                    </div>
+                </div>
+                <button type="button" onclick="rpCloseSinglePicker()" class="w-8 h-8 rounded-full hover:bg-slate-200 text-slate-400 hover:text-slate-600 flex items-center justify-center transition"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            
+            <div class="p-4 border-b border-slate-100 bg-slate-50 space-y-2.5">
+                <div class="relative">
+                    <i class="fa-solid fa-magnifying-glass absolute right-3 top-2.5 text-slate-400 text-xs"></i>
+                    <input id="rpSinglePickSearch" placeholder="بحث في سجلات المصدر..." oninput="rpSingleFilterPicker(this.value)" class="w-full bg-white border border-slate-200 rounded-xl pr-8 pl-3 py-2 text-xs focus:outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100">
+                </div>
+                
+                <div class="flex items-center gap-1.5 pt-0.5">
+                    <input id="rpSingleManualVal" placeholder="أو أدخل كود/اسم سجل يدوياً..." onkeydown="if(event.key==='Enter') rpSingleAddManualFromPicker()" class="flex-1 bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs focus:outline-none focus:border-amber-400">
+                    <button type="button" onclick="rpSingleAddManualFromPicker()" class="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold shrink-0 shadow-sm transition">
+                        <i class="fa-solid fa-plus"></i> إضافة يدوي
+                    </button>
+                </div>
+            </div>
+            
+            <div class="px-4 py-2 bg-slate-100/80 border-b border-slate-200 flex items-center justify-between text-[11px] text-slate-600 font-medium">
+                <span id="rpSinglePickCount" class="font-bold text-amber-700">0 محدد</span>
+                <div class="space-x-2 space-x-reverse">
+                    <button type="button" onclick="rpSinglePickSelectAll(true)" class="text-amber-700 hover:text-amber-800 font-bold hover:underline">تحديد الكل</button>
+                    <span class="text-slate-300">•</span>
+                    <button type="button" onclick="rpSinglePickSelectAll(false)" class="text-slate-500 hover:text-slate-700 hover:underline">إلغاء التحديد</button>
+                </div>
+            </div>
+            
+            <div id="rpSinglePickList" class="flex-1 overflow-y-auto p-4 space-y-1.5 max-h-[45vh] divide-y divide-slate-100/0">
+            </div>
+            
+            <div class="p-3.5 border-t border-slate-100 bg-slate-50 flex items-center justify-between gap-2">
+                <button type="button" onclick="rpCloseSinglePicker()" class="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl text-xs font-bold transition">إلغاء</button>
+                <button type="button" onclick="rpSingleConfirmPicker()" id="rpSinglePickConfirmBtn" class="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5 shadow-sm transition">
+                    <i class="fa-solid fa-check"></i> إضافة السجلات المحددة
+                </button>
+            </div>
+        </div>
+    </div>
     <script>
-        let RP = {file:'', rule:null, editing:null, matchSel:{}, varVals:{}, applyAll:false, distinctCache:{}};
+        let RP = {file:'', rule:null, editing:null, matchSel:{}, varVals:{}, applyAll:false, distinctCache:{}, singleRows:[]};
         function rpEsc(s){ return String(s ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
         function rpSrcLabel(s){ return (RP.rule && RP.rule.source_aliases && RP.rule.source_aliases[s]) || s; }
         function rpNotify(msg, kind){ if(typeof notify === 'function') notify(msg, kind || 'info'); else alert(msg); }
@@ -654,7 +714,11 @@
                 if(data.error){ rpNotify(data.error, 'error'); return; }
                 const rule = (data.rules || []).find(r=>r.file === file && r.name === name);
                 if(!rule){ rpNotify('القاعدة غير موجودة', 'error'); return; }
-                RP = {file: file, rule: rule, editing:null, matchSel:{}, varVals:{}, applyAll:false, distinctCache:{}};
+                RP = {file: file, rule: rule, editing:null, matchSel:{}, varVals:{}, applyAll:false, distinctCache:{}, singleRows:[]};
+                RP.rule.entry_mode = (rule.entry_mode || 'batch').toLowerCase();
+                if(RP.rule.entry_mode === 'single'){
+                    rpInitSingleRows();
+                }
                 document.getElementById('rpIcon').className = 'fa-solid ' + (rule.icon || 'fa-scale-balanced');
                 document.getElementById('rpTitle').textContent = 'سياسات: ' + (rule.display || rule.name);
                 const _rpSub = document.getElementById('rpSub');
@@ -671,7 +735,12 @@
             if(RP.dirty) location.reload();
         }
         function renderRulePolicies(){
+            rpUpdateSwitcherUI();
             const body = document.getElementById('rpBody');
+            if(RP.rule && RP.rule.entry_mode === 'single'){
+                rpRenderSingleView();
+                return;
+            }
             const rule = RP.rule, pols = [...(rule.policies || [])].sort((a,b)=>((a.priority ?? 100) - (b.priority ?? 100)));
             const warns = rule.warnings || [];
             let html = '';
@@ -925,8 +994,688 @@
                 const res = await fetch(`/api/apps/${encodeURIComponent(APP_NAME)}/rules/`);
                 const data = await res.json();
                 const rule = (data.rules || []).find(r=>r.file === RP.file && r.name === (RP.rule || {}).name);
-                if(rule){ RP.rule = rule; renderRulePolicies(); }
+                if(rule){
+                    RP.rule = rule;
+                    RP.rule.entry_mode = (rule.entry_mode || 'batch').toLowerCase();
+                    if(RP.rule.entry_mode === 'single'){
+                        rpInitSingleRows();
+                    }
+                    renderRulePolicies();
+                }
             }catch(e){}
+        }
+        function rpUpdateSwitcherUI(){
+            const isSingle = (RP.rule && (RP.rule.entry_mode === 'single'));
+            const btnBatch = document.getElementById('rpBtnBatch');
+            const btnSingle = document.getElementById('rpBtnSingle');
+            const modalCard = document.getElementById('rpModalCard');
+            if(btnBatch && btnSingle){
+                if(isSingle){
+                    btnSingle.className = 'px-2.5 py-1 rounded-md transition text-white bg-amber-600 shadow-sm font-bold';
+                    btnBatch.className = 'px-2.5 py-1 rounded-md transition text-slate-600 hover:text-slate-900 font-bold';
+                } else {
+                    btnBatch.className = 'px-2.5 py-1 rounded-md transition text-white bg-amber-600 shadow-sm font-bold';
+                    btnSingle.className = 'px-2.5 py-1 rounded-md transition text-slate-600 hover:text-slate-900 font-bold';
+                }
+            }
+            if(modalCard){
+                if(isSingle){
+                    modalCard.classList.remove('max-w-3xl');
+                    modalCard.classList.add('max-w-5xl');
+                } else {
+                    modalCard.classList.remove('max-w-5xl');
+                    modalCard.classList.add('max-w-3xl');
+                }
+            }
+        }
+        async function rpSetEntryMode(mode){
+            if(!RP.rule || RP.rule.entry_mode === mode) return;
+            const targetName = (mode === 'single' ? 'إدخال منفرد' : 'إدخال دفعة');
+            if(!confirm(`هل تريد تغيير نوع الإدخال إلى «${targetName}»؟`)) return;
+            RP.rule.entry_mode = mode;
+            rpUpdateSwitcherUI();
+            if(mode === 'single'){
+                rpInitSingleRows();
+            }
+            renderRulePolicies();
+            try{
+                const src = (RP.rule.sources && RP.rule.sources[0]) || 'record';
+                const polsToSave = (mode === 'single') ? (RP.singleRows || []).map((r, i)=>({
+                    id: r.id || `p_single_${i+1}`,
+                    name: r.srcVal,
+                    priority: 100,
+                    match: {[src]: [r.srcVal]},
+                    values: r.values || {}
+                })) : (RP.rule.policies || []);
+                await fetch(`/api/apps/${encodeURIComponent(APP_NAME)}/rules/policy/save/`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        file: RP.file,
+                        rule: RP.rule.name,
+                        entry_mode: mode,
+                        policies: polsToSave
+                    })
+                });
+                RP.dirty = true;
+            }catch(e){}
+        }
+        function rpInitSingleRows(){
+            const rule = RP.rule;
+            const src = (rule.sources && rule.sources[0]) || 'record';
+            RP.singleRows = (rule.policies || []).map((p, idx) => {
+                let val = '';
+                if(p.match && p.match[src] && p.match[src].length) {
+                    val = p.match[src][0];
+                } else if(p.name) {
+                    val = p.name;
+                }
+                return {
+                    id: p.id || `p_single_${idx+1}`,
+                    srcVal: String(val ?? ''),
+                    values: Object.assign({}, p.values || {})
+                };
+            });
+        }
+        function rpRenderSingleView(){
+            const body = document.getElementById('rpBody');
+            const rule = RP.rule;
+            const src = (rule.sources && rule.sources[0]) || 'السجل';
+            const srcLbl = rpSrcLabel(src);
+            const vars = rule.variables || [];
+            
+            let html = `
+                <div class="flex flex-col h-full space-y-3">
+                    <div class="flex flex-wrap items-center justify-between gap-2 p-3 bg-slate-50 border border-slate-200 rounded-xl">
+                        <div class="flex items-center gap-2 flex-1 min-w-[240px]">
+                            <div class="relative flex-1">
+                                <i class="fa-solid fa-magnifying-glass absolute right-3 top-2.5 text-slate-400 text-xs"></i>
+                                <input id="rpSingleSearch" placeholder="بحث في السجلات..." oninput="rpPaintSingleTable()" class="w-full bg-white border border-slate-200 rounded-lg pr-8 pl-3 py-1.5 text-xs">
+                            </div>
+                            <span id="rpSingleCount" class="text-[11px] font-bold text-slate-500 shrink-0"></span>
+                        </div>
+                        <div class="flex items-center gap-1.5 flex-wrap shrink-0">
+                            <button onclick="rpSingleAddRow()" class="px-2.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-xs font-bold inline-flex items-center gap-1 shadow-sm transition">
+                                <i class="fa-solid fa-plus"></i> إضافة سجل
+                            </button>
+                            <button onclick="rpSingleFetchDistinct()" title="جلب جميع القيم الفريدة الموجودة في بيانات هذا العمود من قاعدة البيانات" class="px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-bold inline-flex items-center gap-1 transition">
+                                <i class="fa-solid fa-arrows-rotate"></i> جلب من الجدول
+                            </button>
+                            <button onclick="rpSingleDownloadTemplate()" title="تنزيل قالب Excel جاهز بالأعمدة والمتغيرات لتعبئته واستيراده" class="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-lg text-xs font-bold inline-flex items-center gap-1 transition">
+                                <i class="fa-solid fa-file-arrow-down"></i> تنزيل قالب إكسل
+                            </button>
+                            <button onclick="rpSingleExportExcel()" title="تصدير السجلات الحالية إلى ملف Excel (CSV)" class="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded-lg text-xs font-bold inline-flex items-center gap-1 transition">
+                                <i class="fa-solid fa-file-excel"></i> تصدير Excel
+                            </button>
+                            <button onclick="document.getElementById('rpSingleFileInput').click()" title="استيراد سجلات من ملف Excel أو CSV" class="px-2.5 py-1.5 bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 rounded-lg text-xs font-bold inline-flex items-center gap-1 transition">
+                                <i class="fa-solid fa-file-import"></i> استيراد
+                            </button>
+                            <input type="file" id="rpSingleFileInput" accept=".xlsx,.xls,.csv,.txt" class="hidden" onchange="rpSingleImportFile(this)">
+                            <button onclick="rpSingleSaveAll()" class="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold inline-flex items-center gap-1.5 shadow transition">
+                                <i class="fa-solid fa-check"></i> حفظ التغييرات
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm flex-1 max-h-[55vh] flex flex-col">
+                        <div class="overflow-x-auto overflow-y-auto flex-1">
+                            <table class="w-full text-right border-collapse text-xs">
+                                <thead class="bg-slate-100 text-slate-700 font-bold sticky top-0 z-10 shadow-sm border-b border-slate-200">
+                                    <tr>
+                                        <th class="p-2 w-10 text-center text-slate-400">#</th>
+                                        <th class="p-2 min-w-[150px] border-l border-slate-200">${rpEsc(srcLbl)}</th>
+                                        ${vars.map(v => `
+                                            <th class="p-2 min-w-[140px] border-l border-slate-200">
+                                                <div class="flex items-center justify-between gap-1">
+                                                    <span>${rpEsc(v.display || v.name)}</span>
+                                                    <button type="button" onclick="rpSingleFillVar('${rpEsc(v.name)}', '${rpEsc(v.display || v.name)}')" title="تطبيق قيمة على جميع السجلات" class="text-slate-400 hover:text-amber-600 text-[10px] p-1 rounded hover:bg-slate-200">
+                                                        <i class="fa-solid fa-arrows-down-to-line"></i>
+                                                    </button>
+                                                </div>
+                                            </th>
+                                        `).join('')}
+                                        <th class="p-2 w-12 text-center">حذف</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="rpSingleTbody" class="divide-y divide-slate-100">
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    
+                    <div class="flex items-center justify-between pt-2 border-t border-slate-100">
+                        <p class="text-[11px] text-slate-400">
+                            <i class="fa-solid fa-circle-info ml-1 text-slate-400"></i>
+                            في وضع <b>الإدخال المنفرد</b>، يرتبط كل سجل بقيمه الخاصة مباشرة في سطر مستقل. اضغط <b>حفظ التغييرات</b> بعد الانتهاء من التعديل.
+                        </p>
+                        <button onclick="rpSingleSaveAll()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5 shadow transition">
+                            <i class="fa-solid fa-check"></i> حفظ التغييرات
+                        </button>
+                    </div>
+                </div>
+            `;
+            body.innerHTML = html;
+            rpPaintSingleTable();
+        }
+        function rpPaintSingleTable(){
+            const tbody = document.getElementById('rpSingleTbody');
+            if(!tbody) return;
+            const rule = RP.rule;
+            const vars = rule.variables || [];
+            const q = ((document.getElementById('rpSingleSearch') || {}).value || '').trim().toLowerCase();
+            
+            const rows = RP.singleRows || [];
+            let visibleRows = [];
+            rows.forEach((r, idx) => {
+                if(!q){
+                    visibleRows.push({row: r, idx: idx});
+                    return;
+                }
+                let match = String(r.srcVal || '').toLowerCase().includes(q);
+                if(!match){
+                    for(const v of vars){
+                        if(String(r.values[v.name] ?? '').toLowerCase().includes(q)){
+                            match = true;
+                            break;
+                        }
+                    }
+                }
+                if(match) visibleRows.push({row: r, idx: idx});
+            });
+            
+            const countEl = document.getElementById('rpSingleCount');
+            if(countEl){
+                countEl.textContent = `${visibleRows.length} من ${rows.length} سجل`;
+            }
+            
+            if(!visibleRows.length){
+                tbody.innerHTML = `<tr><td colspan="${vars.length + 3}" class="text-center py-8 text-slate-400">
+                    ${rows.length === 0 ? 'لا توجد سجلات بعد — أضف سجلاً جديداً أو اضغط «جلب من الجدول» أو استورد ملف Excel' : 'لا توجد نتائج مطابقة للبحث'}
+                </td></tr>`;
+                return;
+            }
+            
+            const maxRender = 400;
+            const toRender = visibleRows.slice(0, maxRender);
+            
+            let html = toRender.map(({row, idx}, i) => {
+                return `
+                    <tr class="hover:bg-amber-50/40 transition">
+                        <td class="p-2 text-center text-slate-400 font-mono text-[10px]">${i + 1}</td>
+                        <td class="p-2 border-l border-slate-100">
+                            <input type="text" value="${rpEsc(row.srcVal)}" oninput="rpUpdateSingleSrcVal(${idx}, this.value)" class="w-full bg-slate-50 border border-slate-200 rounded px-2 py-1 text-xs font-bold text-slate-800 focus:bg-white focus:border-amber-400 focus:outline-none">
+                        </td>
+                        ${vars.map(v => `
+                            <td class="p-2 border-l border-slate-100">
+                                ${rpSingleCellInputHtml(row, idx, v)}
+                            </td>
+                        `).join('')}
+                        <td class="p-2 text-center">
+                            <button type="button" onclick="rpSingleDeleteRow(${idx})" class="w-6 h-6 rounded hover:bg-rose-100 text-rose-500 transition" title="حذف السجل">
+                                <i class="fa-solid fa-trash text-xs"></i>
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+            
+            if(visibleRows.length > maxRender){
+                html += `<tr><td colspan="${vars.length + 3}" class="text-center py-2 text-slate-400 text-[11px] bg-slate-50">يتم عرض أول ${maxRender} سجلاً فقط للسرعة — استخدم البحث للوصول لأي سجل معين.</td></tr>`;
+            }
+            
+            tbody.innerHTML = html;
+        }
+        function rpSingleCellInputHtml(row, idx, v){
+            const val = row.values[v.name] ?? '';
+            const t = v.type || 'text';
+            if(t === 'boolean'){
+                const on = ['1','true','صح','نعم','yes'].includes(String(val).toLowerCase());
+                return `<label class="inline-flex items-center gap-1.5 cursor-pointer"><input type="checkbox" ${on?'checked':''} onchange="rpUpdateSingleVal(${idx}, '${rpEsc(v.name)}', this.checked ? 'صح' : 'غلط')" class="rounded text-emerald-600"><span class="text-[11px]">${on?'نعم':'لا'}</span></label>`;
+            }
+            if(t === 'choice'){
+                const opts = v.options || [];
+                return `<select onchange="rpUpdateSingleVal(${idx}, '${rpEsc(v.name)}', this.value)" class="w-full bg-slate-50 border border-slate-200 rounded px-1.5 py-1 text-xs focus:bg-white focus:border-amber-400"><option value="">— اختر —</option>${opts.map(o=>`<option value="${rpEsc(o)}" ${String(val)===String(o)?'selected':''}>${rpEsc(o)}</option>`).join('')}</select>`;
+            }
+            if(t === 'number'){
+                return `<input type="number" step="any" dir="ltr" value="${rpEsc(val)}" oninput="rpUpdateSingleVal(${idx}, '${rpEsc(v.name)}', this.value)" class="w-full bg-slate-50 border border-slate-200 rounded px-2 py-1 text-xs font-mono focus:bg-white focus:border-amber-400 focus:outline-none">`;
+            }
+            return `<input type="text" value="${rpEsc(val)}" oninput="rpUpdateSingleVal(${idx}, '${rpEsc(v.name)}', this.value)" class="w-full bg-slate-50 border border-slate-200 rounded px-2 py-1 text-xs focus:bg-white focus:border-amber-400 focus:outline-none">`;
+        }
+        function rpUpdateSingleSrcVal(idx, val){
+            if(RP.singleRows && RP.singleRows[idx]){
+                RP.singleRows[idx].srcVal = val;
+            }
+        }
+        function rpUpdateSingleVal(idx, varName, val){
+            if(RP.singleRows && RP.singleRows[idx]){
+                if(!RP.singleRows[idx].values) RP.singleRows[idx].values = {};
+                RP.singleRows[idx].values[varName] = val;
+            }
+        }
+        function rpSingleAddRow(){
+            rpOpenSinglePicker();
+        }
+        async function rpOpenSinglePicker(){
+            const rule = RP.rule;
+            const src = (rule && rule.sources && rule.sources[0]);
+            if(!src){
+                rpNotify('لا يوجد عمود مصدر محدد للقاعدة — حدد مصادر القاعدة في المصمم أولاً', 'warning');
+                return;
+            }
+            const srcLbl = rpSrcLabel(src);
+            const subEl = document.getElementById('rpSinglePickSub');
+            if(subEl) subEl.textContent = `المصدر: ${srcLbl} (${src})`;
+            const searchInput = document.getElementById('rpSinglePickSearch');
+            if(searchInput) searchInput.value = '';
+            const manualInput = document.getElementById('rpSingleManualVal');
+            if(manualInput) manualInput.value = '';
+            
+            RP.singlePickerSel = new Set();
+            document.getElementById('rpSinglePickModal').classList.remove('hidden');
+            
+            const listEl = document.getElementById('rpSinglePickList');
+            listEl.innerHTML = '<p class="text-slate-400 text-center py-6 text-xs"><i class="fa-solid fa-spinner fa-spin ml-1 text-amber-500"></i> جارٍ تحميل السجلات من المصدر...</p>';
+            
+            try{
+                let vals = RP.distinctCache[src];
+                if(!vals){
+                    const res = await fetch('/api/rml/distinct', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ rml: RP.file, app: APP_NAME, column: src, limit: 1000 })
+                    });
+                    const data = await res.json();
+                    if(data.error) throw new Error(data.error);
+                    vals = RP.distinctCache[src] = (data.values || []).map(String);
+                }
+                RP.singlePickerVals = vals;
+                rpPaintSinglePickerList('');
+            }catch(e){
+                listEl.innerHTML = `<p class="text-rose-500 text-center py-4 text-xs font-bold">تعذر تحميل السجلات: ${rpEsc(e.message || e)}</p>`;
+            }
+        }
+        function rpCloseSinglePicker(){
+            document.getElementById('rpSinglePickModal').classList.add('hidden');
+        }
+        function rpSingleFilterPicker(q){
+            rpPaintSinglePickerList(q);
+        }
+        function rpPaintSinglePickerList(q){
+            const listEl = document.getElementById('rpSinglePickList');
+            if(!listEl) return;
+            q = (q || '').trim().toLowerCase();
+            const vals = RP.singlePickerVals || [];
+            const existing = new Set((RP.singleRows || []).map(r => String(r.srcVal).trim()));
+            const sel = RP.singlePickerSel || new Set();
+            
+            const filtered = vals.filter(v => !q || v.toLowerCase().includes(q));
+            
+            if(!filtered.length){
+                listEl.innerHTML = `<p class="text-slate-400 text-center py-6 text-xs">لا توجد سجلات مطابقة${q ? ` للبحث «${rpEsc(q)}»` : ''}</p>`;
+                rpUpdatePickerCount();
+                return;
+            }
+            
+            listEl.innerHTML = filtered.map(v => {
+                const isAlreadyAdded = existing.has(v);
+                const isChecked = sel.has(v);
+                return `
+                    <label class="flex items-center justify-between p-2.5 rounded-xl border ${isChecked ? 'bg-amber-50/80 border-amber-300 ring-1 ring-amber-300' : (isAlreadyAdded ? 'bg-slate-50 border-slate-200 opacity-60' : 'bg-white border-slate-200 hover:border-amber-300')} cursor-pointer transition select-none">
+                        <div class="flex items-center gap-2.5 min-w-0">
+                            <input type="checkbox" ${isAlreadyAdded ? 'disabled' : ''} ${isChecked ? 'checked' : ''} onchange="rpToggleSinglePickVal('${rpEsc(v)}', this.checked)" class="rounded text-amber-600 ${isAlreadyAdded ? 'cursor-not-allowed text-slate-400' : 'cursor-pointer'}">
+                            <span class="text-xs font-bold text-slate-800 truncate">${rpEsc(v)}</span>
+                        </div>
+                        ${isAlreadyAdded ? '<span class="text-[10px] bg-slate-200 text-slate-600 px-2 py-0.5 rounded-full font-medium shrink-0">مضاف مسبقاً</span>' : ''}
+                    </label>
+                `;
+            }).join('');
+            
+            rpUpdatePickerCount();
+        }
+        function rpToggleSinglePickVal(v, checked){
+            if(!RP.singlePickerSel) RP.singlePickerSel = new Set();
+            if(checked) RP.singlePickerSel.add(v);
+            else RP.singlePickerSel.delete(v);
+            rpUpdatePickerCount();
+        }
+        function rpUpdatePickerCount(){
+            const sel = RP.singlePickerSel || new Set();
+            const countEl = document.getElementById('rpSinglePickCount');
+            const confirmBtn = document.getElementById('rpSinglePickConfirmBtn');
+            if(countEl) countEl.textContent = `${sel.size} محدد`;
+            if(confirmBtn) confirmBtn.innerHTML = `<i class="fa-solid fa-check"></i> إضافة السجلات المحددة (${sel.size})`;
+        }
+        function rpSinglePickSelectAll(check){
+            const vals = RP.singlePickerVals || [];
+            const existing = new Set((RP.singleRows || []).map(r => String(r.srcVal).trim()));
+            const q = ((document.getElementById('rpSinglePickSearch') || {}).value || '').trim().toLowerCase();
+            const filtered = vals.filter(v => !q || v.toLowerCase().includes(q));
+            
+            if(!RP.singlePickerSel) RP.singlePickerSel = new Set();
+            if(check){
+                filtered.forEach(v => {
+                    if(!existing.has(v)) RP.singlePickerSel.add(v);
+                });
+            } else {
+                filtered.forEach(v => {
+                    RP.singlePickerSel.delete(v);
+                });
+            }
+            rpPaintSinglePickerList(q);
+        }
+        function rpSingleAddManualFromPicker(){
+            const input = document.getElementById('rpSingleManualVal');
+            const val = (input ? input.value : '').trim();
+            if(!val) return;
+            const existing = new Set((RP.singleRows || []).map(r => String(r.srcVal).trim()));
+            if(existing.has(val)){
+                rpNotify('هذا السجل موجود بالفعل في الجدول', 'info');
+                return;
+            }
+            RP.singleRows.unshift({ id: `p_single_${Date.now()}`, srcVal: val, values: {} });
+            rpPaintSingleTable();
+            if(input) input.value = '';
+            rpNotify(`تمت إضافة السجل «${val}» إلى الجدول ✓`, 'success');
+            rpCloseSinglePicker();
+        }
+        function rpSingleConfirmPicker(){
+            const sel = [...(RP.singlePickerSel || new Set())];
+            if(!sel.length){
+                rpNotify('حدد سجلاً واحداً على الأقل للإضافة', 'info');
+                return;
+            }
+            const existing = new Set((RP.singleRows || []).map(r => String(r.srcVal).trim()));
+            let added = 0;
+            sel.forEach((v, idx) => {
+                if(!existing.has(v)){
+                    RP.singleRows.unshift({ id: `p_single_${Date.now()}_${idx}`, srcVal: v, values: {} });
+                    existing.add(v);
+                    added++;
+                }
+            });
+            rpPaintSingleTable();
+            rpCloseSinglePicker();
+            rpNotify(`تمت إضافة ${added} سجل إلى الجدول بنجاح ✓`, 'success');
+        }
+        function rpSingleDeleteRow(idx){
+            if(idx >= 0 && idx < RP.singleRows.length){
+                RP.singleRows.splice(idx, 1);
+                rpPaintSingleTable();
+            }
+        }
+        function rpSingleFillVar(varName, promptLabel){
+            const val = prompt(`أدخل القيمة المراد تعميمها على المتغير «${promptLabel}» لجميع السجلات:`);
+            if(val === null) return;
+            const sVal = val.trim();
+            (RP.singleRows || []).forEach(r => {
+                if(!r.values) r.values = {};
+                r.values[varName] = sVal;
+            });
+            rpPaintSingleTable();
+            rpNotify(`تم تعميم القيمة «${sVal}» على عمود «${promptLabel}» ✓`, 'success');
+        }
+        async function rpSingleFetchDistinct(){
+            const rule = RP.rule;
+            const src = (rule.sources && rule.sources[0]);
+            if(!src){
+                rpNotify('لا يوجد عمود مصدر محدد للقاعدة', 'warning');
+                return;
+            }
+            try{
+                rpNotify('جارٍ جلب السجلات من قاعدة البيانات...', 'info');
+                const res = await fetch('/api/rml/distinct', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ rml: RP.file, app: APP_NAME, column: src, limit: 2000 })
+                });
+                const data = await res.json();
+                if(data.error) throw new Error(data.error);
+                const vals = (data.values || []).map(String);
+                if(!vals.length){
+                    rpNotify('لم يتم العثور على سجلات في العمود المحدد', 'warning');
+                    return;
+                }
+                const existingMap = new Set((RP.singleRows || []).map(r => String(r.srcVal).trim()));
+                let added = 0;
+                vals.forEach((v, i) => {
+                    const s = v.trim();
+                    if(s && !existingMap.has(s)){
+                        RP.singleRows.push({ id: `p_single_${Date.now()}_${i}`, srcVal: s, values: {} });
+                        existingMap.add(s);
+                        added++;
+                    }
+                });
+                rpPaintSingleTable();
+                rpNotify(`تم جلب ${vals.length} سجل (${added} جديد أُضيف للجدول) ✓`, 'success');
+            }catch(e){
+                rpNotify('تعذر جلب السجلات: ' + (e.message || e), 'error');
+            }
+        }
+        function rpSingleExportExcel(){
+            const rule = RP.rule;
+            const src = (rule.sources && rule.sources[0]) || 'record';
+            const srcLbl = rpSrcLabel(src);
+            const vars = rule.variables || [];
+            const headers = [srcLbl, ...vars.map(v => v.display || v.name)];
+            
+            const escapeCsv = (val) => {
+                const s = String(val ?? '');
+                if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+                    return '"' + s.replace(/"/g, '""') + '"';
+                }
+                return s;
+            };
+            
+            let csv = '\uFEFF' + headers.map(escapeCsv).join(',') + '\r\n';
+            (RP.singleRows || []).forEach(r => {
+                const row = [r.srcVal, ...vars.map(v => r.values[v.name] ?? '')];
+                csv += row.map(escapeCsv).join(',') + '\r\n';
+            });
+            
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `قاعدة_${rule.name}_منفرد.csv`;
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 500);
+        }
+        function rpSingleDownloadTemplate(){
+            const rule = RP.rule;
+            const src = (rule.sources && rule.sources[0]) || 'record';
+            const srcLbl = rpSrcLabel(src);
+            const vars = rule.variables || [];
+            const cols = [srcLbl, ...vars.map(v => v.display || v.name)];
+            const fn = `قالب_قاعدة_${rule.name || 'single'}`;
+            try{
+                const a = document.createElement('a');
+                a.href = `/api/search/excel-template/?columns=${encodeURIComponent(cols.join(','))}&filename=${encodeURIComponent(fn)}`;
+                document.body.appendChild(a);
+                a.click();
+                setTimeout(()=>{ try{ a.remove(); }catch(e){} }, 500);
+            }catch(e){
+                const escapeCsv = (val) => {
+                    const s = String(val ?? '');
+                    if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+                        return '"' + s.replace(/"/g, '""') + '"';
+                    }
+                    return s;
+                };
+                let csv = '\uFEFF' + cols.map(escapeCsv).join(',') + '\r\n';
+                const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${fn}.csv`;
+                document.body.appendChild(a);
+                a.click();
+                setTimeout(()=>{ try{ a.remove(); URL.revokeObjectURL(url); }catch(e){} }, 500);
+            }
+        }
+        function rpSingleImportRowsData(rows){
+            if(!rows || !rows.length) return;
+            const rule = RP.rule;
+            const src = (rule.sources && rule.sources[0]) || 'record';
+            const vars = rule.variables || [];
+            
+            const firstRow = rows[0].map(c => String(c ?? '').trim());
+            let startIdx = 0;
+            let varColMap = {};
+            let srcColIdx = 0;
+            
+            const hasHeader = firstRow.some(cell => {
+                const c = cell.toLowerCase();
+                return c === src.toLowerCase() || c === rpSrcLabel(src).toLowerCase() || vars.some(v => (v.display||'').toLowerCase() === c || (v.name||'').toLowerCase() === c);
+            });
+            
+            if(hasHeader){
+                startIdx = 1;
+                firstRow.forEach((h, colIdx) => {
+                    const hClean = h.trim();
+                    if(hClean.toLowerCase() === src.toLowerCase() || hClean.toLowerCase() === rpSrcLabel(src).toLowerCase()){
+                        srcColIdx = colIdx;
+                    } else {
+                        const foundVar = vars.find(v => (v.display||'').trim() === hClean || v.name.trim() === hClean);
+                        if(foundVar) varColMap[colIdx] = foundVar.name;
+                    }
+                });
+            } else {
+                vars.forEach((v, idx) => { varColMap[idx + 1] = v.name; });
+            }
+            
+            let importedCount = 0;
+            const existingMap = new Map();
+            (RP.singleRows || []).forEach(r => { existingMap.set(String(r.srcVal).trim(), r); });
+            
+            for(let i=startIdx; i<rows.length; i++){
+                const cells = rows[i].map(c => String(c ?? '').trim());
+                const sVal = (cells[srcColIdx] || '').trim();
+                if(!sVal) continue;
+                
+                let rowObj = existingMap.get(sVal);
+                if(!rowObj){
+                    rowObj = { id: `p_single_${Date.now()}_${i}`, srcVal: sVal, values: {} };
+                    RP.singleRows.push(rowObj);
+                    existingMap.set(sVal, rowObj);
+                }
+                
+                Object.keys(varColMap).forEach(cIdx => {
+                    const vName = varColMap[cIdx];
+                    if(cells[cIdx] !== undefined && cells[cIdx] !== ''){
+                        rowObj.values[vName] = cells[cIdx];
+                    }
+                });
+                importedCount++;
+            }
+            
+            rpPaintSingleTable();
+            rpNotify(`تم استيراد/تحديث ${importedCount} سجل بنجاح ✓`, 'success');
+        }
+        function rpSingleImportCsvText(text){
+            const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+            if(!lines.length) return;
+            function parseCsvLine(line){
+                const row = [];
+                let cur = '', inQuotes = false;
+                for(let i=0; i<line.length; i++){
+                    const c = line[i];
+                    if(c === '"'){
+                        if(inQuotes && line[i+1] === '"'){ cur += '"'; i++; }
+                        else inQuotes = !inQuotes;
+                    } else if(c === ',' && !inQuotes){
+                        row.push(cur); cur = '';
+                    } else {
+                        cur += c;
+                    }
+                }
+                row.push(cur);
+                return row;
+            }
+            const rows = lines.map(parseCsvLine);
+            rpSingleImportRowsData(rows);
+        }
+        async function rpSingleImportFile(input){
+            if(!input || !input.files || !input.files.length) return;
+            const file = input.files[0];
+            const name = file.name.toLowerCase();
+            if(name.endsWith('.csv') || name.endsWith('.txt')){
+                const reader = new FileReader();
+                reader.onload = function(e){
+                    rpSingleImportCsvText(e.target.result);
+                    try{ input.value = ''; }catch(e){}
+                };
+                reader.readAsText(file);
+            } else {
+                try{
+                    rpNotify('جارٍ قراءة ملف Excel...', 'info');
+                    const fd = new FormData();
+                    fd.append('file', file);
+                    fd.append('mode', 'table');
+                    const res = await fetch('/api/search/import-excel/', {method:'POST', body: fd});
+                    const d = await res.json().catch(()=>({}));
+                    if(!res.ok) throw new Error(d.error || 'فشل الاستيراد');
+                    if(d.table && d.table.length){
+                        rpSingleImportRowsData(d.table);
+                    } else if(d.values && d.values.length){
+                        const existingMap = new Set((RP.singleRows || []).map(r => String(r.srcVal).trim()));
+                        let added = 0;
+                        d.values.forEach((v, i) => {
+                            const s = String(v).trim();
+                            if(s && !existingMap.has(s)){
+                                RP.singleRows.push({ id: `p_single_${Date.now()}_${i}`, srcVal: s, values: {} });
+                                existingMap.add(s);
+                                added++;
+                            }
+                        });
+                        rpPaintSingleTable();
+                        rpNotify(`تم استيراد ${d.values.length} قيمة من Excel (${added} سجل جديد) ✓`, 'success');
+                    }
+                }catch(e){
+                    rpNotify('فشل الاستيراد: ' + (e.message || e), 'error');
+                } finally {
+                    try{ input.value = ''; }catch(e){}
+                }
+            }
+        }
+        async function rpSingleSaveAll(){
+            const rule = RP.rule;
+            const src = (rule.sources && rule.sources[0]) || 'record';
+            
+            const validRows = (RP.singleRows || []).filter(r => String(r.srcVal || '').trim().length > 0);
+            
+            const policies = validRows.map((r, idx) => {
+                const sVal = String(r.srcVal).trim();
+                return {
+                    id: r.id || `p_single_${idx + 1}`,
+                    name: sVal,
+                    priority: 100,
+                    match: { [src]: [sVal] },
+                    values: r.values || {}
+                };
+            });
+            
+            try{
+                rpNotify('جارٍ حفظ السجلات...', 'info');
+                const res = await fetch(`/api/apps/${encodeURIComponent(APP_NAME)}/rules/policy/save/`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        file: RP.file,
+                        rule: rule.name,
+                        entry_mode: 'single',
+                        policies: policies
+                    })
+                });
+                const data = await res.json();
+                if(!res.ok || data.error) throw new Error(data.error || 'فشل الحفظ');
+                
+                rpNotify(`تم حفظ ${policies.length} سجل بنجاح ✓`, 'success');
+                RP.dirty = true;
+                await openRulePoliciesSilent();
+            }catch(e){
+                rpNotify('تعذر الحفظ: ' + (e.message || e), 'error');
+            }
         }
         async function rpDeletePolicy(pid){
             if(!confirm('حذف هذه السياسة؟')) return;

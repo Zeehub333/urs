@@ -121,6 +121,8 @@ class FMLKField:
     ref_table: Optional[str] = None
     ref_fk: Optional[str] = None
     ref_display: Optional[str] = None
+    ref_conn: Optional[str] = None  # اتصال خارجي (قراءة فقط) لمصدر القائمة — فارغ = الاتصال الأساسي
+    ref_schema: Optional[str] = None  # سكيما جدول المرجع (تُستنتج من refTable المؤهل schema.table)
     display_table: Optional[str] = None  # جدول العرض الإضافي (قراءة فقط)
     display_key: Optional[str] = None  # عمود المفتاح المحلي للمطابقة
     display_fk: Optional[str] = None  # عمود المفتاح في جدول العرض
@@ -130,7 +132,7 @@ class FMLKField:
     icon: Optional[str] = None  # أيقونة المدخل (fa-*) تُعرض بجانب الاسم في المشغل
     destination: Optional[str] = None  # الوجهة: main (الجدول الأساسي) أو اسم جدول متفرع
     options: List[str] = field(default_factory=list)  # for select (literal values only)
-    options_source: List[Dict[str, str]] = field(default_factory=list)  # [{table, schema, column}] from [table.column] refs
+    options_source: List[Dict[str, str]] = field(default_factory=list)  # [{table, schema, column, conn?}] from [table.column] refs or <options_source><source/></options_source>
     validation: Dict[str, Any] = field(default_factory=dict)  # Validation Engine: regex/pattern, min_length, max_length, min, max
     config: Dict[str, Any] = field(default_factory=dict)  # relational widget config (parent_field, sub_fields, ...)
     raw_attrs: Dict[str, str] = field(default_factory=dict)
@@ -141,7 +143,7 @@ class FMLKField:
         """مطلوب فعلاً؟ — خاصية required تسقط حال الإخفاء (visibleIf غير محقق)."""
         return bool(self.required) and self.is_visible(data)
     def to_dict(self):
-        base = {"id": self.id, "name": self.name, "alias": self.alias, "dataType": self.data_type, "inputType": self.input_type, "required": self.required, "nullable": self.nullable, "editable": self.editable, "readonly": (not self.editable), "primary_key": self.primary_key, "primaryKey": self.primary_key, "default": self.default, "defaultValue": self.default, "formula": self.formula, "calc_expr": self.formula, "calc_mode": self.calc_mode, "serial": bool(self.serial), "placeholder": self.placeholder, "visibleIf": self.visible_if, "visible_if": self.visible_if, "tab": self.tab, "category": self.category, "position": self.position, "colSpan": self.col_span, "rowSpan": self.row_span, "is_main_col": bool(self.is_main_col), "isMainCol": bool(self.is_main_col), "refTable": self.ref_table, "refFk": self.ref_fk, "refDisplay": self.ref_display, "displayTable": self.display_table, "display_table": self.display_table, "displayKey": self.display_key, "display_key": self.display_key, "displayFk": self.display_fk, "display_fk": self.display_fk, "displayShow": self.display_show, "display_show": self.display_show, "displayOnly": self.display_only, "display_only": self.display_only, "displayExpr": self.display_expr, "display_expr": self.display_expr, "icon": self.icon, "destination": self.destination, "options": self.options, "options_source": self.options_source, "optionsSource": self.options_source, "validation": self.validation, "validationRules": self.validation, "config": self.config}
+        base = {"id": self.id, "name": self.name, "alias": self.alias, "dataType": self.data_type, "inputType": self.input_type, "required": self.required, "nullable": self.nullable, "editable": self.editable, "readonly": (not self.editable), "primary_key": self.primary_key, "primaryKey": self.primary_key, "default": self.default, "defaultValue": self.default, "formula": self.formula, "calc_expr": self.formula, "calc_mode": self.calc_mode, "serial": bool(self.serial), "placeholder": self.placeholder, "visibleIf": self.visible_if, "visible_if": self.visible_if, "tab": self.tab, "category": self.category, "position": self.position, "colSpan": self.col_span, "rowSpan": self.row_span, "is_main_col": bool(self.is_main_col), "isMainCol": bool(self.is_main_col), "refTable": self.ref_table, "refFk": self.ref_fk, "refDisplay": self.ref_display, "refConn": self.ref_conn, "ref_conn": self.ref_conn, "refSchema": self.ref_schema, "ref_schema": self.ref_schema, "displayTable": self.display_table, "display_table": self.display_table, "displayKey": self.display_key, "display_key": self.display_key, "displayFk": self.display_fk, "display_fk": self.display_fk, "displayShow": self.display_show, "display_show": self.display_show, "displayOnly": self.display_only, "display_only": self.display_only, "displayExpr": self.display_expr, "display_expr": self.display_expr, "icon": self.icon, "destination": self.destination, "options": self.options, "options_source": self.options_source, "optionsSource": self.options_source, "validation": self.validation, "validationRules": self.validation, "config": self.config}
         # Foreign Keys: expose dynamic endpoint for frontend to fetch reference data
         if self.ref_table:
             base["refEndpoint"] = f"/api/fmlk/lookup?field={self.name}&table={self.ref_table}"
@@ -175,6 +177,8 @@ class FMLKDetail:
     detail: str = ""  # عمود الربط في الجدول المتفرع (FK, direct mode)
     rel_type: str = "one_to_many"
     sub_key: str = "id"  # مفتاح سجل الفرعي المستهدف (junction detail_id)
+    conn: Optional[str] = None  # اتصال خارجي (قراءة فقط) لجدول التفاصيل — فارغ = الاتصال الأساسي (junction فقط مع الخارجي)
+    schema: Optional[str] = None  # سكيما جدول التفاصيل الخارجي (تُستنتج من table المؤهل schema.table)
     visible: bool = True  # إظهار شبكة الفرع في المشغل
     link_mode: str = "direct"  # direct: FK مباشر | junction: جدول ثالث دائماً
     junction: Dict[str, Any] = field(default_factory=dict)  # {table, model} رابط M2M
@@ -186,6 +190,7 @@ class FMLKDetail:
                 "detail": self.detail, "rel_type": self.rel_type, "sub_key": self.sub_key,
                 "subKey": self.sub_key, "visible": bool(self.visible),
                 "link_mode": self.link_mode or "direct",
+                "conn": self.conn or "", "schema": self.schema or "",
                 "tab": self.tab or "",
                 "junction": dict(self.junction or {}), "columns": self.columns}
 
@@ -365,8 +370,16 @@ class FMLKFormCompiler:
                                      "tab": (cg("tab", "tabId", "tab_id") or ""),
                                      "visibleIf": (cg("visibleIf", "visible_if", "visible-if") or ""),
                                      "junction": str(cg("junction") or "").strip().lower() in ("1", "true", "yes"),
-                                     "ref": str(cg("ref") or "").strip().lower() in ("1", "true", "yes")})
+                                     "ref": str(cg("ref") or "").strip().lower() in ("1", "true", "yes"),
+                                     "src_expr": (cg("src_expr", "srcExpr", "src-expr") or "").strip(),
+                                     "key_col": (cg("key_col", "keyCol", "key-col") or "").strip(),
+                                     "label_col": (cg("label_col", "labelCol", "label-col") or "").strip(),
+                                     "src_conn": (cg("src_conn", "srcConn", "src-conn") or "").strip()})
                 _subk = (get("sub_key", "subKey", "sub-key") or "id").strip() or "id"
+                _dconn = (get("conn", "connection", "connection_id", "ref_conn", "refConn") or "").strip()
+                _dsch = (get("schema") or "").strip()
+                if not _dsch and "." in tbl:
+                    _dsch, tbl = [p.strip() for p in tbl.split(".", 1)]
                 _vis = str(get("visible", "show", default="1") or "1").strip().lower() not in ("0", "false", "no", "hide", "hidden")
                 _jtbl = (get("junction_table", "junctionTable", "junction-table") or "").strip()
                 _jmod = (get("junction_model", "junctionModel", "junction-model") or "").strip()
@@ -379,7 +392,8 @@ class FMLKFormCompiler:
                     master=(get("master", "master_col", "masterCol") or "").strip(),
                     detail=(get("detail", "detail_col", "detailCol", "fk") or "").strip(),
                     rel_type=(get("rel_type", "relType", "rel-type") or "one_to_many").strip().lower(),
-                    sub_key=_subk, visible=_vis, link_mode=_lmode,
+                    sub_key=_subk, visible=_vis, link_mode=_lmode, conn=(_dconn or None),
+                    schema=(_dsch or None),
                     junction=({"table": _jtbl, "model": _jmod} if _jtbl else {}),
                     columns=cols, tab=(get("tab", "tabLabel", "tab_label") or "").strip(),
                     raw_attrs=dict(el.attrib)))
@@ -427,6 +441,8 @@ class FMLKFormCompiler:
             ref_table = get("refTable","reftable","ref_table")
             ref_fk = get("refFk","reffk","ref_fk")
             ref_display = get("refDisplay","refdisplay","ref_display")
+            ref_conn = get("refConn","refconn","ref_conn","ref-conn")
+            ref_schema = get("refSchema","refschema","ref_schema","ref-schema")
             display_table = get("displayTable","displaytable","display_table")
             display_key = get("displayKey","displaykey","display_key")
             display_fk = get("displayFk","displayfk","display_fk")
@@ -515,8 +531,32 @@ class FMLKFormCompiler:
                 opts = [o.strip() for o in get("options").split(",") if o.strip()]
             # Split [schema.table.column] / [table.column] refs from literal options
             # (dict options {value,label} always stay literal)
+            # + explicit <options_source><source table schema column conn/> children
+            # (the only round-trip carrying an external conn)
             opts_literals: List[str] = []
             opts_source: List[Dict[str, str]] = []
+            for child in list(el):
+                if child.tag.lower() == "options_source":
+                    for src in list(child):
+                        if src.tag.lower() != "source":
+                            continue
+                        def sg(*names, default=""):
+                            for k, v in src.attrib.items():
+                                if k.lower() in [n.lower() for n in names]:
+                                    return v
+                            return default
+                        _st = (sg("table") or "").strip()
+                        _sc2 = (sg("column", "col") or "").strip()
+                        if not _st or not _sc2:
+                            continue
+                        _ss2 = (sg("schema") or "").strip()
+                        if not _ss2 and "." in _st:
+                            _ss2, _st = [p.strip() for p in _st.split(".", 1)]
+                        _entry: Dict[str, str] = {"table": _st, "schema": _ss2, "column": _sc2}
+                        _cn2 = (sg("conn", "connection", "connection_id") or "").strip()
+                        if _cn2:
+                            _entry["conn"] = _cn2
+                        opts_source.append(_entry)
             for _o in opts:
                 if isinstance(_o, dict):
                     opts_literals.append(_o)
@@ -552,7 +592,7 @@ class FMLKFormCompiler:
                     config[cfg_key] = v
             if formula and "calc_expr" not in config:
                 config["calc_expr"] = formula
-            result.append(FMLKField(id=str(fid), name=str(name), alias=str(alias), data_type=str(data_type) if data_type else None, input_type=input_type, required=required, nullable=nullable, editable=editable, primary_key=primary_key, serial=serial, default=default_val, formula=formula, calc_mode=_calc_mode, placeholder=placeholder, visible_if=(str(visible_if).strip() if visible_if else None), tab=tab, category=category, position=position, col_span=col_span, row_span=row_span, is_main_col=is_main_col, ref_table=str(ref_table) if ref_table else None, ref_fk=str(ref_fk) if ref_fk else None, ref_display=str(ref_display) if ref_display else None, display_table=str(display_table) if display_table else None, display_key=str(display_key) if display_key else None, display_fk=str(display_fk) if display_fk else None, display_show=str(display_show) if display_show else None, display_only=display_only, display_expr=str(display_expr) if display_expr else None, icon=(str(icon).strip() if icon else None), destination=(str(destination).strip() if destination else None), options=opts, options_source=opts_source, validation=validation_rules, config=config, raw_attrs=dict(el.attrib)))
+            result.append(FMLKField(id=str(fid), name=str(name), alias=str(alias), data_type=str(data_type) if data_type else None, input_type=input_type, required=required, nullable=nullable, editable=editable, primary_key=primary_key, serial=serial, default=default_val, formula=formula, calc_mode=_calc_mode, placeholder=placeholder, visible_if=(str(visible_if).strip() if visible_if else None), tab=tab, category=category, position=position, col_span=col_span, row_span=row_span, is_main_col=is_main_col, ref_table=str(ref_table) if ref_table else None, ref_fk=str(ref_fk) if ref_fk else None, ref_display=str(ref_display) if ref_display else None, ref_conn=(str(ref_conn).strip() if ref_conn else None), ref_schema=(str(ref_schema).strip() if ref_schema else None), display_table=str(display_table) if display_table else None, display_key=str(display_key) if display_key else None, display_fk=str(display_fk) if display_fk else None, display_show=str(display_show) if display_show else None, display_only=display_only, display_expr=str(display_expr) if display_expr else None, icon=(str(icon).strip() if icon else None), destination=(str(destination).strip() if destination else None), options=opts, options_source=opts_source, validation=validation_rules, config=config, raw_attrs=dict(el.attrib)))
         _mcols = [f for f in result if f.is_main_col]
         if len(_mcols) > 1:
             _names = "، ".join([f.alias or f.name for f in _mcols])

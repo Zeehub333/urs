@@ -25,7 +25,7 @@
                     })();
                     </script>
                     <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">الاتصال المحلي *</label><select id="fmlConnection" onchange="fwConnChanged()" class="wb-inp"></select></div>
-                    <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">الجدول الأساسي *</label><input id="fmlMainTableSearch" oninput="fwFilterMainTables(this.value)" placeholder="ابحث..." class="wb-inp font-mono mb-1" dir="ltr"><select id="fmlMainTable" onchange="fwMainTableChanged()" class="wb-inp font-mono" dir="ltr"></select><div class="mt-1 flex gap-1"><button type="button" onclick="fwNewTableOpen()" class="flex-1 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg text-[11px] font-bold"><i class="fa-solid fa-plus"></i> جدول جديد</button><button type="button" onclick="fwEditTableOpen()" title="تعديل تعريف الجدول المخصص المحدد ثم إعادة ترحيله" class="flex-1 py-1.5 bg-sky-50 hover:bg-sky-100 text-sky-700 rounded-lg text-[11px] font-bold"><i class="fa-solid fa-pen"></i> تعديل المخصص</button></div><div id="fwCustomHint"></div></div>
+                    <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">الجدول الأساسي *</label><input id="fmlMainTableSearch" oninput="fwFilterMainTables(this.value)" placeholder="ابحث..." class="wb-inp font-mono mb-1" dir="ltr"><div class="flex items-stretch gap-1"><select id="fmlMainTable" onchange="fwMainTableChanged()" class="wb-inp font-mono flex-1 min-w-0" dir="ltr"></select><button type="button" onclick="fwMainTableSearch()" title="بحث في الجداول (UniDBPicker)" class="shrink-0 px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-slate-500 hover:text-indigo-700 hover:border-indigo-300"><i class="fa-solid fa-magnifying-glass text-[11px]"></i></button></div><div class="mt-1 flex gap-1"><button type="button" onclick="fwNewTableOpen()" class="flex-1 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg text-[11px] font-bold"><i class="fa-solid fa-plus"></i> جدول جديد</button><button type="button" onclick="fwEditTableOpen()" title="تعديل تعريف الجدول المخصص المحدد ثم إعادة ترحيله" class="flex-1 py-1.5 bg-sky-50 hover:bg-sky-100 text-sky-700 rounded-lg text-[11px] font-bold"><i class="fa-solid fa-pen"></i> تعديل المخصص</button></div><div id="fwCustomHint"></div></div>
                     <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">الفئة</label><input id="fmlCategory" list="fmlCategoryList" placeholder="عام — اكتب جديدة أو اختر" class="wb-inp" autocomplete="off"><datalist id="fmlCategoryList"></datalist></div>
                     <div><label class="block text-[10px] font-bold text-slate-400 mb-0.5">الوصف</label><input id="fmlDescription" placeholder="وصف مختصر" class="wb-inp"></div>
                 </div>
@@ -48,7 +48,7 @@
     </div>
 
     <!-- مودال نوع البيانات للمدخل -->
-    <div id="fwTypeModal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[77] flex items-center justify-center p-4" onclick="if(event.target===this) closeFwTypeModal()">
+    <div id="fwTypeModal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[77] flex items-center justify-center p-4">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
             <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-indigo-50 gap-2 shrink-0">
                 <h3 id="fwTypeTitle" class="text-sm font-bold text-slate-800 flex items-center gap-2"><i class="fa-solid fa-shapes text-indigo-600"></i> نوع المدخل وإعداده</h3>
@@ -69,7 +69,7 @@
     </div>
 
     <!-- مودال الإجراء المخصص -->
-    <div id="fwActionModal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[78] flex items-center justify-center p-4" onclick="if(event.target===this) closeFwActionModal()">
+    <div id="fwActionModal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[78] flex items-center justify-center p-4">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] overflow-hidden flex flex-col">
             <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-indigo-50 gap-2 shrink-0">
                 <h3 id="fwActionModalTitle" class="text-sm font-bold text-slate-800 flex items-center gap-2"><i class="fa-solid fa-bolt text-indigo-600"></i> إعداد الإجراء المخصص</h3>
@@ -162,7 +162,7 @@
     </div>
 
     <!-- مودال أعمدة شبكة الجدول المتفرع -->
-    <div id="fwBranchColsModal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[76] flex items-center justify-center p-4" onclick="if(event.target===this) closeFwBranchCols()">
+    <div id="fwBranchColsModal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[76] flex items-center justify-center p-4">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] overflow-hidden flex flex-col">
             <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-emerald-50 gap-2 shrink-0">
                 <h3 id="fwBranchColsTitle" class="text-sm font-bold text-slate-800 flex items-center gap-2"><i class="fa-solid fa-table-columns text-emerald-600"></i> أعمدة شبكة التفاصيل</h3>
@@ -181,7 +181,7 @@
     </div>
 
     <!-- استعلام تجريبي عن الجدول -->
-    <div id="fwTblPreviewModal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[300] overflow-y-auto p-4" onclick="if(event.target===this) closeFwTblPreview()">
+    <div id="fwTblPreviewModal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[300] overflow-y-auto p-4">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-6xl m-auto overflow-hidden flex flex-col max-h-[92vh]">
             <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-sky-50 gap-2 shrink-0">
                 <h3 id="fwTblPreviewTitle" class="text-sm font-bold text-slate-800 flex items-center gap-2"><i class="fa-solid fa-table-cells text-sky-600"></i> استعلام تجريبي</h3>
@@ -196,7 +196,7 @@
     </div>
 
     <!-- معاينة المستند المرتبط -->
-    <div id="fwDmlPreviewModal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[80] overflow-y-auto p-4" onclick="if(event.target===this) closeFwDmlPreview()">
+    <div id="fwDmlPreviewModal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[80] overflow-y-auto p-4">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-4xl m-auto overflow-hidden flex flex-col max-h-[90vh]">
             <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-slate-50 gap-2 shrink-0">
                 <h3 id="fwDmlPreviewTitle" class="text-sm font-bold text-slate-800 flex items-center gap-2"><i class="fa-solid fa-eye text-violet-600"></i> معاينة المستند</h3>

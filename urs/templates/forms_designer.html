@@ -148,6 +148,12 @@
         const APP_NAME = "{{ app_name|escapejs }}";
     </script>
     <script>
+        {% if has_fml_wizard %}{% include "UniDBPicker.js" %}{% endif %}
+    </script>
+    <script>
+        {% if has_fml_wizard %}{% include "UniExpression.js" %}{% endif %}
+    </script>
+    <script>
         {% if has_fml_wizard %}{% include "forms_wizard_script.html" %}{% endif %}
     </script>
     <script>

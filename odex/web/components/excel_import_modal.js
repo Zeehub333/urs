@@ -153,7 +153,6 @@
 
         closeBtn.onclick = closeModal;
         cancelBtn.onclick = closeModal;
-        md.onclick = function (e) { if (e.target === md) closeModal(); };
 
         dropZone.onclick = function () { fileInput.click(); };
         dropZone.ondragover = function (e) { e.preventDefault(); dropZone.classList.add('border-emerald-500', 'bg-emerald-50'); };

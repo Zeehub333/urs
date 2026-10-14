@@ -905,7 +905,9 @@ def _resolve_expression(expr_text: str, fields: Optional[List[Any]],
                     raise ValueError(
                         f"مرجع غير معروف '[{inner}]' — استورد الحقل '{member}' من جدول '{table}' "
                         f"(تبويب الحقول ← استيراد من جدول)")
-                if not _conn_accepted(ctok, _field_conns(f), conn_map):
+                _full_qual = (str(ctok).strip() + "." + str(table).strip()).upper()
+                _is_own_full = (_full_qual in (alias_by_table or {}))
+                if not _is_own_full and not _conn_accepted(ctok, _field_conns(f), conn_map):
                     have = sorted(_field_conns(f)) or ["؟"]
                     raise ValueError(
                         f"الحقل '{member}' في جدول '{table}' مربوط بالاتصال ({'، '.join(have)}) "

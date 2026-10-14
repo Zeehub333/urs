@@ -14,7 +14,7 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.contrib import admin
-from django.urls import path
+from django.urls import path, include
 from urs import views as urs_views
 
 urlpatterns = [
@@ -29,8 +29,11 @@ urlpatterns = [
     path('api/workspaces/<str:ws_id>/users-columns/', urs_views.api_workspace_users_columns, name='api_workspace_users_columns'),
     path('api/workspaces/<str:ws_id>/login-diag/', urs_views.api_workspace_login_diag, name='api_workspace_login_diag'),
     path('api/workspaces/<str:ws_id>/login-reset/', urs_views.api_workspace_login_reset, name='api_workspace_login_reset'),
+    path('api/workspaces/<str:ws_id>/login/unlock/', urs_views.api_workspace_login_unlock, name='api_workspace_login_unlock'),
     path('api/workspaces/<str:ws_id>/superuser/', urs_views.api_workspace_superuser, name='api_workspace_superuser'),
     path('enter/<str:ws_id>/', urs_views.workspace_login, name='workspace_login'),
+    path('ws-settings/', urs_views.workspace_settings_page, name='workspace_settings_default'),
+    path('ws-settings/<str:ws_id>/', urs_views.workspace_settings_page, name='workspace_settings'),
     path('api/user/change-password/', urs_views.api_user_change_password, name='api_user_change_password'),
     path('api/user/profile/', urs_views.api_user_profile, name='api_user_profile'),
     path('api/master/status/', urs_views.api_master_status, name='api_master_status'),
@@ -44,6 +47,14 @@ urlpatterns = [
     path('api/workspaces/<str:ws_id>/save/', urs_views.api_workspace_save, name='api_workspace_save'),
     path('my-reports/', urs_views.my_reports, name='my_reports'),
     path('dashboards/', urs_views.dashboards, name='dashboards'),
+    path('ad-logs/', urs_views.ad_logs_page, name='ad_logs'),
+    path('ad-tree/', urs_views.ad_tree_page, name='ad_tree'),
+    path('api/ad/tree/', urs_views.api_ad_tree, name='api_ad_tree'),
+    path('api/ad/search/', urs_views.api_ad_search, name='api_ad_search'),
+    path('api/ad/sources/', urs_views.api_ad_sources, name='api_ad_sources'),
+    path('api/ad/logs/', urs_views.api_ad_logs, name='api_ad_logs'),
+    path('api/ad/record-info/', urs_views.api_ad_record_info, name='api_ad_record_info'),
+    path('api/ad/form-perm/', urs_views.api_ad_form_perm, name='api_ad_form_perm'),
     path('my-docs/', urs_views.my_docs, name='my_docs'),
     path('api/my-docs/list/', urs_views.api_my_docs_list, name='api_my_docs_list'),
     path('api/my-docs/save/', urs_views.api_my_docs_save, name='api_my_docs_save'),
@@ -143,6 +154,7 @@ urlpatterns = [
     path('api/fmlk/record', urs_views.api_fmlk_record, name='api_fmlk_record'),
     path('api/fmlk/branch', urs_views.api_fmlk_branch, name='api_fmlk_branch'),
     path('api/fmlk/detail-search', urs_views.api_fmlk_detail_search, name='api_fmlk_detail_search'),
+    path('api/fmlk/grid-source', urs_views.api_fmlk_grid_source, name='api_fmlk_grid_source'),
     path('api/fmlk/detail-sources', urs_views.api_fmlk_detail_sources, name='api_fmlk_detail_sources'),
     path('api/fmlk/master-branch', urs_views.api_fmlk_master_branch, name='api_fmlk_master_branch'),
     path('api/fmlk/action/test-connection', urs_views.api_fmlk_action_test_connection, name='api_fmlk_action_test_connection'),
@@ -173,6 +185,7 @@ urlpatterns = [
     path('api/apps/<str:app_name>/rml/draft/finalize/', urs_views.api_rml_draft_finalize, name='api_rml_draft_finalize'),
     path('api/apps/<str:app_name>/rml/draft/discard/', urs_views.api_rml_draft_discard, name='api_rml_draft_discard'),
     path('api/apps/<str:app_name>/rml/fetch-query/', urs_views.api_rml_fetch_query, name='api_rml_fetch_query'),
+    path('api/apps/<str:app_name>/views/library/', urs_views.api_view_library, name='api_view_library'),
     path('api/apps/<str:app_name>/rml/design-preview/', urs_views.api_rml_design_preview, name='api_rml_design_preview'),
     path('api/rml/detail', urs_views.api_rml_detail, name='api_rml_detail'),
     path('api/rml/detail-search', urs_views.api_rml_detail_search, name='api_rml_detail_search'),
@@ -190,4 +203,5 @@ urlpatterns = [
     path('api/presets/', urs_views.api_presets_list, name='api_presets_list'),
     path('api/presets/create/', urs_views.api_presets_create, name='api_presets_create'),
     path('api/presets/delete/', urs_views.api_presets_delete, name='api_presets_delete'),
+    path('api/nlp/', include('nlp_engine.urls')),
 ]

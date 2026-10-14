@@ -1249,3 +1249,337 @@ def _bump_field_type(fields: List[Dict[str, Any]], ref: str, ftype: str):
     for f in fields:
         if f.get("name") == base and f.get("type") == "VARCHAR":
             f["type"] = ftype
+
+
+# ── WITH … UNION import (organized-CTE pattern → view drafts) ────────────────
+
+def _bump_field_type(fields: List[Dict[str, Any]], ref: str, ftype: str):
+    base = ref.split(".")[-1]
+    for f in fields:
+        if f.get("name") == base and f.get("type") == "VARCHAR":
+            f["type"] = ftype
+
+
+# ── WITH … UNION import (organized-CTE pattern → view drafts) ────────────────
+
+def _split_with_ctes(sql: str) -> Tuple[List[Dict[str, str]], str]:
+    """Leading WITH a AS (...), b AS (...) → ([{name, sql}], rest).
+
+    Bodies are the INNER selects (outer parens stripped, balanced scan).
+    Raises ValueError on malformed input.
+    """
+    m = re.match(r"\s*WITH\b", sql, re.IGNORECASE)
+    if not m:
+        return [], sql
+    i, n = m.end(), len(sql)
+    ctes: List[Dict[str, str]] = []
+
+    def _skip_sep(j: int) -> int:
+        while j < n and sql[j] in (" ", "\t", "\r", "\n", ","):
+            j += 1
+        return j
+
+    i = _skip_sep(i)
+    while True:
+        m2 = re.match(r"([A-Za-z_][\w$#]*)\s*(?:\([^()]*\))?\s+[Aa][Ss]\s*\(", sql[i:])
+        if not m2:
+            if ctes:
+                break
+            raise ValueError("صيغة WITH غير صالحة — المتوقع: WITH اسم AS (SELECT …)، …")
+        name = m2.group(1)
+        j = i + m2.end() - 1
+        depth, q, k = 0, None, j
+        while k < n:
+            ch = sql[k]
+            if q:
+                if ch == q:
+                    q = None
+                k += 1
+                continue
+            if ch in ("'", '"'):
+                q = ch
+                k += 1
+                continue
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+                if depth == 0:
+                    break
+            k += 1
+        if depth != 0:
+            raise ValueError(f"أقواس غير متوازنة في CTE «{name}»")
+        ctes.append({"name": name, "sql": sql[j + 1:k].strip()})
+        i = _skip_sep(k + 1)
+        if i < n and not re.match(r"[Ss][Ee][Ll][Ee][Cc][Tt]\b", sql[i:]):
+            # another CTE expected (comma already skipped) — loop validates
+            continue
+        break
+    return ctes, sql[i:].strip()
+
+
+def _split_union_legs(sql: str) -> List[Tuple[str, Optional[str]]]:
+    """Depth-0 UNION splitter → [(leg_sql, op|None)] (op attaches to the FOLLOWING leg)."""
+    parts: List[Tuple[str, Optional[str]]] = []
+    d, q, i, start, n = 0, None, 0, 0, len(sql)
+    last_op: Optional[str] = None
+    while i < n:
+        ch = sql[i]
+        if q:
+            if ch == q:
+                if q == "'" and i + 1 < n and sql[i + 1] == "'":
+                    i += 1
+                else:
+                    q = None
+            i += 1
+            continue
+        if ch in ("'", '"', "`"):
+            q = ch
+            i += 1
+            continue
+        if ch == "[":
+            j = sql.find("]", i + 1)
+            i = n if j < 0 else j + 1
+            continue
+        if ch == "(":
+            d += 1
+            i += 1
+            continue
+        if ch == ")":
+            d = max(0, d - 1)
+            i += 1
+            continue
+        if d == 0:
+            m = re.match(r"UNION(?:\s+ALL)?\b", sql[i:], re.IGNORECASE)
+            if m:
+                parts.append((sql[start:i].strip(), last_op))
+                last_op = "union_all" if re.search(r"ALL", m.group(0), re.IGNORECASE) else "union_partial"
+                i += m.end()
+                start = i
+                continue
+        i += 1
+    parts.append((sql[start:].strip(), last_op))
+    return [(s, o) for (s, o) in parts if s]
+
+
+def _ref_to_sid(text: str, sid_of: Callable[[str], str], unmapped: List[str]) -> str:
+    """Rewrite {a.c}/[a.c] refs to [sid.c] via alias-or-table lookup.
+
+    3+-part chains have no sid mapping (recorded + left untouched).
+    String literals are never touched.
+    """
+    try:
+        segs = re.split(r"('(?:[^']|'')*')", str(text or ""))
+    except Exception:
+        return text
+    for _i in range(0, len(segs), 2):
+        _s = segs[_i]
+        _holds: List[str] = []
+
+        def _m3(m: re.Match) -> str:
+            unmapped.append(m.group(0))
+            _holds.append(m.group(0))
+            return "\x00%d\x00" % (len(_holds) - 1)
+
+        _s = re.sub(r"[A-Za-z_][A-Za-z0-9_$]*(?:\.[A-Za-z_][A-Za-z0-9_$]*){2,}", _m3, _s)
+
+        def _m2(m: re.Match) -> str:
+            a, c = m.group(2), m.group(3)
+            for key in (a, a.split(".")[-1]):
+                sid = sid_of(key)
+                if sid:
+                    return "[" + sid + "." + c + "]"
+            unmapped.append(a + "." + c)
+            return m.group(0)
+
+        _s = re.sub(r"([\[{]?)([A-Za-z_][A-Za-z0-9_$]*)\.([A-Za-z0-9_$]+)([\]}]?)(?!\.[A-Za-z_])",
+                    _m2, _s)
+        _s = re.sub(r"\x00(\d+)\x00", lambda m: _holds[int(m.group(1))], _s)
+        segs[_i] = _s
+    return "".join(segs)
+
+
+def parse_with(sql: str, conn_id: str = "", default_schema: str = "",
+               expand_star: Optional[Callable[[str, str], List[Dict[str, str]]]] = None,
+               describe: Optional[Callable[[str, str], List[str]]] = None,
+               fk_of: Optional[Callable[[str, str], List[Dict[str, str]]]] = None
+               ) -> Dict[str, Any]:
+    """Parse WITH cte AS (leg UNION ALL leg …), … + final SELECT → view drafts.
+
+    One view per CTE (legs merged: sources remapped to s1..sN, per-leg WHERE
+    attached to the leg's first source as a source filter, UNION chained over
+    leg primaries), plus a `main` view for the final SELECT (may nest CTEs).
+    GROUP BY clauses are ignored with a warning — the view model regenerates
+    them from bare + aggregate columns. Returns {mode, views, warnings}.
+    """
+    warnings: List[str] = []
+    cleaned = strip_comments(sql or "")
+    if not cleaned.strip():
+        raise ValueError("استعلام فارغ")
+    cleaned, multi_batch = _split_batches(cleaned)
+    if multi_batch:
+        warnings.append("عدة دفعات GO — يُحلل الأول فقط")
+    ctes, rest = _split_with_ctes(cleaned)
+    if not ctes:
+        raise ValueError("لا WITH في الاستعلام — استخدم الاستيراد الأحادي (SELECT واحد)")
+    if not rest.strip():
+        raise ValueError("WITH بلا استعلام نهائي")
+    cte_names = [c["name"] for c in ctes]
+    _lname = {n.upper() for n in cte_names}
+
+    def _leg_tbls(parsed: Dict[str, Any]) -> List[Dict[str, Any]]:
+        return [t for t in (parsed.get("tables") or []) if isinstance(t, dict)]
+
+    views: List[Dict[str, Any]] = []
+    _all_warnings: List[str] = list(warnings)
+
+    def _build_view(vname: str, legs: List[Tuple[str, Optional[str]]]) -> Dict[str, Any]:
+        leg_parsed = []
+        for _li, (_lsql, _op) in enumerate(legs):
+            try:
+                _cl = split_clauses(_lsql)
+            except Exception:
+                _cl = {}
+            try:
+                if len(split_top_commas(str(_cl.get("from") or ""))) > 1:
+                    raise ValueError(
+                        f"[{vname}] الفرع {_li + 1} يستخدم الفاصلة بين الجداول — استخدم JOIN صريحاً (JOIN … ON)")
+            except ValueError:
+                raise
+            except Exception:
+                pass
+            if _cl.get("group_by"):
+                _all_warnings.append(
+                    f"[{vname}] يُتجاهل GROUP BY للفرع {_li + 1} — يُعاد توليده تلقائياً من الأعمدة")
+            if _cl.get("having"):
+                _all_warnings.append(f"[{vname}] يُتجاهل HAVING للفرع {_li + 1}")
+            try:
+                _p = parse_sql(_lsql, conn_id=conn_id, default_schema=default_schema,
+                               expand_star=expand_star, describe=describe, fk_of=fk_of)
+            except ValueError as _e:
+                raise ValueError(f"[{vname}] الفرع {_li + 1}: {_e}")
+            for _w in (_p.get("warnings") or []):
+                # GROUP BY/HAVING لها تنبيهنا الأدق (يُعاد التوليد) — نسقط عام parse_sql
+                if re.match(r"^(GROUP BY|HAVING) يُتجاهل في الاستيراد", str(_w)):
+                    continue
+                _all_warnings.append(f"[{vname}] فرع {_li + 1}: {_w}")
+            if _p.get("distinct"):
+                _all_warnings.append(f"[{vname}] يُتجاهل DISTINCT للفرع {_li + 1}")
+            leg_parsed.append((_lsql, _op, _p))
+        sources: List[Dict[str, Any]] = []
+        merges: List[Dict[str, Any]] = []
+        skipped_links = 0
+        unmapped: List[str] = []
+        leg_primaries: List[str] = []
+        first_cols: List[Dict[str, Any]] = []
+        _first_map: Dict[str, str] = {}
+
+        def _reg_table(_map: Dict[str, str], display_key: str, full: str, conn: str, is_cte: bool) -> str:
+            _kk = str(display_key or "").strip().upper()
+            if _kk and _kk in _map:
+                return _map[_kk]
+            _sid = "s%d" % (len(sources) + 1)
+            sources.append({"id": _sid, "table_name": full,
+                            "conn": "" if is_cte else str(conn or ""),
+                            "filter": ""})
+            for _k in {display_key, full, full.split(".")[-1]}:
+                _kk2 = str(_k or "").strip().upper()
+                if _kk2 and _kk2 not in _map:
+                    _map[_kk2] = _sid
+            return _sid
+
+        def _sid_for(_map: Dict[str, str], _ref: str) -> str:
+            _r = str(_ref or "").strip()
+            return _map.get(_r.upper()) or _map.get(_r.split(".")[-1].strip().upper(), "")
+
+        for _li, (_lsql, _op, _p) in enumerate(leg_parsed):
+            _leg_tables = [t for t in _leg_tbls(_p)
+                           if not t.get("__unknown") and (t.get("table") or t.get("alias"))]
+            if not _leg_tables:
+                raise ValueError(f"[{vname}] الفرع {_li + 1} بلا جداول قابلة للربط")
+            # per-leg sid map: the SAME physical table in different legs gets
+            # DIFFERENT sids (UNION legs are independent FROMs)
+            _lsid_of: Dict[str, str] = {}
+            if _li == 0:
+                _first_map = _lsid_of
+            for _t in _leg_tables:
+                _raw = str(_t.get("table") or _t.get("alias") or "").strip()
+                _short = _raw.split(".")[-1].strip()
+                _is_cte = _short.upper() in _lname
+                _full = _short if (_is_cte or not _t.get("schema")) else ("%s.%s" % (_t.get("schema"), _short))
+                _reg_table(_lsid_of, str(_t.get("alias") or _raw).strip() or _short, _full, conn_id, _is_cte)
+            for _l in (_p.get("links") or []):
+                _s1 = _sid_for(_lsid_of, _l.get("from_table") or "")
+                _s2 = _sid_for(_lsid_of, _l.get("to_table") or "")
+                if not _s1 or not _s2 or not _l.get("from_col") or not _l.get("to_col") or _s1 == _s2:
+                    skipped_links += 1
+                    continue
+                _jk = str(_l.get("join_kind") or "").upper()
+                _jt = "RIGHT" if "RIGHT" in _jk else ("FULL" if "FULL" in _jk else ("INNER" if "INNER" in _jk else "LEFT"))
+                merges.append({"type": "join", "s1": _s1, "s2": _s2,
+                               "join_type": _jt, "key_1": _l.get("from_col"), "key_2": _l.get("to_col")})
+            # per-leg WHERE → filter of the leg's first source (same AND scope)
+            _lw = str(_p.get("general_where") or "").strip()
+            if _lw:
+                _first_t = _leg_tables[0]
+                _fsid = _sid_for(_lsid_of, _first_t.get("alias") or "") or _sid_for(_lsid_of, _first_t.get("table") or "")
+                if _fsid:
+                    for _s in sources:
+                        if _s["id"] == _fsid and not _s.get("filter"):
+                            _s["filter"] = _ref_to_sid(_lw, lambda _r, _m=_lsid_of: _sid_for(_m, _r), unmapped)
+                            break
+            if _li == 0:
+                first_cols = _p.get("columns") or []
+            _prim = None
+            for _t in _leg_tables:
+                _cand = _sid_for(_lsid_of, _t.get("alias") or "") or _sid_for(_lsid_of, _t.get("table") or "")
+                if _cand:
+                    _prim = _cand
+                    break
+            if _prim:
+                leg_primaries.append((_prim, _op))
+        # UNION chain over leg primaries
+        for _i in range(1, len(leg_primaries)):
+            merges.append({"type": (leg_primaries[_i][1] or "union_all"),
+                           "s1": leg_primaries[_i - 1][0], "s2": leg_primaries[_i][0],
+                           "join_type": "LEFT", "key_1": "", "key_2": ""})
+        # columns = first leg (UNION positional semantics = engine behavior)
+        seen: Dict[str, bool] = {}
+        columns: List[Dict[str, Any]] = []
+        _col_counts = [len((_p.get("columns") or [])) for (_ls, _op, _p) in leg_parsed]
+        if len(set(_col_counts)) > 1:
+            _all_warnings.append(f"[{vname}] الفروع بعدد أعمدة مختلف {_col_counts} — المحرك يطابق موضعياً")
+        for _c in first_cols:
+            if not isinstance(_c, dict):
+                continue
+            _al = str(_c.get("alias") or _c.get("name") or "").strip()
+            if not _al or _al.upper() in seen:
+                continue
+            seen[_al.upper()] = True
+            columns.append({"name": _al, "alias": _al,
+                            "expr": _ref_to_sid(str(_c.get("expr") or ""), lambda _r: _sid_for(_first_map, _r), unmapped) or ("[" + _al + "]"),
+                            "type": str(_c.get("dataType") or _c.get("type") or "TEXT")})
+        if unmapped:
+            _uniq = sorted({str(_u) for _u in unmapped})
+            _all_warnings.append(f"[{vname}] مراجع لم تُحسم لسيد: {('، '.join(_uniq))[:160]} — راجع التعبيرات")
+        if skipped_links:
+            _all_warnings.append(f"[{vname}] تُخطي {skipped_links} رابط مجهول")
+        return {"name": vname, "display": vname, "imported": False,
+                "sources": sources, "merges": merges, "columns": columns,
+                "groups": [], "variables": []}
+
+    if len({n.upper() for n in cte_names}) != len(cte_names):
+        raise ValueError("أسماء CTE مكررة — وحّد الأسماء")
+    for _c in ctes:
+        _legs = _split_union_legs(_c["sql"])
+        views.append(_build_view(_c["name"], _legs))
+    if not rest.strip():
+        raise ValueError("WITH بلا استعلام نهائي")
+    _rest_up = rest.strip().upper()
+    if not _rest_up.startswith("SELECT"):
+        raise ValueError("الاستعلام النهائي يجب أن يكون SELECT واحداً")
+    _flegs = _split_union_legs(rest.strip())
+    if len(_flegs) > 1:
+        raise ValueError("UNION في الاستعلام النهائي غير مدعوم — غلّفه كـ CTE ثم اختر منه")
+    views.append(_build_view("main", _flegs))
+    return {"mode": "with", "views": views, "warnings": _all_warnings}

@@ -17,12 +17,13 @@ _EXEMPT_EXACT = frozenset({
     "/api/master/status/",
     "/api/master/auth/",
 })
-_EXEMPT_PREFIXES_API = ("/api/workspaces/", "/api/lookup/lists/", "/api/lookup/tables/", "/api/connections/")
+_EXEMPT_PREFIXES_API = ("/api/workspaces/", "/api/lookup/lists/", "/api/lookup/tables/", "/api/connections/", "/api/nlp/")
 _EXEMPT_PREFIXES = (
     "/settings/setup/",
     "/admin/",
     "/static/",
     "/enter/",
+    "/ws-settings/",
 )
 
 
@@ -57,7 +58,9 @@ class WorkspaceGateMiddleware:
         # Pin app roots for this request: explicit ?settings= workspace wins,
         # else the held session workspace. Unknown/empty → unscoped.
         try:
-            _sid0 = (request.GET.get("settings") or "").strip()
+            _sid0 = (request.GET.get("settings") or request.GET.get("workspace") or "").strip()
+            if not _sid0 and path.startswith("/ws-settings/"):
+                _sid0 = path.split("/ws-settings/", 1)[1].strip("/").split("/")[0]
         except Exception:
             _sid0 = ""
         try:
@@ -68,6 +71,11 @@ class WorkspaceGateMiddleware:
         try:
             if _sid0 and _sid0 in known:
                 _active = _sid0
+                try:
+                    if hasattr(request, "session"):
+                        request.session["workspace"] = _sid0
+                except Exception:
+                    pass
             elif _held0 and _held0 in known:
                 _active = _held0
         except Exception:
@@ -81,7 +89,14 @@ class WorkspaceGateMiddleware:
         _tok_fsch = None
         if set_active_fiscal_schema is not None:
             try:
-                _fsch = (request.session.get("fiscal_schema") or request.GET.get("schema") or "").strip()
+                from .workspace import resolve_ws_fiscal_schema
+                _raw_fsch = (request.session.get("fiscal_schema") or request.GET.get("schema") or "").strip()
+                _fsch = resolve_ws_fiscal_schema(_active, _raw_fsch) if _active else _raw_fsch
+                if _active and _fsch and _raw_fsch and _fsch != _raw_fsch:
+                    try:
+                        request.session["fiscal_schema"] = _fsch
+                    except Exception:
+                        pass
                 _tok_fsch = set_active_fiscal_schema(_fsch)
             except Exception:
                 _tok_fsch = None

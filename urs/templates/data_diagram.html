@@ -69,7 +69,7 @@
         </div>
     </div>
     <!-- Add-table modal -->
-    <div id="diagAddModal" class="hidden fixed inset-0 bg-slate-900/60 z-[80] overflow-y-auto p-4" onclick="if(event.target===this) this.classList.add('hidden')">
+    <div id="diagAddModal" class="hidden fixed inset-0 bg-slate-900/60 z-[80] overflow-y-auto p-4">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg m-auto overflow-hidden flex flex-col max-h-[85vh]">
             <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-slate-50">
                 <h3 class="text-sm font-bold text-slate-800">إضافة جدول للمخطط</h3>
@@ -82,7 +82,7 @@
         </div>
     </div>
     <!-- Link editor modal -->
-    <div id="diagLinkModal2" class="hidden fixed inset-0 bg-slate-900/60 z-[85] overflow-y-auto p-4" onclick="if(event.target===this) this.classList.add('hidden')">
+    <div id="diagLinkModal2" class="hidden fixed inset-0 bg-slate-900/60 z-[85] overflow-y-auto p-4">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md m-auto overflow-hidden">
             <div class="px-5 py-3 border-b border-slate-200 bg-slate-50">
                 <h3 class="text-sm font-bold text-slate-800">مرجع الربط</h3>
@@ -166,9 +166,52 @@
             let conn = dgConnId(), schema = '', table = tableKey;
             const m = String(tableKey).match(/^([^:]+)::(.*)$/);
             if(m){ conn = m[1]; const st = m[2]; const dot = st.indexOf('.'); if(dot >= 0){ schema = st.slice(0, dot); table = st.slice(dot + 1); } }
-            const res = await fetch(`/api/connections/${encodeURIComponent(conn)}/tables/${encodeURIComponent(schema ? schema + '.' + table : table)}/columns/`);
-            const data = await res.json();
-            return (data.columns || []).map(c=>({name: c.name || c, type: c.type || c.db_type || ''}));
+            try{
+                const res = await fetch(`/api/connections/${encodeURIComponent(conn)}/tables/${encodeURIComponent(schema ? schema + '.' + table : table)}/columns/`);
+                const data = await res.json();
+                const live = (data.columns || []).map(c=>({name: c.name || c, type: c.type || c.db_type || ''}));
+                if(live.length) return live;
+            }catch(e){}
+            // fallback: displayed-table outputs (views) or already-imported fields —
+            // virtual tables have no physical columns endpoint.
+            try{
+                const vw = ((DG.views || []).find(v=>String(v.name || '').toUpperCase() === String(table || '').toUpperCase()));
+                if(vw){
+                    const outs = dgViewOutputs(vw);
+                    if(outs.length) return outs.map(n=>({name: n.n, type: n.t}));
+                }
+            }catch(e){}
+            try{
+                const matched = (DG.fields || []).filter(f=>String(f.table_source || f.tableSource || '').toUpperCase() === String(table || '').toUpperCase() && (f.name || f.field));
+                if(matched.length) return matched.map(f=>({name: f.name || f.field, type: f.type || ''}));
+            }catch(e){}
+            return [];
+        }
+        function dgViewTokCol(tok){
+            const m = String(tok || '').trim().match(/^\[([A-Za-z0-9_]+)\.([^\]]+)\]$/);
+            if(m) return m[2].trim();
+            const t = String(tok || '').trim();
+            if(t.length >= 2 && t.charAt(0) === '[' && t.charAt(t.length - 1) === ']') return t.slice(1, -1).trim();
+            return t;
+        }
+        function dgViewOutputs(vw){
+            const out = [], seen = {};
+            const push = (n, t)=>{ n = String(n || '').trim(); if(n && !seen[n.toUpperCase()]){ seen[n.toUpperCase()] = 1; out.push({n: n, t: t || 'TEXT'}); } };
+            try{
+                const tmap = {};
+                (vw.columns || []).forEach(c=>{ const a = String(c.alias || c.name || '').trim(); if(a){ tmap[a.toUpperCase()] = c.type || 'TEXT'; push(a, c.type); } });
+                (vw.merges || []).forEach(mg=>{
+                    if(!mg || mg.type === 'union_all' || mg.type === 'union_partial') return;
+                    push(mg.key_1 || mg.key1); push(mg.key_2 || mg.key2);
+                });
+                (vw.groups || []).forEach(g=>{
+                    if(!g) return;
+                    push(dgViewTokCol(g.source_column));
+                    (g.conditions || []).forEach(b=>{ if(!b) return; push(dgViewTokCol(b.group_by)); push(dgViewTokCol(b.then)); });
+                });
+                out.forEach(o=>{ if(tmap[o.n.toUpperCase()]) o.t = tmap[o.n.toUpperCase()]; });
+            }catch(e){}
+            return out;
         }
         async function loadDiagram(){
             const q = new URLSearchParams(location.search);
@@ -189,6 +232,7 @@
                 DG.connections = data.connections || [];
                 DG.charts = data.charts || [];
                 DG.rules = data.rules || [];
+                DG.views = data.views || [];
                 DG.detail = data.detail || null;
                 DG.links = (data.links || []).map(l=>({from_conn: l.from_conn || '', from_table: l.from_table, from_col: l.from_col, to_conn: l.to_conn || '', to_table: l.to_table, to_col: l.to_col, rel_type: (l.rel_type || l.relType || l.rel || 'one_to_one'), match: (l.match || 'exact'), pattern: (l.pattern || ''), inferred: false}));
                 // الجوينات المستدلة من التقرير نفسه (غير المحفوظة)

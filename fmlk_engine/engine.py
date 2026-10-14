@@ -388,7 +388,7 @@ class FMLKFormEngine:
             opts = [(o if isinstance(o, dict) else {"value": o, "label": o}) for o in f.options]
             if search:
                 opts = [o for o in opts if search.lower() in str(o["label"]).lower()]
-            return {"field": field_name, "refTable": f.ref_table, "options": opts[:limit], "source": "static"}
+            return {"field": field_name, "refTable": f.ref_table, "refConn": getattr(f, "ref_conn", None), "options": opts[:limit], "source": "static"}
         if not f.ref_table:
             raise ValueError(f"Field '{field_name}' has no ref_table / static options")
         fk = f.ref_fk or "id"
@@ -413,7 +413,7 @@ class FMLKFormEngine:
             finally:
                 try: cur.close()
                 except: pass
-            return {"field": field_name, "refTable": f.ref_table, "refFk": fk, "refDisplay": disp, "options": rows, "source": "db", "sql": sql}
+            return {"field": field_name, "refTable": f.ref_table, "refFk": fk, "refDisplay": disp, "refConn": getattr(f, "ref_conn", None), "options": rows, "source": "db", "sql": sql}
         except Exception as e:
             # fallback: try ROWNUM for older Oracle or mock
             try:
@@ -435,7 +435,7 @@ class FMLKFormEngine:
         out = []
         for f in self.fields:
             if f.ref_table:
-                out.append({"field": f.name, "alias": f.alias, "refTable": f.ref_table, "refFk": f.ref_fk, "refDisplay": f.ref_display, "endpoint": f"/api/fmlk/lookup?field={f.name}"})
+                out.append({"field": f.name, "alias": f.alias, "refTable": f.ref_table, "refFk": f.ref_fk, "refDisplay": f.ref_display, "refConn": getattr(f, "ref_conn", None), "endpoint": f"/api/fmlk/lookup?field={f.name}"})
         return out
 
     # â”€â”€ SQL Builders (secure _q, binds) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

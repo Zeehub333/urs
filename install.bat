@@ -155,7 +155,7 @@ call :add_req fmlk_engine
 call :add_req permissions_engine
 if "%REQS%"=="" echo [--] no requirements files found.
 set PKGS=cryptography openpyxl reportlab
-set PKGS=%PKGS% arabic-reshaper python-bidi
+set PKGS=%PKGS% arabic-reshaper python-bidi spacy
 "%VPY%" -m pip install %REQS% %PKGS%
 if errorlevel 1 (
   echo [X] pip install failed - check network and retry install.bat.
@@ -167,7 +167,7 @@ echo.
 echo [5/5] verifying ...
 set VFY=import django, psycopg2, oracledb
 set VFY=%VFY%, pyodbc, fastapi, lxml
-set VFY=%VFY%, reportlab, openpyxl, cryptography
+set VFY=%VFY%, reportlab, openpyxl, cryptography, spacy
 "%VPY%" -c "%VFY%; from zk import ZK; print('venv ok')"
 if errorlevel 1 (
   echo [X] verify failed - a required package did not import.

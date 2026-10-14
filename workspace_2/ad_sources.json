@@ -1,0 +1,14 @@
+{
+  "sources": [
+    {
+      "key": "accounts",
+      "ar": "الحسابات",
+      "kind": "table",
+      "conn": "16",
+      "table": "ACCOUNT",
+      "schema": "IAS20264",
+      "seq_col": "A_CODE",
+      "name_col": "A_NAME"
+    }
+  ]
+}

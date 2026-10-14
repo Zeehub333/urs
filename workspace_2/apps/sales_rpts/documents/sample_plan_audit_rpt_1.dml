@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<dml paper="A4" orientation="portrait" margin="12mm" source="sample_plan_audit_rpt.rml" doctype="kashf">
+  <variables/>
+  <header/>
+  <footer/>
+  <sections>
+    <section id="1" name="قسم 1">
+      <tableview source="player:main" variant="grid" layout="rows"/>
+    </section>
+  </sections>
+</dml>

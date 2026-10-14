@@ -41,6 +41,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'urs',
+    'nlp_engine',
 ]
 
 MIDDLEWARE = [
@@ -84,8 +85,14 @@ TEMPLATES = [
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
         'DIRS': [BASE_DIR / "urs" / "templates", BASE_DIR / "templates",
                  *_workspace_modals_dirs()],
-        'APP_DIRS': True,
         'OPTIONS': {
+            # Parsed-template cache: pages like forms_player (~500KB) must not
+            # re-parse on every view (DEBUG disables Django's own caching).
+            # NOTE: restart the server after editing any template file.
+            'loaders': [('django.template.loaders.cached.Loader', [
+                'django.template.loaders.filesystem.Loader',
+                'django.template.loaders.app_directories.Loader',
+            ])],
             'context_processors': [
                 'django.template.context_processors.debug',
                 'django.template.context_processors.request',
@@ -109,6 +116,8 @@ try:
 except Exception:
     _app_db = None
 if _app_db:
+    _app_db = dict(_app_db)
+    _app_db.setdefault("CONN_MAX_AGE", 60)
     DATABASES = {"default": _app_db}
 else:
     # Postgres on 172.16.10.101 (urs) — requested localhost 172.16.10.101 postgres/postgres urs
@@ -120,6 +129,8 @@ else:
             'PASSWORD': 'postgres',
             'HOST': '172.16.10.101',
             'PORT': '5432',
+            # Reuse DB connections across API calls (player fires dozens/page)
+            'CONN_MAX_AGE': 60,
         }
     }
 

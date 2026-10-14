@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}سجلات النظام — Odex ERP{% endblock %}
+{% block sidebar %}
+    <aside class="w-64 bg-white border-l border-gray-200 flex flex-col justify-between hidden md:flex z-20">
+        <div>
+            {% include "partials/main_nav.html" with active="adlogs" %}
+        </div>
+        {% include "partials/sidebar_footer.html" %}
+    </aside>
+{% endblock %}
+{% block main %}
+    <div class="flex-1 flex flex-col min-h-0">
+        <main class="p-6 space-y-4 w-full max-w-7xl mx-auto">
+            <div class="flex items-center gap-3 flex-wrap">
+                <div class="w-11 h-11 bg-indigo-100 text-indigo-600 rounded-2xl flex items-center justify-center text-lg shrink-0"><i class="fa-solid fa-clock-rotate-left"></i></div>
+                <div class="flex-1 min-w-0">
+                    <h1 class="font-extrabold text-slate-800">سجلات النظام</h1>
+                    <p class="text-[11px] text-slate-400">الإدخال والجلب والتعديل والحذف — لكل مستخدم وجهاز ووقت</p>
+                </div>
+                <span id="adLogCount" class="text-[10px] bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-bold"></span>
+            </div>
+            <div class="bg-white rounded-2xl border border-slate-200 p-3 flex flex-wrap items-center gap-2 text-xs">
+                <input id="adqUser" placeholder="المستخدم" class="bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 min-w-[130px]">
+                <select id="adqAction" class="bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5">
+                    <option value="">كل الإجراءات</option>
+                    <option value="insert">إدخال</option>
+                    <option value="fetch">جلب</option>
+                    <option value="update">تعديل</option>
+                    <option value="delete">حذف</option>
+                </select>
+                <input id="adqEntity" placeholder="الكيان (نموذج/تقرير)" class="bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 min-w-[150px]">
+                <input id="adqFrom" type="date" class="bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5">
+                <input id="adqTo" type="date" class="bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5">
+                <button onclick="adLogsLoad(1)" class="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold"><i class="fa-solid fa-magnifying-glass"></i> بحث</button>
+            </div>
+            <div id="adLogBox" class="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+                <div class="p-8 text-center text-slate-400 text-xs">اختر المرشحات ثم بحث — يتطلب جلسة ماستر</div>
+            </div>
+            <div class="flex items-center justify-center gap-2 text-xs">
+                <button onclick="adLogsLoad(adLogsPage-1)" class="px-3 py-1.5 bg-white border border-slate-200 rounded-xl font-bold">→ السابق</button>
+                <span id="adLogsPg" class="text-slate-500 font-bold"></span>
+                <button onclick="adLogsLoad(adLogsPage+1)" class="px-3 py-1.5 bg-white border border-slate-200 rounded-xl font-bold">التالي ←</button>
+            </div>
+        </main>
+    </div>
+{% endblock %}
+{% block scripts %}
+<script>
+let adLogsPage = 1;
+const ADACT = {insert:['إدخال','bg-emerald-100 text-emerald-700'], fetch:['جلب','bg-sky-100 text-sky-700'], update:['تعديل','bg-amber-100 text-amber-700'], delete:['حذف','bg-rose-100 text-rose-700']};
+async function adLogsLoad(p){
+    adLogsPage = Math.max(1, p || 1);
+    const box = document.getElementById('adLogBox');
+    const q = new URLSearchParams({page: adLogsPage, pageSize: 50,
+        username: document.getElementById('adqUser').value.trim(),
+        action: document.getElementById('adqAction').value,
+        entity: document.getElementById('adqEntity').value.trim(),
+        from: document.getElementById('adqFrom').value,
+        to: document.getElementById('adqTo').value});
+    box.innerHTML = '<div class="p-8 text-center text-slate-400 text-xs">جاري التحميل...</div>';
+    try{
+        const res = await fetch('/api/ad/logs/?' + q.toString());
+        const d = await res.json();
+        if(!res.ok) throw new Error(d.error || 'تعذر الجلب');
+        const rows = d.rows || [];
+        document.getElementById('adLogCount').textContent = 'الإجمالي: ' + (d.total || 0);
+        document.getElementById('adLogsPg').textContent = 'صفحة ' + (d.page || 1);
+        if(!rows.length){ box.innerHTML = '<div class="p-8 text-center text-slate-400 text-xs">لا سجلات مطابقة</div>'; return; }
+        const esc = (s)=>String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        box.innerHTML = '<div class="overflow-x-auto"><table class="w-full text-xs"><thead class="bg-slate-50"><tr>'
+            + ['الوقت','المستخدم','الجهاز','الإجراء','الكيان','المعرف','الجدول'].map(h=>`<th class="px-3 py-2 text-right font-bold text-slate-600 whitespace-nowrap">${h}</th>`).join('')
+            + '</tr></thead><tbody>' + rows.map(r=>{
+                const a = ADACT[r.action] || [r.action, 'bg-slate-100 text-slate-600'];
+                return `<tr class="border-t border-slate-100 hover:bg-slate-50/60"><td class="px-3 py-1.5 font-mono whitespace-nowrap" dir="ltr">${esc(r.ts)}</td><td class="px-3 py-1.5 font-bold">${esc(r.username) || '—'}</td><td class="px-3 py-1.5 text-slate-500 font-mono" dir="ltr">${esc(r.device)}</td><td class="px-3 py-1.5"><span class="px-2 py-0.5 rounded-full font-bold ${a[1]}">${a[0]}</span></td><td class="px-3 py-1.5 font-mono" dir="ltr">${esc(r.entity)}</td><td class="px-3 py-1.5 font-mono" dir="ltr">${esc(r.entity_id)}</td><td class="px-3 py-1.5 font-mono" dir="ltr">${esc(r.ref_table)}</td></tr>`;
+            }).join('') + '</tbody></table></div>';
+    }catch(e){ box.innerHTML = '<div class="p-8 text-center text-rose-500 text-xs">' + String((e && e.message) || e).slice(0, 200) + '</div>'; }
+}
+document.addEventListener('DOMContentLoaded', function(){ try{ adLogsLoad(1); }catch(e){} });
+adLogsLoad(1);
+</script>
+{% endblock %}

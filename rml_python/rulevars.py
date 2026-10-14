@@ -88,7 +88,7 @@ def _value_sql(var_type: str, value: Any, *, rule_name: str = "", var_name: str 
 
 
 def _match_sql(match: Dict[str, List[str]]) -> Optional[str]:
-    """بناء شرط المطابقة: AND بين الحقول، وIN داخل الحقل الواحد.
+    """بناء شرط المطابقة: AND بين الحقول، وIN داخل الحقل الواحد (أو = لقيمة واحدة).
     تُكتب الحقول بصيغة [field] ليحلها المحرك لاحقاً."""
     conds = []
     for fld, vals in (match or {}).items():
@@ -96,7 +96,10 @@ def _match_sql(match: Dict[str, List[str]]) -> Optional[str]:
         vals = [str(v) for v in (vals or []) if str(v or "").strip() != ""]
         if not fld or not vals:
             continue
-        conds.append(f"[{fld}] IN ({', '.join(_quote_literal(v) for v in vals)})")
+        if len(vals) == 1:
+            conds.append(f"[{fld}] = {_quote_literal(vals[0])}")
+        else:
+            conds.append(f"[{fld}] IN ({', '.join(_quote_literal(v) for v in vals)})")
     if not conds:
         return None  # سياسة بلا شروط = تنطبق على كل السجلات
     return " AND ".join(conds)
@@ -196,9 +199,11 @@ def expand_rule_vars(expr_text: str, rules: Optional[List[Any]]) -> str:
         if not policies:
             raise ValueError(
                 f"القاعدة '{rule_name}' بلا سياسات — أنشئ سياسة من السايدبار (قواعد الأعمال)")
-        if len(policies) > POLICY_COUNT_WARN:
+        is_single = str(getattr(rule, "entry_mode", "") or getattr(rule, "input_mode", "") or "").strip().lower() in ("single", "individual", "1", "منفرد")
+        policy_limit = 5000 if is_single else 500
+        if len(policies) > policy_limit:
             raise ValueError(
-                f"القاعدة '{rule_name}' فيها {len(policies)} سياسة (الحد الناعم {POLICY_COUNT_WARN}) — "
+                f"القاعدة '{rule_name}' فيها {len(policies)} سياسة (الحد {policy_limit}) — "
                 f"قسّم القاعدة أو ادمج السياسات المتشابهة لتفادي تضخم SQL")
         # الترتيب الحتمي: الأولوية الأصغر أولاً ثم ترتيب الإنشاء — الأول المطابق يفوز
         ordered = sorted(enumerate(policies), key=lambda t: _policy_priority(t[1], t[0]))

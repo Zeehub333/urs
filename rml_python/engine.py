@@ -362,6 +362,28 @@ def _build_outer_where(filters: List[Dict[str, Any]], columns: Optional[List] = 
                 phs.append(f":{pj}")
                 params[pj] = v
             clauses.append(f"{qfield} IN ({', '.join(phs)})" if phs else "1=0")
+        elif op in ("not_blank", "filled", "is_not_blank", "notblank", "no_blank"):
+            # إخفاء السجل الفارغ على الاسم المستعار (hide_blank للأعمدة المحسوبة/المجمعة)
+            # بلا ليترال '' (أوراكل تعده NULL فيُخفي الكل!). الرقمي/التاريخ: IS NOT NULL فقط.
+            _odt = str(getattr(col, "data_type", None) or "").strip().lower() if col is not None else ""
+            _onum = bool(getattr(col, "is_amount", False)) or _odt in (
+                "number", "numeric", "integer", "int", "bigint", "smallint",
+                "decimal", "dec", "float", "double", "real", "money", "amount")
+            _odate = _odt in ("date", "datetime", "time", "timestamp")
+            if _onum or _odate:
+                clauses.append(f"({qfield} IS NOT NULL)")
+            else:
+                clauses.append(f"(CONCAT(LTRIM(RTRIM(CAST({qfield} AS VARCHAR(4000)))), '|') <> '|')")
+        elif op in ("not_zero", "nonzero", "is_not_zero", "notzero", "no_zero"):
+            # إخفاء السجل الصفري على الاسم المستعار (hide_zero) — رقمياً للمبالغ/الأرقام
+            _odt = str(getattr(col, "data_type", None) or "").strip().lower() if col is not None else ""
+            _onum = bool(getattr(col, "is_amount", False)) or _odt in (
+                "number", "numeric", "integer", "int", "bigint", "smallint",
+                "decimal", "dec", "float", "double", "real", "money", "amount")
+            if _onum:
+                clauses.append(f"({qfield} <> 0)")
+            else:
+                clauses.append(f"(CONCAT(LTRIM(RTRIM(CAST({qfield} AS VARCHAR(4000)))), '|') NOT IN ('|', '0|'))")
         else:
             clauses.append(f"{qfield}={_wrap(':'+p, val, windowed)}")
             params[p] = val
@@ -435,6 +457,237 @@ def _resolve_filter_field(field: str, columns: Optional[List] = None,
     if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", out.strip() or ""):
         return _q(out.strip())
     return out
+
+
+def _normalize_group_bys(group_by) -> list:
+    """Normalize a GROUP BY spec (str | dict | list) to a list of non-empty keys.
+
+    Items stay as str (plain field) or dict ({field, cond:{...}}) so the
+    clause builder can compile conditional CASE keys.
+    """
+    items = group_by if isinstance(group_by, (list, tuple)) else ([group_by] if group_by else [])
+    out = []
+    for _g in items:
+        if isinstance(_g, dict):
+            _f = str(_g.get("field") or _g.get("column") or _g.get("name") or "").strip()
+            if _f and _f not in [str(x.get("field") if isinstance(x, dict) else x) for x in out]:
+                out.append({"field": _f, "order": _g.get("order"),
+                            **({"cond": _g.get("cond")} if _g.get("cond") else {})})
+            continue
+        if str(_g or "").strip() and str(_g).strip() not in [str(x.get("field") if isinstance(x, dict) else x) for x in out]:
+            out.append(str(_g).strip())
+    return out
+
+
+def _group_by_extra_fields(group_by) -> list:
+    """All physical field names a GROUP BY spec touches (incl. CASE WHEN/THEN/ELSE)."""
+    out = []
+    for _g in _normalize_group_bys(group_by):
+        if isinstance(_g, dict):
+            if _g.get("field"):
+                out.append(str(_g["field"]))
+            _c = _g.get("cond") or {}
+            for _k in ("when_field", "then_field", "else_field"):
+                if str(_c.get(_k) or "").strip():
+                    out.append(str(_c[_k]))
+            for _b in (_c.get("branches") or []):
+                if isinstance(_b, dict):
+                    for _k in ("when_field", "then_field", "if", "then", "group_by"):
+                        if str(_b.get(_k) or "").strip():
+                            out.append(str(_b[_k]))
+        elif str(_g or "").strip():
+            out.append(str(_g))
+    return out
+
+
+def _build_case_group(cond, columns, fields, table_map, conn_map, rules, default_tables) -> str:
+    """Compile a conditional group key → CASE WHEN <when> <op> <val> THEN <then> [WHEN ...] ELSE <else> END."""
+    from .namespaces import _resolve_expression as _rx
+    cond = cond or {}
+
+    def _lit(_v):
+        _s = str(_v if _v is not None else "")
+        return "'" + _s.replace("'", "''") + "'"
+
+    def _op(_o):
+        _o = str(_o or "=").strip().upper()
+        if _o not in ("=", "!=", "<>", ">", "<", ">=", "<="):
+            _o = "="
+        return "<>" if _o == "!=" else _o
+
+    def _res(_f):
+        return _resolve_filter_field(str(_f or ""), columns, fields, table_map,
+                                     conn_map, rules, default_tables=default_tables)
+
+    _else_raw = str(cond.get("else_field") or "").strip()
+    _else = (_res(_else_raw) if _else_raw else "NULL")
+    _brs = [b for b in (cond.get("branches") or []) if isinstance(b, dict)
+            and str(b.get("when_field") or b.get("if") or b.get("group_by") or "").strip()
+            and str(b.get("then_field") or b.get("then") or "").strip()]
+    if _brs:
+        _whens = []
+        for _b in _brs:
+            _wf = str(_b.get("when_field") or _b.get("if") or _b.get("group_by") or "")
+            _tf = str(_b.get("then_field") or _b.get("then") or "")
+            _whens.append(f"WHEN {_res(_wf)} {_op(_b.get('op'))} {_lit(_b.get('value', ''))} THEN {_res(_tf)}")
+        return "CASE " + " ".join(_whens) + f" ELSE {_else} END"
+    _when = _res(str(cond.get("when_field") or ""))
+    _then = _res(str(cond.get("then_field") or ""))
+    # Always a quoted literal: '1' casts safely against numeric columns on
+    # PG/Oracle/MSSQL, while a bare 1 would break text columns (ORA-01722/PG error).
+    return f"CASE WHEN {_when} {_op(cond.get('op'))} {_lit(cond.get('value', ''))} THEN {_then} ELSE {_else} END"
+
+
+def _build_group_clause(group_by, columns, fields, table_map, conn_map, rules, default_tables) -> str:
+    """GROUP BY clause from a single field or a list of fields (multi group-by).
+
+    List items may be plain field names or {field, cond:{when_field,op,value,then_field,else_field}}
+    dicts compiled to CASE WHEN ... THEN ... ELSE ... END.
+    """
+    keys = _normalize_group_bys(group_by)
+    if not keys:
+        return ""
+    parts = []
+    for _k in keys:
+        if isinstance(_k, dict) and _k.get("cond"):
+            parts.append(_build_case_group(_k["cond"], columns, fields, table_map, conn_map,
+                                           rules, default_tables))
+        else:
+            _f = _k.get("field") if isinstance(_k, dict) else _k
+            parts.append(_resolve_filter_field(_f, columns, fields, table_map, conn_map, rules,
+                                               default_tables=default_tables))
+    return " GROUP BY " + ", ".join(parts)
+
+
+_VIEW_AGG_ITEM_RE = re.compile(r"(?i)\b(SUM|COUNT|AVG|MIN|MAX|STDDEV|VARIANCE|MEDIAN)\s*\(|\bOVER\s*\(")
+_VIEW_CONST_ITEM_RE = re.compile(r"^[\s\d\.\+\-\*/%\(\)\|]*$")
+
+
+def _view_item_needs_grouping(resolved_sql) -> bool:
+    """True when a resolved SELECT item is a bare (non-aggregated, non-constant) expression.
+
+    Oracle (ORA-00979) rejects bare select items missing from GROUP BY, so a
+    grouped view must extend GROUP BY with them. Aggregates, windowed
+    expressions and constants are exempt.
+    """
+    try:
+        _s = re.sub(r"('(?:[^']|'')*')", "''", str(resolved_sql or ""))
+    except Exception:
+        return False
+    if _VIEW_AGG_ITEM_RE.search(_s):
+        return False
+    _t = _s.replace("''", "").strip()
+    if not _t or _t.upper() == "NULL" or _VIEW_CONST_ITEM_RE.match(_t):
+        return False
+    return True
+
+
+def _split_select_items(select_clause) -> list:
+    """Split a SELECT list on top-level commas (paren-depth + '...' aware)."""
+    out, _depth, _q, _cur = [], 0, False, []
+    try:
+        _s = str(select_clause or "")
+    except Exception:
+        return []
+    _i, _n = 0, len(_s)
+    while _i < _n:
+        _ch = _s[_i]
+        if _q:
+            _cur.append(_ch)
+            if _ch == "'":
+                if _i + 1 < _n and _s[_i + 1] == "'":
+                    _cur.append("'")
+                    _i += 1
+                else:
+                    _q = False
+        elif _ch == "'":
+            _q = True
+            _cur.append(_ch)
+        elif _ch == '"':
+            # quoted identifier — may contain commas/parens; copy verbatim
+            _j = _s.find('"', _i + 1)
+            if _j < 0:
+                _cur.append(_ch)
+            else:
+                _cur.append(_s[_i:_j + 1])
+                _i = _j
+        elif _ch == "(":
+            _depth += 1
+            _cur.append(_ch)
+        elif _ch == ")":
+            _depth = max(0, _depth - 1)
+            _cur.append(_ch)
+        elif _ch == "," and _depth == 0:
+            out.append("".join(_cur))
+            _cur = []
+        else:
+            _cur.append(_ch)
+        _i += 1
+    out.append("".join(_cur))
+    return [_x.strip() for _x in out if _x.strip()]
+
+
+def _strip_select_alias(item) -> str:
+    """Drop a trailing top-level AS "alias" from one SELECT item."""
+    try:
+        return re.sub(r'\s+AS\s+("[^"]*"|[A-Za-z_][\w$#]*)\s*$', "", str(item or "").strip(),
+                       flags=re.IGNORECASE)
+    except Exception:
+        return str(item or "").strip()
+
+
+def _extend_classic_group_by(group_clause, select_clause) -> str:
+    """Oracle safety for the classic (non-view) SELECT path.
+
+    Bare SELECT items must appear in GROUP BY (else ORA-00979), and a
+    SELECT mixing aggregates with bare items needs grouping at all
+    (else ORA-00937). Resolved item text is appended — same policy as
+    the named-view path (_extend_group_keys).
+    """
+    try:
+        _items = [_strip_select_alias(_x) for _x in _split_select_items(select_clause)]
+        _items = [_x for _x in _items if _x]
+        if not _items:
+            return group_clause
+        _has_agg = any(_VIEW_AGG_ITEM_RE.search(_x) for _x in _items)
+        _gc = str(group_clause or "")
+        if not _gc and not _has_agg:
+            return group_clause
+        _prefix, _keys = "", []
+        _m = re.match(r"(?is)^\s*GROUP\s+BY\s+(.*)$", _gc)
+        if _m:
+            _keys = _split_select_items(_m.group(1))
+        def _norm(_x):
+            try:
+                return re.sub(r"\s+", " ", str(_x or "")).strip()
+            except Exception:
+                return str(_x or "")
+        _seen = {_norm(_k) for _k in _keys}
+        _extra = [_x for _x in _items
+                  if _view_item_needs_grouping(_x) and _norm(_x) not in _seen]
+        if not _extra:
+            return group_clause
+        if _keys:
+            return _gc + ", " + ", ".join(_extra)
+        return " GROUP BY " + ", ".join(_extra)
+    except Exception:
+        return group_clause
+
+
+def _count_over_groups(from_q, where_clause, group_clause) -> str:
+    """COUNT(*) matching a grouped query.
+
+    With GROUP BY, a flat COUNT(*) returns one row PER GROUP (and fetchone
+    would mistake the first group's count for the total) — wrap so the
+    total is the number of groups.
+    """
+    try:
+        if str(group_clause or "").strip():
+            return (f"SELECT COUNT(*) as cnt FROM "
+                    f"(SELECT 1 FROM {from_q}{where_clause}{group_clause}) t")
+    except Exception:
+        pass
+    return f"SELECT COUNT(*) as cnt FROM {from_q}{where_clause}"
 
 
 _AR_LETTER_RE = re.compile(r"[\u0600-\u06FF]")
@@ -743,14 +996,16 @@ def _build_where(filters: List[Dict[str, Any]], start_idx: int = 1, columns: Opt
         op = (f.get("op") or "equals").lower()
         if not field:
             continue
+        if op in ("group_by", "groupby", "var_select", "varselect"):
+            continue  # doc-param events (grouping/variable column) — applied structurally, never WHERE
         try:
             _dk = drop_keys or set()
             _fld_l = str(field).strip().lower()
             _ref_l = str(f.get("refname") or f.get("param_refname") or "").strip().lower()
             if (_fld_l and _fld_l in _dk) or (_ref_l and _ref_l in _dk):
                 continue  # expression-only doc param: value flows via expansion, never WHERE
-            if str(field).strip().startswith("@"):
-                continue  # param refs are never DB identifiers (ORA-00904)
+            if str(field).strip().startswith("@") or _looks_like_formula(field):
+                continue  # param refs / raw formulas are never DB identifiers (ORA-00904)
             if re.fullmatch(r"(?i)v_custom_\d+", str(field).strip() or ""):
                 continue  # designer placeholder column (custom param never linked) — never real
         except Exception:
@@ -1024,6 +1279,89 @@ def _build_where(filters: List[Dict[str, Any]], start_idx: int = 1, columns: Opt
                 placeholders.append(f":{pj}")
                 params[pj] = v
             clauses.append(f"{qfield} IN ({', '.join(placeholders)})" if placeholders else "1=0")
+        elif op in ("not_between", "notbetween", "not_between_dates", "خارج"):
+            # خارج رقمين/تاريخين: NOT BETWEEN (valFrom/valTo أو value=[from,to])
+            p2 = f"p{i}_2"
+            v_from = f.get("valFrom", f.get("value", [None, None])[0] if isinstance(f.get("value"), (list, tuple)) else None)
+            v_to = f.get("valTo", f.get("value", [None, None])[1] if isinstance(f.get("value"), (list, tuple)) else None)
+            if _numcol and (not _num_safe_for_compare(v_from, _tstr) or not _num_safe_for_compare(v_to, _tstr)):
+                clauses.append("1=0")
+            elif is_date and (not _date_safe_for_compare(_norm_dt_val(v_from)) or not _date_safe_for_compare(_norm_dt_val(v_to))):
+                clauses.append("1=0")
+            else:
+                v_from = v_from if _numcol else _norm_dt_val(v_from)
+                v_to = v_to if _numcol else _norm_dt_val(v_to)
+                clauses.append(f"{qfield} NOT BETWEEN {_dbind(':'+p, v_from, is_date)} AND {_dbind(':'+p2, v_to, is_date)}")
+                params[p] = v_from
+                params[p2] = v_to
+        elif op in ("between_dates", "between_date", "بين_تاريخين"):
+            # بين تاريخين: BETWEEN بتطبيع التاريخ على الطرفين دائماً
+            p2 = f"p{i}_2"
+            v_from = f.get("valFrom", f.get("value", [None, None])[0] if isinstance(f.get("value"), (list, tuple)) else None)
+            v_to = f.get("valTo", f.get("value", [None, None])[1] if isinstance(f.get("value"), (list, tuple)) else None)
+            v_from, v_to = _norm_dt_val(v_from), _norm_dt_val(v_to)
+            if not _date_safe_for_compare(v_from) or not _date_safe_for_compare(v_to):
+                clauses.append("1=0")
+            else:
+                clauses.append(f"{qfield} BETWEEN {_dbind(':'+p, v_from, True)} AND {_dbind(':'+p2, v_to, True)}")
+                params[p] = v_from
+                params[p2] = v_to
+        elif op in ("on_date", "ondate", "بتاريخ"):
+            # بتاريخ: مساواة على اليوم (مثل inday)
+            _v = _norm_dt_val(f.get("value"))
+            clauses.append(f"CAST({qfield} AS DATE) = TO_DATE(:{p}, 'YYYY-MM-DD')")
+            params[p] = _v
+        elif op in ("in_hour", "inhour", "في_الساعة", "hour"):
+            # في الساعة: EXTRACT(HOUR) — قيمة 0..23
+            try:
+                _h = int(str(f.get("value") or "").strip())
+            except (TypeError, ValueError):
+                _h = -1
+            if _h < 0 or _h > 23:
+                raise ValueError(f'ساعة غير صالحة "{f.get("value")}" — أدخل رقماً 0..23')
+            clauses.append(f"EXTRACT(HOUR FROM {qfield}) = :{p}")
+            params[p] = _h
+        elif op in ("in_minute", "inminute", "في_الدقيقة", "minute"):
+            # في الدقيقة: EXTRACT(MINUTE) — قيمة 0..59
+            try:
+                _mi = int(str(f.get("value") or "").strip())
+            except (TypeError, ValueError):
+                _mi = -1
+            if _mi < 0 or _mi > 59:
+                raise ValueError(f'دقيقة غير صالحة "{f.get("value")}" — أدخل رقماً 0..59')
+            clauses.append(f"EXTRACT(MINUTE FROM {qfield}) = :{p}")
+            params[p] = _mi
+        elif op in ("not_blank", "filled", "is_not_blank", "notblank", "no_blank"):
+            # إخفاء السجل الفارغ (خاصية العمود hide_blank): NULL أو فراغات فقط.
+            # الأعمدة الرقمية/التاريخية فراغها الوحيد هو NULL → IS NOT NULL فقط
+            # (رخيص + صديق للفهارس، بلا دوال). النصية/المجهولة: حارس CONCAT
+            # المحمول بلا ليترال '' (أوراكل تعده NULL فيُخفي الكل!).
+            _hb_num, _hb_date = _numcol, is_date
+            if not (_hb_num or _hb_date):
+                _tgt = _single_ref_target(
+                    (getattr(col, "expr", None) or getattr(col, "name", None) or ""), _fmap)
+                if _tgt is not None:
+                    _tt = str(getattr(_tgt, "data_type", "") or "").upper()
+                    _hb_num = any(k in _tt for k in _NUMERIC_HINTS)
+                    _hb_date = bool(_date_kind_of(_tt))
+            if _hb_num or _hb_date:
+                clauses.append(f"({qfield} IS NOT NULL)")
+            else:
+                clauses.append(f"(CONCAT(LTRIM(RTRIM(CAST({qfield} AS VARCHAR(4000)))), '|') <> '|')")
+        elif op in ("not_zero", "nonzero", "is_not_zero", "notzero", "no_zero"):
+            # إخفاء السجل الصفري (خاصية العمود hide_zero): مقارنة رقمية دقيقة
+            # للأعمدة الرقمية (تشمل الكسور)؛ نصية لغيرها. NULL يُستبعد دائماً.
+            _nz_num = _numcol
+            if not _nz_num:
+                _tgt = _single_ref_target(
+                    (getattr(col, "expr", None) or getattr(col, "name", None) or ""), _fmap)
+                if _tgt is not None:
+                    _nz_num = any(k in str(getattr(_tgt, "data_type", "") or "").upper()
+                                  for k in _NUMERIC_HINTS)
+            if _nz_num:
+                clauses.append(f"({qfield} <> 0)")
+            else:
+                clauses.append(f"(CONCAT(LTRIM(RTRIM(CAST({qfield} AS VARCHAR(4000)))), '|') NOT IN ('|', '0|'))")
         else:
             # Fallback to equals (مع توحيد عربي عند الحاجة)
             if _numcol and not _num_safe_for_compare(f.get("value"), _tstr):
@@ -1040,6 +1378,26 @@ def _build_where(filters: List[Dict[str, Any]], start_idx: int = 1, columns: Opt
                 params[p] = f.get("value")
     where = " WHERE " + f" {_join} ".join(clauses) if clauses else ""
     return where, params
+
+def _single_ref_target(expr_text, fmap):
+    """Field behind a bare [f] / [t.f] / name column expression (None when computed).
+
+    Lets hide_blank/hide_zero (and only them) inherit the underlying field's
+    data-type when the column itself declares none and its alias differs from
+    the field name. Shared filter machinery is untouched.
+    """
+    try:
+        s = str(expr_text or "").strip()
+        if re.fullmatch(r"[\[{][A-Za-z0-9_.]+[\]}]", s):
+            inner = s[1:-1]
+        elif re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", s):
+            inner = s
+        else:
+            return None
+        return (fmap or {}).get(inner.split(".")[-1].strip().lower())
+    except Exception:
+        return None
+
 
 def _select_ordinal(matched, columns) -> int:
     """1-based position of a matched column in the SELECT list (0 = unknown).
@@ -1130,6 +1488,10 @@ def _alias_by_table(fields: Optional[List[Any]], table_map: Optional[Dict[str, s
 
     Lets qualified refs ([table.col]/[conn.table.col]) resolve to their OWN
     table's alias instead of the bare-name lookup (wrong table on duplicates).
+    Full dotted sources (namespace.view, schema.table) are ALSO keyed intact:
+    a qualifier addressing the field's own table by its FULL name
+    ([ns.view.col]) is unambiguous, so the resolver accepts it without
+    demanding a connection binding (views never carry one).
     """
     out: Dict[str, str] = {}
     if not table_map:
@@ -1144,6 +1506,9 @@ def _alias_by_table(fields: Optional[List[Any]], table_map: Optional[Dict[str, s
             tn = ts.strip().replace('"', "").split(".")[-1].upper() if ts else ""
             if tn:
                 out.setdefault(tn, al)
+            _full = ts.strip().replace('"', "").upper()
+            if _full and _full != tn:
+                out.setdefault(_full, al)
     except Exception:
         pass
     return out
@@ -1578,6 +1943,18 @@ class RMLReportEngine:
             self.doc_params = compiler.doc_params() if hasattr(compiler, "doc_params") else []
         except Exception:
             self.doc_params = []
+        try:
+            self.report_views = compiler.views() if hasattr(compiler, "views") else []
+        except Exception:
+            self.report_views = []
+        try:
+            self.report_view_refs = compiler.view_refs() if hasattr(compiler, "view_refs") else []
+        except Exception:
+            self.report_view_refs = []
+        try:
+            self.report_unions = compiler.unions() if hasattr(compiler, "unions") else []
+        except Exception:
+            self.report_unions = []
         self.db = db_engine
         # Extra live engines by connection key (multi-DB reports); primary is self.db
         self.databases: Dict[str, Any] = dict(databases or {})
@@ -1623,6 +2000,9 @@ class RMLReportEngine:
             self._fields_by_conn.setdefault(str(getattr(f, "connection_id", None) or ""), []).append(f)
         # Derive base table: designer's table_opts is_default wins, else first
         # <field table_source>, else first column expr prefix.
+        # NEW: allow any table to be used as base when explicitly specified
+        # via active_table or when no default is marked, to support queries
+        # from displayed tables and joins beyond raw base tables.
         self._default_table: Optional[str] = None
         try:
             _comp = getattr(self, "compiler", None)
@@ -2006,6 +2386,9 @@ class RMLReportEngine:
     # keep the old merging behavior untouched.
     _REFNAME_TOKEN_RE = re.compile(r"@([A-Za-z_][A-Za-z0-9_]*)")
     _REFNAME_SEG_RE = re.compile(r"('(?:[^']|'')*')")
+    # Dynamic input variables (&VAR from a view's خيارات الإدخال) — literal-safe.
+    _VIEW_VAR_RE = re.compile(r"(?<![\w$#@&\u0600-\u06FF])&([A-Za-z_][A-Za-z0-9_]*)")
+    _VIEW_VAR_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
     @staticmethod
     def _refname_of(col) -> str:
@@ -2085,18 +2468,214 @@ class RMLReportEngine:
                 return val
         return getattr(dp, "default_value", "") or ""
 
+    # Aggregates allowed a PARTITION BY overlay for group-event params
+    # (window-capable on Oracle / Postgres / SQLServer alike).
+    _DOC_PARTITION_AGGS = ("SUM", "AVG", "COUNT", "MIN", "MAX", "STDDEV", "VARIANCE")
+
+    def _doc_event_params(self):
+        """Split doc_params by event: (filter_params, group_params, variable_params)."""
+        groups, variables = [], []
+        for dp in (getattr(self, "doc_params", None) or []):
+            try:
+                ev = str(getattr(dp, "event", "") or "").strip().lower()
+            except Exception:
+                continue
+            if ev in ("group", "grouping"):
+                groups.append(dp)
+            elif ev in ("variable", "var", "varcol"):
+                variables.append(dp)
+        return groups, variables
+
+    def _doc_group_choice(self, dp, filters):
+        """Resolve a group-event param's active value to its group_var dict (or raise)."""
+        vars_ = [g for g in (getattr(dp, "group_vars", None) or []) if isinstance(g, dict)]
+        if not vars_:
+            raise ValueError(
+                f'مدخل التجميع "{getattr(dp, "label", None) or getattr(dp, "column", "")}" بلا متغيرات — أضف متغير تجميع واحداً على الأقل.')
+        val = self._doc_param_val(dp, filters)
+        sval = "" if val is None else str(val).strip()
+        if not sval:
+            return vars_[0]
+        slow = sval.lower()
+        for g in vars_:
+            _t = str(g.get("table") or "").strip()
+            _c = str(g.get("column") or "").strip()
+            cands = {str(g.get("n") or "").strip().lower(),
+                     str(g.get("label") or "").strip().lower(),
+                     _c.lower(),
+                     ((_t + "." + _c).lower() if _t and _c else "")}
+            cands.discard("")
+            if slow in cands:
+                return g
+        _labels = [str(g.get("label") or g.get("column") or g.get("n") or "?") for g in vars_]
+        raise ValueError(
+            f'قيمة التجميع "{sval}" غير معرفة في "{getattr(dp, "label", None) or getattr(dp, "column", "")}" — '
+            f'اختر من: {"، ".join(_labels)}.')
+
+    def _doc_var_choice(self, dp, filters):
+        """Resolve a variable-column param's active value to its var_source dict (or raise)."""
+        srcs = [s for s in (getattr(dp, "var_sources", None) or []) if isinstance(s, dict)]
+        if not srcs:
+            raise ValueError(
+                f'العمود المتغير "{getattr(dp, "label", None) or getattr(dp, "column", "")}" بلا مصادر — أضف مصدراً واحداً على الأقل.')
+        val = self._doc_param_val(dp, filters)
+        sval = "" if val is None else str(val).strip()
+        if not sval:
+            return srcs[0]
+        slow = sval.lower()
+        for s in srcs:
+            if slow in {str(s.get("n") or "").strip().lower(),
+                        str(s.get("label") or "").strip().lower()} - {""}:
+                return s
+        _labels = [str(s.get("label") or s.get("n") or "?") for s in srcs]
+        raise ValueError(
+            f'قيمة العمود المتغير "{sval}" غير معرفة في "{getattr(dp, "label", None) or getattr(dp, "column", "")}" — '
+            f'اختر من: {"، ".join(_labels)}.')
+
+    def _apply_doc_param_events(self, plan, columns, filters, table_map, dialect):
+        """Apply group/variable doc-param events structurally.
+
+        Returns (columns, group_keys_sql, extra_selects):
+        - group event → GROUP BY <chosen var> + extra select
+          <group_expr> OVER (PARTITION BY <chosen var>) AS <label>.
+        - variable event → target column expr rewritten to a per-engine
+          conditional (DECODE on Oracle, CASE WHEN elsewhere) over its sources.
+        """
+        import copy as _copy
+        groups, variables = self._doc_event_params()
+        if not groups and not variables:
+            return columns, [], []
+        try:
+            _abt = self._plan_alias_map(plan) or {}
+        except Exception:
+            _abt = {}
+        try:
+            _fields = list(getattr(self, "fields", []) or [])
+        except Exception:
+            _fields = []
+        try:
+            from .namespaces import _resolve_expression as _rx
+        except Exception:
+            _rx = None
+
+        def _qualify_var(table, column):
+            tkey = self._norm_table(table or "")
+            col = str(column or "").strip()
+            if not col:
+                raise ValueError("متغير تجميع بلا عمود — حدد الجدول والعمود.")
+            _spell = col
+            for _f in _fields:
+                try:
+                    if (self._norm_table(getattr(_f, "table_source", "") or "") == tkey
+                            and str(getattr(_f, "name", "") or "").strip().lower() == col.lower()):
+                        _spell = str(getattr(_f, "name")).strip()
+                        break
+                except Exception:
+                    continue
+            al = _abt.get(tkey)
+            if al:
+                return f'{_q(al)}.{_q(_spell)}'
+            # Single-table query (no aliases): bare column when it IS the base
+            try:
+                _base = self._norm_table((plan or {}).get("base_norm") or "")
+            except Exception:
+                _base = ""
+            if _base and tkey == _base:
+                return f'{_q(_spell)}'
+            raise ValueError(
+                f'جدول التجميع "{table}" غير موجود في الاستعلام — استورد حقلاً منه أولاً.')
+
+        group_keys, extra = [], []
+        for dp in groups:
+            g = self._doc_group_choice(dp, filters)
+            q = _qualify_var(g.get("table"), g.get("column"))
+            gexpr = str(getattr(dp, "group_expr", None) or "").strip()
+            if not gexpr:
+                raise ValueError(
+                    f'مدخل التجميع "{getattr(dp, "label", None) or getattr(dp, "column", "")}" بلا تعبير — '
+                    f'اكتب دالة تجميعية واحدة مثل SUM([المبلغ]).')
+            if _rx is None:
+                raise ValueError("تعذر حل تعبير التجميع — وحدة التعبيرات غير متاحة.")
+            try:
+                resolved = _rx(gexpr, _fields, {}, set(), table_map or {},
+                               self._conn_map(), alias_by_table=_abt, default_tables=None)
+            except ValueError as _e:
+                raise ValueError(f'تعبير التجميع "{gexpr}": {_e}')
+            m = re.fullmatch(r"\s*([A-Za-z_][A-Za-z0-9_]*)\((.*)\)\s*", resolved, re.DOTALL)
+            if not m:
+                raise ValueError(
+                    f'تعبير التجميع يجب أن يكون دالة تجميعية واحدة مثل SUM([المبلغ]) — ورد: "{gexpr}".')
+            func, args = m.group(1).upper(), m.group(2).strip()
+            if func not in self._DOC_PARTITION_AGGS:
+                raise ValueError(
+                    f'الدالة {func} لا تدعم PARTITION — المسموح: {"، ".join(self._DOC_PARTITION_AGGS)}.')
+            _al = str(getattr(dp, "label", None) or getattr(dp, "column", None) or "group_val").strip()
+            group_keys.append(q)
+            extra.append((f"{func}({args}) OVER (PARTITION BY {q})", _al))
+
+        new_cols = list(columns or [])
+        for dp in variables:
+            s = self._doc_var_choice(dp, filters)
+            target = str(getattr(dp, "target_column", None) or "").strip().lower()
+            if not target:
+                raise ValueError(
+                    f'العمود المتغير "{getattr(dp, "label", None) or getattr(dp, "column", "")}" بلا عمود متأثر — اختر العمود المتأثر.')
+            _idx = None
+            for _i, _c in enumerate(new_cols):
+                try:
+                    _a = str(getattr(_c, "alias", None) or getattr(_c, "name", None) or "").strip().lower()
+                except Exception:
+                    _a = ""
+                if _a and _a == target:
+                    _idx = _i
+                    break
+            if _idx is None:
+                raise ValueError(
+                    f'العمود المتأثر "{getattr(dp, "target_column", "")}" غير موجود في أعمدة التقرير.')
+            _orig = str(getattr(new_cols[_idx], "expr", None) or "").strip()
+            _srcs = [x for x in (getattr(dp, "var_sources", None) or []) if isinstance(x, dict)]
+            _else = _orig or str((_srcs[0].get("expr") if _srcs else "") or "")
+            _ql = lambda t: "'" + str(t or "").replace("'", "''") + "'"
+            _lbl = lambda x: _ql(x.get("label") if str(x.get("label") or "").strip() else x.get("n"))
+            # المميز هو المصدر المختار نفسه — يطابق فرعه دائماً (ELSE احتياطي فقط)
+            _disc = _lbl(s)
+            if str(dialect or "").lower() == "oracle":
+                _new_expr = ("DECODE(" + _disc + "".join(
+                    f", {_lbl(x)}, ({str(x.get('expr') or '')})" for x in _srcs)
+                    + (f", ({_else})" if _else else "") + ")")
+            else:
+                _new_expr = ("CASE " + "".join(
+                    f"WHEN {_disc} = {_lbl(x)} THEN ({str(x.get('expr') or '')}) " for x in _srcs)
+                    + (f"ELSE ({_else}) " if _else else "") + "END")
+            try:
+                new_cols[_idx] = _copy.copy(new_cols[_idx])
+                new_cols[_idx].expr = _new_expr
+            except Exception:
+                raise ValueError("تعذر تطبيق العمود المتغير على العمود الهدف.")
+        return new_cols, group_keys, extra
+
     def _doc_no_filter_keys(self) -> set:
         """Set of lowercase field/column/name/refname keys for doc_params that should NOT be filtered in SQL."""
         keys = set()
         dp_list = getattr(self, "doc_params", None) or (self.compiler.doc_params() if hasattr(self, "compiler") and hasattr(self.compiler, "doc_params") else [])
         for dp in dp_list or []:
+            try:
+                _ev = str(getattr(dp, "event", "") or "").strip().lower()
+            except Exception:
+                _ev = ""
+            _keys: list = []
+            for k in (getattr(dp, "column", None), getattr(dp, "param_refname", None), getattr(dp, "id", None)):
+                if k and str(k).strip():
+                    _keys.append(str(k).strip().lower())
             # ONLY the explicit no_filter flag excludes (expression-only intent).
             # is_custom alone means user-created origin — a custom param linked
             # to a real column with no_filter OFF must filter normally.
             if getattr(dp, "no_filter", False):
-                for k in (getattr(dp, "column", None), getattr(dp, "param_refname", None), getattr(dp, "id", None)):
-                    if k and str(k).strip():
-                        keys.add(str(k).strip().lower())
+                keys.update(_keys)
+            # group/variable events never filter — their values drive GROUP BY /
+            # CASE construction instead (see _apply_doc_param_events).
+            if _ev in ("group", "grouping", "variable", "var", "varcol"):
+                keys.update(_keys)
         return keys
 
     def _expand_doc_params(self, text: str, doc_params: List[Any], filters: Optional[List[Dict[str, Any]]] = None) -> str:
@@ -2157,6 +2736,190 @@ class RMLReportEngine:
             segs[i] = seg
         return "".join(segs)
 
+    # ── Dynamic input variables (&VAR) ───────────────────────────────────
+    # View-level خيارات الإدخال: {name, type, default}. &NAME in the general
+    # condition or view column/group expressions resolves (filters first via
+    # a linked doc_param, else the variable default) to an inlined literal —
+    # identical SQL on Oracle / Postgres / SQL Server (no binds to transpile).
+    def _view_var_defs(self) -> Dict[str, dict]:
+        """{UPPER_NAME: {name, type, default}} from report + library views (local first)."""
+        out: Dict[str, dict] = {}
+        try:
+            _all = [v for v in (getattr(self, "report_views", []) or []) if isinstance(v, dict)]
+            try:
+                for _lv in (self._library_views() or []):
+                    if isinstance(_lv, dict):
+                        _all.append(_lv)
+            except Exception:
+                pass
+            for _v in _all:
+                for _vv in (_v.get("variables") or []):
+                    if not isinstance(_vv, dict):
+                        continue
+                    _n = str(_vv.get("name") or "").strip()
+                    if not _n or not self._VIEW_VAR_NAME_RE.match(_n):
+                        continue
+                    _k = _n.upper()
+                    if _k in out:
+                        continue
+                    _t = str(_vv.get("type") or "text").strip().lower()
+                    _d = _vv.get("default")
+                    out[_k] = {"name": _n,
+                               "type": _t if _t in ("number", "text", "date") else "text",
+                               "default": "" if _d is None else str(_d)}
+        except Exception:
+            pass
+        return out
+
+    def _resolve_view_var(self, name, var_defs=None, filters=None):
+        """Resolve &NAME → (status, sql_literal, type).
+
+        status: 'ok' | 'missing' (known, no value and no default) | 'unknown'.
+        Value source: linked doc_param filter value first, else variable default.
+        """
+        _nm = str(name or "").strip()
+        if var_defs is None:
+            try:
+                var_defs = self._view_var_defs()
+            except Exception:
+                var_defs = {}
+        eff_filters = filters if filters is not None else getattr(self, "_active_filters", None)
+        _dp = None
+        try:
+            for _p in (getattr(self, "doc_params", None) or []):
+                _keys = set()
+                for _rk in (getattr(_p, "var", None), getattr(_p, "param_refname", None),
+                            getattr(_p, "refname", None), getattr(_p, "column", None)):
+                    if _rk and str(_rk).strip():
+                        _keys.add(str(_rk).strip().lower())
+                if _nm.lower() in _keys:
+                    _dp = _p
+                    break
+        except Exception:
+            _dp = None
+        _vd = (var_defs or {}).get(_nm.upper())
+        if _dp is None and _vd is None:
+            return "unknown", None, "text"
+        _val, _has = "", False
+        if _dp is not None:
+            try:
+                _val = self._doc_param_val(_dp, eff_filters)
+            except Exception:
+                _val = ""
+            _s = "" if _val is None else str(_val).strip()
+            if _s != "":
+                _val, _has = _s, True
+        if not _has and _vd is not None:
+            _d = str(_vd.get("default") or "").strip()
+            if _d != "":
+                _val, _has = _d, True
+        if not _has:
+            return "missing", None, "text"
+        try:
+            _tp = str(getattr(_dp, "type", "") or (_vd or {}).get("type") or "text").strip().lower()
+        except Exception:
+            _tp = "text"
+        if _val.strip().upper() == "CURRENT_DATE":
+            return "ok", "CURRENT_DATE", _tp
+        if _tp == "number" and re.fullmatch(r"-?\d+(\.\d+)?", _val):
+            return "ok", _val, _tp
+        return "ok", "'" + _val.replace("'", "''") + "'", _tp
+
+    def _expand_view_vars(self, text, filters=None, _var_defs=None):
+        """Inline known &VAR refs as literals (cross-DB safe).
+
+        Unknown names raise (design error — define them in خيارات الإدخال).
+        Known-but-empty names become NULL and are recorded in
+        self._view_vars_missing (execute() turns that into an empty report).
+        String literals are never touched.
+        """
+        if not text or "&" not in str(text):
+            return str(text or "")
+        try:
+            var_defs = self._view_var_defs() if _var_defs is None else _var_defs
+        except Exception:
+            var_defs = {}
+        missing = set()
+        segs = re.split(self._REFNAME_SEG_RE, str(text))
+        for i in range(0, len(segs), 2):
+            def _rep(m):
+                _nm = m.group(1)
+                _st, _lit, _tp = self._resolve_view_var(_nm, var_defs, filters)
+                if _st == "unknown":
+                    raise ValueError(
+                        f'متغير غير معرف &{_nm} — عرّفه في «خيارات الإدخال» للجدول المعروض (اسم المتغير).')
+                if _st == "missing":
+                    missing.add(str(_nm).upper())
+                    return "NULL"
+                return _lit
+            try:
+                segs[i] = self._VIEW_VAR_RE.sub(_rep, segs[i])
+            except ValueError:
+                raise
+            except Exception:
+                pass
+        if missing:
+            try:
+                self._view_vars_missing = set(getattr(self, "_view_vars_missing", set()) or set()) | missing
+            except Exception:
+                pass
+        return "".join(segs)
+
+    def _view_vars_missing_for(self, filters=None):
+        """Known &VARs with neither a filter value nor a default (scan only, no expansion)."""
+        try:
+            var_defs = self._view_var_defs()
+        except Exception:
+            return set()
+        if not var_defs:
+            return set()
+        eff_filters = filters if filters is not None else getattr(self, "_active_filters", None)
+        texts = []
+        try:
+            if hasattr(self.compiler, "general_where"):
+                texts.append(self.compiler.general_where() or "")
+        except Exception:
+            pass
+        try:
+            for _v in (getattr(self, "report_views", []) or []):
+                if not isinstance(_v, dict):
+                    continue
+                for _c in (_v.get("columns") or []):
+                    if isinstance(_c, dict):
+                        texts.append(str(_c.get("expr") or ""))
+                for _g in (_v.get("groups") or []):
+                    if isinstance(_g, dict):
+                        texts.append(str(_g.get("expr") or _g.get("expression") or ""))
+        except Exception:
+            pass
+        try:
+            for _c in (getattr(self, "columns", []) or []):
+                texts.append(str(getattr(_c, "expr", None) or ""))
+                texts.append(str(getattr(_c, "where_clause", None) or ""))
+        except Exception:
+            pass
+        missing = set()
+        for _t in texts:
+            if not _t or "&" not in str(_t):
+                continue
+            try:
+                segs = re.split(self._REFNAME_SEG_RE, str(_t))
+            except Exception:
+                continue
+            for _i in range(0, len(segs), 2):
+                try:
+                    _names = self._VIEW_VAR_RE.findall(segs[_i])
+                except Exception:
+                    continue
+                for _nm in _names:
+                    try:
+                        _st, _lit, _tp = self._resolve_view_var(_nm, var_defs, eff_filters)
+                    except Exception:
+                        continue
+                    if _st == "missing":
+                        missing.add(str(_nm).upper())
+        return missing
+
     def _rewrite_value_expr(self, text, alias_of) -> str:
         """Replace @refname (and [refname]) with the referenced column's quoted SELECT alias."""
         s = str(text or "").lstrip()
@@ -2165,6 +2928,8 @@ class RMLReportEngine:
         dp_list = (self.compiler.doc_params() if hasattr(self, "compiler") and hasattr(self.compiler, "doc_params") else [])
         if dp_list:
             s = self._expand_doc_params(s, dp_list, getattr(self, "_active_filters", None))
+        if "&" in s:
+            s = self._expand_view_vars(s, getattr(self, "_active_filters", None))
         try:
             from .namespaces import _transpile_if_calls, _transpile_xlookup_calls
             s = _transpile_if_calls(s)
@@ -2312,7 +3077,10 @@ class RMLReportEngine:
                 chain = " ← ".join(stack + [tid])
                 raise ValueError(f"مرجع دائري بين الأعمدة: {chain}")
             inlined = self._inline_col_ref(tgt, stack + [tid], by_name, by_alias)
-            return "(" + self._strip_format_wrapper(inlined) + ")"
+            _clean_inlined = self._strip_format_wrapper(inlined).strip()
+            if _clean_inlined.startswith("="):
+                _clean_inlined = _clean_inlined[1:].strip()
+            return "(" + _clean_inlined + ")"
 
         out = re.sub(r"[\[{]([^\].\[{}]+)[\]}]", sub, raw)
         return self._sub_at_refs(out, by_name, by_alias, stack)
@@ -2351,7 +3119,16 @@ class RMLReportEngine:
             if tid in stack:
                 chain = " ← ".join(list(stack) + [tid])
                 raise ValueError(f"مرجع دائري بين الأعمدة: {chain}")
-            return self._inline_col_ref(tgt, tuple(stack) + (tid,), by_name, by_alias)
+            inner = self._inline_col_ref(tgt, tuple(stack) + (tid,), by_name, by_alias)
+            if inner is None:
+                return None
+            # stored exprs carry the designer "=" prefix (and maybe a format
+            # wrapper) — the [...] path strips them in sub(); the @ path must
+            # too, else "(=..." reaches SQL → ORA-00936
+            _clean_inlined = self._strip_format_wrapper(inner).strip()
+            if _clean_inlined.startswith("="):
+                _clean_inlined = _clean_inlined[1:].strip()
+            return _clean_inlined
 
         def _getat(m):
             tgt = _tgt(m.group(1).lower())
@@ -2382,13 +3159,17 @@ class RMLReportEngine:
 
     def _expand_at_aliases(self, text):
         """Expand @ColumnAlias in free text (general_where etc.). Idempotent."""
-        if not text or "@" not in str(text):
+        if not text:
             return text
-        dp_list = (self.compiler.doc_params() if hasattr(self, "compiler") and hasattr(self.compiler, "doc_params") else [])
-        if dp_list:
-            text = self._expand_doc_params(text, dp_list, getattr(self, "_active_filters", None))
-        by_name, by_alias = self._at_column_maps()
-        return self._sub_at_refs(str(text), by_name, by_alias, ())
+        if "@" in str(text):
+            dp_list = (self.compiler.doc_params() if hasattr(self, "compiler") and hasattr(self.compiler, "doc_params") else [])
+            if dp_list:
+                text = self._expand_doc_params(text, dp_list, getattr(self, "_active_filters", None))
+            by_name, by_alias = self._at_column_maps()
+            text = self._sub_at_refs(str(text), by_name, by_alias, ())
+        if "&" in str(text):
+            text = self._expand_view_vars(text, getattr(self, "_active_filters", None))
+        return text
 
     def _wrap_value_levels(self, level0_select, from_q, where_clause, group_clause,
                              order_clause, paginate_clause, report_aliases, levels, resolved):
@@ -2440,6 +3221,10 @@ class RMLReportEngine:
                     new_raw = self._expand_doc_params(new_raw, dp_list, eff_filters)
                 if new_wc:
                     new_wc = self._expand_doc_params(new_wc, dp_list, eff_filters)
+            if new_raw and "&" in str(new_raw):
+                new_raw = self._expand_view_vars(new_raw, eff_filters)
+            if new_wc and "&" in str(new_wc):
+                new_wc = self._expand_view_vars(new_wc, eff_filters)
             _kw = {}
             if new_raw != (c.expr or ""):
                 _kw["expr"] = new_raw
@@ -3080,6 +3865,16 @@ class RMLReportEngine:
         if len(parts) == 3:
             ctok, table, col = parts
             key = col.lower()
+            if self._is_view_call(ctok, table):
+                # Shared/local view call [namespace.view.col] — precise full-name
+                # match (no norm-stripping), takes precedence over conn.table.col.
+                _full = (str(ctok).strip() + "." + str(table).strip()).lower()
+                for f in (getattr(self, "fields", []) or []):
+                    n = getattr(f, "name", None)
+                    if n and str(n).strip().lower() == key and \
+                            str(getattr(f, "table_source", None) or "").strip().lower() == _full:
+                        return key
+                return None
             cmap = self._conn_map()
             from .namespaces import _field_conns, _conn_accepted
             for f in (getattr(self, "fields", []) or []):
@@ -3152,6 +3947,35 @@ class RMLReportEngine:
             _api = self._api_table_info(norm)
         except Exception:
             _api = None
+        try:
+            _vdef = self._view_def(norm)
+        except Exception:
+            _vdef = None
+        if _vdef is not None:
+            # Displayed table (VIEW): outputs come from the definition —
+            # never hit the DB for a virtual table name.
+            _vm: Dict[str, str] = {}
+            _vo: Dict[str, str] = {}
+            try:
+                for _on in self._view_outputs(_vdef):
+                    _vm[str(_on).upper()] = "TEXT"
+                    _vo[str(_on).upper()] = str(_on)
+                for _vc in (_vdef.get("columns") or []):
+                    if isinstance(_vc, dict):
+                        _va = str(_vc.get("alias") or _vc.get("name") or "").strip()
+                        _vt = str(_vc.get("type") or "").strip().upper() or "TEXT"
+                        if _va:
+                            _vm[_va.upper()] = _vt
+            except Exception:
+                pass
+            self._cols_cache[key] = dict(_vm)
+            try:
+                if not hasattr(self, "_cols_orig") or self._cols_orig is None:
+                    self._cols_orig = {}
+                self._cols_orig[key] = dict(_vo)
+            except Exception:
+                pass
+            return dict(_vm)
         _ms_gid = None
         try:
             _ms_gid = self._conn_key_of_table(norm)
@@ -4421,6 +5245,15 @@ class RMLReportEngine:
             if sec_norm == base_norm:
                 pos = over_end  # base-only call — skip past it and keep scanning
                 continue
+            try:
+                _sec_is_view = self._view_def(sec_norm) is not None
+            except Exception:
+                _sec_is_view = False
+            if _sec_is_view:
+                # Displayed tables join as derived tables — never rewrite their
+                # aggregates into correlated subqueries over a physical name.
+                needed |= fallback
+                break
             # Partition anchors must ALL be known base fields
             if not part_fields:
                 needed |= fallback
@@ -4480,13 +5313,18 @@ class RMLReportEngine:
             texts.append(str(general_where))
         extra_fields: List[str] = []
         for f in (filters or []):
-            extra_fields.append(str(f.get("field") or f.get("column") or f.get("name") or ""))
+            if isinstance(f, dict):
+                extra_fields.append(str(f.get("field") or f.get("column") or f.get("name") or ""))
+            elif isinstance(f, str):
+                extra_fields.append(f)
         ss = sort if isinstance(sort, list) else ([sort] if sort else [])
         for s in ss:
             if isinstance(s, dict):
                 extra_fields.append(str(s.get("column") or s.get("field") or s.get("name") or ""))
         if group_by:
-            extra_fields.append(str(group_by))
+            for _gb in _group_by_extra_fields(group_by):
+                if str(_gb or "").strip():
+                    extra_fields.append(str(_gb))
         for fld in extra_fields:
             texts.append(fld)
             try:
@@ -4517,6 +5355,15 @@ class RMLReportEngine:
                 ref = (getattr(dp, "param_refname", None) or getattr(dp, "refname", None) or "").strip()
                 if ref:
                     dp_vals.append((ref, self._doc_param_val(dp, filters)))
+        # Dynamic &VAR literals also shape the SQL — include their resolutions.
+        var_vals = []
+        try:
+            _vdefs = self._view_var_defs() or {}
+            for _vk in sorted(_vdefs.keys()):
+                _st, _lit, _tp = self._resolve_view_var(_vk, _vdefs, filters)
+                var_vals.append((_vk, _st, _lit))
+        except Exception:
+            pass
 
         def _shape(f):
             if isinstance(f, dict) and isinstance(f.get("any"), (list, tuple)):
@@ -4526,7 +5373,7 @@ class RMLReportEngine:
             return None
 
         try:
-            return _json.dumps([active_table, [_shape(f) for f in (filters or [])], sort, group_by, dp_vals],
+            return _json.dumps([active_table, [_shape(f) for f in (filters or [])], sort, group_by, dp_vals, var_vals],
                                sort_keys=True, default=str)
         except Exception:
             return str(id(filters)) + str(active_table)
@@ -4553,6 +5400,952 @@ class RMLReportEngine:
             return self._db_identity(a) == self._db_identity(b)
         except Exception:
             return False
+
+    # ── Displayed tables (VIEWs) ──────────────────────────────────────
+    # A VIEW is a named virtual table persisted in <views>. Its columns are
+    # synced as report fields (table_source = view name) so boxes, links,
+    # filters and [VIEW.COL] refs work; at execution the view expands to a
+    # derived-table subquery on its own (single) connection.
+    # A UNION (<unions><union>) is a UNION ALL over whole views — adapted here
+    # to an equivalent view-def (member views as sources + union_all chain +
+    # unified explicit outputs), so every view path (columns, plan, links,
+    # aliases, flattening) handles unions with zero further branching.
+    def _view_map(self) -> Dict[str, dict]:
+        try:
+            cached = getattr(self, "_view_map_cache", None)
+            if cached is not None:
+                return cached
+        except Exception:
+            pass
+        m: Dict[str, dict] = {}
+        try:
+            # Shared library views first (namespace.view_name callable from any report)…
+            for v in (self._library_views() or []):
+                if isinstance(v, dict) and str(v.get("name") or "").strip():
+                    m[self._norm_table(str(v["name"]))] = v
+            # …local definitions shadow them on stripped-name clash.
+            for v in (getattr(self, "report_views", []) or []):
+                if isinstance(v, dict) and str(v.get("name") or "").strip():
+                    m[self._norm_table(str(v["name"]))] = v
+        except Exception:
+            pass
+        # …merged unions adapt to view-defs on top (members must be views).
+        # Outside the swallowed try: structural union errors fail fast with
+        # guidance instead of vanishing into a "table does not exist".
+        for u in (getattr(self, "report_unions", []) or []):
+            if isinstance(u, dict) and str(u.get("name") or "").strip():
+                try:
+                    _adapted = self._union_as_view(u, m)
+                except ValueError:
+                    raise
+                except Exception:
+                    continue
+                if _adapted:
+                    m[self._norm_table(str(u["name"]))] = _adapted
+        try:
+            self._view_map_cache = m
+        except Exception:
+            pass
+        return m
+
+    def _union_as_view(self, union, raw_map) -> Optional[dict]:
+        """Adapt a <union> (UNION ALL over whole views) to an equivalent view-def.
+
+        Members become sources (flattened by _compile_view_sql like any nested
+        view), chained with union_all merges; unified outputs (first spelling
+        wins) become explicit [sN.col] columns so foreign branches NULL-fill.
+        Raises ValueError with guidance on structural problems.
+        """
+        name = str(union.get("name") or "").strip()
+        members: List[str] = []
+        _seen_m: set = set()
+        for _x in (union.get("views") or union.get("members") or []):
+            _mn = str(_x or "").strip()
+            if _mn and _mn.lower() not in _seen_m:
+                _seen_m.add(_mn.lower())
+                members.append(_mn)
+        if len(members) < 2:
+            raise ValueError(
+                f'الدمج "{name}" يحتاج عرضين على الأقل — حدد عضوين أو احذف الدمج.')
+        if self._norm_table(name) in {self._norm_table(_x) for _x in members}:
+            raise ValueError(f'الدمج "{name}" يستدعي نفسه — أعد تسميته.')
+        _defs = []
+        for _mn in members:
+            _d = (raw_map or {}).get(self._norm_table(_mn))
+            if not isinstance(_d, dict):
+                raise ValueError(
+                    f'الدمج "{name}" يستدعي عرضاً غير موجود "{_mn}" — احذف العضو أو أعد إنشاء الدمج.')
+            if "_union_members" in _d:
+                raise ValueError(
+                    f'الدمج "{name}" لا يقبل الدمج المتداخل "{_mn}" — ادمج العروض الأساسية فقط.')
+            _defs.append(_d)
+        _outs: List[str] = []
+        _seen_o: set = set()
+        try:
+            _mem_outs = [self._view_outputs(_d) for _d in _defs]
+        except Exception:
+            _mem_outs = [[] for _d in _defs]
+        for _ol in _mem_outs:
+            for _on in (_ol or []):
+                if _on and str(_on).upper() not in _seen_o:
+                    _seen_o.add(str(_on).upper())
+                    _outs.append(str(_on))
+        if not _outs:
+            raise ValueError(f'الدمج "{name}" بلا أعمدة — أعضاؤه بلا مخرجات.')
+        _cols = []
+        for _on in _outs:
+            _k = next((i for i, _ol in enumerate(_mem_outs)
+                       if _on.upper() in {str(_x).upper() for _x in (_ol or [])}), 0)
+            _sp = next((str(_x) for _x in (_mem_outs[_k] or [])
+                        if str(_x).upper() == _on.upper()), _on)
+            _cols.append({"name": _sp, "alias": _sp,
+                          "expr": "[s%d.%s]" % (_k + 1, _sp), "type": "TEXT"})
+        return {"name": name, "display": str(union.get("display") or name),
+                "sources": [{"id": "s%d" % (i + 1), "table_name": _mn, "conn": ""}
+                            for i, _mn in enumerate(members)],
+                "merges": [{"type": "union_all", "s1": "s%d" % i, "s2": "s%d" % (i + 1),
+                            "join_type": "", "key_1": "", "key_2": ""}
+                           for i in range(1, len(members))],
+                "columns": _cols, "groups": [],
+                "_union_members": list(members)}
+
+    def _library_views(self) -> List[dict]:
+        """Shared view library beside the report file (_view_library.rml).
+
+        Each view is tagged with its `_ns` (library namespace = app name).
+        """
+        try:
+            cached = getattr(self, "_lib_views_cache", None)
+            if cached is not None:
+                return cached
+        except Exception:
+            pass
+        out: List[dict] = []
+        try:
+            import pathlib
+            p = getattr(getattr(self, "compiler", None), "path", None)
+            if p:
+                lib = pathlib.Path(p).parent / "_view_library.rml"
+                if lib.exists():
+                    from .compiler import RMLReportCompiler
+                    _lc = RMLReportCompiler(path=lib)
+                    try:
+                        _ns = str((_lc.rpt_metadata() or {}).get("namespace") or "").strip()
+                    except Exception:
+                        _ns = ""
+                    if not _ns:
+                        _ns = lib.parent.name
+                    for _v in (_lc.views() or []):
+                        if isinstance(_v, dict):
+                            _v["_ns"] = _ns
+                            out.append(_v)
+        except Exception:
+            out = []
+        try:
+            self._lib_views_cache = out
+        except Exception:
+            pass
+        return out
+
+    def _view_full_map(self) -> Dict[str, dict]:
+        """Full-name view lookup: 'namespace.view' → def (locals under bare name)."""
+        try:
+            cached = getattr(self, "_view_full_cache", None)
+            if cached is not None:
+                return cached
+        except Exception:
+            pass
+        m: Dict[str, dict] = {}
+        try:
+            for v in (self._library_views() or []):
+                if isinstance(v, dict) and str(v.get("name") or "").strip():
+                    _ns = str(v.get("_ns") or "").strip()
+                    if _ns:
+                        m[(_ns + "." + str(v["name"]).strip()).lower()] = v
+            for v in (getattr(self, "report_views", []) or []):
+                if isinstance(v, dict) and str(v.get("name") or "").strip():
+                    m[str(v["name"]).strip().lower()] = v
+        except Exception:
+            pass
+        try:
+            self._view_full_cache = m
+        except Exception:
+            pass
+        return m
+
+    def _is_view_call(self, ns: str, view: str) -> bool:
+        """True when 'namespace.view' names a known (library or local) view."""
+        try:
+            full = (str(ns or "").strip() + "." + str(view or "").strip()).lower()
+            if full in (self._view_full_map() or {}):
+                return True
+            # view_refs declare intent even before sync
+            for r in (getattr(self, "report_view_refs", []) or []):
+                if not isinstance(r, dict):
+                    continue
+                rns = str(r.get("namespace") or "").strip().lower()
+                rnm = str(r.get("name") or "").strip().lower()
+                if rns and rnm and (rns + "." + rnm) == full:
+                    return True
+        except Exception:
+            pass
+        return False
+
+    def _view_def(self, table_norm):
+        try:
+            return self._view_map().get(self._norm_table(table_norm))
+        except Exception:
+            return None
+
+    @staticmethod
+    def _view_tok_col(token) -> str:
+        """Column part of a view token: '[s1.C]' → 'C'; plain → as-is."""
+        t = str(token or "").strip()
+        m = re.match(r"^\[([A-Za-z0-9_]+)\.([^\]]+)\]$", t)
+        if m:
+            return m.group(2).strip()
+        if len(t) >= 2 and t.startswith("[") and t.endswith("]"):
+            return t[1:-1].strip()
+        return t
+
+    @staticmethod
+    def _view_tok_sid(token) -> str:
+        t = str(token or "").strip()
+        m = re.match(r"^\[([A-Za-z0-9_]+)\.([^\]]+)\]$", t)
+        return m.group(1) if m else ""
+
+    def _view_implicit(self, view) -> List[Tuple[str, str, str]]:
+        """Implicit passthrough outputs [(source_id, col, out_name)].
+
+        Join keys and grouping tokens must stay addressable ([VIEW.COL])
+        for links, filters and GROUP BY even when they are not explicit
+        view columns. First spelling wins (case-insensitive).
+        """
+        out: List[Tuple[str, str, str]] = []
+        seen: set = set()
+
+        def _push(sid, col):
+            sid, col = str(sid or "").strip(), str(col or "").strip()
+            if not sid or not col or col.upper() in seen:
+                return
+            seen.add(col.upper())
+            out.append((sid, col, col))
+
+        try:
+            for c in (view.get("columns") or []):
+                if isinstance(c, dict):
+                    a = str(c.get("alias") or c.get("name") or "").strip()
+                    if a:
+                        seen.add(a.upper())
+            for m in (view.get("merges") or []):
+                if not isinstance(m, dict):
+                    continue
+                if str(m.get("type") or "") in ("union_all", "union_partial"):
+                    continue
+                _push(m.get("s1") or m.get("source_1_id"), m.get("key_1") or m.get("key1"))
+                _push(m.get("s2") or m.get("source_2_id"), m.get("key_2") or m.get("key2"))
+            for g in (view.get("groups") or []):
+                if not isinstance(g, dict):
+                    continue
+                if str(g.get("name") or "").strip():
+                    # Named group: group_by token passthrough (alias form is
+                    # already an explicit view column); the group name itself
+                    # is an output via _view_outputs, not implicit.
+                    _gb = str(g.get("group_by") or g.get("groupBy") or "").strip()
+                    if re.match(r"^\[[A-Za-z0-9_]+\.[^\]]+\]$", _gb):
+                        _push(self._view_tok_sid(_gb), self._view_tok_col(_gb))
+                    continue
+                _sc = str(g.get("source_column") or g.get("sourceColumn") or "").strip()
+                if _sc:
+                    _push(self._view_tok_sid(_sc) or "__x__", self._view_tok_col(_sc))
+                for b in (g.get("conditions") or g.get("branches") or []):
+                    if not isinstance(b, dict):
+                        continue
+                    _gb = str(b.get("group_by") or b.get("if") or "").strip()
+                    if _gb:
+                        _push(self._view_tok_sid(_gb) or "__x__", self._view_tok_col(_gb))
+                    _th = str(b.get("then") or b.get("then_field") or "").strip()
+                    if _th:
+                        _push(self._view_tok_sid(_th) or "__x__", self._view_tok_col(_th))
+            out = [(s, c, n) for (s, c, n) in out if s != "__x__"]
+        except Exception:
+            pass
+        return out
+
+    def _view_outputs(self, view) -> List[str]:
+        """Ordered output column names: explicit aliases + named groups + implicit passthroughs."""
+        out: List[str] = []
+        seen: set = set()
+        try:
+            for c in (view.get("columns") or []):
+                if isinstance(c, dict):
+                    a = str(c.get("alias") or c.get("name") or "").strip()
+                    if a and a.upper() not in seen:
+                        seen.add(a.upper())
+                        out.append(a)
+            for g in (view.get("groups") or []):
+                if isinstance(g, dict):
+                    a = str(g.get("name") or "").strip()
+                    if a and a.upper() not in seen:
+                        seen.add(a.upper())
+                        out.append(a)
+            for (_s, _c, _n) in self._view_implicit(view):
+                if _n.upper() not in seen:
+                    seen.add(_n.upper())
+                    out.append(_n)
+        except Exception:
+            pass
+        return out
+
+    def _view_source_gids(self, view, _seen=None) -> set:
+        """Global conn buckets of a view's sources (multi-bucket → invalid).
+
+        A source whose table is itself another view (derived/CTE-like) has
+        no physical connection of its own — it inherits that view's gid
+        transitively. _seen (normalized view names) guards reference cycles.
+        """
+        buckets: set = set()
+        try:
+            cmap = self._conn_map() or {}
+            _seen = set(_seen or ())
+            for s in (view.get("sources") or []):
+                if not isinstance(s, dict):
+                    continue
+                raw = str(s.get("conn") or "").strip()
+                if not raw:
+                    try:
+                        _tn = self._norm_table(str(s.get("table_name") or s.get("table") or ""))
+                        _nv = self._view_def(_tn) if _tn and _tn not in _seen else None
+                    except Exception:
+                        _tn, _nv = "", None
+                    if _nv is not None:
+                        try:
+                            buckets |= self._view_source_gids(_nv, _seen | {_tn})
+                            continue
+                        except Exception:
+                            pass
+                    buckets.add("")
+                    continue
+                try:
+                    gid = cmap.get(raw) or self._global_conn_id(raw) or raw
+                except Exception:
+                    gid = raw
+                buckets.add(str(gid or ""))
+        except Exception:
+            pass
+        return buckets
+
+    def _view_gid(self, view):
+        """Single global conn of a view's sources (raises on multi-connection)."""
+        try:
+            buckets = self._view_source_gids(view)
+            nonnull = {x for x in buckets if x}
+            if len(nonnull) > 1:
+                raise ValueError(
+                    f'الجدول المعروض "{view.get("name")}" مصادره على اتصالات مختلفة — '
+                    f'وحّد اتصال المصادر أو استورد الجداول مباشرة في التقرير.')
+            return next(iter(nonnull)) if nonnull else None
+        except ValueError:
+            raise
+        except Exception:
+            return None
+
+    def _compile_view_sql(self, view, _stack=None) -> str:
+        """Build the derived-table SELECT for a view (same-connection sources).
+
+        Derived sources first: a source whose table is itself another view
+        (no physical table exists for it) is flattened — its compiled SQL is
+        inlined as a CTE-like derived table. _stack (normalized view names
+        on the current chain) turns reference cycles into a clear error
+        instead of infinite recursion.
+        """
+        name = str(view.get("name") or "")
+        self_norm = self._norm_table(name)
+        _stack = set(_stack or ())
+        if self_norm and self_norm in _stack:
+            _chain = " ← ".join([*sorted(_stack), self_norm])
+            raise ValueError(
+                f'مرجع دائري بين الجداول المعروضة ({_chain}) — '
+                f'العرض "{name}" يستدعي نفسه عبر سلسلة المصادر.')
+        try:
+            _vmap = self._view_map()
+        except Exception:
+            _vmap = {}
+        _srcs = []
+        for i, s in enumerate(view.get("sources") or []):
+            if not isinstance(s, dict):
+                continue
+            tn = str(s.get("table_name") or s.get("table") or "").strip()
+            if not tn:
+                continue
+            sid = str(s.get("id") or "").strip() or ("s%d" % (i + 1))
+            _srcs.append({"id": sid, "table_name": tn, "conn": str(s.get("conn") or ""),
+                          "filter": str(s.get("filter") or s.get("where") or "").strip()})
+        if not _srcs:
+            raise ValueError(f'الجدول المعروض "{name}" بلا مصادر.')
+        # Flatten: derived/CTE-like sources (table = another view) inline
+        # their compiled SQL — no physical table exists for a view name.
+        # (Save-time validation forbids view names that clash with imported
+        # physical tables, so a map hit unambiguously means "derived".)
+        _nested: Dict[str, str] = {}
+        for _s in _srcs:
+            _tn = self._norm_table(_s["table_name"])
+            if not _tn:
+                continue
+            if _tn == self_norm or _tn in _stack:
+                raise ValueError(
+                    f'مرجع دائري بين الجداول المعروضة: العرض "{name}" '
+                    f'يستخدم "{_s["table_name"]}" وهو في سلسلة مصادره.')
+            _nv = _vmap.get(_tn)
+            if _nv is not None:
+                _nested[_s["id"]] = self._compile_view_sql(_nv, _stack | ({self_norm} if self_norm else set()))
+        vg = self._view_gid(view)  # raises on multi-connection sources
+        try:
+            report_schema = (self.metadata or {}).get("schema")
+        except Exception:
+            report_schema = None
+        _vsch: Dict[str, Optional[str]] = {}
+        for _s in _srcs:
+            if _s["id"] in _nested:
+                continue  # derived — inlined SQL, no physical schema lookup
+            _tn = self._norm_table(_s["table_name"])
+            if _tn not in _vsch:
+                try:
+                    _vsch[_tn] = self._schema_for_table(_tn, vg, report_schema)
+                except Exception:
+                    _vsch[_tn] = None
+        smap = {_s["id"]: _s for _s in _srcs}
+        # Shared expression machinery (linked — never copied): pseudo-fields
+        # let namespaces._resolve_expression apply the exact report-level
+        # language (IF→CASE, XLOOKUP, ISNULL→COALESCE, CAST fixes, get()).
+        try:
+            from .compiler import RMLField as _RMLField
+        except Exception:
+            _RMLField = None
+        try:
+            from .namespaces import _resolve_expression as _rx
+        except Exception:
+            _rx = None
+
+        def _short(tn):
+            tn = str(tn or "").strip()
+            return tn.split(".")[-1] if "." in tn else tn
+
+        def _frag(s):
+            if s["id"] in _nested:
+                # Derived/CTE-like source: inline the flattened view SQL.
+                return f"({_nested[s['id']]}) {_q(str(s['id']).upper())}"
+            tn = self._norm_table(s["table_name"])
+            sch = _vsch.get(tn)
+            return f"{_q(sch) + '.' if sch else ''}{_q(_short(s['table_name']))} {_q(str(s['id']).upper())}"
+
+        def _join_frag(merges_in, seed_sid=None, only=None):
+            """FROM + JOIN chain with connectivity ordering (shared by plain and UNION legs).
+
+            The seed (first merge's s1, or seed_sid when it touches a merge)
+            opens FROM; every later merge JOINs its NEW side only, keys staying
+            per-side — so ON never names a table missing from FROM (ORA-00904).
+            A merge whose both sides are already joined appends its equality to
+            the last ON (no duplicate table). Disconnected merges and sources
+            no merge touches are CROSS JOINed — importing is enough.
+            """
+            valid = []
+            for m in (merges_in or []):
+                if not isinstance(m, dict):
+                    continue
+                a_id = str(m.get("s1") or m.get("source_1_id") or "")
+                b_id = str(m.get("s2") or m.get("source_2_id") or "")
+                k1 = str(m.get("key_1") or m.get("key1") or "").strip()
+                k2 = str(m.get("key_2") or m.get("key2") or "").strip()
+                if smap.get(a_id) is None or smap.get(b_id) is None or not k1 or not k2:
+                    raise ValueError(f'دمج ناقص في العرض "{name}" — حدد المصدرين والمفتاحين.')
+                if a_id == b_id:
+                    raise ValueError(
+                        f'دمج ناقص في العرض "{name}" — لا يمكن ربط المصدر "{a_id}" بنفسه.')
+                jt = str(m.get("join_type") or m.get("joinType") or "LEFT").strip().upper()
+                if jt not in ("LEFT", "INNER", "RIGHT", "FULL"):
+                    jt = "LEFT"
+                valid.append((a_id, b_id, jt, k1, k2))
+            # only={sids} scopes a UNION leg to its component: foreign sources
+            # must NOT leak in as CROSS JOINs (that would cartesian-multiply
+            # the leg). Plain path passes nothing (all sources in scope).
+            _scope = None if only is None else set(only)
+            from_sid = None
+            if seed_sid and (not valid or any(a == seed_sid or b == seed_sid for (a, b, _j, _k1, _k2) in valid)):
+                from_sid = seed_sid
+            elif valid:
+                from_sid = valid[0][0]
+            elif _srcs:
+                _pool = [_s["id"] for _s in _srcs if _scope is None or _s["id"] in _scope]
+                if not _pool:
+                    return ""
+                from_sid = _pool[0]
+            else:
+                return ""
+            joined = {from_sid}
+            steps = []  # ("JOIN", jt, new_id, on) | ("CROSS", sid)
+            tails = []
+            pending = list(valid)
+            while pending:
+                progressed = False
+                for _t in list(pending):
+                    _a, _b, _jt, _k1, _k2 = _t
+                    _on = f"{_q(_a.upper())}.{_q(_k1)} = {_q(_b.upper())}.{_q(_k2)}"
+                    if _a in joined and _b in joined:
+                        tails.append(_on)
+                        pending.remove(_t)
+                        progressed = True
+                        break
+                    if _a in joined or _b in joined:
+                        _new = _b if _a in joined else _a
+                        steps.append(("JOIN", _jt, _new, _on))
+                        joined |= {_a, _b}
+                        pending.remove(_t)
+                        progressed = True
+                        break
+                if progressed:
+                    continue
+                _a, _b, _jt, _k1, _k2 = pending.pop(0)
+                if _a not in joined and _b not in joined:
+                    steps.append(("CROSS", _a))
+                    joined.add(_a)
+                pending.insert(0, (_a, _b, _jt, _k1, _k2))
+            out = f"FROM {_frag(smap[from_sid])}"
+            for _st in steps:
+                if _st[0] == "CROSS":
+                    out += f" CROSS JOIN {_frag(smap[_st[1]])}"
+                else:
+                    out += f" {_st[1]} JOIN {_frag(smap[_st[2]])} ON {_st[3]}"
+            for _t in tails:
+                out += f" AND {_t}"
+            for _s in _srcs:
+                if _scope is not None and _s["id"] not in _scope:
+                    continue
+                if _s["id"] not in joined:
+                    out += f" CROSS JOIN {_frag(_s)}"
+                    joined.add(_s["id"])
+            return out
+
+        # Named groups {name, group_by, expr}: prepared aggregate results —
+        # each becomes an extra output AS <name>, callable from any view
+        # column via %%name%%. Built BEFORE _res so %% expansion applies
+        # inside every resolver (plain, UNION-branch NULL-ing, U scope).
+        groups = [g for g in (view.get("groups") or []) if isinstance(g, dict)
+                  and (str(g.get("name") or "").strip()
+                       or str(g.get("source_column") or "").strip()
+                       or [b for b in (g.get("conditions") or []) if isinstance(b, dict)])]
+        _GNAME_RE = re.compile(r"^[A-Za-z_\u0600-\u06FF][A-Za-z0-9_\u0600-\u06FF]*$")
+        gmap: Dict[str, dict] = {}
+        for _g in groups:
+            _gn = str(_g.get("name") or "").strip()
+            if not _gn:
+                continue
+            if not _GNAME_RE.match(_gn):
+                raise ValueError(
+                    f'اسم التجميع «{_gn}» في العرض "{name}" غير صالح — '
+                    f'حروف وأرقام وشرطة سفلية بلا مسافات، مثال: total_qty.')
+            if _gn.upper() in gmap:
+                raise ValueError(
+                    f'اسم التجميع «{_gn}» مكرر في العرض "{name}".')
+            gmap[_gn.upper()] = _g
+
+        def _gexpand(ex, _seen=frozenset()):
+            """Expand %%group_name%% refs to the group's raw expression (recursive)."""
+            def _rep(m):
+                _gn = m.group(1)
+                _key = _gn.upper()
+                if _key in _seen:
+                    raise ValueError(
+                        f'مرجع دائري %%{_gn}%% في العرض "{name}".')
+                _gd = gmap.get(_key)
+                if _gd is None:
+                    _avail = ("، ".join("%%" + _k + "%%" for _k in sorted(gmap.keys()))
+                              or "لا تجميعات مسماة")
+                    raise ValueError(
+                        f'نتيجة تجميع مجهولة %%{_gn}%% في العرض "{name}" — '
+                        f'المتاح: {_avail}.')
+                return _gexpand(str(_gd.get("expr") or _gd.get("expression") or ""),
+                                _seen | {_key})
+            return re.sub(r"%%([A-Za-z0-9_\u0600-\u06FF]+)%%", _rep, str(ex or ""))
+
+        def _res(expr, branch=None):
+            """Resolve a view expression with the SHARED resolver (linked, not copied).
+
+            [sid.col]/{sid.col} tokens become pseudo-fields (table_source=sid)
+            so namespaces._resolve_expression applies the exact report-level
+            language: IF→CASE, XLOOKUP, ISNULL→COALESCE, CAST fixes, get(),
+            bare s.col refs — all qualified to the inner sid aliases.
+            Unknown tokens fail fast with view-scoped guidance.
+            """
+            expr = _gexpand(expr)
+            if "&" in str(expr):
+                expr = self._expand_view_vars(expr)
+            for _m in re.finditer(r"[\[{]([A-Za-z0-9_]+)\.([^\]}]+)[\]}]", expr):
+                if _m.group(1) not in smap:
+                    raise ValueError(
+                        f'مرجع مجهول [{_m.group(1)}.{_m.group(2).strip()}] في العرض "{name}" — '
+                        f'المصادر المتاحة: {", ".join(sorted(smap.keys()))}.')
+            if branch is not None:
+                # UNION branch: foreign-source refs become NULL (token level).
+                def _rep(m):
+                    return "NULL" if m.group(1) not in branch else m.group(0)
+                expr = re.sub(r"\[([A-Za-z0-9_]+)\.([^\]]+)\]", _rep, expr)
+                expr = re.sub(r"\{([A-Za-z0-9_]+)\.([^\}]+)\}", _rep, expr)
+            if _rx is None or _RMLField is None:
+                def _raw(m):
+                    return f"{_q(m.group(1).upper())}.{_q(m.group(2).strip())}"
+                return re.sub(r"\[([A-Za-z0-9_]+)\.([^\]]+)\]", _raw, expr)
+            flds, tmap, abt = [], {}, {}
+            seen = set()
+            for _sid, _col in re.findall(r"[\[{]([A-Za-z0-9_]+)\.([^\]}]+)[\]}]", expr):
+                _col = _col.strip()
+                if (_sid, _col.lower()) in seen:
+                    continue
+                seen.add((_sid, _col.lower()))
+                try:
+                    flds.append(_RMLField(id="v_%s_%s" % (_sid, _col), name=_col,
+                                          data_type="TEXT", connection_id=vg,
+                                          table_source=_sid))
+                except Exception:
+                    pass
+                tmap[_col.lower()] = _sid.upper()
+                abt[self._norm_table(_sid)] = _sid.upper()
+            try:
+                return _rx(expr, flds, {}, set(), tmap, self._conn_map(),
+                            alias_by_table=abt, default_tables=None)
+            except ValueError as _e:
+                raise ValueError(
+                    f'في العرض "{name}": {_e} — داخل العرض استخدم [source.col].')
+
+        def _qv(val):
+            return "'" + str(val if val is not None else "").replace("'", "''") + "'"
+
+        def _op(o):
+            o = str(o or "=").strip().upper()
+            if o not in ("=", "!=", "<>", ">", "<", ">=", "<="):
+                o = "="
+            return "<>" if o == "!=" else o
+
+        explicit = []
+        for c in (view.get("columns") or []):
+            if not isinstance(c, dict):
+                continue
+            alias = str(c.get("alias") or c.get("name") or "").strip()
+            if alias:
+                explicit.append((alias, c))
+        implicit = self._view_implicit(view)
+        exp_set = {a.upper() for (a, _c) in explicit} | {str(g.get("name") or "").strip().upper() for g in groups if str(g.get("name") or "").strip()}
+
+        def _colexpr(c):
+            ex = str(c.get("expr") or "").strip()
+            if ex:
+                return ex
+            a = str(c.get("alias") or c.get("name") or "").strip()
+            return f"[{_srcs[0]['id']}.{a}]"
+
+        def _select_pairs(branch=None):
+            pairs = []
+            for (a, c) in explicit:
+                pairs.append((a, _res(_colexpr(c), branch)))
+            if branch is None:
+                # Named group aggregates live in the outer SELECT only —
+                # UNION branches stay core (explicit + implicit).
+                for g in named:
+                    _gn = str(g.get("name") or "").strip()
+                    pairs.append((_gn, _res(str(g.get("expr") or g.get("expression") or ""), branch)))
+            for (sid, col, outn) in implicit:
+                if outn.upper() in exp_set:
+                    continue
+                pairs.append((outn, _res(f'[{sid}.{col}]', branch)))
+            return pairs
+
+        def _select_list(branch=None):
+            pairs = _select_pairs(branch)
+            return ", ".join(f"{ex} AS {_q(a)}" for (a, ex) in pairs) if pairs else "*"
+
+        def _extend_group_keys(gkeys, pairs, has_agg=False):
+            """Append bare (non-aggregated) select items to GROUP BY (ORA-00979).
+
+            When has_agg is True (named groups or aggregate functions exist),
+            all bare (non-aggregated, non-constant) columns are automatically
+            collected into GROUP BY.
+            """
+            if not gkeys and not has_agg:
+                return gkeys
+            try:
+                _seen = set(gkeys)
+                for (_a, _ex) in (pairs or []):
+                    if _ex not in _seen and _view_item_needs_grouping(_ex):
+                        gkeys.append(_ex)
+                        _seen.add(_ex)
+            except Exception:
+                pass
+            return gkeys
+
+        merges = [m for m in (view.get("merges") or []) if isinstance(m, dict)]
+        unions = [m for m in merges if str(m.get("type") or "") in ("union_all", "union_partial")]
+        joins = [m for m in merges if str(m.get("type") or "") not in ("union_all", "union_partial")]
+
+        def _leg_where(comp_sids, branch):
+            """AND of per-source filters for one leg (UNION component or whole view).
+
+            Each filter is validated BEFORE resolving: every [sid.col]/{sid.col}
+            must belong to this leg (else _res would silently NULL-fill it in a
+            UNION branch). Bare [col] (no sid) is rejected with guidance.
+            Returns "" when the leg has no filters.
+            """
+            _cset = set(comp_sids)
+            parts = []
+            for _s in _srcs:
+                if _s["id"] not in _cset:
+                    continue
+                _f = str(_s.get("filter") or "").strip()
+                if not _f:
+                    continue
+                _fx = _gexpand(_f)
+                _nol = re.sub(r"('(?:[^']|'')*')", "''", _fx)
+                for _m in re.finditer(r"[\[{]([A-Za-z_][A-Za-z0-9_]*)[\]}]", _nol):
+                    raise ValueError(
+                        f'مرشح المصدر "{_s["id"]}" في العرض "{name}" يحوي [{_m.group(1)}] بلا مصدر — '
+                        f'استخدم صيغة [sid.col] (المصادر: {", ".join(sorted(_cset))}).')
+                for _m in re.finditer(r"[\[{]([A-Za-z0-9_]+)\.", _nol):
+                    if _m.group(1) not in _cset:
+                        raise ValueError(
+                            f'مرشح المصدر "{_s["id"]}" في العرض "{name}" يشير للمصدر "{_m.group(1)}" '
+                            f'خارج فرعه في الـ UNION — المرشح يجب أن يستخدم مصادر فرعه فقط '
+                            f'({", ".join(sorted(_cset))}).')
+                parts.append(_res(_f, branch))
+            return " AND ".join("(%s)" % p for p in parts)
+        # (groups/gmap built above, before _res, so %% refs expand everywhere)
+        named = [g for g in groups if str(g.get("name") or "").strip()]
+        legacy = [g for g in groups if not str(g.get("name") or "").strip()]
+        col_by_alias: Dict[str, dict] = {}
+        for (_a, _c) in explicit:
+            col_by_alias.setdefault(_a.upper(), _c)
+            _cn = str(_c.get("name") or "").strip()
+            if _cn:
+                col_by_alias.setdefault(_cn.upper(), _c)
+        for _g in named:
+            _gn = str(_g.get("name") or "").strip()
+            if _gn.upper() in {_a.upper() for (_a, _c) in explicit}:
+                raise ValueError(
+                    f'اسم التجميع «{_gn}» في العرض "{name}" يطابق عموداً في العرض — '
+                    f'اختر اسماً آخر.')
+            if not str(_g.get("expr") or _g.get("expression") or "").strip():
+                raise ValueError(
+                    f'التجميع «{_gn}» في العرض "{name}" بلا تعبير — مثال: sum([s1.QTY]).')
+
+        def _gres_key(g, u_scope=False):
+            """GROUP BY key of a named group: its view column resolved in scope (if provided)."""
+            _gb = str(g.get("group_by") or g.get("groupBy") or "").strip()
+            if not _gb:
+                _gn0 = str(g.get("name") or "").strip()
+                raise ValueError(
+                    f'التجميع «{_gn0}» في العرض "{name}" بلا عمود تجميع — اختر عموداً من أعمدة العرض')
+            if _gb.upper() in gmap:
+                return ""
+            _col = col_by_alias.get(_gb.upper())
+            if _col is not None:
+                _cex = _colexpr(_col)
+                if re.search(r"(?i)\b(SUM|COUNT|AVG|MIN|MAX)\s*\(", _cex):
+                    raise ValueError(
+                        f'لا يمكن التجميع حسب العمود «{_gb}» في العرض "{name}" — عمود تجميعي. اختر عموداً عادياً')
+                return _ores(_cex) if u_scope else _res(_cex)
+            return _ores(_gb) if u_scope else _res(_gb)
+
+        def _group_key(g, remap_u=False):
+            if str(g.get("type") or "").lower().startswith("cond"):
+                _wh = []
+                for b in (g.get("conditions") or []):
+                    if not isinstance(b, dict):
+                        continue
+                    _wf = str(b.get("group_by") or b.get("if") or "").strip()
+                    _tf = str(b.get("then") or b.get("then_field") or "").strip()
+                    if not _wf or not _tf:
+                        continue
+                    if remap_u:
+                        _wh.append(f"WHEN {_q('U')}.{_q(self._view_tok_col(_wf))} {_op(b.get('op'))} {_qv(b.get('value', ''))} THEN {_q('U')}.{_q(self._view_tok_col(_tf))}")
+                    else:
+                        _wh.append(f"WHEN {_res(_wf)} {_op(b.get('op'))} {_qv(b.get('value', ''))} THEN {_res(_tf)}")
+                if not _wh:
+                    return ""
+                return "CASE " + " ".join(_wh) + " ELSE NULL END"
+            _sc = str(g.get("source_column") or "").strip()
+            if not _sc:
+                return ""
+            if remap_u:
+                return f"{_q('U')}.{_q(self._view_tok_col(_sc))}"
+            return _res(_sc)
+
+        if unions:
+            # Partition _srcs into components connected by joins
+            _adj = {s["id"]: [] for s in _srcs}
+            for m in joins:
+                _a = str(m.get("s1") or m.get("source_1_id") or "")
+                _b = str(m.get("s2") or m.get("source_2_id") or "")
+                if _a in _adj and _b in _adj:
+                    _adj[_a].append(_b)
+                    _adj[_b].append(_a)
+            
+            components = []
+            _visited = set()
+            for s in _srcs:
+                sid = s["id"]
+                if sid not in _visited:
+                    _comp = []
+                    _q_bfs = [sid]
+                    _visited.add(sid)
+                    while _q_bfs:
+                        _curr = _q_bfs.pop(0)
+                        _comp.append(_curr)
+                        for _nxt in _adj[_curr]:
+                            if _nxt not in _visited:
+                                _visited.add(_nxt)
+                                _q_bfs.append(_nxt)
+                    components.append(_comp)
+            
+            _right_sides = set(str(m.get("s2") or m.get("source_2_id") or "") for m in joins)
+            _comp_sqls = []
+            for _comp in components:
+                _branch_set = set(_comp)
+                _from_sid = next((sid for sid in _comp if sid not in _right_sides), _comp[0])
+                _comp_merges = [m for m in joins
+                                if str(m.get("s1") or m.get("source_1_id") or "") in _branch_set
+                                and str(m.get("s2") or m.get("source_2_id") or "") in _branch_set]
+                _comp_sql = f"SELECT {_select_list(branch=_branch_set)} {_join_frag(_comp_merges, _from_sid, only=_branch_set)}"
+                _leg_f = _leg_where(_branch_set, _branch_set)
+                if _leg_f:
+                    _comp_sql += " WHERE " + _leg_f
+                _comp_sqls.append(_comp_sql)
+
+            op = "UNION" if any(str(u.get("type") or "") == "union_partial" for u in unions) else "UNION ALL"
+            core = ("\n" + op + "\n").join(_comp_sqls)
+            if not groups:
+                return core
+            # تحقق: مفاتيح التجميع يجب أن تكون من مخرجات الـ UNION
+            core_outs = {a.upper() for (a, _c) in explicit} | {n.upper() for (_s, _c, n) in implicit} | {str(g.get("name") or "").strip().upper() for g in named}
+            _alias_set = {_a.upper() for (_a, _c) in explicit} | {str(_c.get("name") or "").strip().upper() for (_a, _c) in explicit}
+            for g in named:
+                _gb = str(g.get("group_by") or g.get("groupBy") or "").strip()
+                if not _gb:
+                    continue
+                if _gb.upper() in _alias_set:
+                    continue
+                _cc = self._view_tok_col(_gb)
+                if _cc and _cc.upper() not in core_outs:
+                    raise ValueError(
+                        f'عمود التجميع "{_cc}" في العرض "{name}" ليس من مخرجات الـ UNION — '
+                        f'أضفه كعمود في العرض أولاً.')
+            for g in legacy:
+                _toks = []
+                if str(g.get("type") or "").lower().startswith("cond"):
+                    for b in (g.get("conditions") or []):
+                        if isinstance(b, dict):
+                            _toks.append(str(b.get("group_by") or b.get("if") or ""))
+                            _toks.append(str(b.get("then") or b.get("then_field") or ""))
+                else:
+                    _toks.append(str(g.get("source_column") or ""))
+                for _t in _toks:
+                    _cc = self._view_tok_col(_t)
+                    if _cc and _cc.upper() not in core_outs:
+                        raise ValueError(
+                            f'عمود التجميع "{_cc}" في العرض "{name}" ليس من مخرجات الـ UNION — '
+                            f'أضفه كعمود في العرض أولاً.')
+            outer_sel = []
+            # Outer select resolves against the UNION outputs ("U" scope) with
+            # the same shared resolver (aggregates/IF/transpilations apply).
+            _oflds, _otmap = [], {}
+            # inner [sid.col] -> leg output alias (explicit columns first, then
+            # implicit outputs): the outer SELECT may only use UNION outputs.
+            _oalias_by_col = {}
+            if _RMLField is not None:
+                for (a, _c) in explicit:
+                    for _m in re.finditer(r"[\[{]([A-Za-z0-9_]+)\.([^\]}]+)[\]}]",
+                                           str(_colexpr(_c) or "")):
+                        _oalias_by_col.setdefault(_m.group(2).strip().lower(), a)
+                    _oalias_by_col.setdefault(str(a).strip().lower(), a)
+                for (_sid0, _col0, _outn0) in implicit:
+                    _oalias_by_col.setdefault(str(_col0).strip().lower(), _outn0)
+                for (a, _c) in explicit:
+                    try:
+                        _oflds.append(_RMLField(id="vu_%s" % a, name=a, data_type="TEXT",
+                                                connection_id=vg, table_source="U"))
+                    except Exception:
+                        pass
+                    _otmap[a.lower()] = "U"
+                for (_sid, _col, _outn) in implicit:
+                    if _outn.upper() in {x.upper() for (x, _cc) in explicit}:
+                        continue
+                    try:
+                        _oflds.append(_RMLField(id="vu_%s" % _outn, name=_outn, data_type="TEXT",
+                                                connection_id=vg, table_source="U"))
+                    except Exception:
+                        pass
+                    _otmap[_outn.lower()] = "U"
+                for g in named:
+                    _gn = str(g.get("name") or "").strip()
+                    if _gn and _gn.lower() not in _otmap:
+                        try:
+                            _oflds.append(_RMLField(id="vu_%s" % _gn, name=_gn, data_type="TEXT",
+                                                    connection_id=vg, table_source="U"))
+                        except Exception:
+                            pass
+                        _otmap[_gn.lower()] = "U"
+
+            def _ores(ex):
+                ex = _gexpand(ex)
+                def _omap(m):
+                    _col = m.group(2).strip()
+                    return "[U.%s]" % _oalias_by_col.get(_col.lower(), _col)
+                ex = re.sub(r"[\[{]([A-Za-z0-9_]+)\.([^\]}]+)[\]}]", _omap,
+                            str(ex or ""))
+                if _rx is None:
+                    return ex
+                try:
+                    return _rx(ex, _oflds, {}, set(), _otmap, self._conn_map(),
+                                alias_by_table={"U": "U"}, default_tables=None)
+                except ValueError as _e:
+                    raise ValueError(
+                        f'في العرض "{name}": {_e} — خارج الـ UNION استخدم مخرجاته.')
+
+            outer_pairs = []
+            for (a, c) in explicit:
+                outer_pairs.append((a, _ores(_colexpr(c))))
+            for g in named:
+                _gn = str(g.get("name") or "").strip()
+                outer_pairs.append((_gn, _ores(str(g.get("expr") or g.get("expression") or ""))))
+            for (sid, col, outn) in implicit:
+                if outn.upper() in {a.upper() for (a, _c) in explicit}:
+                    continue
+                outer_pairs.append((outn, f"{_q('U')}.{_q(col)}"))
+            has_agg_u = bool(named) or any(
+                re.search(r"(?i)\b(SUM|COUNT|AVG|MIN|MAX|STDDEV|VARIANCE|MEDIAN)\s*\(", str(ex or ""))
+                for (_a, ex) in outer_pairs
+            )
+            gkeys = [_group_key(g, remap_u=True) for g in legacy] + [_gres_key(g, u_scope=True) for g in named]
+            gkeys = [k for k in gkeys if k]
+            gkeys = _extend_group_keys(gkeys, outer_pairs, has_agg=has_agg_u)
+            if not gkeys:
+                return core
+            outer_sel = [f'{ex} AS {_q(a)}' for (a, ex) in outer_pairs]
+            return f"SELECT {', '.join(outer_sel)} FROM ({core}) {_q('U')} GROUP BY {', '.join(gkeys)}"
+
+        # JOIN scope: ordered chain (each merge JOINs its new side only).
+        _pairs = _select_pairs()
+        sql = f"SELECT {', '.join(f'{ex} AS {_q(a)}' for (a, ex) in _pairs) if _pairs else '*'} {_join_frag(joins)}"
+        _plain_f = _leg_where({_s["id"] for _s in _srcs}, None)
+        if _plain_f:
+            sql += " WHERE " + _plain_f
+        has_agg_j = bool(named) or any(
+            re.search(r"(?i)\b(SUM|COUNT|AVG|MIN|MAX|STDDEV|VARIANCE|MEDIAN)\s*\(", str(ex or ""))
+            for (_a, ex) in _pairs
+        )
+        gkeys = [_group_key(g) for g in legacy] + [_gres_key(g) for g in named]
+        gkeys = [k for k in gkeys if k]
+        gkeys = _extend_group_keys(gkeys, _pairs, has_agg=has_agg_j)
+        if gkeys:
+            sql += " GROUP BY " + ", ".join(gkeys)
+        return sql
 
     def _build_plan(self, active_table, filters, sort, group_by, dataclasses) -> Dict[str, Any]:
         from_table = active_table or self._default_table
@@ -4582,8 +6375,61 @@ class RMLReportEngine:
             raise
         except Exception:
             pass
+        # Graceful unused-table rule: a table referenced ONLY by the general
+        # condition (not by any column/filter/sort/group) must not break the
+        # fetch — if a join key is inferable we join (working reports keep
+        # working); otherwise its conjuncts are pruned with notice instead of
+        # raising. Tables used at report level always join (or raise loudly).
+        _gw_pruned: List[dict] = []
+        try:
+            _col_used = self._used_tables(inlined, filters, sort, group_by, field_table, "")
+            _gw_only = set()
+            if _gw_text:
+                for _r in self._refs_in_text(_gw_text, field_table):
+                    _t = field_table.get(_r)
+                    if _t and _t != base_norm and _t not in _col_used:
+                        _gw_only.add(_t)
+            for _s in sorted(_gw_only):
+                try:
+                    _k = self._infer_join_key(
+                        base_norm, _s, base_schema_norm, base_db,
+                        self._schema_for_table(_s, self._conn_key_of_table(_s), report_schema),
+                        self._db_for_conn(self._conn_key_of_table(_s)))
+                except Exception:
+                    _k = None
+                if not _k:
+                    _gw_text, _dropped = self._prune_gw_tables(_gw_text, {_s}, field_table)
+                    if _dropped:
+                        _gw_pruned.append({"table": _s, "dropped": _dropped})
+        except Exception:
+            # best-effort only: planning continues with the original text
+            pass
         used = self._used_tables(inlined, filters, sort, group_by, field_table, _gw_text or "")
         sec_all = sorted(t for t in used if t != base_norm)
+        # Displayed tables used by this query (base or secondaries)
+        _used_views: Dict[str, dict] = {}
+        for _t in ([base_norm] + list(sec_all)):
+            try:
+                _vd = self._view_def(_t)
+            except Exception:
+                _vd = None
+            if _vd is not None:
+                _used_views[_t] = _vd
+        for _vn, _vd in _used_views.items():
+            # A view executes as a subquery on its own connection — it must
+            # share the base physical DB (else the remote-merge path would
+            # query a virtual name as a physical table).
+            try:
+                _vg = self._view_gid(_vd)
+                _vdb = self._db_for_conn(_vg)
+            except ValueError:
+                raise
+            except Exception:
+                _vdb = None
+            if base_db is not None and _vdb is not None and not self._same_db(_vdb, base_db):
+                raise ValueError(
+                    f'الجدول المعروض "{_vd.get("name")}" على قاعدة مختلفة عن الجدول الأساسي — '
+                    f'وحّد الاتصال أو استورد العرض إلى التقرير (flatten) بدلاً من ربطه.')
         # Route secondaries: local (same physical DB) vs remote
         local_sec: List[str] = []
         remote_sec: Dict[str, Any] = {}
@@ -4609,7 +6455,8 @@ class RMLReportEngine:
                 if not remote_sec[s]["key"]:
                     raise ValueError(
                         f'تعذر الاستدلال على مفتاح الربط بين "{from_table}" و"{s}" عبر الاتصالات. '
-                        f'أضف عموداً مشتركاً (مثل رقم المستند) في الجدولين.')
+                        f'عرّف رابطاً صريحاً بينهما من المصمم (ورقة الحقول ← رابط مخصص: الجدول والعمود من الطرفين)، '
+                        f'أو أضف عموداً مشتركاً (مثل رقم المستند) في الجدولين.')
         # general_where across DBs: remote conjuncts become two-phase
         # filter dicts (base IN lists); the rest stays in base SQL.
         try:
@@ -4663,21 +6510,48 @@ class RMLReportEngine:
             base_q = _q(_btmp)
         elif _bmir:
             base_q = f"{_q(str(_bmir.get('schema') or ''))}.{_q(str(_bmir.get('table') or base_norm))}"
+        elif base_norm in _used_views:
+            # Displayed table as the base: derived-table subquery (always aliased —
+            # PG/MSSQL reject alias-less derived tables).
+            base_q = f"({self._compile_view_sql(_used_views[base_norm])})"
         elif base_schema and "." not in from_table:
             base_q = f"{_q(base_schema)}.{_q(from_table)}"
         else:
             base_q = _q(from_table)
         if not sec_all:
+            if base_norm in _used_views:
+                _vname = str(_used_views[base_norm].get("name") or base_norm)
+                _vmap = {str(getattr(_f, "name", "") or "").strip().lower(): _vname
+                         for _f in (fields or [])
+                         if getattr(_f, "name", None)
+                         and self._norm_table(getattr(_f, "table_source", "") or "") == base_norm}
+                return {"from_table": from_table, "base_norm": base_norm, "base_conn": base_conn,
+                        "base_db": base_db, "base_schema": base_schema,
+                        "base_disp": (from_table if "." not in from_table else from_table.split(".")[-1]),
+                        "from_q": f"{base_q} {_q(_vname)}",
+                        "columns": inlined, "table_map": _vmap, "merges": [], "extra": [],
+                        "strip": set(), "local_sec": [], "remote": {}, "base_alias": _vname,
+                        "alias_map": {base_norm: _vname},
+                        "gw_base": _gw_text or "", "gw_remote": [], "gw_deferred": [],
+                        "gw_pruned": _gw_pruned}
             return {"from_table": from_table, "base_norm": base_norm, "base_conn": base_conn,
                     "base_db": base_db, "base_schema": base_schema,
                     "base_disp": (from_table if "." not in from_table else from_table.split(".")[-1]),
                     "from_q": base_q,
                     "columns": inlined, "table_map": None, "merges": [], "extra": [],
                     "strip": set(), "local_sec": [], "remote": {}, "base_alias": None,
+                    "alias_map": {},
                     "gw_base": _gw_text or "", "gw_remote": [], "gw_deferred": []}
-        # Aliases (base always aliased when other tables involved)
-        base_alias = "T0"
-        aliases = {s: f"T{i + 1}" for i, s in enumerate(sorted(set(local_sec)))}
+        # Aliases (base always aliased when other tables involved).
+        # Displayed tables alias by their VIEW NAME: FROM (SELECT …) VIEW_NAME.
+        if base_norm in _used_views:
+            base_alias = str(_used_views[base_norm].get("name") or base_norm)
+        else:
+            base_alias = "T0"
+        aliases = {s: f"T{i + 1}" for i, s in enumerate(sorted(set(local_sec) - set(_used_views)))}
+        for _vs in _used_views:
+            if _vs != base_norm:
+                aliases[_vs] = str(_used_views[_vs].get("name") or _vs)
         disp: Dict[str, str] = {}
         for f in fields:
             ts = getattr(f, "table_source", None)
@@ -4738,6 +6612,7 @@ class RMLReportEngine:
         # Per-column: remote merge specs vs local rewrite
         new_cols = []
         join_needed: set = set()
+        need_reasons: Dict[str, set] = {}
         merges: List[Dict[str, Any]] = []
         for col in inlined:
             raw = (getattr(col, "expr", None) or getattr(col, "name", None) or "").strip()
@@ -4762,6 +6637,8 @@ class RMLReportEngine:
                 db=base_db, sec_schemas={s: self._schema_for_table(s, self._conn_key_of_table(s), report_schema) for s in local_sec},
                 sec_displays=disp)
             join_needed |= {t for t in need if t in local_sec}
+            for t in sorted({t for t in need if t in local_sec}):
+                need_reasons.setdefault(t, set()).add('العمود "%s"' % (getattr(col, "alias", "") or "?"))
             # Remote refs surviving a local rewrite = unsupported mix
             if {t for t in self._refs_in_text(new_raw, field_table) if field_table.get(t) in remote_sec}:
                 raise ValueError(
@@ -4775,15 +6652,19 @@ class RMLReportEngine:
                 t = field_table.get(r)
                 if t and t in local_sec:
                     join_needed.add(t)
+                    need_reasons.setdefault(t, set()).add('الشرط العام')
         joins = []
         for s in sorted(join_needed):
             ssch = self._schema_for_table(s, self._conn_key_of_table(s), report_schema)
             ssch_q = _q(ssch) if ssch else ""
             key = self._infer_join_key(base_norm, s, base_schema_norm, base_db, ssch)
             if not key:
+                _rsn = sorted(need_reasons.get(s, set()))
+                _rsn_txt = (' (الجدول مطلوب بسبب: ' + '، '.join(_rsn[:3]) + ')') if _rsn else ''
                 raise ValueError(
-                    f'تعذر الاستدلال على مفتاح الربط بين "{from_table}" و"{disp.get(s, s)}". '
-                    f'أضف عموداً مشتركاً (مثل رقم المستند) في الجدولين.')
+                    f'تعذر الاستدلال على مفتاح الربط بين "{from_table}" و"{disp.get(s, s)}"{_rsn_txt}. '
+                    f'عرّف رابطاً صريحاً بينهما من المصمم (ورقة الحقول ← رابط مخصص: الجدول والعمود من الطرفين)، '
+                    f'أو أضف عموداً مشتركاً بنفس الاسم والنوع (مثل رقم المستند) في الجدولين.')
             bcol, scol = key
             # True-case column spelling (critical for case-sensitive engines like Postgres)
             try:
@@ -4792,7 +6673,12 @@ class RMLReportEngine:
                 _sdb = base_db
             bcol = self._orig_col(base_norm, bcol, base_db, base_schema) or bcol
             scol = self._orig_col(s, scol, _sdb, ssch) or scol
-            sec_q = f"{ssch_q + '.' if ssch_q else ''}{_q(disp.get(s, s))}"
+            if s in _used_views:
+                # Displayed table secondary: derived-table subquery (never a
+                # schema-qualified physical name).
+                sec_q = f"({self._compile_view_sql(_used_views[s])})"
+            else:
+                sec_q = f"{ssch_q + '.' if ssch_q else ''}{_q(disp.get(s, s))}"
             _lon = f"{_q(aliases[s])}.{_q(scol)}"
             _ron = f"{_q(base_alias)}.{_q(bcol)}"
             try:
@@ -4855,8 +6741,9 @@ class RMLReportEngine:
                 "columns": new_cols, "table_map": table_map, "merges": merges, "extra": extra,
                 "strip": strip, "local_sec": sorted(set(local_sec)), "remote": remote_sec,
                 "base_alias": base_alias,
+                "alias_map": dict(aliases, **({base_norm: base_alias} if base_alias else {})),
                 "gw_base": _gw_base, "gw_remote": _gw_remote,
-                "gw_deferred": _gw_deferred}
+                "gw_deferred": _gw_deferred, "gw_pruned": _gw_pruned}
 
     def _plan_remote_column(self, col, raw: str, refs_tables: set, remote_sec: Dict[str, Any],
                             base_norm: str, base_alias: str, disp: Dict[str, str],
@@ -5107,6 +6994,40 @@ class RMLReportEngine:
                 break
             s = s[1:-1].strip()
         return s
+
+    def _prune_gw_tables(self, gw_text, drop_tables, field_table):
+        """Drop top-level AND conjuncts whose refs ALL belong to drop_tables.
+
+        A conjunct is dropped only when it carries ≥1 field ref and every one
+        resolves to a dropped table. Ref-less / mixed / literal-only conjuncts
+        are always kept. Returns (kept_text, dropped_list).
+        """
+        drop = {str(t or "").strip().upper() for t in (drop_tables or set())}
+        if not str(gw_text or "").strip() or not drop:
+            return str(gw_text or ""), []
+        kept, dropped = [], []
+        try:
+            parts = self._split_top_and(gw_text)
+        except Exception:
+            return str(gw_text or ""), []
+        for _p in parts:
+            _c = str(_p or "").strip()
+            if not _c:
+                continue
+            try:
+                _refs = {r for r in self._refs_in_text(_c, field_table or {}) if (field_table or {}).get(r)}
+            except Exception:
+                _refs = set()
+            if _refs:
+                try:
+                    _heads = {str((field_table or {})[r]).strip().upper() for r in _refs}
+                except Exception:
+                    _heads = set()
+                if _heads and all(_h in drop for _h in _heads):
+                    dropped.append(_c[:200])
+                    continue
+            kept.append(_c)
+        return " AND ".join(kept), dropped
 
     def _split_general_where(self, gw_text, base_norm, local_sec, remote_sec, field_table):
         """Split general_where into (base_sql_text, remote_filter_dicts, deferred).
@@ -6774,10 +8695,17 @@ class RMLReportEngine:
                 if not _okr:
                     continue
                 if _end is None or (_start <= _matched < _end):
-                    if _strip:
-                        for _k in _strip:
-                            _r.pop(_k, None)
-                    _out.append({k: _fmt_cell(v) for k, v in _r.items()})
+                    _row_d = {k: _fmt_cell(v) for k, v in _r.items()}
+                    for _c in _pcols:
+                        _cn = getattr(_c, "name", None)
+                        _ca = getattr(_c, "alias", None)
+                        if _cn and _cn not in _row_d:
+                            _val = _row_d.get(_ca)
+                            if _val is None and _ca:
+                                _val = _row_d.get(str(_ca).lower())
+                            if _val is not None:
+                                _row_d[_cn] = _val
+                    _out.append(_row_d)
                 _matched += 1
             # free the chunk BEFORE the next fetch allocates (peak = 1 chunk)
             try:
@@ -7223,6 +9151,35 @@ class RMLReportEngine:
                 (outer if self._route_one(f, columns) in ("outer", "core") else base).append(f)
         return base, outer
 
+    def _hide_empty_filters(self, columns=None) -> list:
+        """Synthetic row-hiding filters from column hide_blank/hide_zero flags.
+
+        Each flag becomes a valueless filter on the column alias; the normal
+        pipeline (_split_filters → base/outer) routes it: plain columns to
+        inner WHERE, aggregates/computed to the outer alias wrapper — so the
+        record is hidden (filtered), not just blanked, with correct totals.
+        """
+        out = []
+        for c in (columns if columns is not None else (getattr(self, "columns", []) or [])):
+            try:
+                hb = bool(getattr(c, "hide_blank", False))
+                hz = bool(getattr(c, "hide_zero", False))
+            except Exception:
+                continue
+            if not (hb or hz):
+                continue
+            try:
+                key = str(getattr(c, "alias", None) or getattr(c, "name", None) or "").strip()
+            except Exception:
+                key = ""
+            if not key:
+                continue
+            if hb:
+                out.append({"field": key, "op": "not_blank", "_hide_empty": True})
+            if hz:
+                out.append({"field": key, "op": "not_zero", "_hide_empty": True})
+        return out
+
     def _core_expr(self, col, fields, table_map):
         """Numeric core SQL of a formatted (TO_CHAR) column for filtering.
 
@@ -7380,19 +9337,41 @@ class RMLReportEngine:
         return out
 
     def _plan_alias_map(self, plan) -> Dict[str, str]:
-        """{NORM_TABLE: alias} reconstructed from a routing plan.
+        """{NORM_TABLE: alias} for a routing plan.
 
-        Mirrors the aliases enumeration used at plan time
-        ({s: T{i+1}} over sorted local_sec + base_alias), so qualified refs
+        Prefers the plan's own alias_map (authoritative — views alias by
+        VIEW_NAME); falls back to reconstructing {s: T{i+1}} for legacy plans.
+        Full dotted view names (STORE.VIEW_1) are ALSO keyed: a qualifier
+        addressing the field's own table by its FULL name ([ns.view.col])
+        is unambiguous, so the resolver accepts it without demanding a
+        connection binding (views never carry one).
+        Mirrors the aliases enumeration used at plan time so qualified refs
         ([table.col]/[conn.table.col]) bind to their OWN table's alias even
         when the column name exists in several tables.
         """
         out: Dict[str, str] = {}
         try:
-            if (plan or {}).get("base_alias") and (plan or {}).get("base_norm"):
-                out[plan["base_norm"]] = plan["base_alias"]
-            for i, s in enumerate((plan or {}).get("local_sec") or []):
-                out.setdefault(s, f"T{i + 1}")
+            if isinstance((plan or {}).get("alias_map"), dict) and (plan or {}).get("alias_map"):
+                out = {str(k): v for k, v in plan["alias_map"].items() if v}
+            else:
+                if (plan or {}).get("base_alias") and (plan or {}).get("base_norm"):
+                    out[plan["base_norm"]] = plan["base_alias"]
+                for i, s in enumerate((plan or {}).get("local_sec") or []):
+                    out.setdefault(s, f"T{i + 1}")
+            try:
+                _fulls = self._view_full_map() or {}
+            except Exception:
+                _fulls = {}
+            try:
+                # view_refs declare intent (ns.view) even for local defs
+                for _r in (getattr(self, "report_view_refs", []) or []):
+                    if isinstance(_r, dict) and str(_r.get("namespace") or "").strip() and str(_r.get("name") or "").strip():
+                        _fulls.setdefault((str(_r["namespace"]).strip() + "." + str(_r["name"]).strip()).lower(), None)
+            except Exception:
+                pass
+            for _full in _fulls:
+                if self._norm_table(_full) in out:
+                    out.setdefault(str(_full).upper(), out[self._norm_table(_full)])
         except Exception:
             pass
         return out
@@ -7489,8 +9468,10 @@ class RMLReportEngine:
                         _scan_fields(_f.get("all") or [])
 
             _scan_fields(filters)
-            if isinstance(group_by, str) and group_by.strip().lower() in _dep:
-                _hits.add(group_by.strip())
+            _gb_items = _group_by_extra_fields(group_by)
+            for _gb_item in _gb_items:
+                if isinstance(_gb_item, str) and _gb_item.strip().lower() in _dep:
+                    _hits.add(_gb_item.strip())
             _gw_texts = []
             try:
                 _gw_texts.append(plan.get("gw_base") or "")
@@ -7570,14 +9551,27 @@ class RMLReportEngine:
         columns = plan["columns"]
         table_map = plan["table_map"]
         _abt_plan = self._plan_alias_map(plan)
+        _dialect = ("pg" if _is_pg_db(plan.get("base_db"))
+                    else ("mssql" if _is_mssql_db(plan.get("base_db")) else "oracle"))
+        # Document-report input events: grouping (GROUP BY + PARTITION extra)
+        # and variable columns (per-engine DECODE/CASE rewrite) apply here.
+        _ev_extra = []
+        try:
+            columns, _ev_groups, _ev_extra = self._apply_doc_param_events(
+                plan, columns, filters or [], table_map, _dialect)
+        except ValueError:
+            raise
+        except Exception:
+            _ev_groups = []
         select_clause = _build_select(columns, getattr(self, "fields", []), table_map=table_map,
-                                        dialect=("pg" if _is_pg_db(plan.get("base_db"))
-                                                 else ("mssql" if _is_mssql_db(plan.get("base_db")) else "oracle")),
+                                        dialect=_dialect,
                                         conn_map=self._conn_map(),
                                         rules=getattr(self, "rules", []),
                                         alias_by_table=_abt_plan,
                                         default_tables=self._rx_defaults())
         for _ex, _al in (extra_selects or []):
+            select_clause += f", {_ex} AS {_q(_al)}"
+        for _ex, _al in (_ev_extra or []):
             select_clause += f", {_ex} AS {_q(_al)}"
         for _ex, _al in (plan.get("extra") or []):
             select_clause += f", {_ex} AS {_q(_al)}"
@@ -7588,9 +9582,23 @@ class RMLReportEngine:
                                                  drop_keys=self._doc_no_filter_keys())
         where_clause = self._apply_general_where(where_clause, table_map, self._conn_map(),
                                                   plan.get("gw_base"))
-        group_clause = ""
-        if group_by:
-            group_clause = f" GROUP BY {_resolve_filter_field(group_by, columns, getattr(self, 'fields', []), table_map, self._conn_map(), getattr(self, 'rules', []), default_tables=self._rx_defaults())}"
+        group_clause = _build_group_clause(group_by, columns, getattr(self, 'fields', []), table_map, self._conn_map(), getattr(self, 'rules', []), self._rx_defaults())
+        try:
+            if _ev_groups:
+                _gq = ", ".join(_ev_groups)
+                group_clause = ((group_clause + ", " + _gq) if group_clause else " GROUP BY " + _gq)
+        except Exception:
+            pass
+        # ORA-00937/00979: أي بند عارٍ في SELECT (CASE محسوب...) يجب أن يكون
+        # في GROUP BY — يُستكمل تلقائياً بنص التعبير المحلول (سياسة العروض نفسها)
+        try:
+            group_clause = _extend_classic_group_by(group_clause, select_clause)
+        except Exception:
+            pass
+        try:
+            self._last_group_clause = group_clause
+        except Exception:
+            pass
         order_clause = _build_order_by(sort, columns=columns)
         try:
             _ms_base = _is_mssql_db(plan.get("base_db"))
@@ -7787,6 +9795,12 @@ class RMLReportEngine:
         for col, vals in column_filters.items():
             if vals:
                 filters.append({"field": col, "op": "in", "value": vals})
+        # خصائص الأعمدة hide_blank/hide_zero → إخفاء السجل (تصفية صفوف)
+        try:
+            filters = list(filters or []) + self._hide_empty_filters()
+        except Exception:
+            pass
+        self._active_filters = filters
 
         sort = payload.get("sort") or payload.get("activeSort")
         # Handle legacy: sort as {column, direction}
@@ -7795,7 +9809,14 @@ class RMLReportEngine:
 
         page = payload.get("page") or payload.get("currentPage") or 1
         page_size = payload.get("pageSize") or payload.get("page_size") or 50
-        group_by = payload.get("groupBy") or payload.get("group_by") or payload.get("activeGroupColumn")
+        group_by = payload.get("groupBys") or payload.get("group_bys") or payload.get("groupBy") or payload.get("group_by") or payload.get("activeGroupColumn")
+        if not _normalize_group_bys(group_by):
+            try:
+                _persisted_gb = self.compiler.group_bys() if hasattr(self, "compiler") and hasattr(self.compiler, "group_bys") else []
+            except Exception:
+                _persisted_gb = []
+            if _persisted_gb:
+                group_by = [g for g in _persisted_gb if isinstance(g, dict) and (g.get("field") or g.get("cond"))]
         active_table = payload.get("activeTable") or payload.get("table")
 
         sql, params, _strip = self._compile_wrapped(
@@ -7888,6 +9909,26 @@ class RMLReportEngine:
                     return False
 
                 if not any(_matches_rp(f) for f in active_val_filters):
+                    # ربط متغير ديناميكي (&VAR): القيمة الافتراضية — للمدخل أو
+                    # للمتغير — تُغني عن الإدخال دائماً (لا انتظار مع وجود افتراضي)
+                    try:
+                        _vlink = str(getattr(rp, "var", None) or (rp.get("var") if isinstance(rp, dict) else "") or "").strip()
+                    except Exception:
+                        _vlink = ""
+                    if _vlink:
+                        try:
+                            _dv = str(getattr(rp, "default_value", None) or (rp.get("default_value") if isinstance(rp, dict) else "") or "").strip()
+                        except Exception:
+                            _dv = ""
+                        if _dv:
+                            continue
+                        try:
+                            _vdefs = self._view_var_defs() if hasattr(self, "_view_var_defs") else {}
+                        except Exception:
+                            _vdefs = {}
+                        _vd = (_vdefs or {}).get(_vlink.upper()) or {}
+                        if str(_vd.get("default") or "").strip():
+                            continue
                     return True
             return False
         return not active_val_filters
@@ -7910,7 +9951,9 @@ class RMLReportEngine:
         self._active_filters = filters
         try:
             if payload.get("distributed") or getattr(self, "_force_distributed", False):
-                return self._execute_distributed(payload)
+                _conns = self.compiler.connections() if hasattr(self, "compiler") and hasattr(self.compiler, "connections") else []
+                if len(_conns) > 1 or getattr(self, "_force_distributed", False):
+                    return self._execute_distributed(payload)
         except Exception:
             pass
         try:
@@ -7922,12 +9965,24 @@ class RMLReportEngine:
         for col, vals in column_filters.items():
             if vals:
                 filters.append({"field": col, "op": "in", "value": vals})
+        # خصائص الأعمدة hide_blank/hide_zero → إخفاء السجل (تصفية صفوف، لا تفريغ خلايا)
+        try:
+            filters = list(filters or []) + self._hide_empty_filters()
+        except Exception:
+            pass
         self._active_filters = filters
 
         sort = payload.get("sort") or payload.get("activeSort")
         page = payload.get("page") or payload.get("currentPage") or 1
         page_size = payload.get("pageSize") or payload.get("page_size") or 50
-        group_by = payload.get("groupBy") or payload.get("group_by") or payload.get("activeGroupColumn")
+        group_by = payload.get("groupBys") or payload.get("group_bys") or payload.get("groupBy") or payload.get("group_by") or payload.get("activeGroupColumn")
+        if not _normalize_group_bys(group_by):
+            try:
+                _persisted_gb = self.compiler.group_bys() if hasattr(self, "compiler") and hasattr(self.compiler, "group_bys") else []
+            except Exception:
+                _persisted_gb = []
+            if _persisted_gb:
+                group_by = [g for g in _persisted_gb if isinstance(g, dict) and (g.get("field") or g.get("cond"))]
         active_table = payload.get("activeTable") or payload.get("table")
 
         # Document Report Guard: لا يجلب التقرير شيئاً إلا بعد إدخال/اختيار عوامل تصفية مخصصة
@@ -7946,6 +10001,26 @@ class RMLReportEngine:
                     "message": "لا بيانات بعد",
                     "metadata": self.metadata or {},
                 }
+        # Dynamic-variable Guard: &VAR بلا قيمة مدخلة ولا افتراضية → تقرير فارغ
+        # بدل خطأ قاعدة البيانات — حتى إدخال/اختيار القيمة من المدخل المرتبط.
+        try:
+            _var_missing = self._view_vars_missing_for(filters)
+        except Exception:
+            _var_missing = set()
+        if _var_missing:
+            _vnames = ", ".join("&" + _n for _n in sorted(_var_missing))
+            return {
+                "rows": [],
+                "total": 0,
+                "page": 1,
+                "pageSize": page_size,
+                "columns": [c.to_dict() if hasattr(c, "to_dict") else c for c in (self.columns or [])],
+                "sql": "-- بانتظار إدخال القيم",
+                "required_inputs_missing": True,
+                "awaiting_vars": sorted(_var_missing),
+                "message": "بانتظار إدخال القيم: " + _vnames,
+                "metadata": self.metadata or {},
+            }
 
         # Compile SQL (computed-column filters wrapped in an outer query)
         _t_plan = _tmod.time()
@@ -7963,6 +10038,10 @@ class RMLReportEngine:
         sql, params = self._compile_sql2(
             exec_plan, base_f, sort, 1 if _need_all else page,
             "all" if _need_all else page_size, group_by, extra)
+        try:
+            _main_group_clause = self._last_group_clause
+        except Exception:
+            _main_group_clause = None
         _gsql, _gparams, _gwpre, _gwempty = (sql, params, False, False)
         if _deferred:
             # E-driven pre-filter (and early-empty): the condition narrows
@@ -7991,7 +10070,11 @@ class RMLReportEngine:
         where_clause = self._apply_general_where(where_clause, exec_plan["table_map"], self._conn_map(),
                                                    exec_plan.get("gw_base"))
         from_q = exec_plan["from_q"]
-        group_clause = f" GROUP BY {_resolve_filter_field(group_by, exec_plan['columns'], getattr(self, 'fields', []), exec_plan['table_map'], self._conn_map(), getattr(self, 'rules', []), default_tables=self._rx_defaults())}" if group_by else ""
+        try:
+            group_clause = (_main_group_clause if str(_main_group_clause or "").strip()
+                            else _build_group_clause(group_by, exec_plan['columns'], getattr(self, 'fields', []), exec_plan['table_map'], self._conn_map(), getattr(self, 'rules', []), self._rx_defaults()))
+        except Exception:
+            group_clause = _build_group_clause(group_by, exec_plan['columns'], getattr(self, 'fields', []), exec_plan['table_map'], self._conn_map(), getattr(self, 'rules', []), self._rx_defaults())
         if outer_f:
             _ow, _op = _build_outer_where(outer_f, outer_cols, rules=getattr(self, "rules", []))
             if _ow:
@@ -8003,7 +10086,7 @@ class RMLReportEngine:
                 count_sql_simple = f"SELECT COUNT(*) as cnt FROM ({_inner}) t WHERE {_ow[len(' WHERE '):]}"
                 count_params_simple = _ip
             else:
-                count_sql_simple = f"SELECT COUNT(*) as cnt FROM {from_q}{where_clause}{group_clause}"
+                count_sql_simple = _count_over_groups(from_q, where_clause, group_clause)
                 count_params_simple = where_params
         else:
             _need_distinct_count = False
@@ -8026,7 +10109,7 @@ class RMLReportEngine:
                 count_sql_simple = f"SELECT COUNT(*) as cnt FROM ({_csql}) t"
                 count_params_simple = _cp
             else:
-                count_sql_simple = f"SELECT COUNT(*) as cnt FROM {from_q}{where_clause}{group_clause}"
+                count_sql_simple = _count_over_groups(from_q, where_clause, group_clause)
                 count_params_simple = where_params
 
         # Execute with robust resource management
@@ -8141,8 +10224,18 @@ class RMLReportEngine:
                                  getattr(c, "alias", None) or getattr(c, "name", None))
                                 for c in (exec_plan.get("columns") or [])
                                 if getattr(c, "col_refname", None) or getattr(c, "colRefname", None)]
+                    _cname_pairs = [(getattr(c, "name", None), getattr(c, "alias", None))
+                                    for c in (exec_plan.get("columns") or [])
+                                    if getattr(c, "name", None)]
                     for _r in raw_rows:
                         _row_d = {k: _fmt_cell(v) for k, v in _r.items()}
+                        for _cn, _ca in _cname_pairs:
+                            if _cn and _cn not in _row_d:
+                                _val = _row_d.get(_ca)
+                                if _val is None and _ca:
+                                    _val = _row_d.get(str(_ca).lower())
+                                if _val is not None:
+                                    _row_d[_cn] = _val
                         for _rn, _al in _refcols:
                             if _rn:
                                 _val = _row_d.get(_al)
@@ -8308,6 +10401,7 @@ class RMLReportEngine:
             "sql": sql,
             "params": params,
             "gw_post_filtered": bool(_deferred),
+            "gw_pruned": exec_plan.get("gw_pruned") or [],
             "warnings": self._render_api_warnings(),
             "columns": [c.to_dict() for c in self.columns],
             "fields": [f.to_dict() for f in getattr(self, "fields", [])],
@@ -9175,6 +11269,11 @@ class RMLReportEngine:
         from collections import defaultdict
         self._report_progress({"stage": "distributed", "text": "بدء التنفيذ الموزع…"})
         filters = payload.get("filters") or payload.get("activeFilters") or []
+        # خصائص الأعمدة hide_blank/hide_zero → إخفاء السجل (تصفية صفوف)
+        try:
+            filters = list(filters or []) + self._hide_empty_filters()
+        except Exception:
+            pass
         self._active_filters = filters
         sort = payload.get("sort") or payload.get("activeSort")
         page = int(payload.get("page") or 1)
@@ -9205,6 +11304,8 @@ class RMLReportEngine:
 
         # Identify secondaries: tables in columns + links not equal to base.
         sec_specs = self._distributed_secondary_specs(exec_plan, base_norm)
+        if not sec_specs:
+            raise ValueError("لا توجد جداول باتصالات أخرى — نفّذ التقرير بالمسار العادي.")
         # Build SQL for primary (filter-only, no JOIN with secondaries).
         primary_sql, primary_params, _ = self._compile_distributed_primary(
             exec_plan, base_norm, filters)
@@ -9909,6 +12010,26 @@ class RMLReportEngine:
                 clauses.append(f"{qcol} IS NULL")
             elif op in ("is_not_null", "notnull", "not_null"):
                 clauses.append(f"{qcol} IS NOT NULL")
+            elif op in ("not_blank", "filled", "is_not_blank", "notblank", "no_blank"):
+                # إخفاء السجل الفارغ على الجدول البعيد (hide_blank) — بلا ليترال ''.
+                # الرقمي/التاريخي: IS NOT NULL فقط (رخيص).
+                _rt = str(_dtype2 or "").upper()
+                if any(k in _rt for k in ("NUMBER", "INTEGER", "SMALLINT", "BIGINT", "TINYINT",
+                                          "DECIMAL", "NUMERIC", "FLOAT", "DOUBLE", "REAL", "MONEY",
+                                          "DATE", "TIME", "STAMP")) or re.search(r"\bINT\b", _rt):
+                    clauses.append(f"({qcol} IS NOT NULL)")
+                else:
+                    clauses.append(f"(CONCAT(LTRIM(RTRIM(CAST({qcol} AS VARCHAR(4000)))), '|') <> '|')")
+            elif op in ("not_zero", "nonzero", "is_not_zero", "notzero", "no_zero"):
+                # إخفاء السجل الصفري على الجدول البعيد (hide_zero) — نوع العمود البعيد معروف
+                _rt = str(_dtype2 or "").upper()
+                _rnum = bool(re.search(r"\bINT\b", _rt)) or any(
+                    k in _rt for k in ("NUMBER", "INTEGER", "SMALLINT", "BIGINT", "TINYINT",
+                                       "DECIMAL", "NUMERIC", "FLOAT", "DOUBLE", "REAL", "MONEY"))
+                if _rnum:
+                    clauses.append(f"({qcol} <> 0)")
+                else:
+                    clauses.append(f"(CONCAT(LTRIM(RTRIM(CAST({qcol} AS VARCHAR(4000)))), '|') NOT IN ('|', '0|'))")
             else:
                 clauses.append(f"{qcol}={_db(':'+p, f.get('value'))}")
                 params[p] = f.get("value")

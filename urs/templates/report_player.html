@@ -106,7 +106,7 @@
 {% block main %}
     <!-- Main Report Player — All features from provided HTML integrated -->
     <div class="flex-1 flex flex-col overflow-hidden min-w-0">
-    <header class="bg-white border-b border-slate-200 px-4 py-1.5 flex items-center justify-between sticky top-0 z-30 shadow-sm shrink-0">
+    <header class="bg-white border-b border-slate-200 px-4 py-1.5 flex items-center justify-between sticky top-0 z-40 shadow-sm shrink-0">
         <!-- Right: Report Title (dynamic from Django RML) -->
         <div class="flex items-center gap-3">
             <div class="w-8 h-8 bg-indigo-600 rounded-xl flex items-center justify-center text-white shadow-md shadow-indigo-100">
@@ -164,7 +164,7 @@
     </header>
 
     <!-- Mobile search bar (SearchEngine unified) -->
-    <div class="lg:hidden bg-white border-b border-slate-200 px-4 py-2 flex flex-col gap-1">
+    <div class="lg:hidden bg-white border-b border-slate-200 px-4 py-2 flex flex-col gap-1 relative z-35">
         <div id="searchEngineBoxMobile" class="w-full"></div>
         <div id="activeTagsListMobile" class="flex flex-wrap gap-1.5 max-h-[76px] overflow-y-auto custom-scroll"></div>
     </div>
@@ -218,7 +218,7 @@
             </div>
 
             <!-- Permanent Sub-Header for Document Reports (هيدر فرعي دائم للتقرير المستندي) -->
-            <div id="docRequiredHeader" class="hidden bg-slate-50 border-b border-slate-200 px-4 py-2 text-xs shrink-0 z-10 transition-all shadow-2xs">
+            <div id="docRequiredHeader" class="hidden bg-slate-50 border-b border-slate-200 px-4 py-2 text-xs shrink-0 relative z-25 transition-all shadow-2xs">
                 <div class="flex flex-wrap items-center justify-between gap-2.5">
                     <div class="flex items-center gap-2 text-xs font-bold text-slate-800 shrink-0">
                         <span class="w-6 h-6 rounded-lg bg-sky-100 text-sky-700 flex items-center justify-center text-[11px]"><i class="fa-solid fa-file-invoice"></i></span>
@@ -349,7 +349,7 @@
     </div>
 
     <!-- Tag Editor Modal (edit one filter factor) -->
-    <div id="tagEditorModal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-50 overflow-y-auto p-4" onclick="if(event.target===this) closeTagEditor()">
+    <div id="tagEditorModal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-50 overflow-y-auto p-4">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden m-auto max-h-[92vh] overflow-y-auto custom-scroll">
             <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-slate-50">
                 <h3 class="text-sm font-bold text-slate-800 flex items-center gap-2"><i class="fa-solid fa-pen-to-square text-indigo-600"></i> تعديل العامل</h3>
@@ -422,7 +422,7 @@
     </div>
 
     <!-- Save document to my_docs -->
-    <div id="saveDocModal" class="hidden fixed inset-0 bg-slate-900/50 z-[70] flex items-center justify-center p-4" onclick="if(event.target===this) closeSaveDocModal()">
+    <div id="saveDocModal" class="hidden fixed inset-0 bg-slate-900/50 z-[70] flex items-center justify-center p-4">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
             <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-emerald-50">
                 <h3 class="text-sm font-bold text-slate-800 flex items-center gap-2"><i class="fa-solid fa-floppy-disk text-emerald-600"></i> حفظ في مستنداتي</h3>
@@ -440,7 +440,7 @@
     </div>
 
     <!-- Columns visibility manager -->
-    <div id="colsManagerModal" class="hidden fixed inset-0 bg-slate-900/50 z-[60] flex items-center justify-center p-4" onclick="if(event.target===this) closeColsManager()">
+    <div id="colsManagerModal" class="hidden fixed inset-0 bg-slate-900/50 z-[60] flex items-center justify-center p-4">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden max-h-[85vh] flex flex-col">
             <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-slate-50 shrink-0">
                 <h3 class="text-sm font-bold text-slate-800 flex items-center gap-2"><i class="fa-solid fa-table-columns text-indigo-600"></i> إظهار / إخفاء الأعمدة</h3>
@@ -449,7 +449,7 @@
             <div id="colsManagerList" class="flex-1 overflow-y-auto custom-scroll p-3 space-y-1 text-xs"></div>
             <div class="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-2 shrink-0">
                 <button onclick="showAllCols()" class="px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold">إظهار الكل</button>
-                <button onclick="closeColsManager()" class="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold">تم</button>
+                <button onclick="applyColsManager()" class="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold">تم</button>
             </div>
         </div>
     </div>
@@ -677,6 +677,10 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
         let hiddenCols = new Set();
         let userHiddenCols = new Set();
         let userShownCols = new Set();
+        // لقطة أعمدة نافذة الإظهار/الإخفاء (للربط بالفهرس بدل الاسم)
+        let colsManagerCache = [];
+        let colsManagerBound = false;
+        function cmEsc(s){ try{ return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }catch(e){ return ''; } }
         function hiddenStoreKey(){
             try{ return 'rml_hidden_' + (currentApp || 'app') + '_' + (currentRml || 'rml'); }
             catch(e){ return 'rml_hidden_default'; }
@@ -898,22 +902,53 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                     // expression-only custom params fall back to their ref.
                     alias: p.column || p.field || p.name || p.param_refname || ('dp_' + idx),
                     label: (p.label || p.display || '').trim() || ((p.column && !/^col_\d+$/i.test(p.column) && !/^dp_\d+$/i.test(p.column)) ? p.column : '') || ('مدخل ' + (idx + 1)),
-                    kind: (p.type === 'select' || (Array.isArray(p.options) && p.options.length)) ? 'select' : (p.type === 'datetime' ? 'date' : (p.type || 'text')),
-                    op: p.op || (p.type === 'date' ? 'between' : (p.type === 'number' || p.type === 'select') ? 'equals' : 'contains'),
+                    kind: (function(){
+                        const _ev = String(p.event || '').trim().toLowerCase();
+                        if(_ev === 'group' || _ev === 'grouping' || _ev === 'variable' || _ev === 'var' || _ev === 'varcol') return 'select';
+                        return (p.type === 'select' || (Array.isArray(p.options) && p.options.length)) ? 'select' : (p.type === 'datetime' ? 'date' : (p.type || 'text'));
+                    })(),
+                    op: (function(){
+                        const _ev = String(p.event || '').trim().toLowerCase();
+                        if(_ev === 'group' || _ev === 'grouping') return 'group_by';
+                        if(_ev === 'variable' || _ev === 'var' || _ev === 'varcol') return 'var_select';
+                        return p.op || (p.type === 'date' ? 'between' : (p.type === 'number' || p.type === 'select') ? 'equals' : 'contains');
+                    })(),
+                    event: (function(){
+                        const _ev = String(p.event || '').trim().toLowerCase();
+                        if(_ev === 'group' || _ev === 'grouping') return 'group';
+                        if(_ev === 'variable' || _ev === 'var' || _ev === 'varcol') return 'variable';
+                        return 'filter';
+                    })(),
                     required: (p.required === undefined ? true : !!(p.required && p.required !== 'false' && p.required !== '0')),
                     defaultValue: p.default_value || p.defaultValue || '',
                     source: p.source || {connection: p.src_conn || p.srcConn || '', table: p.src_table || p.srcTable || '', column: p.src_column || p.srcColumn || ''},
                     searchable: (p.searchable === undefined || p.searchable === null) ? true : (['0', 'false', 'no', 'off'].indexOf(String(p.searchable).toLowerCase()) < 0),
                     refname: p.param_refname || p.paramRefname || p.refname || p.ref_name || '',
-                    options: (Array.isArray(p.options) ? p.options : (typeof p.options === 'string' && p.options ? p.options.split(',').map(s=>s.trim()).filter(Boolean) : [])).map(item => {
-                        if(typeof item === 'object' && item !== null) return item;
-                        const s = String(item).trim();
-                        if(s.includes(':')) {
-                            const parts = s.split(':');
-                            return {name: parts[0].trim(), value: parts.slice(1).join(':').trim()};
+                    var: p.var || '',
+                    src_mode: p.src_mode || p.srcMode || '',
+                    src_value_expr: p.src_value_expr || p.srcValueExpr || '',
+                    src_label_expr: p.src_label_expr || p.srcLabelExpr || '',
+                    var: p.var || '',
+                    event: (function(){
+                        const _ev = String(p.event || '').trim().toLowerCase();
+                        if(_ev === 'group' || _ev === 'grouping') return 'group';
+                        if(_ev === 'variable' || _ev === 'var' || _ev === 'varcol') return 'variable';
+                        return 'filter';
+                    })(),
+                    group_vars: p.group_vars || p.groupVars || [],
+                    var_sources: p.var_sources || p.varSources || [],
+                    target_column: p.target_column || p.targetColumn || '',
+                    group_expr: p.group_expr || p.groupExpr || '',
+                    options: (function(){
+                        const _ev = String(p.event || '').trim().toLowerCase();
+                        if(_ev === 'group' || _ev === 'grouping'){
+                            return (p.group_vars || p.groupVars || []).map(g=>({name: (g && (g.label || g.column || g.n)) || '', value: (g && (g.label || g.column || g.n)) || ''}));
                         }
-                        return {name: s, value: s};
-                    }),
+                        if(_ev === 'variable' || _ev === 'var' || _ev === 'varcol'){
+                            return (p.var_sources || p.varSources || []).map(s=>({name: (s && (s.label || s.n)) || '', value: (s && (s.label || s.n)) || ''}));
+                        }
+                        return (Array.isArray(p.options) ? p.options : (typeof p.options === 'string' && p.options ? p.options.split(',').map(s=>s.trim()).filter(Boolean) : []));
+                    })(),
                     is_custom: !!(p.is_custom || p.isCustom),
                     no_filter: !!(p.no_filter || p.noFilter)
                 }));
@@ -990,24 +1025,50 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
         window._docSrcTimers = window._docSrcTimers || {};
         function docParamSource(f){
             try{
+                const sw = String((f && (f.src_where || f.srcWhere || f.where)) || '').trim();
+                const agw = (f && (f.apply_general_where !== undefined && f.apply_general_where !== null))
+                    ? (['0', 'false', 'no', 'off'].indexOf(String(f.apply_general_where).toLowerCase()) < 0)
+                    : ((f && (f.applyGeneralWhere !== undefined && f.applyGeneralWhere !== null))
+                        ? (['0', 'false', 'no', 'off'].indexOf(String(f.applyGeneralWhere).toLowerCase()) < 0)
+                        : true);
+                const ve = String((f && (f.src_value_expr || f.srcValueExpr)) || '').trim();
+                if(ve){
+                    return {value_expr: ve,
+                            label_expr: String((f && (f.src_label_expr || f.srcLabelExpr)) || '').trim(),
+                            app: (typeof currentApp !== 'undefined' ? currentApp : ''),
+                            file: (typeof currentRml !== 'undefined' ? currentRml : ''),
+                            src_where: sw,
+                            apply_general_where: agw};
+                }
                 const s = (f && f.source) || {};
-                const c = s.connection || f.src_conn || f.srcConn || '';
                 const t = s.table || f.src_table || f.srcTable || '';
                 const col = s.column || f.src_column || f.srcColumn || '';
-                if(c && t && col) return {connection: String(c), table: String(t), column: String(col)};
+                let c = s.connection || f.src_conn || f.srcConn || '';
+                if(!c && t){
+                    try{
+                        const md = (lastApiData && lastApiData.metadata) || (typeof DJANGO_RML_METADATA !== 'undefined' ? DJANGO_RML_METADATA : {});
+                        const flds = md.fields || [];
+                        const match = flds.find(x => String(x.table_source || x.tableSource || '').trim().toLowerCase() === String(t).trim().toLowerCase());
+                        if(match && (match.conn_id || match.connection_id)) c = String(match.conn_id || match.connection_id);
+                        else if(md.connection) c = String(md.connection);
+                    }catch(e){}
+                }
+                if(t && col) return {connection: String(c || ''), table: String(t), column: String(col), src_where: sw, apply_general_where: agw};
             }catch(e){}
             return null;
         }
         function docSrcEscA(a){ return String(a == null ? '' : a).replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }
         function docSrcEscH(s){ return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
-        function docSrcComboHTML(f, curV, attrs, inputCls){
+        function docSrcComboHTML(f, curV, attrs, inputCls, curLabel){
             const a = docSrcEscA(f.alias);
+            const disp = (curLabel !== undefined && curLabel !== null && String(curLabel) !== '') ? String(curLabel) : String(curV ?? '');
+            const dval = (disp !== String(curV ?? '')) ? ` data-val="${docSrcEscH(curV ?? '')}"` : '';
             return `<div class="relative flex-1 min-w-[150px]" data-docsrc-wrap="${docSrcEscH(f.alias)}">`
-                + `<input ${attrs} value="${docSrcEscH(curV)}" type="text" autocomplete="off" placeholder="ابحث واختر..." class="${inputCls}"`
+                + `<input ${attrs} value="${docSrcEscH(disp)}"${dval} type="text" autocomplete="off" placeholder="ابحث واختر..." class="${inputCls}"`
                 + ` oninput="docSrcOnInput('${a}', this)" onfocus="docSrcOnInput('${a}', this, true)"`
                 + ` onkeydown="if(event.key==='Enter'){docSrcEnter('${a}', this);} if(event.key==='Escape'){docSrcHide('${a}');}">`
                 + `<button type="button" onclick="docSrcToggle('${a}', this)" title="عرض القيم" class="absolute left-1 top-1/2 -translate-y-1/2 text-slate-400 hover:text-indigo-600 px-1"><i class="fa-solid fa-chevron-down text-[10px]"></i></button>`
-                + `<div class="docsrc-list hidden absolute z-50 mt-1 w-full max-h-56 overflow-y-auto custom-scroll bg-white border border-slate-200 rounded-xl shadow-xl text-xs"></div>`
+                + `<div class="docsrc-list hidden absolute z-[100] mt-1 w-full max-h-56 overflow-y-auto custom-scroll bg-white border border-slate-200 rounded-xl shadow-xl text-xs"></div>`
                 + `</div>`;
         }
         function docSrcWrap(alias, el){
@@ -1019,17 +1080,33 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                 return document.querySelector(`[data-docsrc-wrap="${CSS.escape(alias)}"]`);
             }catch(e){ return null; }
         }
+        function docSrcNorm(v){ return (v && typeof v === 'object') ? {value: String(v.value ?? ''), label: String(v.label ?? v.value ?? '')} : {value: String(v ?? ''), label: String(v ?? '')}; }
+        function docSrcMergeOpts(staticOpts, vals){
+            // دمج الخيارات الثابتة مع الديناميكية: الثابت أولاً، والمكرر (بنفس القيمة المُرسلة) يُحذف
+            const normS = (o)=>((o && typeof o === 'object') ? {value: String(o.name ?? o.value ?? ''), label: String(o.value || o.label || o.display || o.name || '')} : {value: String(o ?? ''), label: String(o ?? '')});
+            const out = [], seen = {};
+            (staticOpts || []).map(normS).concat((vals || []).map(docSrcNorm)).forEach(it=>{
+                const k = String(it.value ?? '');
+                if(seen[k]) return;
+                seen[k] = 1;
+                out.push(it);
+            });
+            return out;
+        }
         function docSrcPaint(alias, wrap, vals, totalNote){
             if(!wrap) return;
             const list = wrap.querySelector('.docsrc-list');
             if(!list) return;
-            window._docSrcLast[alias] = (vals || []).slice();
+            const items = docSrcMergeOpts(
+                (window._docSrcDef[alias] && window._docSrcDef[alias].staticOpts) || [],
+                vals);
+            window._docSrcLast[alias] = items;
             const a = docSrcEscA(alias);
             let h = '';
-            if(!vals || !vals.length){
+            if(!items.length){
                 h = '<div class="px-3 py-2.5 text-slate-400">لا توجد قيم مطابقة</div>';
             } else {
-                h = vals.map((v, i)=>`<button type="button" onclick="docSrcPick(this, '${a}', ${i})" class="w-full text-right px-3 py-1.5 hover:bg-indigo-50 hover:text-indigo-800 truncate" title="${docSrcEscH(v)}">${docSrcEscH(v)}</button>`).join('');
+                h = items.map((it, i)=>`<button type="button" onclick="docSrcPick(this, '${a}', ${i})" class="w-full text-right px-3 py-1.5 hover:bg-indigo-50 hover:text-indigo-800 truncate" title="${docSrcEscH(it.label)}">${docSrcEscH(it.label)}</button>`).join('');
                 if(totalNote) h += `<div class="px-3 py-1.5 text-[10px] text-slate-400 border-t border-slate-100">${docSrcEscH(totalNote)}</div>`;
             }
             list.innerHTML = h;
@@ -1042,8 +1119,20 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
             if(list && !list.classList.contains('hidden') && (q === undefined || q === null)) { /* keep open, refresh */ }
             if(list) { list.innerHTML = '<div class="px-3 py-2.5 text-slate-400"><i class="fa-solid fa-spinner fa-spin"></i> جارٍ البحث...</div>'; list.classList.remove('hidden'); }
             try{
+                const gw = (lastApiData && (lastApiData.general_where || lastApiData.generalWhere)) || '';
+                const body = {
+                    search: q || '',
+                    limit: 50,
+                    app: (src.app || (typeof currentApp !== 'undefined' ? currentApp : '')),
+                    file: (src.file || (typeof currentRml !== 'undefined' ? currentRml : '')),
+                    general_where: gw,
+                    src_where: src.src_where || '',
+                    apply_general_where: (src.apply_general_where !== false)
+                };
+                if(src.value_expr){ body.value_expr = src.value_expr; if(src.label_expr) body.label_expr = src.label_expr; }
+                else { body.connection = src.connection; body.table = src.table; body.column = src.column; }
                 const res = await fetch('/api/rml/values-source', {method: 'POST', headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({connection: src.connection, table: src.table, column: src.column, search: q || '', limit: 50})});
+                    body: JSON.stringify(body)});
                 const d = await res.json().catch(()=>({}));
                 if(!res.ok) throw new Error((d && d.error) || ('HTTP ' + res.status));
                 docSrcPaint(alias, wrap, d.values || [], (d.truncated ? ('أول ' + (d.values || []).length + ' قيمة — ضيّق البحث') : ''));
@@ -1054,6 +1143,7 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
         function docSrcOnInput(alias, el, focusOnly){
             const wrap = docSrcWrap(alias, el);
             if(!wrap) return;
+            if(el && !focusOnly){ try{ delete el.dataset.val; }catch(e){} }
             clearTimeout(window._docSrcTimers[alias]);
             const q = el ? (el.value || '') : '';
             const def = (window._docSrcDef || {})[alias] || {};
@@ -1099,15 +1189,15 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
         function docSrcPick(btn, alias, idx){
             try{
                 const vals = window._docSrcLast[alias] || [];
-                const v = vals[idx];
-                if(v === undefined) return;
+                const it = docSrcNorm(vals[idx]);
+                if(vals[idx] === undefined) return;
                 const wrap = btn ? btn.closest('[data-docsrc-wrap]') : docSrcWrap(alias, null);
                 if(!wrap) return;
                 const inp = wrap.querySelector('input');
-                if(inp) inp.value = String(v);
+                if(inp){ inp.value = it.label; try{ inp.dataset.val = it.value; }catch(e){} }
                 docSrcHide(alias);
                 if(inp && inp.closest && inp.closest('#docHeaderControls')){
-                    docHeaderSelectChanged(alias, String(v));
+                    docHeaderSelectChanged(alias, it.value);
                 }
             }catch(e){}
         }
@@ -1141,7 +1231,7 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
             docHeaderFetch(true, alias);
         }
         function docHeaderClear(){
-            document.querySelectorAll('#docHeaderControls input').forEach(inp=>{ inp.value = ''; });
+            document.querySelectorAll('#docHeaderControls input').forEach(inp=>{ inp.value = ''; try{ delete inp.dataset.val; }catch(e){} });
             document.querySelectorAll('#docHeaderControls select[data-dhf]').forEach(sel=>{ sel.value = ''; });
             resetAllFilters();
             if(isDocType()){
@@ -1172,9 +1262,14 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                 tit.textContent = 'مدخلات التقرير:';
             }
             const keep = {};
+            const keepLbl = {};
             try{
                 document.querySelectorAll('#docHeaderControls [data-dhf]').forEach(el=>{
-                    keep[el.getAttribute('data-dhf') + '||' + el.getAttribute('data-dht')] = el.value;
+                    const k = el.getAttribute('data-dhf') + '||' + el.getAttribute('data-dht');
+                    let dv = '';
+                    try{ dv = (el.dataset && el.dataset.val !== undefined) ? String(el.dataset.val) : ''; }catch(e){}
+                    keep[k] = (dv !== '') ? dv : el.value;
+                    try{ keepLbl[k] = (dv !== '' && el.value !== dv) ? el.value : ''; }catch(e){}
                 });
             }catch(e){}
 
@@ -1192,8 +1287,9 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
 
             wrap.innerHTML = fields.map((f)=>{
                 const op = f.op || docDefOp(f.kind);
+                const isRange = (op === 'between' || op === 'not_between' || op === 'between_dates');
                 let valInput = '';
-                if(f.kind === 'date' && op === 'between'){
+                if(f.kind === 'date' && isRange){
                     const vFrom = keep[f.alias + '||from'] ?? findActiveDocVal(f, 'from') ?? '';
                     const vTo = keep[f.alias + '||to'] ?? findActiveDocVal(f, 'to') ?? '';
                     valInput = `<div class="flex items-center gap-1">
@@ -1201,7 +1297,7 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                         <span class="text-slate-400 text-[10px]">إلى</span>
                         <input data-dhf="${f.alias}" data-dht="to" value="${String(vTo).replace(/"/g, '&quot;')}" type="date" class="bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-indigo-500 w-32" onchange="docHeaderSelectChanged('${f.alias}', this.value)" onkeydown="if(event.key==='Enter') docHeaderSelectChanged('${f.alias}', this.value)">
                     </div>`;
-                } else if(f.kind === 'number' && op === 'between'){
+                } else if(f.kind === 'number' && isRange){
                     const vFrom = keep[f.alias + '||from'] ?? findActiveDocVal(f, 'from') ?? '';
                     const vTo = keep[f.alias + '||to'] ?? findActiveDocVal(f, 'to') ?? '';
                     valInput = `<div class="flex items-center gap-1">
@@ -1212,7 +1308,8 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                 } else if(f.kind === 'select' || (Array.isArray(f.options) && f.options.length)){
                     let curV = keep[f.alias + '||single'] ?? findActiveDocVal(f, 'single') ?? f.defaultValue ?? '';
                     const _opts = (f && Array.isArray(f.options) && f.options.length) ? f.options : null;
-                    if(_opts){
+                    const _dynSrc = docParamSource(f);
+                    if(_opts && !_dynSrc){
                         if(curV === '' && _opts.length){
                             const f0 = _opts[0];
                             curV = (typeof f0 === 'object' && f0 !== null) ? (f0.name || f0.value || '') : String(f0);
@@ -1226,11 +1323,12 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                         }).join('');
                         valInput = `<select data-dhf="${f.alias}" data-dht="single" class="bg-white border border-slate-200 rounded-lg px-2.5 py-1 text-xs focus:outline-none focus:border-indigo-500 min-w-[150px] font-medium" onchange="docHeaderSelectChanged('${f.alias}', this.value)">${optHtml}</select>`;
                     } else {
-                        const _src = docParamSource(f);
+                        const _src = _dynSrc;
                         if(_src){
                             window._docSrcDef[f.alias] = _src;
                             window._docSrcDef[f.alias].searchable = (f.searchable !== false);
-                            valInput = docSrcComboHTML(f, curV, `data-dhf="${f.alias}" data-dht="single"`, 'w-full bg-white border border-slate-200 rounded-lg pl-7 pr-2.5 py-1 text-xs focus:outline-none focus:border-indigo-500 font-medium');
+                            window._docSrcDef[f.alias].staticOpts = _opts;
+                            valInput = docSrcComboHTML(f, curV, `data-dhf="${f.alias}" data-dht="single"`, 'w-full bg-white border border-slate-200 rounded-lg pl-7 pr-2.5 py-1 text-xs focus:outline-none focus:border-indigo-500 font-medium', keepLbl[f.alias + '||single']);
                         } else {
                             const cacheKey = (currentApp || '') + '::' + (currentRml || '') + '::' + f.alias;
                             const isLoaded = !!(window._docDistinctCache && window._docDistinctCache[cacheKey]);
@@ -1271,7 +1369,8 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                 const hasAf = activeFilters.some(a => a && (a.field === f.alias || (f.refname && a.refname === f.refname)));
                 if(!hasAf){
                     const inp = document.querySelector(`#docHeaderControls [data-dhf="${f.alias}"][data-dht="single"]`);
-                    const val = inp ? (inp.value || '').trim() : '';
+                    let val = inp ? (inp.value || '').trim() : '';
+                    try{ const dv = (inp && inp.dataset && inp.dataset.val !== undefined) ? String(inp.dataset.val).trim() : ''; if(dv !== '') val = dv; }catch(e){}
                     if(val !== ''){
                         activeFilters.push({field: f.alias, op: op, value: val, refname: f.refname || ''});
                     }
@@ -1288,11 +1387,13 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                 const op = f.op || docDefOp(f.kind);
                 const gv = (t)=>{
                     const el = document.querySelector(`#docHeaderControls [data-dhf="${f.alias}"][data-dht="${t}"]`);
-                    return el ? (el.value || '').trim() : '';
+                    if(!el) return '';
+                    try{ const dv = (el.dataset && el.dataset.val !== undefined) ? String(el.dataset.val).trim() : ''; if(dv !== '') return dv; }catch(e){}
+                    return (el.value || '').trim();
                 };
-                if(op === 'between'){
+                if(op === 'between' || op === 'not_between' || op === 'between_dates'){
                     const a = gv('from'), b = gv('to');
-                    if(a && b) newFilters.push({field: f.alias, op: 'between', valFrom: a, valTo: b, refname: f.refname || '', _doc: true});
+                    if(a && b) newFilters.push({field: f.alias, op: op, valFrom: a, valTo: b, refname: f.refname || '', _doc: true});
                     else if(a) newFilters.push({field: f.alias, op: 'gte', value: a, refname: f.refname || '', _doc: true});
                     else if(b) newFilters.push({field: f.alias, op: 'lte', value: b, refname: f.refname || '', _doc: true});
                     else if(f.required && !f.no_filter && !missingRequired){ missingRequired = true; missingName = f.label || f.alias; }
@@ -1513,8 +1614,8 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
         }
         const DOC_OPS = {
             text: [['contains','يحتوي'],['equals','يساوي'],['startswith','يبدأ بـ'],['endswith','ينتهي بـ'],['not_contains','لا يحتوي'],['not_equals','لا يساوي']],
-            number: [['equals','يساوي'],['not_equals','لا يساوي'],['gt','أكبر من'],['gte','≥'],['lt','أصغر من'],['lte','≤'],['between','بين']],
-            date: [['between','بين تاريخين'],['equals','في يوم'],['lt','قبل'],['gt','بعد'],['inmonth','في شهر'],['inyear','في سنة'],['since','منذ']],
+            number: [['equals','يساوي'],['not_equals','لا يساوي'],['gt','أكبر من'],['gte','≥'],['lt','أصغر من'],['lte','≤'],['between','بين'],['not_between','خارج رقمين']],
+            date: [['between_dates','بين تاريخين'],['on_date','بتاريخ'],['equals','في يوم'],['lt','قبل'],['gt','بعد'],['inmonth','في شهر'],['inyear','في سنة'],['in_hour','في الساعة'],['in_minute','في الدقيقة'],['since','منذ']],
             time: [['equals','يساوي'],['not_equals','لا يساوي']],
             select: [['equals','يساوي'],['not_equals','لا يساوي']]
         };
@@ -1522,7 +1623,14 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
         function docDefOp(kind){ return kind === 'date' ? 'between' : (kind === 'number' || kind === 'select') ? 'equals' : 'contains'; }
         function docSnapshotVals(){
             const m = {};
-            try{ document.querySelectorAll('#docSearchFields [data-docf]').forEach(el=>{ m[el.getAttribute('data-docf') + '||' + el.getAttribute('data-doct')] = el.value; }); }catch(e){}
+            window._docSnapLbl = window._docSnapLbl || {};
+            try{ document.querySelectorAll('#docSearchFields [data-docf]').forEach(el=>{
+                const k = el.getAttribute('data-docf') + '||' + el.getAttribute('data-doct');
+                let dv = '';
+                try{ dv = (el.dataset && el.dataset.val !== undefined) ? String(el.dataset.val) : ''; }catch(e){}
+                m[k] = (dv !== '') ? dv : el.value;
+                try{ window._docSnapLbl[k] = (dv !== '' && el.value !== dv) ? el.value : ''; }catch(e){}
+            }); }catch(e){}
             return m;
         }
         function docFieldOpChanged(){
@@ -1535,7 +1643,8 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
             if(kind === 'select'){
                 const _opts = (f && Array.isArray(f.options) && f.options.length) ? f.options : null;
                 const _svCur = String(val == null ? (f.defaultValue || '') : val);
-                if(_opts){
+                const _dynSrc = docParamSource(f || {});
+                if(_opts && !_dynSrc){
                     const optHtml = `<option value="">-- اختر --</option>` + _opts.map(item => {
                         const optName = typeof item === 'object' && item !== null ? (item.name || item.key || item.code || item.value || '') : String(item);
                         const optVal = typeof item === 'object' && item !== null ? (item.value || item.label || item.display || item.name || '') : String(item);
@@ -1544,14 +1653,15 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                     }).join('');
                     return `<select data-docf="${alias}" data-doct="${doct}" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500">${optHtml}</select>`;
                 }
-                const _src = docParamSource(f || {});
+                const _src = _dynSrc;
                 if(_src){
                     window._docSrcDef[alias] = _src;
                     window._docSrcDef[alias].searchable = !((f || {}).searchable === false);
+                    window._docSrcDef[alias].staticOpts = _opts;
                     if((f || {}).displayColumn || (f || {}).refDisplay || (f || {}).display_column) {
                         window._docSrcDef[alias].displayColumn = (f || {}).displayColumn || (f || {}).refDisplay || (f || {}).display_column;
                     }
-                    return docSrcComboHTML({alias: alias}, _svCur, `data-docf="${alias}" data-doct="${doct}"`, 'w-full bg-slate-50 border border-slate-200 rounded-xl pl-8 pr-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500');
+                    return docSrcComboHTML({alias: alias}, _svCur, `data-docf="${alias}" data-doct="${doct}"`, 'w-full bg-slate-50 border border-slate-200 rounded-xl pl-8 pr-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500', (window._docSnapLbl || {})[alias + '||' + doct]);
                 }
                 const cacheKey = (currentApp || '') + '::' + (currentRml || '') + '::' + alias;
                 const isLoaded = !!(window._docDistinctCache && window._docDistinctCache[cacheKey]);
@@ -1586,10 +1696,11 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                 } else {
                     wrap.innerHTML = fields.map(f=>{
                         const op = f.op || docDefOp(f.kind);
+                        const isRange = (op === 'between' || op === 'not_between' || op === 'between_dates');
                         let vals = '';
-                        if(f.kind === 'date' && op === 'between'){
+                        if(f.kind === 'date' && isRange){
                             vals = `<div class="grid grid-cols-2 gap-2"><div>${docValInput(f.alias, f.kind, op, 'dateFrom', keep[f.alias + '||dateFrom'], 'من', f)}</div><div>${docValInput(f.alias, f.kind, op, 'dateTo', keep[f.alias + '||dateTo'], 'إلى', f)}</div></div>`;
-                        } else if(f.kind === 'number' && op === 'between'){
+                        } else if(f.kind === 'number' && isRange){
                             vals = `<div class="grid grid-cols-2 gap-2"><div>${docValInput(f.alias, f.kind, op, 'numFrom', keep[f.alias + '||numFrom'], 'من', f)}</div><div>${docValInput(f.alias, f.kind, op, 'numTo', keep[f.alias + '||numTo'], 'إلى', f)}</div></div>`;
                         } else {
                             const ph = f.kind === 'number' ? 'القيمة...' : (op === 'inyear' ? 'YYYY' : op === 'inmonth' ? 'YYYY-MM' : 'القيمة...');
@@ -1627,10 +1738,11 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
             activeFilters = [];
             fields.forEach(f=>{
                 const op = f.op || docDefOp(f.kind);
-                const gv = (t)=>{ const el = document.querySelector('#docSearchFields [data-docf="' + f.alias.replace(/"/g, '\\"') + '"][data-doct="' + t + '"]'); return el ? (el.value || '').trim() : ''; };
-                if(op === 'between'){
+                const isRange = (op === 'between' || op === 'not_between' || op === 'between_dates');
+                const gv = (t)=>{ const el = document.querySelector('#docSearchFields [data-docf="' + f.alias.replace(/"/g, '\\"') + '"][data-doct="' + t + '"]'); if(!el) return ''; try{ const dv = (el.dataset && el.dataset.val !== undefined) ? String(el.dataset.val).trim() : ''; if(dv !== '') return dv; }catch(e){} return (el.value || '').trim(); };
+                if(isRange){
                     const a = gv('dateFrom') || gv('numFrom'), b = gv('dateTo') || gv('numTo');
-                    if(a && b) activeFilters.push({field: f.alias, op: 'between', valFrom: a, valTo: b, refname: f.refname || '', _doc: true});
+                    if(a && b) activeFilters.push({field: f.alias, op: op, valFrom: a, valTo: b, refname: f.refname || '', _doc: true});
                     else if(a) activeFilters.push({field: f.alias, op: 'gte', value: a, refname: f.refname || '', _doc: true});
                     else if(b) activeFilters.push({field: f.alias, op: 'lte', value: b, refname: f.refname || '', _doc: true});
                 } else {
@@ -1643,7 +1755,7 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
             syncUrlFilters(); renderSearchTags(); refreshApiData();
         }
         function docClearSearch(){
-            document.querySelectorAll('#docSearchFields input').forEach(el=>{ el.value = ''; });
+            document.querySelectorAll('#docSearchFields input').forEach(el=>{ el.value = ''; try{ delete el.dataset.val; }catch(e){} });
             resetAllFilters();
         }
         function docBackToFilters(){
@@ -1803,9 +1915,9 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
             if(forceStageRefresh){ payload.refreshApi = true; forceStageRefresh = false; }
             payload.columnFilters = {};
             // Distributed execution: skip staging (5M-row copy) by joining
-            // across connections in Python instead. Engine falls back to
-            // the legacy staged path when the report has only one connection.
-            payload.distributed = true;
+            // across connections in Python instead. Only enabled when multi-connection.
+            const _connsList = (typeof DJANGO_RML_CONNECTIONS !== 'undefined' ? DJANGO_RML_CONNECTIONS : []) || [];
+            payload.distributed = (_connsList.length > 1);
             for (const k in (columnFilters || {})) {
                 if (columnFilters[k] && columnFilters[k].length) {
                     const rk = resolveDbField(k);
@@ -1866,7 +1978,6 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                 ov = document.createElement('div');
                 ov.id = 'errModal';
                 ov.className = 'hidden fixed inset-0 z-[90] bg-slate-900/50 backdrop-blur-sm flex items-start justify-center p-4 overflow-y-auto';
-                ov.setAttribute('onclick', 'if(event.target===this)closeErrorModal()');
                 document.body.appendChild(ov);
             }
             ov.dataset.msg = String(msg || '');
@@ -2227,10 +2338,17 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
             if(!groups.length) return null;
             // المستويات المستخدمة فعلاً فقط (بلا صفوف فارغة)
             const sortedGroups = [...groups].sort((a,b)=>((a.order||99)-(b.order||99)) || String(a.id||'').localeCompare(String(b.id||'')));
-            const colAliases = cols.map(c=>c.alias);
             const lvlOf = (g)=>{ try{ return Math.max(1, Math.min(parseInt(g.level) || 1, 5)); }catch(e){ return 1; } };
+            const colMatchesGroup = (c, g)=>{
+                if(!g || !g.columns || !Array.isArray(g.columns)) return false;
+                const gCols = g.columns;
+                if(c.name && gCols.includes(c.name)) return true;
+                if(c.id && (gCols.includes(c.id) || gCols.includes(String(c.id)))) return true;
+                if(c.alias && gCols.includes(c.alias)) return true;
+                return false;
+            };
             const usedLvls = [...new Set(
-                sortedGroups.filter(g=>(g.columns || []).some(a=>colAliases.includes(a))).map(lvlOf)
+                sortedGroups.filter(g=>cols.some(c=>colMatchesGroup(c, g))).map(lvlOf)
             )].sort((a, b)=>a - b);
             const depth = usedLvls.length || 1;
             // سلسلة كل عمود: المجموعة في كل مستوى مستخدم (أول مطابقة حسب الترتيب)
@@ -2239,13 +2357,17 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                 for(const L of usedLvls){
                     let hit = null;
                     for(const g of sortedGroups){
-                        if(lvlOf(g) === L && (g.columns || []).includes(c.alias)){ hit = g; break; }
+                        if(lvlOf(g) === L && colMatchesGroup(c, g)){ hit = g; break; }
                     }
                     chain.push(hit);
                 }
                 return chain;
             });
-            const colTh = (gc)=>{ const _cs = colTextStyle(gc); return `<th${colDataAttr(gc)} class="px-2 py-1 font-bold border-b border-l border-r border-slate-200 bg-slate-50 text-slate-700 cursor-pointer hover:bg-slate-100 select-none group"${_cs ? ` style="${_cs}"` : ''} onclick="openColumnMenu(event, '${gc.alias}')"><div class="flex items-center justify-between"><span>${gc.alias}</span><i class="fa-solid fa-chevron-down text-[10px] text-slate-400 group-hover:text-indigo-600"></i></div></th>`; };
+            const colTh = (gc)=>{
+                const _cs = colTextStyle(gc);
+                const _label = gc.label || gc.display || gc.header || gc.alias;
+                return `<th${colDataAttr(gc)} class="px-2 py-1 font-bold border-b border-l border-r border-slate-200 bg-slate-50 text-slate-700 cursor-pointer hover:bg-slate-100 select-none group"${_cs ? ` style="${_cs}"` : ''} onclick="openColumnMenu(event, '${gc.alias}')"><div class="flex items-center justify-between"><span>${_label}</span><i class="fa-solid fa-chevron-down text-[10px] text-slate-400 group-hover:text-indigo-600"></i></div></th>`;
+            };
             const grpCls = (L)=> L === 1
                 ? 'px-4 py-2.5 font-extrabold text-[13px] border-b-2 border-l border-r border-slate-300 bg-slate-200 text-slate-800 text-center select-none'
                 : 'px-4 py-2 font-bold text-xs border-b border-l border-r border-slate-300 bg-slate-100 text-slate-700 text-center select-none';
@@ -2269,7 +2391,8 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
                         for(let k = L + 1; k <= depth; k++){ if(chains[i][k - 1]){ below = true; break; } rs++; }
                         if(!below){
                             const _cs0 = colTextStyle(cols[i]);
-                            rows[L - 1] += `<th${colDataAttr(cols[i])} class="px-2 py-1 font-bold border-b-2 border-slate-300 bg-slate-100 text-slate-800 cursor-pointer hover:bg-slate-200 select-none group" rowspan="${rs + 1}"${_cs0 ? ` style="${_cs0}"` : ''} onclick="openColumnMenu(event, '${cols[i].alias}')"><div class="flex items-center justify-between"><span>${cols[i].alias}</span><i class="fa-solid fa-chevron-down text-[10px] text-slate-400 group-hover:text-indigo-600"></i></div></th>`;
+                            const _l0 = cols[i].label || cols[i].display || cols[i].header || cols[i].alias;
+                            rows[L - 1] += `<th${colDataAttr(cols[i])} class="px-2 py-1 font-bold border-b-2 border-slate-300 bg-slate-100 text-slate-800 cursor-pointer hover:bg-slate-200 select-none group" rowspan="${rs + 1}"${_cs0 ? ` style="${_cs0}"` : ''} onclick="openColumnMenu(event, '${cols[i].alias}')"><div class="flex items-center justify-between"><span>${_l0}</span><i class="fa-solid fa-chevron-down text-[10px] text-slate-400 group-hover:text-indigo-600"></i></div></th>`;
                             chains[i].done = true;
                             for(let k = L + 1; k <= depth; k++) pending[i]++;
                         } else {
@@ -3318,31 +3441,102 @@ LIMIT 50;" class="w-full font-mono text-[12px] border border-slate-200 rounded-x
         function openColsManager(){
             const list = document.getElementById('colsManagerList');
             const cols = allCols();
+            colsManagerCache = cols.slice();
             if(!cols.length){ list.innerHTML = '<p class="text-slate-400 text-center py-4">لا توجد أعمدة بعد تحميل التقرير</p>'; }
             else {
-                list.innerHTML = cols.map(c=>{
+                list.innerHTML = cols.map((c, i)=>{
                     const a = c.alias || c.name;
                     const on = !hiddenCols.has(a);
                     return `<label class="flex items-center gap-2 px-2 py-1.5 hover:bg-slate-50 rounded-lg cursor-pointer">
-                        <input type="checkbox" ${on ? 'checked' : ''} onchange="toggleColVis('${a.replace(/'/g, "\\'")}', this.checked)" class="rounded text-indigo-600">
-                        <span class="flex-1 text-slate-700 truncate">${a}</span>
+                        <input type="checkbox" data-cm-idx="${i}" ${on ? 'checked' : ''} class="rounded text-indigo-600">
+                        <span class="flex-1 text-slate-700 truncate">${cmEsc(a)}</span>
                     </label>`;
                 }).join('');
             }
             document.getElementById('colsManagerModal').classList.remove('hidden');
+            // ربط مفوّض لمرة واحدة: أي صندوق (حالي/مستقبلي) يطبّق فور تغييره
+            try{
+                if(!colsManagerBound){
+                    colsManagerBound = true;
+                    document.getElementById('colsManagerList').addEventListener('change', function(ev){
+                        try{
+                            const t = ev && ev.target && ev.target.closest ? ev.target.closest('input[data-cm-idx]') : null;
+                            if(!t) return;
+                            toggleColVisByIdx(parseInt(t.getAttribute('data-cm-idx'), 10), !!t.checked, t);
+                        }catch(e){}
+                    });
+                }
+            }catch(e){}
         }
         function closeColsManager(){ document.getElementById('colsManagerModal').classList.add('hidden'); }
+        // تغيير فوري أثناء التحديد (تطبيق حي) — عبر تفويض change (بلا تضمين
+        // الأسماء في سلاسل JS، فالأسماء العربية/الرموز لا تكسر المعالج أبداً)
+        function toggleColVisByIdx(i, show, inputEl){
+            const c = (typeof colsManagerCache !== 'undefined' && colsManagerCache) ? colsManagerCache[i] : null;
+            if(!c){ return; }
+            const alias = c.alias || c.name;
+            const snapBack = ()=>{ try{ if(inputEl) inputEl.checked = !hiddenCols.has(alias); }catch(e){} };
+            try{
+                if(show){ hiddenCols.delete(alias); try{ userShownCols.add(alias); userHiddenCols.delete(alias); }catch(e){} }
+                else {
+                    const all = allCols().map(x=>x.alias || x.name);
+                    if(all.filter(a=>!hiddenCols.has(a)).length <= 1){ try{ notify('يجب إبقاء عمود واحد ظاهراً على الأقل', 'info'); }catch(e){} snapBack(); return; }
+                    hiddenCols.add(alias);
+                    try{ userHiddenCols.add(alias); userShownCols.delete(alias); }catch(e){}
+                }
+                saveHiddenCols();
+                renderGrid();
+            }catch(err){ snapBack(); try{ notify('تعذر تطبيق إظهار/إخفاء العمود', 'error'); }catch(e){} }
+        }
         function toggleColVis(alias, show){
-            if(show){ hiddenCols.delete(alias); try{ userShownCols.add(alias); userHiddenCols.delete(alias); }catch(e){} }
-            else {
-                const all = allCols().map(c=>c.alias || c.name);
-                if(all.filter(a=>!hiddenCols.has(a)).length <= 1){ try{ notify('يجب إبقاء عمود واحد ظاهراً على الأقل', 'info'); }catch(e){} openColsManager(); return; }
-                hiddenCols.add(alias);
-                try{ userHiddenCols.add(alias); userShownCols.delete(alias); }catch(e){}
-            }
-            saveHiddenCols();
-            openColsManager();
-            renderGrid();
+            // توافق: كان يُستدعى من صناديق النافذة — يحوَّل للفهرس عند الإمكان
+            try{
+                const cols = (typeof colsManagerCache !== 'undefined' && colsManagerCache && colsManagerCache.length) ? colsManagerCache : allCols();
+                const i = cols.findIndex(c=>(c.alias || c.name) === alias);
+                if(i >= 0){ toggleColVisByIdx(i, show, null); return; }
+            }catch(e){}
+            try{
+                if(show){ hiddenCols.delete(alias); try{ userShownCols.add(alias); userHiddenCols.delete(alias); }catch(e){} }
+                else {
+                    const all = allCols().map(c=>c.alias || c.name);
+                    if(all.filter(a=>!hiddenCols.has(a)).length <= 1){ try{ notify('يجب إبقاء عمود واحد ظاهراً على الأقل', 'info'); }catch(e){} openColsManager(); return; }
+                    hiddenCols.add(alias);
+                    try{ userHiddenCols.add(alias); userShownCols.delete(alias); }catch(e){}
+                }
+                saveHiddenCols();
+                openColsManager();
+                renderGrid();
+            }catch(err){ try{ openColsManager(); }catch(e){} }
+        }
+        // زر «تم»: مصدر الحقيقة هو الصناديق الظاهرة — يُعاد اشتقاق المخفي
+        // منها ويُطبق على الجدول قبل الإغلاق (فلا يعتمد على نجاح التطبيق الحي)
+        function applyColsManager(){
+            try{
+                const boxes = document.querySelectorAll('#colsManagerList input[data-cm-idx]');
+                const cache = (typeof colsManagerCache !== 'undefined' && colsManagerCache) ? colsManagerCache : [];
+                const live = (cache && cache.length) ? cache : allCols();
+                const newHidden = new Set();
+                boxes.forEach(b=>{
+                    const i = parseInt(b.getAttribute('data-cm-idx'), 10);
+                    const c = live[i];
+                    if(c && !b.checked) newHidden.add(c.alias || c.name);
+                });
+                if(boxes.length){
+                    const all = allCols().map(c=>c.alias || c.name);
+                    const visCount = all.filter(a=>!newHidden.has(a)).length;
+                    if(all.length && visCount < 1){ try{ notify('يجب إبقاء عمود واحد ظاهراً على الأقل', 'info'); }catch(e){} openColsManager(); return; }
+                    hiddenCols = newHidden;
+                    try{
+                        const rmlH = rmlHiddenCols();
+                        userHiddenCols = new Set([...newHidden].filter(a=>!rmlH.has(a)));
+                        userShownCols = new Set([...all].filter(a=>!newHidden.has(a) && rmlH.has(a)));
+                    }catch(e){}
+                    saveHiddenCols();
+                    renderGrid();
+                    openColsManager();
+                }
+            }catch(err){ try{ notify('تعذر تطبيق إظهار/إخفاء الأعمدة', 'error'); }catch(e){} }
+            closeColsManager();
         }
         function showAllCols(){ hiddenCols.clear(); try{ userHiddenCols.clear(); allCols().forEach(c=>userShownCols.add(c.alias || c.name)); }catch(e){} saveHiddenCols(); openColsManager(); renderGrid(); }
         function filterColumnCheckboxes(query) {
@@ -4829,6 +5023,9 @@ try{
             }
             resetAllFilters();
         }
+        {% if has_rml_wizard %}{% include "UniDBPicker.js" %}{% endif %}
+        {% if has_rml_wizard %}{% include "UniExpression.js" %}{% endif %}
+        {% if has_rml_wizard %}{% include "UniCondition.js" %}{% endif %}
         {% if has_rml_wizard %}{% include "rml_wizard_script.html" %}{% endif %}
         let expXhr = null;
         function expProgressShow(title){

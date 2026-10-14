@@ -1,0 +1,265 @@
+{% extends "base.html" %}
+{% block title %}شجرة دليل النظام — Odex ERP{% endblock %}
+{% block sidebar %}
+    <aside class="w-64 bg-white border-l border-gray-200 flex flex-col justify-between hidden md:flex z-20">
+        <div>
+            {% include "partials/main_nav.html" with active="adtree" %}
+        </div>
+        {% include "partials/sidebar_footer.html" %}
+    </aside>
+{% endblock %}
+{% block main %}
+    <div class="flex-1 flex flex-col min-h-0">
+        <main class="p-6 space-y-4 w-full max-w-7xl mx-auto">
+            <div class="flex items-center gap-3 flex-wrap">
+                <div class="w-11 h-11 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center text-lg shrink-0"><i class="fa-solid fa-sitemap"></i></div>
+                <div class="flex-1 min-w-0">
+                    <h1 class="font-extrabold text-slate-800">شجرة دليل النظام</h1>
+                    <p class="text-[11px] text-slate-400">النماذج ومدخلاتها — التقارير وأعمدتها وقواعدها — المصادر — التسلسلات</p>
+                </div>
+                <select id="adWs" onchange="adTreeLoad()" class="bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-bold"></select>
+                <label class="text-[11px] text-slate-500 flex items-center gap-1"><input id="adCounts" type="checkbox" onchange="adTreeLoad()" class="rounded"> أعداد السجلات</label>
+                <button onclick="adTreeLoad()" class="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold"><i class="fa-solid fa-rotate"></i> تحديث</button>
+            </div>
+            <div class="bg-white rounded-2xl border border-slate-200 p-3 flex flex-wrap items-center gap-2 text-xs">
+                <input id="adq" oninput="adTreeFilter(this.value)" placeholder="بحث في الدليل (اسم عربي/ملف/جدول)..." class="flex-1 min-w-[200px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5">
+                <span id="adTreeCount" class="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-bold"></span>
+            </div>
+            <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                <div class="bg-white rounded-2xl border border-slate-200 p-3">
+                    <h3 class="text-xs font-extrabold text-slate-700 mb-2"><i class="fa-solid fa-table-list text-indigo-500"></i> النماذج</h3>
+                    <div id="adForms" class="space-y-1.5 max-h-[60vh] overflow-y-auto custom-scroll"></div>
+                </div>
+                <div class="space-y-4">
+                    <div class="bg-white rounded-2xl border border-slate-200 p-3">
+                        <h3 class="text-xs font-extrabold text-slate-700 mb-2"><i class="fa-solid fa-chart-column text-emerald-500"></i> التقارير</h3>
+                        <div id="adReports" class="space-y-1.5 max-h-[38vh] overflow-y-auto custom-scroll"></div>
+                    </div>
+                    <div class="bg-white rounded-2xl border border-slate-200 p-3">
+                        <h3 class="text-xs font-extrabold text-slate-700 mb-2"><i class="fa-solid fa-square-root-variable text-violet-500"></i> القواعد</h3>
+                        <div id="adRules" class="space-y-1 max-h-[22vh] overflow-y-auto custom-scroll"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="bg-white rounded-2xl border border-slate-200 p-3">
+                <div class="flex items-center justify-between flex-wrap gap-2 mb-2">
+                    <h3 class="text-xs font-extrabold text-slate-700"><i class="fa-solid fa-database text-amber-500"></i> مصادر الدليل (جداول: تسلسل + اسم) — تُستخدم في الجداول الفرعية والصلاحيات</h3>
+                    <button onclick="adSrcForm()" class="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold"><i class="fa-solid fa-plus"></i> مصدر جديد</button>
+                </div>
+                <div id="adSources" class="space-y-1.5"></div>
+                <div id="adSrcEditor" class="hidden mt-2 bg-amber-50/60 border border-amber-200 rounded-xl p-3 grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                    <input id="adS_key" placeholder="المفتاح (لاتيني)" dir="ltr" class="bg-white border border-slate-200 rounded-xl px-2 py-1.5 font-mono">
+                    <input id="adS_ar" placeholder="الاسم العربي" class="bg-white border border-slate-200 rounded-xl px-2 py-1.5">
+                    <select id="adS_conn" title="الاتصال (فارغ=الأساسي)" class="bg-white border border-slate-200 rounded-xl px-2 py-1.5 text-xs" dir="ltr"><option value="">الأساسي</option></select>
+                    <div class="flex items-stretch gap-1"><input id="adS_table" placeholder="الجدول" dir="ltr" class="bg-white border border-slate-200 rounded-xl px-2 py-1.5 font-mono flex-1 min-w-0"><button type="button" onclick="adSrcTblSearch()" title="بحث في الجداول (UniDBPicker)" class="shrink-0 px-2 py-1 bg-white border border-slate-200 rounded-xl text-slate-500 hover:text-indigo-700 hover:border-indigo-300"><i class="fa-solid fa-magnifying-glass text-[10px]"></i></button></div>
+                    <input id="adS_schema" placeholder="السكيما (اختياري)" dir="ltr" class="bg-white border border-slate-200 rounded-xl px-2 py-1.5 font-mono">
+                    <div class="flex items-stretch gap-1"><input id="adS_seq" placeholder="عمود التسلسل" dir="ltr" class="bg-white border border-slate-200 rounded-xl px-2 py-1.5 font-mono flex-1 min-w-0"><button type="button" onclick="adSrcColSearch('seq')" title="بحث في الأعمدة (UniDBPicker)" class="shrink-0 px-2 py-1 bg-white border border-slate-200 rounded-xl text-slate-500 hover:text-indigo-700 hover:border-indigo-300"><i class="fa-solid fa-magnifying-glass text-[10px]"></i></button></div>
+                    <div class="flex items-stretch gap-1"><input id="adS_name" placeholder="عمود الاسم" dir="ltr" class="bg-white border border-slate-200 rounded-xl px-2 py-1.5 font-mono flex-1 min-w-0"><button type="button" onclick="adSrcColSearch('name')" title="بحث في الأعمدة (UniDBPicker)" class="shrink-0 px-2 py-1 bg-white border border-slate-200 rounded-xl text-slate-500 hover:text-indigo-700 hover:border-indigo-300"><i class="fa-solid fa-magnifying-glass text-[10px]"></i></button></div>
+                    <div class="flex items-center gap-1.5">
+                        <button onclick="adSrcSave()" class="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold">حفظ</button>
+                        <button onclick="document.getElementById('adSrcEditor').classList.add('hidden')" class="px-3 py-1.5 bg-slate-100 rounded-xl font-bold">إلغاء</button>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+{% endblock %}
+{% block scripts %}
+<style>.wb-cell{width:100%;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc;padding:7px 8px;font-size:11px;color:#0f172a}.wb-cell:focus{outline:2px solid #6366f1;outline-offset:-2px;background:#fff}</style>
+<script>
+{% include "UniDBPicker.js" %}
+let adTreeData = null, adEditKey = '';
+const esc = (s)=>String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const AD_CUR_WS = "{{ current_workspace.id|default:current_workspace.name|default:'' }}";
+async function adWsLoad(){
+    try{
+        const r = await fetch('/api/workspaces/');
+        const d = await r.json();
+        const sel = document.getElementById('adWs');
+        const list = (d.workspaces || []);
+        // المساحة الحالية أولاً (جلسة الدخول) ثم البقية — كانت تعرض الأساسية دائماً
+        const cur = String(AD_CUR_WS || d.current || '').trim();
+        const ordered = [...list].sort((a,b)=>((b.id||b.name)===cur) - ((a.id||a.name)===cur));
+        sel.innerHTML = ordered.map(w=>`<option value="${esc(w.id || w.name)}">${esc(w.ar || w.name || w.id)}</option>`).join('') || '<option value="">—</option>';
+        if(cur){ sel.value = cur; }
+        adTreeLoad();
+    }catch(e){}
+}
+async function adTreeLoad(){
+    const ws = document.getElementById('adWs').value;
+    const counts = document.getElementById('adCounts').checked ? '&counts=1' : '';
+    try{ if(!document.getElementById('adSrcEditor').classList.contains('hidden')) adConnsFetch(); }catch(e){}
+    try{
+        const res = await fetch('/api/ad/tree/?ws=' + encodeURIComponent(ws) + counts);
+        const d = await res.json();
+        if(!res.ok) throw new Error(d.error || 'تعذر الجلب');
+        adTreeData = d;
+        adTreeRender('');
+        adSourcesRender(d.sources || []);
+        document.getElementById('adTreeCount').textContent =
+            `نماذج ${d.counts.forms} • تقارير ${d.counts.reports} • قواعد ${d.counts.rules}`;
+    }catch(e){
+        document.getElementById('adForms').innerHTML = '<p class="text-rose-500 text-xs">' + esc(e.message).slice(0,200) + '</p>';
+    }
+}
+function adTreeFilter(q){
+    adTreeRender((q || '').trim().toLowerCase());
+}
+function adTreeRender(q){
+    const d = adTreeData || {forms: [], reports: [], rules: []};
+    const hit = (o)=>!q || [o.name_ar, o.file, o.table, o.app].some(v=>String(v || '').toLowerCase().includes(q));
+    const counts = (d.record_counts || {});
+    document.getElementById('adForms').innerHTML = (d.forms || []).filter(hit).map(f=>`
+        <details class="border border-slate-100 rounded-xl"><summary class="px-2.5 py-1.5 cursor-pointer text-xs font-bold text-slate-700 hover:bg-slate-50 rounded-xl">${esc(f.name_ar)} <span class="font-mono font-normal text-slate-400" dir="ltr">${esc(f.file)}</span>${counts[f.table] !== undefined ? ` <span class="bg-emerald-100 text-emerald-700 px-1.5 rounded-full text-[10px]">${counts[f.table]} سجل</span>` : ''}</summary>
+        <div class="px-2.5 pb-2 text-[11px] text-slate-500">الجدول: <span class="font-mono" dir="ltr">${esc(f.table || '—')}</span>${(f.details || []).length ? ' • فرعيات: ' + f.details.map(x=>esc(x.alias || x.table)).join('، ') : ''}</div>
+        <div class="px-2.5 pb-2 flex flex-wrap gap-1">${(f.inputs || []).map(i=>`<span class="text-[10px] bg-slate-100 px-1.5 py-0.5 rounded" title="${esc(i.input_type)}">${esc(i.alias || i.name)}</span>`).join('')}</div></details>`).join('') || '<p class="text-slate-400 text-xs">لا نماذج</p>';
+    document.getElementById('adReports').innerHTML = (d.reports || []).filter(hit).map(r=>`
+        <details class="border border-slate-100 rounded-xl"><summary class="px-2.5 py-1.5 cursor-pointer text-xs font-bold text-slate-700 hover:bg-slate-50 rounded-xl">${esc(r.name_ar)} <span class="font-mono font-normal text-slate-400" dir="ltr">${esc(r.file)}</span></summary>
+        <div class="px-2.5 pb-1 text-[11px] text-slate-500">الأعمدة (${(r.columns || []).length})${(r.rules || []).length ? ' • القواعد: ' + r.rules.map(x=>esc(x.name)).join('، ') : ''}${r.charts ? ' • مخططات: ' + r.charts : ''}</div>
+        <div class="px-2.5 pb-2 flex flex-wrap gap-1">${(r.columns || []).map(c=>`<span class="text-[10px] bg-slate-100 px-1.5 py-0.5 rounded">${esc(c.alias || c.name)}</span>`).join('')}</div></details>`).join('') || '<p class="text-slate-400 text-xs">لا تقارير</p>';
+    document.getElementById('adRules').innerHTML = (d.rules || []).filter(o=>!q || String(o.rule_name || '').toLowerCase().includes(q)).map(o=>`
+        <div class="text-[11px] px-2 py-1 border border-slate-100 rounded-lg"><span class="font-mono font-bold" dir="ltr">${esc(o.rule_name)}</span> <span class="text-slate-400 font-mono" dir="ltr">${esc(o.rule_file)}</span>${(o.variables || []).length ? `<div class="text-slate-500">المتغيرات: ${o.variables.map(esc).join('، ')}</div>` : ''}</div>`).join('') || '<p class="text-slate-400 text-xs">لا قواعد</p>';
+}
+function adSourcesRender(srcs){
+    document.getElementById('adSources').innerHTML = srcs.map(s=>`
+        <div class="flex items-center gap-2 text-xs border border-slate-100 rounded-xl px-2.5 py-1.5">
+            <span class="font-mono font-bold" dir="ltr">${esc(s.key)}</span>
+            <span class="font-bold text-slate-700">${esc(s.ar || s.key)}</span>
+            <span class="text-slate-400 font-mono" dir="ltr">${esc([s.schema, s.table].filter(Boolean).join('.') || s.table || '')}</span>
+            <span class="text-slate-400">تسلسل: <span class="font-mono" dir="ltr">${esc(s.seq_col || '—')}</span> • اسم: <span class="font-mono" dir="ltr">${esc(s.name_col || '—')}</span></span>
+            <span style="margin-right:auto"></span>
+            ${s.kind === 'table' ? `<button onclick='adSrcEdit(${JSON.stringify(s.key)})' class="text-indigo-500 hover:text-indigo-700 font-bold">تعديل</button><button onclick='adSrcDel(${JSON.stringify(s.key)})' class="text-rose-400 hover:text-rose-600 font-bold">حذف</button>` : '<span class="text-[10px] bg-slate-100 px-1.5 rounded-full">مدمج</span>'}
+        </div>`).join('') || '<p class="text-slate-400 text-xs">لا مصادر مخصصة — المدمجة: النماذج/التقارير/القواعد</p>';
+}
+function adSrcForm(){ adEditKey = ''; ['adS_key','adS_ar','adS_conn','adS_table','adS_schema','adS_seq','adS_name'].forEach(id=>document.getElementById(id).value = ''); document.getElementById('adSrcEditor').classList.remove('hidden'); try{ adConnsFetch(''); }catch(e){} }
+function adSrcEdit(key){
+    adEditKey = key;
+    const d = adTreeData || {};
+    const s = ((d.sources || []).find(x=>x.key === key)) || {};
+    document.getElementById('adS_key').value = s.key || key;
+    document.getElementById('adS_ar').value = s.ar || '';
+    try{ adConnsFetch(s.conn || ''); }catch(e){ try{ document.getElementById('adS_conn').value = s.conn || ''; }catch(e2){} }
+    document.getElementById('adS_table').value = s.table || '';
+    document.getElementById('adS_schema').value = s.schema || '';
+    document.getElementById('adS_seq').value = s.seq_col || '';
+    document.getElementById('adS_name').value = s.name_col || '';
+    document.getElementById('adSrcEditor').classList.remove('hidden');
+}
+// ── UniDBPicker في محرر المصادر: اتصال ← جدول ← أعمدة ──
+let adConnsCache = [], adPrimaryConn = '';
+async function adConnsFetch(keep){
+    const sel = document.getElementById('adS_conn');
+    const cur = (keep !== undefined) ? keep : (sel ? sel.value : '');
+    try{
+        const r = await fetch('/api/connections/');
+        const d = await r.json();
+        adConnsCache = d.connections || [];
+    }catch(e){ adConnsCache = []; }
+    try{
+        const w = await fetch('/api/workspaces/');
+        const wd = await w.json();
+        adPrimaryConn = String(wd.primary_connection || '');
+    }catch(e){}
+    if(sel){
+        sel.innerHTML = '<option value="">الأساسي' + (adPrimaryConn ? ' (' + esc(adPrimaryConn) + ')' : '') + '</option>'
+            + adConnsCache.map(c=>`<option value="${esc(c.id)}">${esc(c.name || c.id)}${c.engine ? ' • ' + esc(c.engine) : ''}</option>`).join('');
+        if(cur){
+            const hit = adConnsCache.find(c=>String(c.id) === String(cur) || String(c.name) === String(cur));
+            if(hit){ sel.value = String(hit.id); }
+            else { const o = document.createElement('option'); o.value = cur; o.textContent = cur; sel.appendChild(o); sel.value = cur; }
+        } else sel.value = '';
+    }
+}
+function adSrcConnId(){
+    // id الاتصال للمنتقي: المختار، وإلا الأساسي (فارغ=الأساسي)
+    try{
+        const v = String(document.getElementById('adS_conn').value || '').trim();
+        if(v){
+            const hit = (adConnsCache || []).find(c=>String(c.id) === v || String(c.name) === v);
+            if(hit) return hit.id;
+            return isNaN(Number(v)) ? v : Number(v);
+        }
+        if(adPrimaryConn){
+            const hit = (adConnsCache || []).find(c=>String(c.name) === String(adPrimaryConn) || String(c.id) === String(adPrimaryConn));
+            if(hit) return hit.id;
+        }
+        if((adConnsCache || []).length === 1) return adConnsCache[0].id;
+    }catch(e){}
+    return '';
+}
+function adSrcTblSearch(){
+    try{
+        if(typeof UniDBPicker === 'undefined'){ notify('منتقي قاعدة البيانات غير محمل', 'error'); return; }
+        const cid = adSrcConnId();
+        if(!cid){ notify('لا اتصال متاح — حدد الاتصال أولاً', 'info'); return; }
+        const cname = ((adConnsCache || []).find(c=>String(c.id) === String(cid)) || {}).name || adPrimaryConn || cid;
+        UniDBPicker.pickTable({conn: cid, title: 'بحث في جداول ' + cname, sub: 'مصدر دليل', onPick: (it)=>{
+            let v = String((it && it.value) || '').trim();
+            if(!v) return;
+            const tEl = document.getElementById('adS_table'), sEl = document.getElementById('adS_schema');
+            if(v.includes('.') && !(sEl && String(sEl.value || '').trim())){
+                const i = v.indexOf('.');
+                if(sEl) sEl.value = v.slice(0, i);
+                v = v.slice(i + 1);
+            }
+            if(tEl) tEl.value = v;
+        }});
+    }catch(e){ notify(String((e && e.message) || e).slice(0,200), 'error'); }
+}
+function adSrcColSearch(which){
+    try{
+        if(typeof UniDBPicker === 'undefined'){ notify('منتقي قاعدة البيانات غير محمل', 'error'); return; }
+        const cid = adSrcConnId();
+        const tEl = document.getElementById('adS_table'), sEl = document.getElementById('adS_schema');
+        let tbl = tEl ? String(tEl.value || '').trim() : '';
+        const sch = sEl ? String(sEl.value || '').trim() : '';
+        if(!cid || !tbl){ notify('اختر الاتصال والجدول أولاً', 'info'); return; }
+        if(sch && !tbl.includes('.')) tbl = sch + '.' + tbl;
+        UniDBPicker.pickColumn({conn: cid, table: tbl, title: 'بحث في أعمدة ' + tbl, onPick: (it)=>{
+            const v = String((it && it.value) || '').trim();
+            if(!v) return;
+            const target = document.getElementById(which === 'name' ? 'adS_name' : 'adS_seq');
+            if(target) target.value = v;
+        }});
+    }catch(e){ notify(String((e && e.message) || e).slice(0,200), 'error'); }
+}
+function adCsrf(){ try{ const m = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]*)/); return (m && m[1]) || ''; }catch(e){ return ''; } }
+async function adReadJson(res){
+    // تحليل دفاعي: صفحات HTML (كـ 403 CSRF) كانت تنفجر بـ Unexpected token '<'
+    const txt = await res.text();
+    try{ return JSON.parse(txt); }
+    catch(e){ throw new Error('HTTP ' + res.status + ' — ' + txt.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 160)); }
+}
+async function adSrcSave(){
+    const ws = document.getElementById('adWs').value;
+    const g = (id)=>document.getElementById(id).value.trim();
+    const body = {ws, key: g('adS_key'), ar: g('adS_ar'), conn: g('adS_conn'), table: g('adS_table'), schema: g('adS_schema'), seq_col: g('adS_seq'), name_col: g('adS_name')};
+    const isEdit = !!adEditKey;
+    try{
+        const headers = {'Content-Type': 'application/json'};
+        const csrf = adCsrf();
+        if(csrf) headers['X-CSRFToken'] = csrf;
+        const res = await fetch('/api/ad/sources/', {method: isEdit ? 'PUT' : 'POST', headers, body: JSON.stringify(isEdit ? {ws, key: adEditKey, patch: body} : body)});
+        const d = await adReadJson(res);
+        if(!res.ok) throw new Error(d.error || 'تعذر الحفظ');
+        document.getElementById('adSrcEditor').classList.add('hidden');
+        adTreeLoad();
+    }catch(e){ alert(String((e && e.message) || e).slice(0, 200)); }
+}
+async function adSrcDel(key){
+    if(!confirm('حذف المصدر ' + key + '؟')) return;
+    const ws = document.getElementById('adWs').value;
+    try{
+        const headers = {'Content-Type': 'application/json'};
+        const csrf = adCsrf();
+        if(csrf) headers['X-CSRFToken'] = csrf;
+        const res = await fetch('/api/ad/sources/', {method: 'DELETE', headers, body: JSON.stringify({ws, key})});
+        const d = await adReadJson(res);
+        if(!res.ok) throw new Error(d.error || 'تعذر الحذف');
+        adTreeLoad();
+    }catch(e){ alert(String((e && e.message) || e).slice(0, 200)); }
+}
+document.addEventListener('DOMContentLoaded', async function(){ await adWsLoad(); adTreeLoad(); });
+adWsLoad().then(adTreeLoad);
+</script>
+{% endblock %}

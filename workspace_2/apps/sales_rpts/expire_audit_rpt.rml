@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rml>
+  <rpt_metadata name="expire_audit_rpt" displayName="تقرير رقابة الاصناف المنتهية" category="الرقابة والمراجعة" schema="IAS20264" icon="fa-chart-bar" doc_layout="table" connection="ORCL_PROD"/>
+  <rml_connections>
+    <connection id="1" connection_id="16"/>
+  </rml_connections>
+  <fields>
+    <field id="1" name="I_CODE" type="TEXT" conn_id="16" table_source="expire_items"/>
+    <field id="2" name="I_NAME" type="TEXT" conn_id="16" table_source="expire_items"/>
+    <field id="3" name="COST_PRICE" type="TEXT" conn_id="16" table_source="expire_items"/>
+    <field id="4" name="PRICING" type="TEXT" conn_id="16" table_source="expire_items"/>
+    <field id="5" name="PRICE_LVL" type="TEXT" conn_id="16" table_source="expire_items"/>
+    <field id="6" name="AVL_Q" type="TEXT" conn_id="16" table_source="expire_items"/>
+    <field id="7" name="EXP_DATE" type="TEXT" conn_id="16" table_source="expire_items"/>
+    <field id="8" name="W_NAME" type="TEXT" conn_id="16" table_source="expire_items"/>
+    <field id="9" name="LEV_NO" type="TEXT" conn_id="16" table_source="expire_items"/>
+    <field id="10" name="W_CODE" type="TEXT" conn_id="16" table_source="expire_items"/>
+  </fields>
+  <columns>
+    <column id="6" name="I_CODE" alias="رقم الصنف" expr="=[16.expire_items.I_CODE]" join_type="one_to_one" col_refname="I_CODE" icon="fa-hashtag" distinct="1"/>
+    <column id="7" name="I_NAME" alias="اسم الصنف" expr="=[16.expire_items.I_NAME]" join_type="one_to_one" col_refname="I_NAME" icon="fa-hashtag"/>
+    <column id="4" name="col_4" alias="تاريخ الانتهاء" expr="=[EXP_DATE]" col_type="computed" dataType="date" join_type="one_to_one" icon="fa-hashtag"/>
+    <column id="3" name="col_3" alias="التسعير" expr="=IF(@V_2='o1', [COST_PRICE], [PRICING])" join_type="one_to_one" icon="fa-hashtag" is_amount="1"/>
+    <column id="5" name="col_5" alias="الكمية المتوفرة" expr="=[AVL_Q]" join_type="one_to_one" icon="fa-hashtag"/>
+  </columns>
+  <table_opts>
+    <table name="expire_items" conn="16" is_default="1" where="[expire_items.PRICE_LVL] = '1' AND [16.expire_items.EXP_DATE] &lt;= SYSDATE AND ('&amp;W' = '0' OR [W_CODE] LIKE '%' || '&amp;W' || '%')" where_match="all"/>
+  </table_opts>
+  <views>
+    <view name="expire_items" display="expire_items" imported="1">
+      <sources>
+        <source id="s1" table_name="IAS20264.IAS_ITM_MST" conn="16"/>
+        <source id="s2" table_name="IAS20264.IAS_BILL_DTL" conn="16"/>
+        <source id="s3" table_name="IAS20264.IAS_ITEM_PRICE" conn="16"/>
+        <source id="s4" table_name="IAS20264.WAREHOUSE_DETAILS" conn="16"/>
+        <source id="s5" table_name="IAS20264.DETAIL_INV" conn="16"/>
+        <source id="s6" table_name="IAS20264.IAS_AUD_ITM_DTL" conn="16"/>
+      </sources>
+      <merges>
+        <merge type="join" source_1_id="s2" source_2_id="s1" join_type="LEFT" key_1="I_CODE" key_2="I_CODE"/>
+        <merge type="join" source_1_id="s3" source_2_id="s1" join_type="LEFT" key_1="I_CODE" key_2="I_CODE"/>
+        <merge type="join" source_1_id="s3" source_2_id="s4" join_type="LEFT" key_1="LEV_NO" key_2="PRICE_LVL"/>
+        <merge type="join" source_1_id="s2" source_2_id="s4" join_type="LEFT" key_1="W_CODE" key_2="W_CODE"/>
+        <merge type="join" source_1_id="s5" source_2_id="s1" join_type="LEFT" key_1="I_CODE" key_2="I_CODE"/>
+        <merge type="join" source_1_id="s6" source_2_id="s1" join_type="LEFT" key_1="I_CODE" key_2="I_CODE"/>
+      </merges>
+      <columns>
+        <column name="I_CODE" alias="I_CODE" expr="[[s1.I_CODE]]" type="TEXT"/>
+        <column name="I_NAME" alias="I_NAME" expr="[[s1.I_NAME]]" type="TEXT"/>
+        <column name="COST_PRICE" alias="COST_PRICE" expr="[[s1.PRIMARY_COST]]" type="TEXT"/>
+        <column name="PRICING" alias="PRICING" expr="[[s3.I_PRICE]]" type="TEXT"/>
+        <column name="PRICE_LVL" alias="PRICE_LVL" expr="[[s3.LEV_NO]]" type="TEXT"/>
+        <column name="AVL_Q" alias="AVL_Q" expr="[[s6.STK_COST]]/[[[s1.PRIMARY_COST]]" type="TEXT"/>
+        <column name="EXP_DATE" alias="EXP_DATE" expr="[[s2.EXPIRE_DATE]]" type="TEXT"/>
+        <column name="W_NAME" alias="W_NAME" expr="[[s4.W_NAME]]" type="TEXT"/>
+      </columns>
+      <groups/>
+      <variables>
+        <var name="W" type="text" default="1001"/>
+      </variables>
+    </view>
+  </views>
+  <doc_params>
+    <doc_param column="priceMethod" id="dp_custom_1791667196144" label="نوع التسعير" type="select" op="equals" required="1" default_value="o1" param_refname="V_2" src_mode="table" is_custom="1" no_filter="1" event="filter" src="static">
+      <option name="o1" value="بالتكلفة">بالتكلفة</option>
+      <option name="o2" value="بالبيع">بالبيع</option>
+    </doc_param>
+  </doc_params>
+  <general_where>([expire_items.PRICE_LVL] = '1' AND [16.expire_items.EXP_DATE] &lt;= SYSDATE AND ('&amp;W' = '0' OR [W_CODE] LIKE '%' || '&amp;W' || '%'))</general_where>
+</rml>

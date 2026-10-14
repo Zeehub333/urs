@@ -66,16 +66,16 @@ def _split_users_table(users_table, schema):
     return parts[0].lower(), parts[1].lower()
 
 
-def migrate_schema(host, port, user, password, dbname, schema, users_table=""):
-    """Create schema `company_branch_year` and migrate ALL Django app tables into it.
+def migrate_schema(host, port, user, password, dbname, schema, users_table="", workspace_id="", conn_name=""):
+    """Create schema `company_branch_year` and migrate ALL models without exception into it:
+    1) All Django / URS models (`migrate --run-syncdb`)
+    2) Users table (when missing, sys_users-compatible shape)
+    3) Every `.fmlk` / `.fml` model across the workspace apps and system apps (CREATE TABLE IF NOT EXISTS + ADD COLUMN IF NOT EXISTS + junctions)
+    4) Every custom model in `custom_models/*.json` (CREATE TABLE IF NOT EXISTS + ADD COLUMN IF NOT EXISTS)
+    5) Sync Django ORM rows (connections, countries, currencies, etc.) into the schema tables if fresh.
 
-    Steps: (CREATE DATABASE when missing) → CREATE SCHEMA IF NOT EXISTS →
-    CREATE users table (when missing, sys_users-compatible shape) →
-    temporary Django connection with ``search_path=<schema>`` →
-    ``migrate --run-syncdb`` (every app incl. ``urs`` models, auth, django_migrations)
-    → list created tables from ``pg_tables``.
-
-    Returns {"schema", "tables", "migrated": True, "users_table", "users_created"}.
+    Returns {"schema", "tables", "migrated": True, "users_table", "users_created",
+             "django_tables", "fmlk_migrated", "custom_migrated", "errors"}.
     Raises RuntimeError (Arabic) with the driver error attached. Never touches
     the default connection.
     """
@@ -87,6 +87,12 @@ def migrate_schema(host, port, user, password, dbname, schema, users_table=""):
         port = 5432
     user = str(user or "").strip() or "postgres"
     password = str(password or "")
+    if password:
+        try:
+            from config.dbconf import dbpass_resolve
+            password = dbpass_resolve(password) or password
+        except Exception:
+            pass
     dbname = str(dbname or "").strip() or "urs"
     try:
         import psycopg2
@@ -166,7 +172,7 @@ def migrate_schema(host, port, user, password, dbname, schema, users_table=""):
             except Exception:
                 pass
 
-    # --- Django migrate into the schema via search_path ---------------------
+    # --- 1) Django migrate into the schema via search_path -------------------
     alias = "ws_%s" % schema
     try:
         from django.conf import settings as _dj_settings
@@ -184,9 +190,6 @@ def migrate_schema(host, port, user, password, dbname, schema, users_table=""):
         "HOST": host,
         "PORT": str(port),
         "OPTIONS": {"options": "-c search_path=%s" % schema},
-        # Same defaults ConnectionHandler.configure_settings applies at
-        # startup (runtime-added aliases skip them; missing TIME_ZONE raised
-        # KeyError: 'TIME_ZONE' on connect via check_settings()).
         "ATOMIC_REQUESTS": False,
         "AUTOCOMMIT": True,
         "CONN_MAX_AGE": 0,
@@ -201,20 +204,6 @@ def migrate_schema(host, port, user, password, dbname, schema, users_table=""):
                          verbosity=0, interactive=False)
         except Exception as e:
             raise RuntimeError("فشل migrate داخل السكيما %s: %s" % (schema, e))
-        try:
-            conn = _conns[alias]
-            cur = conn.cursor()
-            try:
-                cur.execute("SELECT tablename FROM pg_tables WHERE schemaname = %s "
-                            "ORDER BY tablename", [schema])
-                tables = [str(r[0]) for r in (cur.fetchall() or [])]
-            finally:
-                try:
-                    cur.close()
-                except Exception:
-                    pass
-        except Exception as e:
-            raise RuntimeError("تم الترحيل لكن تعذر سرد الجداول: %s" % e)
     finally:
         try:
             _conns[alias].close()
@@ -224,8 +213,178 @@ def migrate_schema(host, port, user, password, dbname, schema, users_table=""):
             del _dj_settings.DATABASES[alias]
         except Exception:
             pass
-    return {"schema": schema, "tables": tables, "migrated": True,
-            "users_table": users_target, "users_created": users_created}
+
+    # --- 2) Migrate ALL .fmlk / .fml models and ALL custom_models/*.json -----
+    fmlk_migrated = []
+    custom_migrated = []
+    model_errors = []
+    try:
+        conn = _connect(dbname)
+        conn.autocommit = True
+        cur = conn.cursor()
+        try:
+            from fmlk_engine.compiler import FMLKFormCompiler
+            from fmlk_engine.engine import FMLKFormEngine
+
+            # Collect all app roots (target workspace first, then all workspaces & system roots)
+            app_dirs = []
+            seen_dirs = set()
+            ws_id_clean = str(workspace_id or "").strip()
+            if ws_id_clean and (BASE_DIR / ws_id_clean / "apps").is_dir():
+                d = (BASE_DIR / ws_id_clean / "apps").resolve()
+                seen_dirs.add(d)
+                app_dirs.append(d)
+            for p in sorted(BASE_DIR.glob("workspace_*")):
+                ad = p / "apps"
+                if ad.is_dir() and ad.resolve() not in seen_dirs:
+                    seen_dirs.add(ad.resolve())
+                    app_dirs.append(ad.resolve())
+            for legacy in (BASE_DIR / "odex" / "system", BASE_DIR / "system"):
+                if legacy.is_dir() and legacy.resolve() not in seen_dirs:
+                    seen_dirs.add(legacy.resolve())
+                    app_dirs.append(legacy.resolve())
+
+            seen_fmlk_tables = set()
+            for root_dir in app_dirs:
+                for fpath in sorted(root_dir.glob("*/*.fmlk")) + sorted(root_dir.glob("*/*.fml")):
+                    try:
+                        comp = FMLKFormCompiler(path=fpath)
+                        eng = FMLKFormEngine(comp, None)
+                        meta = comp.fml_metadata() or {}
+                        tbl = (meta.get("table") or meta.get("name") or fpath.stem or "").strip()
+                        if "." in tbl:
+                            tbl = tbl.split(".")[-1].strip()
+                        if not tbl or not _WS_SCHEMA_RE.fullmatch(tbl):
+                            continue
+                        # Target schema is ALWAYS the migrated schema (plus original schema if explicit & valid)
+                        target_schemas = [schema]
+                        orig_sch = str(meta.get("schema") or "").strip().lower()
+                        if orig_sch and orig_sch != "public" and orig_sch != schema and _WS_SCHEMA_RE.fullmatch(orig_sch):
+                            # Only create in target `schema` so all models live together in the workspace schema
+                            pass
+                        for t_sch in target_schemas:
+                            ddl = eng.build_create_table_ddl(schema=t_sch, table=tbl)
+                            for st in [s.strip() for s in ddl.split(";") if s.strip()]:
+                                cur.execute(st)
+                            cur.execute(
+                                "SELECT column_name FROM information_schema.columns WHERE table_schema=%s AND table_name=%s",
+                                (t_sch, tbl)
+                            )
+                            have = {str(r[0]).lower() for r in (cur.fetchall() or [])}
+                            added_cols = []
+                            for f in (comp.fields() or []):
+                                nm = (getattr(f, "name", "") or "").strip()
+                                if not nm or nm.lower() in have or getattr(f, "display_only", False):
+                                    continue
+                                if not _WS_SCHEMA_RE.fullmatch(nm):
+                                    continue
+                                dt = str(getattr(f, "data_type", "") or "VARCHAR").upper().split("(")[0].strip()
+                                pg_t = eng.DATA_TYPE_MAP.get(dt, "TEXT")
+                                try:
+                                    cur.execute(f'ALTER TABLE "{t_sch}"."{tbl}" ADD COLUMN IF NOT EXISTS "{nm}" {pg_t}')
+                                    have.add(nm.lower())
+                                    added_cols.append(nm)
+                                except Exception:
+                                    pass
+                            # Also ensure junction tables for details if any
+                            try:
+                                from urs import custom_models as _cmj
+                                for _det in (comp.details() or []):
+                                    _dd = _det.to_dict() if hasattr(_det, "to_dict") else dict(_det)
+                                    _dtab = (_dd.get("table") or "").strip().split(".")[-1].strip()
+                                    if not _dtab:
+                                        continue
+                                    _link_mode = str(_dd.get("link_mode") or _dd.get("linkMode") or "").strip().lower()
+                                    _cust = [c for c in (_dd.get("columns") or []) if isinstance(c, dict) and c.get("junction")]
+                                    if _link_mode == "junction" or _cust:
+                                        _jm, _jerr = _cmj.ensure_junction(
+                                            tbl, _dtab, t_sch, conn_name or "urs_local", _cust,
+                                            detail_text=bool(str((_dd.get("conn") or "")).strip())
+                                        )
+                                        if _jm and not _jerr:
+                                            j_ddl = _cmj.build_ddl({**_jm, "schema": t_sch})
+                                            for jst in [s.strip() for s in j_ddl.split(";") if s.strip()]:
+                                                cur.execute(jst)
+                            except Exception:
+                                pass
+                            key = f"{t_sch}.{tbl}".lower()
+                            if key not in seen_fmlk_tables:
+                                seen_fmlk_tables.add(key)
+                                fmlk_migrated.append({"app": fpath.parent.name, "file": fpath.name, "table": tbl, "added": added_cols})
+                    except Exception as fe:
+                        model_errors.append({"file": fpath.name, "error": str(fe)[:160]})
+        except Exception as e:
+            model_errors.append({"stage": "fmlk", "error": str(e)[:200]})
+
+        # Migrate all custom_models/*.json into the target schema
+        try:
+            from urs import custom_models as _cm
+            for m_meta in (_cm.list_models() or []):
+                m_name = m_meta.get("name")
+                model_def = _cm.get_model(m_name) if m_name else None
+                if not model_def:
+                    continue
+                tbl = (model_def.get("table") or model_def.get("name") or "").strip()
+                if not tbl or not _WS_SCHEMA_RE.fullmatch(tbl):
+                    continue
+                try:
+                    m_copy = dict(model_def)
+                    m_copy["schema"] = schema
+                    ddl = _cm.build_ddl(m_copy)
+                    for st in [s.strip() for s in ddl.split(";") if s.strip()]:
+                        cur.execute(st)
+                    cur.execute(
+                        "SELECT column_name FROM information_schema.columns WHERE table_schema=%s AND table_name=%s",
+                        (schema, tbl)
+                    )
+                    have = {str(r[0]).lower() for r in (cur.fetchall() or [])}
+                    added_cols = []
+                    for f in (model_def.get("fields") or []):
+                        nm = (f.get("name") or "").strip()
+                        if not nm or nm.lower() in have or not _WS_SCHEMA_RE.fullmatch(nm):
+                            continue
+                        try:
+                            cur.execute(f'ALTER TABLE "{schema}"."{tbl}" ADD COLUMN IF NOT EXISTS "{nm}" {_cm.pg_type(f)}')
+                            have.add(nm.lower())
+                            added_cols.append(nm)
+                        except Exception:
+                            pass
+                    custom_migrated.append({"model": m_name, "table": tbl, "added": added_cols})
+                except Exception as ce:
+                    model_errors.append({"custom_model": m_name, "error": str(ce)[:160]})
+        except Exception as e:
+            model_errors.append({"stage": "custom_models", "error": str(e)[:200]})
+
+        # List all tables now in the schema
+        try:
+            cur.execute("SELECT tablename FROM pg_tables WHERE schemaname = %s ORDER BY tablename", [schema])
+            tables = [str(r[0]) for r in (cur.fetchall() or [])]
+        except Exception as e:
+            raise RuntimeError("تم الترحيل لكن تعذر سرد الجداول: %s" % e)
+        finally:
+            try:
+                cur.close()
+            except Exception:
+                pass
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+    return {
+        "schema": schema,
+        "tables": tables,
+        "table_count": len(tables),
+        "migrated": True,
+        "users_table": users_target,
+        "users_created": users_created,
+        "fmlk_migrated": len(fmlk_migrated),
+        "custom_migrated": len(custom_migrated),
+        "fmlk_details": fmlk_migrated,
+        "custom_details": custom_migrated,
+        "errors": model_errors,
+    }
 
 def probe_port(host="127.0.0.1", port=5432, timeout=1.0) -> bool:
     try:

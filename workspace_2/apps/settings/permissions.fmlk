@@ -1,52 +1,111 @@
 <?xml version="1.0" encoding="utf-8"?>
 <fml>
-  <fml_metadata name="permissions" displayName="الصلاحيات" table="sys_permissions" model_type="form" schema="taafi_main_2026" connection="urs_local" category="النظام" description="صلاحيات النظام — الحقول وقواعد العمل" icon="fa-shield-halved"/>
+  <fml_metadata name="permissions" displayName="صلاحيات المستخدمين" table="ad_permissions" model_type="form" schema="taafi_main_2026" connection="urs_local" category="النظام" icon="fa-shield-halved" description="صلاحيات المستخدمين: نماذج وتقارير وقواعد ومصادر — مصدر محلي أو خارجي" details_tab="التفاصيل"/>
   <tabs>
-    <tab id="main" name="الصلاحيات" alias="الصلاحيات" sort_order="1"/>
+    <tab id="الصلاحية" name="الصلاحية" alias="الصلاحية" sort_order="1" is_main="1"/>
+    <tab id="صلاحيات النماذج" name="صلاحيات النماذج" alias="صلاحيات النماذج" sort_order="2"/>
+    <tab id="صلاحيات التقارير" name="صلاحيات التقارير" alias="صلاحيات التقارير" sort_order="3"/>
+    <tab id="صلاحيات القواعد" name="صلاحيات القواعد" alias="صلاحيات القواعد" sort_order="4"/>
+    <tab id="صلاحيات المصادر" name="صلاحيات المصادر" alias="صلاحيات المصادر" sort_order="5"/>
+    <tab id="صلاحيات الحسابات" name="صلاحيات الحسابات" alias="صلاحيات الحسابات" sort_order="6"/>
   </tabs>
   <fields>
-    <field id="1" name="permission_code" alias="رمز الصلاحية" dataType="VARCHAR" inputType="text" required="true" nullable="false" editable="true" primary_key="true" tab="main" category="أساسية" placeholder="مثال: HR.EMP.VIEW">
-      <validation pattern="^[A-Z0-9_.]+$" min_length="3" max_length="60"/>
-    </field>
-    <field id="2" name="permission_name" alias="اسم الصلاحية" dataType="VARCHAR" inputType="text" required="true" nullable="false" editable="true" primary_key="false" tab="main" category="أساسية"/>
-    <field id="3" name="module" alias="الوحدة" dataType="VARCHAR" inputType="select" required="true" nullable="false" editable="true" primary_key="false" tab="main" category="التصنيف">
+    <field id="1" name="perm_source" alias="مصدر الصلاحيات" dataType="VARCHAR" inputType="select" required="true" nullable="false" editable="true" primary_key="false" tab="أساسية" destination="main" category="أساسية">
       <options>
-        <option>الموارد البشرية</option>
-        <option>المحاسبة</option>
-        <option>المخزون</option>
-        <option>المبيعات</option>
-        <option>المشتريات</option>
-        <option>النظام</option>
+        <option>محلي</option>
+        <option>خارجي</option>
       </options>
     </field>
-    <field id="4" name="action" alias="الإجراء" dataType="VARCHAR" inputType="select" required="true" nullable="false" editable="true" primary_key="false" tab="main" category="التصنيف">
+    <field id="2" name="apply_on" alias="تطبيق على :" dataType="VARCHAR" inputType="select" required="false" nullable="true" editable="true" primary_key="false" tab="الصلاحية" destination="main" category="الصلاحية">
       <options>
-        <option>عرض</option>
-        <option>إضافة</option>
-        <option>تعديل</option>
-        <option>حذف</option>
-        <option>اعتماد</option>
-        <option>تصدير</option>
+        <option value="user">المستخدمين</option>
+        <option value="group">مجموعات المستخدمين</option>
       </options>
     </field>
-    <field id="5" name="role" alias="الدور الممنوح" dataType="VARCHAR" inputType="select" required="true" nullable="false" editable="true" primary_key="false" tab="main" category="المنح">
-      <options>
-        <option>مدير نظام</option>
-        <option>مدير</option>
-        <option>مشرف</option>
-        <option>مستخدم</option>
-        <option>ضيف</option>
-      </options>
-    </field>
-    <field id="6" name="scope" alias="النطاق" dataType="VARCHAR" inputType="select" required="false" nullable="true" editable="true" primary_key="false" tab="main" category="المنح">
-      <options>
-        <option>عام</option>
-        <option>الشركة</option>
-        <option>الفرع</option>
-        <option>شخصي</option>
-      </options>
-    </field>
-    <field id="7" name="is_active" alias="مفعلة" dataType="BOOLEAN" inputType="boolean" required="false" nullable="true" editable="true" primary_key="false" tab="main" category="الحالة" default="true"/>
-    <field id="8" name="notes" alias="ملاحظات" dataType="TEXT" inputType="textarea" required="false" nullable="true" editable="true" primary_key="false" tab="main" category="إضافية"/>
+    <field id="3" name="user_name" alias="المستخدم" dataType="VARCHAR" inputType="datamodal" required="true" nullable="false" editable="true" primary_key="false" tab="أساسية" destination="main" category="أساسية" src_expr="if(@perm_source='خارجي',[IAS20264.USER_R@16],[taafi_main_2026.users@13])" key_col="taafi_main_2026.users:username,USER_R:u_id" label_col="taafi_main_2026.users:full_name,USER_R:u_a_name"/>
+    <field id="4" name="is_active" alias="مفعلة" dataType="BOOLEAN" inputType="boolean" required="false" nullable="true" editable="true" primary_key="false" tab="الحالة" destination="main" category="الحالة"/>
+    <field id="5" name="notes" alias="ملاحظات" dataType="TEXT" inputType="textarea" required="false" nullable="true" editable="true" primary_key="false" tab="إضافية" destination="main" category="إضافية"/>
   </fields>
+  <details>
+    <detail table="ad_perm_forms" alias="صلاحيات النماذج" tab="صلاحيات النماذج" master="id" detail="permission_id" rel_type="one_to_many" link_mode="direct" sub_key="id" visible="1">
+      <columns>
+        <column name="permission_id" alias="الصلاحية" data_type="INTEGER" input_type="text" tab="الصلاحية"/>
+        <column name="form_file" alias="ملف النموذج" data_type="VARCHAR" input_type="text" tab="الصلاحية"/>
+        <column name="form_name" alias="النموذج (بحث بالعربي)" data_type="VARCHAR" input_type="text" tab="الصلاحية"/>
+        <column name="can_view" alias="عرض" data_type="BOOLEAN" input_type="boolean" tab="الصلاحية"/>
+        <column name="can_edit" alias="تعديل" data_type="BOOLEAN" input_type="boolean" tab="الصلاحية"/>
+        <column name="can_add" alias="اضافة" data_type="BOOLEAN" input_type="boolean" tab="الصلاحية"/>
+        <column name="can_import" alias="استيراد" data_type="BOOLEAN" input_type="boolean" tab="الصلاحية"/>
+        <column name="can_export" alias="تصدير" data_type="BOOLEAN" input_type="boolean" tab="الصلاحية"/>
+        <column name="can_delete" alias="حذف" data_type="BOOLEAN" input_type="boolean" tab="الصلاحية"/>
+        <column name="can_search" alias="بحث" data_type="BOOLEAN" input_type="boolean" tab="الصلاحية"/>
+        <column name="can_migrate" alias="ترحيل" data_type="BOOLEAN" input_type="boolean" tab="الصلاحية"/>
+        <column name="can_unmigrate" alias="الغاء الترحيل" data_type="BOOLEAN" input_type="boolean" tab="الصلاحية"/>
+        <column name="custom_actions" alias="إجراءات مخصصة" data_type="TEXT" input_type="multiselect" tab="الصلاحية"/>
+        <column name="fields_visibility" alias="ظهور الأعمدة {عمود:0/1}" data_type="TEXT" input_type="text" tab="الصلاحية"/>
+      </columns>
+    </detail>
+    <detail table="ad_perm_reports" alias="صلاحيات التقارير" tab="صلاحيات التقارير" master="id" detail="permission_id" rel_type="one_to_many" link_mode="direct" sub_key="id" visible="1">
+      <columns>
+        <column name="permission_id" alias="الصلاحية" data_type="INTEGER" input_type="text" tab="الصلاحية"/>
+        <column name="report_file" alias="ملف التقرير" data_type="VARCHAR" input_type="text" tab="الصلاحية"/>
+        <column name="report_name" alias="التقرير (بحث بالعربي)" data_type="VARCHAR" input_type="text" tab="الصلاحية"/>
+        <column name="can_view" alias="عرض" data_type="BOOLEAN" input_type="boolean" tab="الصلاحية"/>
+        <column name="columns_visibility" alias="ظهور الأعمدة {عمود:0/1}" data_type="TEXT" input_type="text" tab="الصلاحية"/>
+      </columns>
+    </detail>
+    <detail table="ad_perm_rules" alias="صلاحيات القواعد" tab="صلاحيات القواعد" master="id" detail="permission_id" rel_type="one_to_many" link_mode="direct" sub_key="id" visible="1">
+      <columns>
+        <column name="permission_id" alias="الصلاحية" data_type="INTEGER" input_type="text" tab="الصلاحية"/>
+        <column name="rule_file" alias="ملف القاعدة" data_type="VARCHAR" input_type="text" tab="الصلاحية"/>
+        <column name="rule_name" alias="القاعدة" data_type="VARCHAR" input_type="text" tab="الصلاحية"/>
+        <column name="can_view" alias="عرض" data_type="BOOLEAN" input_type="boolean" tab="الصلاحية"/>
+        <column name="can_edit" alias="تعديل" data_type="BOOLEAN" input_type="boolean" tab="الصلاحية"/>
+        <column name="can_add" alias="اضافة" data_type="BOOLEAN" input_type="boolean" tab="الصلاحية"/>
+        <column name="can_import" alias="استيراد" data_type="BOOLEAN" input_type="boolean" tab="الصلاحية"/>
+        <column name="can_export" alias="تصدير" data_type="BOOLEAN" input_type="boolean" tab="الصلاحية"/>
+        <column name="can_delete" alias="حذف" data_type="BOOLEAN" input_type="boolean" tab="الصلاحية"/>
+        <column name="can_search" alias="بحث" data_type="BOOLEAN" input_type="boolean" tab="الصلاحية"/>
+        <column name="can_migrate" alias="ترحيل" data_type="BOOLEAN" input_type="boolean" tab="الصلاحية"/>
+        <column name="can_unmigrate" alias="الغاء الترحيل" data_type="BOOLEAN" input_type="boolean" tab="الصلاحية"/>
+        <column name="variables" alias="تفعيل المتغيرات {متغير:0/1}" data_type="TEXT" input_type="text" tab="الصلاحية"/>
+      </columns>
+    </detail>
+    <detail table="ad_perm_objects" alias="صلاحيات المصادر" tab="صلاحيات المصادر" master="id" detail="permission_id" rel_type="one_to_many" link_mode="direct" sub_key="id" visible="1">
+      <columns>
+        <column name="permission_id" alias="الصلاحية" data_type="INTEGER" input_type="text" tab="الصلاحية"/>
+        <column name="source" alias="المصدر (مفتاح الدليل)" data_type="VARCHAR" input_type="text" tab="الصلاحية"/>
+        <column name="ref_key" alias="المرجع (التسلسل)" data_type="VARCHAR" input_type="text" tab="الصلاحية"/>
+        <column name="ref_name" alias="الاسم" data_type="VARCHAR" input_type="text" tab="الصلاحية"/>
+        <column name="can_view" alias="عرض" data_type="BOOLEAN" input_type="boolean" tab="الصلاحية"/>
+        <column name="can_edit" alias="تعديل" data_type="BOOLEAN" input_type="boolean" tab="الصلاحية"/>
+        <column name="can_add" alias="اضافة" data_type="BOOLEAN" input_type="boolean" tab="الصلاحية"/>
+        <column name="can_import" alias="استيراد" data_type="BOOLEAN" input_type="boolean" tab="الصلاحية"/>
+        <column name="can_export" alias="تصدير" data_type="BOOLEAN" input_type="boolean" tab="الصلاحية"/>
+        <column name="can_search" alias="بحث" data_type="BOOLEAN" input_type="boolean" tab="الصلاحية"/>
+        <column name="can_delete" alias="حذف" data_type="BOOLEAN" input_type="boolean" tab="الصلاحية"/>
+        <column name="can_migrate" alias="ترحيل" data_type="BOOLEAN" input_type="boolean" tab="الصلاحية"/>
+        <column name="can_unmigrate" alias="الغاء الترحيل" data_type="BOOLEAN" input_type="boolean" tab="الصلاحية"/>
+        <column name="extra" alias="إضافي" data_type="TEXT" input_type="text" tab="الصلاحية"/>
+      </columns>
+    </detail>
+    <detail table="ad_perm_accounts" alias="صلاحيات الحسابات" tab="صلاحيات الحسابات" master="id" detail="permission_id" rel_type="one_to_many" link_mode="direct" sub_key="id" visible="1">
+      <columns>
+        <column name="permission_id" alias="الصلاحية" data_type="INTEGER" input_type="text" tab="الصلاحية"/>
+        <column name="source" alias="المصدر" data_type="VARCHAR" input_type="text" tab="الصلاحية" default="src:accounts"/>
+        <column name="ref_key" alias="المرجع (رقم الحساب)" data_type="VARCHAR" input_type="text" tab="الصلاحية"/>
+        <column name="ref_name" alias="اسم الحساب" data_type="VARCHAR" input_type="text" tab="الصلاحية"/>
+        <column name="can_view" alias="عرض" data_type="BOOLEAN" input_type="boolean" tab="الصلاحية"/>
+        <column name="can_edit" alias="تعديل" data_type="BOOLEAN" input_type="boolean" tab="الصلاحية"/>
+        <column name="can_add" alias="اضافة" data_type="BOOLEAN" input_type="boolean" tab="الصلاحية"/>
+        <column name="can_import" alias="استيراد" data_type="BOOLEAN" input_type="boolean" tab="الصلاحية"/>
+        <column name="can_export" alias="تصدير" data_type="BOOLEAN" input_type="boolean" tab="الصلاحية"/>
+        <column name="can_delete" alias="حذف" data_type="BOOLEAN" input_type="boolean" tab="الصلاحية"/>
+        <column name="can_search" alias="بحث" data_type="BOOLEAN" input_type="boolean" tab="الصلاحية"/>
+        <column name="can_migrate" alias="ترحيل" data_type="BOOLEAN" input_type="boolean" tab="الصلاحية"/>
+        <column name="can_unmigrate" alias="الغاء الترحيل" data_type="BOOLEAN" input_type="boolean" tab="الصلاحية"/>
+        <column name="extra" alias="إضافي" data_type="TEXT" input_type="text" tab="الصلاحية"/>
+      </columns>
+    </detail>
+  </details>
 </fml>

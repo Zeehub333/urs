@@ -170,6 +170,8 @@ def _load_app_context(app_name):
                 except:
                     app_meta = {"name": app_name, "ar": app_name}
             for p in sorted(cand.glob("*.rml")):
+                if _is_internal_rml(p.name):
+                    continue
                 try:
                     from rml_python.compiler import RMLReportCompiler
                     comp = RMLReportCompiler(path=p)
@@ -201,6 +203,55 @@ def _group_files_by_category(files):
             groups.append({"name": _cat, "files": []})
         groups[idx[_cat]]["files"].append(_f)
     return groups
+
+def _scrub_catalog_names(request, fml_files, rml_files, app_rules=None):
+    """View (entry) mode: Arabic display names → file keys in catalog lists.
+
+    Scope: names of forms/reports/business-rules shown in home/app-detail/
+    player sidebars, grids and search indexes. Edit (design) mode returns
+    inputs untouched. Current-record headers (fml_metadata/rml_metadata)
+    are NOT touched — callers keep them separately so the open item stays
+    identified. Never raises; returns (fml, rml, rules) — copies in view mode.
+    """
+    try:
+        if _ws_can_design(request):
+            return fml_files, rml_files, app_rules
+    except Exception:
+        pass
+    import copy as _cp
+    try:
+        fml = _cp.deepcopy(fml_files or [])
+        rml = _cp.deepcopy(rml_files or [])
+        rules = _cp.deepcopy(app_rules) if app_rules is not None else None
+    except Exception:
+        fml, rml, rules = list(fml_files or []), list(rml_files or []), app_rules
+    try:
+        for _f in (fml or []):
+            if not isinstance(_f, dict):
+                continue
+            _md = _f.get("metadata")
+            if isinstance(_md, dict):
+                if _md.get("displayName"):
+                    _md["displayName"] = _f.get("file") or _md.get("displayName")
+                _md["description"] = ""
+        for _f in (rml or []):
+            if not isinstance(_f, dict):
+                continue
+            _md = _f.get("metadata")
+            if isinstance(_md, dict):
+                if _md.get("displayName"):
+                    _md["displayName"] = _f.get("file") or _md.get("displayName")
+                _md["description"] = ""
+        for _r in (rules or []):
+            if not isinstance(_r, dict):
+                continue
+            if _r.get("display"):
+                _r["display"] = _r.get("name") or _r.get("display")
+            _r["description"] = ""
+    except Exception:
+        pass
+    return fml, rml, rules
+
 
 def _unified_side_groups(fml_files, rml_files):
     """One group per shared category name holding BOTH its forms and reports.
@@ -311,6 +362,32 @@ def workspace_home(request):
     })
 
 
+def workspace_settings_page(request, ws_id=""):
+    """Standalone Workspace Settings page (/ws-settings/<ws_id>/) rendering ws_settings.html."""
+    _g = _gate_redirect(request)
+    if _g is not None:
+        return _g
+    _sid = (request.GET.get("settings") or "").strip()
+    if _sid and not ws_id:
+        return redirect("/ws-settings/%s/" % _sid)
+    try:
+        workspaces = ws_workspaces_info()
+    except Exception:
+        workspaces = []
+    target_id = (ws_id or request.GET.get("settings") or request.GET.get("workspace") or request.session.get("workspace") or "").strip()
+    if not target_id and workspaces:
+        target_id = workspaces[0].get("id") or ""
+    ws_obj = next((w for w in workspaces if w.get("id") == target_id), None)
+    if ws_obj is None and workspaces:
+        ws_obj = workspaces[0]
+        target_id = ws_obj.get("id") or ""
+    return render(request, "ws_settings.html", {
+        "ws_id": target_id,
+        "workspace": ws_obj or {},
+        "workspaces": workspaces,
+    })
+
+
 _WS_ID_RE = None
 try:
     import re as _re_wsid
@@ -363,52 +440,139 @@ def _write_ws_settings_py(ws, values):
     return merged
 
 
-def _write_ws_conf(ws, primary_connection="", users_table="", status="active",
-                   user_column="", password_column="", schema=""):
-    """Write <ws>/workspace.conf bindings (display keys live in settings.py).
+_WS_AUTH_HASHES = ("auto", "none", "plain", "md5", "sha1", "sha256",
+                   "mysql_sha1", "pg_md5", "caesar", "atbash", "rot13")
+_WS_AUTH_SHIFT_DEFAULT = 3
 
-    user_column/password_column pin the login username/password columns of
-    the users table (USERS_USER_COLUMN / USERS_PASSWORD_COLUMN); empty means
-    auto-detect from the known name lists. schema pins the workspace
-    data schema (SCHEMA=company_branch_year, created by migrate_schema).
-    """
+
+def _ws_auth_shift(value):
+    """AUTH_SHIFT as int (Caesar offset, may be negative). Default 3."""
+    try:
+        _v = int(str(value or "").strip())
+    except (TypeError, ValueError):
+        return _WS_AUTH_SHIFT_DEFAULT
+    if _v < -1000 or _v > 1000:
+        return _WS_AUTH_SHIFT_DEFAULT
+    return _v
+
+
+def _ws_conf_get(conf, *keys, default=""):
+    """Case-insensitive conf reader with fallback defaults."""
+    if not isinstance(conf, dict):
+        return default
+    for k in keys:
+        if k in conf and conf[k]:
+            return str(conf[k]).strip()
+        kl = k.lower()
+        for ck, cv in conf.items():
+            if ck.lower() == kl and cv:
+                return str(cv).strip()
+    return default
+
+
+def _write_ws_conf(ws, primary_connection="", users_table="", status="active",
+                   user_column="", password_column="", schema="",
+                   auth_conn="", auth_user_column="", auth_password_column="",
+                   auth_full_column="", auth_hash="", auth_shift="",
+                   local_user_table="", local_user_username="", local_user_password="",
+                   local_user_enctype="", local_user_fullname="", local_user_connection="",
+                   external_user_table="", external_user_username="", external_user_password="",
+                   external_user_enctype="", external_user_fullname="", external_user_connection="",
+                   external_user_shift=""):
+    """Write <ws>/workspace.conf bindings supporting local and external user tables."""
     cp = ws / "workspace.conf"
     try:
         conf_lines = cp.read_text(encoding="utf-8").splitlines()
     except Exception:
         conf_lines = ["# Workspace runtime bindings."]
     drop = {"WORKSPACE_NAME", "BRAND", "COMPANY", "DOMAIN"}
+    managed_keys = {
+        "PRIMARY_CONNECTION", "USERS_TABLE", "STATUS",
+        "USERS_USER_COLUMN", "USERS_PASSWORD_COLUMN", "SCHEMA",
+        "AUTH_CONN", "AUTH_USER_COLUMN", "AUTH_PASSWORD_COLUMN",
+        "AUTH_FULL_COLUMN", "AUTH_HASH", "AUTH_SHIFT",
+        "LOCAL_USER_TABLE", "LOCAL_USER_USERNAME", "LOCAL_USER_PASSWORD",
+        "LOCAL_USER_ENCTYPE", "LOCAL_USER_FULLNAME", "LOCAL_USER_CONNECTION",
+        "EXTERNAL_USER_TABLE", "EXTERNAL_USER_USERNAME", "EXTERNAL_USER_PASSWORD",
+        "EXTERNAL_USER_ENCTYPE", "EXTERNAL_USER_FULLNAME", "EXTERNAL_USER_CONNECTION",
+        "EXTERNAL_USER_SHIFT"
+    }
     out = []
     for ln in conf_lines:
         s = ln.strip()
         if s and not s.startswith("#") and "=" in s:
             k = s.split("=", 1)[0].strip()
-            if k in drop:
-                continue
-            if k in ("PRIMARY_CONNECTION", "USERS_TABLE", "STATUS",
-                     "USERS_USER_COLUMN", "USERS_PASSWORD_COLUMN", "SCHEMA"):
+            if k in drop or k.upper() in managed_keys:
                 continue
         out.append(ln)
-    if primary_connection:
-        out.append("PRIMARY_CONNECTION=%s" % primary_connection)
-    if users_table:
-        out.append("USERS_TABLE=%s" % users_table)
-    if user_column:
-        out.append("USERS_USER_COLUMN=%s" % user_column)
-    if password_column:
-        out.append("USERS_PASSWORD_COLUMN=%s" % password_column)
+
+    # Core bindings
+    _pc = primary_connection or local_user_connection
+    if _pc:
+        out.append("PRIMARY_CONNECTION=%s" % _pc)
     if schema:
         out.append("SCHEMA=%s" % schema)
     out.append("STATUS=%s" % (status or "active"))
+
+    # Local user authentication
+    _lut = local_user_table or users_table
+    if _lut:
+        out.append("LOCAL_USER_TABLE=%s" % _lut)
+        out.append("USERS_TABLE=%s" % _lut)
+    _luu = local_user_username or user_column
+    if _luu:
+        out.append("LOCAL_USER_USERNAME=%s" % _luu)
+        out.append("USERS_USER_COLUMN=%s" % _luu)
+    _lup = local_user_password or password_column
+    if _lup:
+        out.append("LOCAL_USER_PASSWORD=%s" % _lup)
+        out.append("USERS_PASSWORD_COLUMN=%s" % _lup)
+    if local_user_enctype and str(local_user_enctype).strip().lower() not in ("", "auto"):
+        out.append("LOCAL_USER_ENCTYPE=%s" % str(local_user_enctype).strip().lower())
+    if local_user_fullname:
+        out.append("LOCAL_USER_FULLNAME=%s" % local_user_fullname)
+    if local_user_connection:
+        out.append("LOCAL_USER_CONNECTION=%s" % local_user_connection)
+
+    # External user authentication
+    _econn = external_user_connection or auth_conn
+    if _econn:
+        out.append("EXTERNAL_USER_CONNECTION=%s" % _econn)
+        out.append("AUTH_CONN=%s" % _econn)
+    if external_user_table:
+        out.append("EXTERNAL_USER_TABLE=%s" % external_user_table)
+    _euu = external_user_username or auth_user_column
+    if _euu:
+        out.append("EXTERNAL_USER_USERNAME=%s" % _euu)
+        out.append("AUTH_USER_COLUMN=%s" % _euu)
+    _eup = external_user_password or auth_password_column
+    if _eup:
+        out.append("EXTERNAL_USER_PASSWORD=%s" % _eup)
+        out.append("AUTH_PASSWORD_COLUMN=%s" % _eup)
+    _euf = external_user_fullname or auth_full_column
+    if _euf:
+        out.append("EXTERNAL_USER_FULLNAME=%s" % _euf)
+        out.append("AUTH_FULL_COLUMN=%s" % _euf)
+    _ehash = external_user_enctype or auth_hash
+    if _ehash and str(_ehash).strip().lower() not in ("", "auto"):
+        out.append("EXTERNAL_USER_ENCTYPE=%s" % str(_ehash).strip().lower())
+        out.append("AUTH_HASH=%s" % str(_ehash).strip().lower())
+    _eshift = external_user_shift or auth_shift
+    try:
+        _sh = _ws_auth_shift(_eshift)
+    except Exception:
+        _sh = _WS_AUTH_SHIFT_DEFAULT
+    if str(_eshift or "").strip() != "" and _sh != _WS_AUTH_SHIFT_DEFAULT:
+        out.append("EXTERNAL_USER_SHIFT=%d" % _sh)
+        out.append("AUTH_SHIFT=%d" % _sh)
+
     cp.write_text("\n".join(out).rstrip("\n") + "\n", encoding="utf-8")
 
 
-def _ws_users_colmap(ws_id):
-    """Pinned (user_col, pass_col) for a workspace users table, lowercase.
-
-    '' means unset — callers fall back to auto-detect. Only valid
-    identifiers are returned. Never raises.
-    """
+def _ws_auth_cfg(ws_id):
+    """External-auth config for a workspace: {conn, table, user_col, pass_col, full_col, hash, shift}."""
+    out = {"conn": "", "table": "", "user_col": "", "pass_col": "", "full_col": "", "hash": "auto",
+           "shift": _WS_AUTH_SHIFT_DEFAULT}
     import re as _re_id
     try:
         from . import workspace as _wsm
@@ -417,8 +581,67 @@ def _ws_users_colmap(ws_id):
             if _w.name != ws_id:
                 continue
             conf = _wsm.read_conf(_w / "workspace.conf")
-            _u = str(conf.get("USERS_USER_COLUMN") or "").strip().lower()
-            _p = str(conf.get("USERS_PASSWORD_COLUMN") or "").strip().lower()
+            out["conn"] = _ws_conf_get(conf, "EXTERNAL_USER_CONNECTION", "AUTH_CONN")[:80]
+            out["table"] = _ws_conf_get(conf, "EXTERNAL_USER_TABLE")[:120]
+            _ok = lambda v: bool(v) and bool(_re_id.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", v))
+            _u = _ws_conf_get(conf, "EXTERNAL_USER_USERNAME", "AUTH_USER_COLUMN").lower()
+            _p = _ws_conf_get(conf, "EXTERNAL_USER_PASSWORD", "AUTH_PASSWORD_COLUMN").lower()
+            _f = _ws_conf_get(conf, "EXTERNAL_USER_FULLNAME", "AUTH_FULL_COLUMN").lower()
+            out["user_col"] = _u if _ok(_u) else ""
+            out["pass_col"] = _p if _ok(_p) else ""
+            out["full_col"] = _f if _ok(_f) else ""
+            _h = _ws_conf_get(conf, "EXTERNAL_USER_ENCTYPE", "EXTERNAL_USER_HASH", "AUTH_HASH", default="auto").lower()
+            out["hash"] = _h if _h in _WS_AUTH_HASHES else "auto"
+            try:
+                out["shift"] = _ws_auth_shift(_ws_conf_get(conf, "EXTERNAL_USER_SHIFT", "AUTH_SHIFT"))
+            except Exception:
+                out["shift"] = _WS_AUTH_SHIFT_DEFAULT
+            break
+    except Exception:
+        pass
+    return out
+
+
+def _ws_local_auth_cfg(ws_id):
+    """Local-auth config for a workspace: {conn, table, user_col, pass_col, full_col, hash}."""
+    out = {"conn": "", "table": "", "user_col": "", "pass_col": "", "full_col": "", "hash": "auto"}
+    import re as _re_id
+    try:
+        from . import workspace as _wsm
+        ws_id = str(ws_id or "").strip()
+        for _w in _wsm.workspace_dirs():
+            if _w.name != ws_id:
+                continue
+            conf = _wsm.read_conf(_w / "workspace.conf")
+            out["conn"] = _ws_conf_get(conf, "LOCAL_USER_CONNECTION", "PRIMARY_CONNECTION")[:80]
+            out["table"] = _ws_conf_get(conf, "LOCAL_USER_TABLE", "USERS_TABLE")[:120]
+            _ok = lambda v: bool(v) and bool(_re_id.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", v))
+            _u = _ws_conf_get(conf, "LOCAL_USER_USERNAME", "USERS_USER_COLUMN").lower()
+            _p = _ws_conf_get(conf, "LOCAL_USER_PASSWORD", "USERS_PASSWORD_COLUMN").lower()
+            _f = _ws_conf_get(conf, "LOCAL_USER_FULLNAME").lower()
+            out["user_col"] = _u if _ok(_u) else ""
+            out["pass_col"] = _p if _ok(_p) else ""
+            out["full_col"] = _f if _ok(_f) else ""
+            _h = _ws_conf_get(conf, "LOCAL_USER_ENCTYPE", "LOCAL_USER_HASH", default="auto").lower()
+            out["hash"] = _h if _h in _WS_AUTH_HASHES else "auto"
+            break
+    except Exception:
+        pass
+    return out
+
+
+def _ws_users_colmap(ws_id):
+    """Pinned (user_col, pass_col) for a workspace users table, lowercase."""
+    import re as _re_id
+    try:
+        from . import workspace as _wsm
+        ws_id = str(ws_id or "").strip()
+        for _w in _wsm.workspace_dirs():
+            if _w.name != ws_id:
+                continue
+            conf = _wsm.read_conf(_w / "workspace.conf")
+            _u = _ws_conf_get(conf, "LOCAL_USER_USERNAME", "USERS_USER_COLUMN").lower()
+            _p = _ws_conf_get(conf, "LOCAL_USER_PASSWORD", "USERS_PASSWORD_COLUMN").lower()
             _ok = lambda v: bool(v) and bool(_re_id.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", v))
             return (_u if _ok(_u) else "", _p if _ok(_p) else "")
     except Exception:
@@ -749,15 +972,20 @@ def _ws_db_init_module():
         raise RuntimeError("تعذر تحميل db_init.py: %s" % e)
 
 
-def _ws_migrate_workspace_schema(conn_params, schema, users_table=""):
+def _ws_migrate_workspace_schema(conn_params, schema, users_table="", workspace_id="", conn_name=""):
     """Run db_init.migrate_schema for a workspace connection dict. Returns its dict."""
     mod = _ws_db_init_module()
     fn = getattr(mod, "migrate_schema", None)
     if not callable(fn):
         raise RuntimeError("db_init.migrate_schema غير متوفرة")
     cp = conn_params if isinstance(conn_params, dict) else {}
-    return fn(cp.get("host"), cp.get("port"), cp.get("user"),
-              cp.get("password"), cp.get("instance"), schema, users_table or "")
+    try:
+        return fn(cp.get("host"), cp.get("port"), cp.get("user"),
+                  cp.get("password"), cp.get("instance"), schema, users_table or "",
+                  workspace_id=workspace_id, conn_name=conn_name)
+    except TypeError:
+        return fn(cp.get("host"), cp.get("port"), cp.get("user"),
+                  cp.get("password"), cp.get("instance"), schema, users_table or "")
 
 
 @csrf_exempt
@@ -874,7 +1102,11 @@ def api_workspaces_create(request):
         })
         _pc = _s(data.get("primary_connection"), 80) or "urs_local"
         _ut = _s(data.get("users_table"), 160) or ("%s.users" % _schema)
-        _write_ws_conf(ws, _pc, _ut, "active", schema=_schema)
+        _ac = _s(data.get("auth_conn"), 80)
+        _ah = _s(data.get("auth_hash"), 16).lower() or "auto"
+        _ash = _s(data.get("auth_shift"), 16) if _ah == "caesar" else ""
+        _write_ws_conf(ws, _pc, _ut, "active", schema=_schema,
+                        auth_conn=_ac, auth_hash=_ah, auth_shift=_ash)
 
         copied = 0
         if src_ws is not None:
@@ -940,13 +1172,19 @@ def api_workspaces_create(request):
                     imported_files = int(_ins.get("files") or 0)
                 except Exception:
                     imported_files = 0
+                # Also remap connection/schema on newly imported apps if requested
+                for _imp_app in imported:
+                    try:
+                        _ws_remap_copied_conns(ws / "apps" / _imp_app, conn_name, _schema)
+                    except Exception:
+                        pass
             except ValueError as e:
                 return JsonResponse({"error": str(e),
                                      "workspace": _wsm.workspace_info(ws),
                                      "connection": conn_name, "schema": _schema},
                                     json_dumps_params={"ensure_ascii": False}, status=400)
 
-        # migrate all urs models into the workspace schema on its connection
+        # migrate all urs models + fmlk models + custom models into the workspace schema on its connection
         migrated, migrate_info, migrate_error = False, {}, ""
         _do_migrate = data.get("migrate", True)
         if isinstance(_do_migrate, str):
@@ -963,7 +1201,8 @@ def api_workspaces_create(request):
                             _mp["password"] = _row_pw
                     except Exception:
                         pass
-                migrate_info = _ws_migrate_workspace_schema(_mp, _schema, _ut) or {}
+                migrate_info = _ws_migrate_workspace_schema(
+                    _mp, _schema, _ut, workspace_id=ws_id, conn_name=conn_name) or {}
                 migrated = bool((migrate_info or {}).get("migrated"))
             except Exception as e:
                 migrate_error = str(e)[:300]
@@ -1165,11 +1404,11 @@ def api_workspace_delete(request, ws_id):
 
 @csrf_exempt
 def api_workspace_migrate(request, ws_id):
-    """POST /api/workspaces/<id>/migrate/ — (re)run schema migration for a workspace.
+    """POST /api/workspaces/<id>/migrate/ — (re)run full schema migration for a workspace.
 
-    Reads SCHEMA + PRIMARY_CONNECTION from workspace.conf and the matching
-    Connection row, then runs db_init.migrate_schema (CREATE SCHEMA +
-    full migrate). Body: {schema?} to override the conf SCHEMA.
+    Reads SCHEMA + PRIMARY_CONNECTION from workspace.conf (or overrides from body:
+    {schema?, connection_name?, connection_id?, connection?: {host, port, user, password, instance}})
+    and runs db_init.migrate_schema (CREATE SCHEMA + all Django/URS models + all .fmlk models + all custom models).
     Requires master password (session master_ok).
     """
     if request.method != "POST":
@@ -1191,27 +1430,41 @@ def api_workspace_migrate(request, ws_id):
             return JsonResponse({"error": "invalid JSON"}, status=400)
         ws = next(w for w in _wsm.workspace_dirs() if w.name == ws_id)
         conf = _wsm.read_conf(ws / "workspace.conf")
-        _pc = (conf.get("PRIMARY_CONNECTION") or "").strip()
-        if not _pc:
-            return JsonResponse({"error": "لا يوجد اتصال أساسي في workspace.conf"}, status=400)
-        _schema = str(data.get("schema") or conf.get("SCHEMA") or "").strip().lower()
+        _target_conn_ref = str(data.get("connection_name") or data.get("connection_id") or data.get("primary_connection") or conf.get("PRIMARY_CONNECTION") or "").strip()
+        if not _target_conn_ref:
+            return JsonResponse({"error": "لا يوجد اتصال محدد للترحيل"}, status=400)
+        try:
+            from .models import Connection
+            row = Connection.objects.filter(name=_target_conn_ref).first()
+            if row is None and _target_conn_ref.isdigit():
+                row = Connection.objects.filter(id=int(_target_conn_ref)).first()
+        except Exception:
+            row = None
+        _schema = str(data.get("schema") or (getattr(row, "schema", "") if row else "") or conf.get("SCHEMA") or "").strip().lower()
         if not _schema:
             return JsonResponse({"error": "لا توجد سكيما — حدد schema"}, status=400)
         if not __import__("re").fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", _schema):
             return JsonResponse({"error": "schema: أحرف لاتينية/أرقام/_ فقط"}, status=400)
-        if _schema != (conf.get("SCHEMA") or "").strip().lower():
-            _write_ws_conf(ws, conf.get("PRIMARY_CONNECTION", ""), conf.get("USERS_TABLE", ""),
+        # If set_primary is true or schema changed, update workspace.conf
+        _new_pc = (row.name if row else _target_conn_ref) if bool(data.get("set_primary", False)) else (conf.get("PRIMARY_CONNECTION") or (row.name if row else _target_conn_ref))
+        if _schema != (conf.get("SCHEMA") or "").strip().lower() or _new_pc != (conf.get("PRIMARY_CONNECTION") or "").strip():
+            _write_ws_conf(ws, _new_pc, conf.get("USERS_TABLE", ""),
                            conf.get("STATUS", "active"), conf.get("USERS_USER_COLUMN", ""),
-                           conf.get("USERS_PASSWORD_COLUMN", ""), _schema)
-        try:
-            from .models import Connection
-            row = Connection.objects.filter(name=_pc).first()
-        except Exception:
-            row = None
-        if row is None:
-            return JsonResponse({"error": "صف الاتصال غير موجود: %s" % _pc}, status=404)
-        params = {"host": row.host, "port": row.port, "user": row.user,
-                  "password": row.password, "instance": row.instance}
+                           conf.get("USERS_PASSWORD_COLUMN", ""), _schema,
+                           auth_conn=conf.get("AUTH_CONN", ""),
+                           auth_user_column=conf.get("AUTH_USER_COLUMN", ""),
+                           auth_password_column=conf.get("AUTH_PASSWORD_COLUMN", ""),
+                           auth_full_column=conf.get("AUTH_FULL_COLUMN", ""),
+                           auth_hash=conf.get("AUTH_HASH", ""),
+                           auth_shift=conf.get("AUTH_SHIFT", ""))
+        if row is not None and str(getattr(row, "engine", "postgres") or "postgres").lower() != "postgres":
+            return JsonResponse({"error": "ترحيل الجداول والمودلز متاح لاتصالات PostgreSQL المحلية فقط (محرك %s: %s)" % (row.name, row.engine)}, status=400)
+        if row is None and not (isinstance(data.get("connection"), dict) and data["connection"].get("host")):
+            return JsonResponse({"error": "صف الاتصال غير موجود: %s" % _target_conn_ref}, status=404)
+        params = {}
+        if row is not None:
+            params = {"host": row.host, "port": row.port, "user": row.user,
+                      "password": row.password, "instance": row.instance}
         if isinstance(data.get("connection"), dict) and data.get("connection"):
             _c = data.get("connection")
             if _c.get("host"): params["host"] = _c["host"]
@@ -1222,13 +1475,23 @@ def api_workspace_migrate(request, ws_id):
             if _c.get("instance"): params["instance"] = _c["instance"]
         try:
             info = _ws_migrate_workspace_schema(
-                params, _schema, conf.get("USERS_TABLE") or "") or {}
+                params, _schema, conf.get("USERS_TABLE") or "",
+                workspace_id=ws_id, conn_name=(row.name if row else _target_conn_ref)) or {}
         except Exception as e:
             return JsonResponse({"error": "فشل الترحيل: %s" % str(e)[:300]}, status=500)
-        return JsonResponse({"ok": True, "workspace": ws_id, "schema": _schema,
-                             "tables": info.get("tables") or [],
-                             "table_count": len(info.get("tables") or [])},
-                            json_dumps_params={"ensure_ascii": False})
+        return JsonResponse({
+            "ok": True,
+            "workspace": ws_id,
+            "connection": (row.name if row else _target_conn_ref),
+            "schema": _schema,
+            "tables": info.get("tables") or [],
+            "table_count": len(info.get("tables") or []),
+            "fmlk_migrated": info.get("fmlk_migrated", 0),
+            "custom_migrated": info.get("custom_migrated", 0),
+            "fmlk_details": info.get("fmlk_details") or [],
+            "custom_details": info.get("custom_details") or [],
+            "errors": info.get("errors") or [],
+        }, json_dumps_params={"ensure_ascii": False})
     except Exception as e:
         return JsonResponse({"error": str(e)[:200]}, status=500)
 
@@ -1312,19 +1575,53 @@ def api_workspace_save(request, ws_id):
                 return v
             return fb
         _old_conf = _wsm.read_conf(ws / "workspace.conf")
-        _pc = _s(data.get("primary_connection"), 80) or _old_conf.get("PRIMARY_CONNECTION", "")
-        _ut = _s(data.get("users_table"), 160) or _old_conf.get("USERS_TABLE", "")
+        _pc = _s(data.get("primary_connection"), 80) or _ws_conf_get(_old_conf, "PRIMARY_CONNECTION")
+        _ut = _s(data.get("users_table"), 160) or _ws_conf_get(_old_conf, "LOCAL_USER_TABLE", "USERS_TABLE")
         _st = _s(data.get("status"), 16).lower()
         if _st not in ("active", "archived", "disabled"):
             _st = _old_conf.get("STATUS", "active").strip().lower() or "active"
-        _uc = _colkey("users_user_column",
-                       _old_conf.get("USERS_USER_COLUMN", "").strip().lower())
-        _upc = _colkey("users_password_column",
-                       _old_conf.get("USERS_PASSWORD_COLUMN", "").strip().lower())
+
+        _lut = _s(data.get("local_user_table"), 160) or _ut
+        _luc = _s(data.get("local_user_connection"), 80) or _pc
+        _luu = _colkey("local_user_username", _colkey("users_user_column", _ws_conf_get(_old_conf, "LOCAL_USER_USERNAME", "USERS_USER_COLUMN").lower()))
+        _lup = _colkey("local_user_password", _colkey("users_password_column", _ws_conf_get(_old_conf, "LOCAL_USER_PASSWORD", "USERS_PASSWORD_COLUMN").lower()))
+        _lue = _s(data.get("local_user_enctype") or data.get("local_user_hash"), 32).lower() or _ws_conf_get(_old_conf, "LOCAL_USER_ENCTYPE", default="auto")
+        _luf = _colkey("local_user_fullname", _ws_conf_get(_old_conf, "LOCAL_USER_FULLNAME").lower())
+
+        _ac = _s(data.get("auth_conn") or data.get("external_user_connection"), 80) if ("auth_conn" in data or "external_user_connection" in data) else _ws_conf_get(_old_conf, "EXTERNAL_USER_CONNECTION", "AUTH_CONN")
+        _xut = _s(data.get("external_user_table"), 160) or _ws_conf_get(_old_conf, "EXTERNAL_USER_TABLE")
+        _auc = _colkey("auth_user_column", _colkey("external_user_username", _ws_conf_get(_old_conf, "EXTERNAL_USER_USERNAME", "AUTH_USER_COLUMN").lower()))
+        _apc = _colkey("auth_password_column", _colkey("external_user_password", _ws_conf_get(_old_conf, "EXTERNAL_USER_PASSWORD", "AUTH_PASSWORD_COLUMN").lower()))
+        _afc = _colkey("auth_full_column", _colkey("external_user_fullname", _ws_conf_get(_old_conf, "EXTERNAL_USER_FULLNAME", "AUTH_FULL_COLUMN").lower()))
+        _ah = _s(data.get("auth_hash") or data.get("external_user_enctype"), 16).lower() or _ws_conf_get(_old_conf, "EXTERNAL_USER_ENCTYPE", "AUTH_HASH", default="auto")
+        _ash = _s(data.get("auth_shift") or data.get("external_user_shift"), 16) or _ws_conf_get(_old_conf, "EXTERNAL_USER_SHIFT", "AUTH_SHIFT")
+
+        if _ac:
+            try:
+                from .models import Connection as _ConnA
+                _ar = _ConnA.objects.filter(name=_ac).first()
+                if _ar is None and _ac.isdigit():
+                    _ar = _ConnA.objects.filter(id=int(_ac)).first()
+                if _ar is None:
+                    return JsonResponse({"error": "اتصال التخويل غير موجود"}, status=400)
+            except Exception:
+                return JsonResponse({"error": "تعذر التحقق من اتصال التخويل"}, status=400)
         _schema = _s(data.get("schema"), 64).lower() or (_old_conf.get("SCHEMA") or "").strip().lower()
-        if not _schema and "." in _ut:
-            _schema = _ut.partition(".")[0].strip().lower()
-        _write_ws_conf(ws, _pc, _ut, _st, _uc, _upc, _schema)
+        if not _schema and not _ac and "." in _lut:
+            _schema = _lut.partition(".")[0].strip().lower()
+
+        _write_ws_conf(ws, primary_connection=_pc, users_table=_lut, status=_st,
+                        user_column=_luu, password_column=_lup, schema=_schema,
+                        auth_conn=_ac, auth_user_column=_auc,
+                        auth_password_column=_apc, auth_full_column=_afc,
+                        auth_hash=_ah, auth_shift=_ash,
+                        local_user_table=_lut, local_user_username=_luu,
+                        local_user_password=_lup, local_user_enctype=_lue,
+                        local_user_fullname=_luf, local_user_connection=_luc,
+                        external_user_table=_xut, external_user_username=_auc,
+                        external_user_password=_apc, external_user_enctype=_ah,
+                        external_user_fullname=_afc, external_user_connection=_ac,
+                        external_user_shift=_ash)
         _conn_saved = False
         if isinstance(data.get("connection"), dict):
             try:
@@ -1350,7 +1647,7 @@ def api_workspace_save(request, ws_id):
                         "password": _cdata.get("password") if _cdata.get("password") is not None and str(_cdata.get("password")).strip() != "" else (_row.password or ""),
                         "instance": _cdata.get("instance") or _row.instance or "urs",
                     }
-                    _minfo = _ws_migrate_workspace_schema(_mp, _schema, _ut) or {}
+                    _minfo = _ws_migrate_workspace_schema(_mp, _schema, _ut, workspace_id=ws.name, conn_name=_pc) or {}
                     migrated = bool((_minfo or {}).get("migrated"))
                     try:
                         migrate_tables = list((_minfo or {}).get("tables") or [])
@@ -1360,8 +1657,11 @@ def api_workspace_save(request, ws_id):
                     migrate_error = str(e)[:250]
         return JsonResponse({"ok": True, "workspace": _wsm.workspace_info(ws),
                              "connection_saved": _conn_saved,
+                             "auth_conn": _ac, "auth_hash": _ah,
                              "schema": _schema, "migrated": migrated,
                              "migrate_tables": len(migrate_tables),
+                             "fmlk_migrated": (_minfo.get("fmlk_migrated", 0) if '_minfo' in locals() and isinstance(_minfo, dict) else 0),
+                             "custom_migrated": (_minfo.get("custom_migrated", 0) if '_minfo' in locals() and isinstance(_minfo, dict) else 0),
                              "tables": migrate_tables,
                              "migrate_error": migrate_error},
                             json_dumps_params={"ensure_ascii": False})
@@ -1588,21 +1888,43 @@ def _login_client_ip(request):
         return ""
 
 
-def _login_throttle_key(ip, ws_id, username):
-    return "wslogin:%s:%s:%s" % (ip or "-", ws_id or "-", (username or "").lower())
+def _login_throttle_key(ws_id, username):
+    """Per-user throttle key — deliberately IP-independent.
+
+    (The separate wslogin:ip: counter already caps whole-IP abuse, and an
+    IP-scoped user key would let distributed brute-force retry 5× per IP
+    while making admin unlock impossible without knowing the user's IP.)
+    """
+    return "wslogin:%s:%s" % (ws_id or "-", (username or "").lower())
 
 
 def _login_locked(ip, key):
-    """(blocked, retry_after_secs): user key 5 tries, IP key 30 (shared offices)."""
+    """(blocked, retry_after_secs): user key 5 tries, IP key 30 (shared offices).
+
+    retry_after is the honest remaining window (sliding: WINDOW after the
+    last recorded fail). Tolerates legacy plain-int counters.
+    """
     try:
+        import time as _tm
         from django.core.cache import cache
+        _now = _tm.time()
+        _worst = 0
         for _k, _lim in (("wslogin:ip:" + (ip or "-"), _LOGIN_IP_TRIES), (key, _LOGIN_USER_TRIES)):
             try:
-                _n = int(cache.get(_k) or 0)
+                _cur = cache.get(_k)
             except Exception:
-                _n = 0
+                _cur = None
+            try:
+                if isinstance(_cur, (list, tuple)) and len(_cur) == 2:
+                    _n, _last = int(_cur[0] or 0), float(_cur[1] or 0)
+                else:
+                    _n, _last = int(_cur or 0), 0
+            except Exception:
+                _n, _last = 0, 0
             if _n >= _lim:
-                return True, _LOGIN_WINDOW
+                _worst = max(_worst, int(_LOGIN_WINDOW - (_now - _last)) if _last else _LOGIN_WINDOW)
+        if _worst > 0:
+            return True, _worst
     except Exception:
         pass
     return False, 0
@@ -1610,11 +1932,17 @@ def _login_locked(ip, key):
 
 def _login_note_fail(ip, key):
     try:
+        import time as _tm
         from django.core.cache import cache
+        _now = _tm.time()
         for _k in ("wslogin:ip:" + (ip or "-"), key):
             try:
-                _n = int(cache.get(_k) or 0) + 1
-                cache.set(_k, _n, _LOGIN_WINDOW)
+                _cur = cache.get(_k)
+                if isinstance(_cur, (list, tuple)) and len(_cur) == 2:
+                    _n = int(_cur[0] or 0) + 1
+                else:
+                    _n = int(_cur or 0) + 1
+                cache.set(_k, (_n, _now), _LOGIN_WINDOW)
             except Exception:
                 pass
     except Exception:
@@ -1753,15 +2081,79 @@ def _stored_is_hash(s):
     return False
 
 
-def _verify_login_password(plain, stored, username=""):
+def _verify_login_password(plain, stored, username="", algo="", shift=None):
     """Check a plain password against stored value across known hash types.
 
     plaintext (legacy) → fmlk verify_secret (Django hashers + std fallback) →
     hex sha256/sha1/md5 → werkzeug pbkdf2 → werkzeug scrypt → bcrypt →
     argon2 → MySQL *SHA1 → Postgres md5(password+user). Never raises.
+
+    algo (AUTH_HASH pin: none/plain/md5/sha1/sha256/mysql_sha1/pg_md5/
+    caesar/atbash/rot13) forces STRICT single-scheme matching for
+    external-auth tables; ''/'auto' keeps the cascade below. shift is the
+    Caesar offset (AUTH_SHIFT) used when the stored value carries none.
     """
     import hashlib as _hl
     import hmac as _hm
+    p, s = str(plain or ""), str(stored or "")
+    _algo = str(algo or "").strip().lower()
+    if _algo and _algo != "auto":
+        try:
+            _s = s.strip()
+            if not p or not _s:
+                return False
+            if _algo in ("none", "plain", "plaintext"):
+                try:
+                    return bool(_hm.compare_digest(_s, p))
+                except Exception:
+                    return _s == p
+            if _algo in ("md5", "sha1", "sha256"):
+                _fn = {"md5": _hl.md5, "sha1": _hl.sha1, "sha256": _hl.sha256}[_algo]
+                return _fn(p.encode("utf-8")).hexdigest() == _s.lower()
+            if _algo == "mysql_sha1":
+                _inner = _hl.sha1(p.encode("utf-8")).digest()
+                return ("*" + _hl.sha1(_inner).hexdigest().upper()) == _s.upper()
+            if _algo == "pg_md5":
+                if "md5" + _hl.md5((p + str(username or "")).encode("utf-8")).hexdigest() == _s.lower():
+                    return True
+                return ("md5" + _hl.md5(p.encode("utf-8")).hexdigest()) == _s.lower()
+            if _algo in ("caesar", "atbash", "rot13"):
+                from fmlk_engine.crypto import shift_unicode as _shift_fn
+                from fmlk_engine.crypto import atbash_cipher as _atbash_fn
+                from fmlk_engine.crypto import rot13_cipher as _rot13_fn
+                from fmlk_engine.crypto import _safe_compare as _scmp
+                import base64 as _b64
+
+                def _payload(_v, _pfx):
+                    _t = _v[len(_pfx):] if _v.startswith(_pfx) else _v
+                    try:
+                        return _b64.b64decode(_t.encode("ascii")).decode("utf-8")
+                    except Exception:
+                        return _t
+
+                if _algo == "caesar":
+                    _sh = _ws_auth_shift(shift)
+                    _rest = _s[len("caesar$"):] if _s.startswith("caesar$") else None
+                    if _rest is not None:
+                        _parts = _rest.split("$", 1)
+                        try:
+                            _sh = _ws_auth_shift(_parts[0])
+                        except Exception:
+                            pass
+                        _val = _parts[1] if len(_parts) > 1 else ""
+                        try:
+                            return bool(_scmp(_b64.b64decode(_val.encode("ascii")).decode("utf-8"),
+                                              _shift_fn(p, _sh)))
+                        except Exception:
+                            return bool(_scmp(_val, _shift_fn(p, _sh)))
+                    return bool(_scmp(_payload(_s, ""), _shift_fn(p, _sh)))
+                _fn2 = _atbash_fn if _algo == "atbash" else _rot13_fn
+                _pfx2 = "atbash$" if _algo == "atbash" else "rot13$"
+                _t2 = _s[len(_pfx2):] if _s.startswith(_pfx2) else _s
+                return bool(_scmp(_t2, _fn2(p)))
+        except Exception:
+            pass
+        return False
     p, s = str(plain or ""), str(stored or "")
     # DB char(n) columns blank-pad values — hashes never carry meaningful
     # surrounding whitespace, so compare against the stripped form too.
@@ -1847,6 +2239,46 @@ def _verify_login_password(plain, stored, username=""):
     return False
 
 
+def _ws_login_local_candidates(obj, utable, fiscal_sch, ext_configured):
+    """[(schema, table)] locating the users table regardless of local schema.
+
+    Dotted USERS_TABLE pins (unchanged). Else: fiscal schema first (legacy),
+    then the connection's own schema, then the canonical 'users' name in each
+    (the legacy fiscal-'users' fallback only when external auth is on).
+    First table WITH columns wins; the verdict there is final (we locate the
+    table across schemas — we never hunt the same user across schemas).
+    """
+    tbl = (utable or "").strip() or "users"
+    if "." in tbl:
+        sch, _, bare = tbl.partition(".")
+        if sch.strip() and bare.strip():
+            return [(sch.strip(), bare.strip())]
+        tbl = (bare.strip() or tbl).strip()
+    out = []
+    fiscal = (fiscal_sch or "").strip()
+    try:
+        connschema = str(getattr(obj, "schema", "") or "").strip()
+    except Exception:
+        connschema = ""
+    if fiscal:
+        out.append((fiscal, tbl))
+    if ext_configured and tbl.lower() != "users" and fiscal:
+        out.append((fiscal, "users"))
+    if connschema and connschema.lower() != (fiscal or "").lower():
+        out.append((connschema, tbl))
+        if ext_configured and tbl.lower() != "users":
+            out.append((connschema, "users"))
+    if not out:
+        out.append((fiscal or "public", tbl))
+    seen, ded = set(), []
+    for _s, _t in out:
+        _k = (_s.lower(), _t.lower())
+        if _k not in seen:
+            seen.add(_k)
+            ded.append((_s, _t))
+    return ded
+
+
 def _ws_login_connection(ws_id):
     """Primary-connection row (+ users table) for a workspace.
 
@@ -1859,13 +2291,14 @@ def _ws_login_connection(ws_id):
         if ws is None:
             return None, "", "unknown workspace"
         conf = _wsm.read_conf(ws / "workspace.conf")
-        cname = (conf.get("PRIMARY_CONNECTION") or "").strip()
+        cname = _ws_conf_get(conf, "LOCAL_USER_CONNECTION", "PRIMARY_CONNECTION")
         if not cname:
             return None, "", "لا اتصال محلي معرف في إعدادات مساحة العمل"
         obj = Connection.objects.filter(name=cname).first()
         if obj is None:
             return None, "", "الاتصال '%s' غير موجود" % cname
-        return obj, (conf.get("USERS_TABLE") or "").strip() or "users", ""
+        utable = _ws_conf_get(conf, "LOCAL_USER_TABLE", "USERS_TABLE", default="users")
+        return obj, utable, ""
     except Exception as e:
         return None, "", str(e)
 
@@ -1906,7 +2339,8 @@ def api_workspace_fiscal_years(request, ws_id):
             cur = conn.cursor()
             cur.execute("SELECT schema_name FROM information_schema.schemata ORDER BY 1")
             schemas = [r[0] for r in (cur.fetchall() or [])]
-            tbl = (utable.split(".")[-1] if utable else "users").strip()
+            _has_ext_auth = bool((conf.get("AUTH_CONN") or "").strip())
+            tbl = "users" if _has_ext_auth else (utable.split(".")[-1] if utable else "users").strip()
             if tbl:
                 cur.execute("SELECT DISTINCT table_schema FROM information_schema.tables WHERE table_name = %s", (tbl,))
                 schemas_with_users = {r[0] for r in (cur.fetchall() or [])}
@@ -1933,12 +2367,377 @@ def api_workspace_fiscal_years(request, ws_id):
         return JsonResponse({"error": str(e)}, status=500)
 
 
+_WS_AUTH_ACTIVE_COLS = ("is_active", "active")
+_WS_AUTH_SU_COLS = ("is_superuser", "superuser", "super_user", "is_admin")
+
+
+def _ws_login_row_external(conn_name, utable, req_schema, username, auth):
+    """Fetch one user row from an EXTERNAL auth connection (read-only).
+
+    Returns (row, active_col|None, su_col|None, full_col|None, sch, ucol, pcol)
+    where row is (username, stored, [active, [su, [full]]]) in the same shape
+    as the primary-Postgres path so the shared checks below apply untouched.
+    Raises ValueError with an Arabic message on any problem.
+    """
+    import re as _re_id
+    _shim, _eng = _fmlk_external_exec(conn_name)
+    try:
+        if "." in (utable or ""):
+            sch, _, tbl = utable.partition(".")
+        else:
+            tbl = (utable or "").strip()
+            # External source is independent of the local fiscal year: prefer
+            # the connection's own default schema, fiscal schema last.
+            sch = ""
+            try:
+                sch = str(_default_schema_for(_fmlk_conn_row(conn_name)) or "").strip()
+            except Exception:
+                sch = ""
+            if not sch:
+                sch = (req_schema or "").strip()
+        for _ident, _label in ((sch, "schema"), (tbl, "المستخدمين")):
+            if not _re_id.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", _ident or ""):
+                raise ValueError("اسم غير صالح في جدول %s" % _label)
+        _is_mssql = _eng.startswith("sqlserver") or _eng in ("mssql",)
+        _is_ora = _eng == "oracle" or _eng.startswith("ora")
+        if _is_ora:
+            # Oracle folds UNQUOTED identifiers to UPPER — quote the real case
+            sch, tbl = sch.upper(), tbl.upper()
+        if _is_mssql:
+            _qt = "[%s].[%s]" % (sch, tbl)
+            _qc = lambda c: "[%s]" % c
+        else:
+            _qt = '"%s"."%s"' % (sch, tbl)
+            _qc = lambda c: '"%s"' % c
+        try:
+            _cur = _shim._exec("SELECT * FROM %s WHERE 1=0" % _qt, {})
+            try:
+                _rawcols = [str(d[0]) for d in (_cur.description or [])]
+            finally:
+                try:
+                    _cur.close()
+                except Exception:
+                    pass
+        except Exception:
+            raise ValueError("جدول المستخدمين '%s' غير موجود في المصدر الخارجي (%s)" % (tbl, sch))
+        cols = [c.lower() for c in _rawcols]
+        # real-case map: match case-insensitively, quote the TRUE name
+        # (Oracle "u_id" != U_ID — quoting the lowered name breaks).
+        _real = {}
+        for _rc in _rawcols:
+            _real.setdefault(str(_rc).lower(), str(_rc))
+        _Q = lambda c: _qc(_real.get(str(c).lower(), c))
+        if not cols:
+            raise ValueError("جدول المستخدمين '%s' بلا أعمدة" % tbl)
+        ucol = auth.get("user_col") or ""
+        if ucol and ucol not in cols:
+            raise ValueError("عمود اسم المستخدم '%s' غير موجود في '%s'" % (ucol, tbl))
+        pcol = auth.get("pass_col") or ""
+        if pcol and pcol not in cols:
+            raise ValueError("عمود كلمة المرور '%s' غير موجود في '%s'" % (pcol, tbl))
+        fcol = auth.get("full_col") or ""
+        if fcol and fcol not in cols:
+            raise ValueError("عمود الاسم الكامل '%s' غير موجود في '%s'" % (fcol, tbl))
+        if not ucol:
+            ucol = next((c for c in _WS_USER_COLS if c in cols), None)
+        if not pcol:
+            pcol = next((c for c in _WS_PASS_COLS if c in cols), None)
+        if not fcol:
+            fcol = next((c for c in _WS_FULL_COLS if c in cols), None)
+        if not ucol:
+            raise ValueError("لا عمود اسم مستخدم في جدول المستخدمين")
+        if not pcol:
+            raise ValueError("لا عمود كلمة مرور في جدول المستخدمين")
+        _active_col = next((c for c in _WS_AUTH_ACTIVE_COLS if c in cols), None)
+        _su_col = next((c for c in _WS_AUTH_SU_COLS if c in cols), None)
+        _sel = [_Q(ucol), _Q(pcol)]
+        if _active_col:
+            _sel.append(_Q(_active_col))
+        if _su_col:
+            _sel.append(_Q(_su_col))
+        if fcol:
+            _sel.append(_Q(fcol))
+        _un = str(username or "")
+        _lit = "'" + _un.replace("'", "''") + "'"
+        _lit_lo = "'" + _un.lower().replace("'", "''") + "'"
+        if _eng.startswith("sqlserver") or _eng in ("mssql",):
+            _page, _top = "", "TOP 1 "
+        elif _eng.startswith("postgres"):
+            _page, _top = " FETCH FIRST 1 ROWS ONLY", ""
+        else:
+            _page, _top = " FETCH FIRST 1 ROWS ONLY", ""
+        _cols_sql = ", ".join(_sel)
+        row = None
+        for _cond in ("%s = %s" % (_Q(ucol), _lit),
+                      "LOWER(%s) = %s" % (_Q(ucol), _lit_lo)):
+            _sql = "SELECT %s%s FROM %s WHERE %s%s" % (_top, _cols_sql, _qt, _cond, _page)
+            _cur = _shim._exec(_sql, {})
+            try:
+                row = _cur.fetchone()
+            finally:
+                try:
+                    _cur.close()
+                except Exception:
+                    pass
+            if row is not None:
+                break
+        try:
+            if row is not None and (not isinstance(row, (list, tuple)) or len(row) < 2):
+                row = None
+        except Exception:
+            row = None
+        return row, _active_col, _su_col, fcol, sch, ucol, pcol
+    finally:
+        try:
+            getattr(_shim, "conn", None).close()
+        except Exception:
+            pass
+
+
+def _ws_login_check_row(row, active_col, su_col, fn_col, username, password, algo, ip, tkey, ws_id, sch, shift=None):
+    """Shared post-fetch login checks (primary and external sources).
+
+    Returns (err_response|None, uname, fname, is_su). Never raises.
+    """
+    try:
+        if row is not None and (not isinstance(row, (list, tuple)) or len(row) < 2):
+            row = None
+    except Exception:
+        row = None
+    _sidx = 2 + (1 if active_col else 0)
+    _is_su = bool(su_col and len(row or []) > _sidx and str(row[_sidx]).lower() in ("1", "true", "t", "yes", "y", "on")) if row is not None else False
+    _fidx = _sidx + (1 if su_col else 0)
+    _fname = str(row[_fidx] or "").strip() if (fn_col and row is not None and len(row) > _fidx and row[_fidx] is not None) else ""
+    if not _fname and row is not None and len(row) > 0:
+        _fname = str(row[0] or username)
+    if row is not None and active_col and str(row[2] if len(row) > 2 else "").lower() in ("0", "false", "f", "no", "n", "off"):
+        _login_note_fail(ip, tkey)
+        return JsonResponse({"error": "هذا الحساب موقوف"}, status=403), "", "", False
+    if row is None:
+        # dummy verify evens out timing (no user enumeration)
+        try:
+            _verify_login_password("x" * 12, "pbkdf2_sha256$200000$" + "0" * 32 + "$" + "0" * 64)
+        except Exception:
+            pass
+        _login_note_fail(ip, tkey)
+        try:
+            _ws_login_log.warning("login unknown user ws=%s schema=%s user=%s ip=%s",
+                                  ws_id, sch, username[:64], ip)
+        except Exception:
+            pass
+        return JsonResponse({"error": "بيانات الدخول غير صحيحة"}, status=403), "", "", False
+    if not _verify_login_password(password, row[1], username=row[0], algo=algo, shift=shift):
+        _login_note_fail(ip, tkey)
+        try:
+            _ws_login_log.warning("login bad password ws=%s schema=%s user=%s ip=%s",
+                                  ws_id, sch, str(row[0])[:64], ip)
+        except Exception:
+            pass
+        return JsonResponse({"error": "بيانات الدخول غير صحيحة"}, status=403), "", "", False
+    return None, row[0], _fname, _is_su
+
+
+def _ws_login_success_response(request, ws_id, mode, sch, uname, fname, is_su, ip, tkey):
+    """Establish the workspace session after a successful check. Never raises."""
+    pass
+    try:
+        from .workspace import resolve_ws_fiscal_schema as _rwfs
+        sch = _rwfs(ws_id, sch) or sch
+    except Exception:
+        pass
+    try:
+        _m = _FYEAR_RE.search(sch) if _FYEAR_RE else None
+    except Exception:
+        _m = None
+    try:
+        try:
+            request.session.cycle_key()
+        except Exception:
+            pass
+        request.session["workspace"] = ws_id
+        request.session["ws_mode"] = mode
+        request.session["fiscal_year"] = int(_m.group(0)) if _m else None
+        request.session["fiscal_schema"] = sch
+        request.session["ws_user"] = {
+            "username": str(uname),
+            "full_name": str(fname or uname),
+            "is_superuser": bool(is_su),
+        }
+    except Exception:
+        pass
+    _login_clear(ip, tkey)
+    return JsonResponse({"ok": True, "redirect": "/apps/",
+                         "user": {"username": str(uname), "full_name": str(fname or uname), "is_superuser": bool(is_su)}},
+                        json_dumps_params={"ensure_ascii": False})
+
+
+def _ws_login_count_external(conn_name, sch, tbl, ucol, username):
+    """COUNT duplicates of a username on an external connection (read-only)."""
+    import re as _re_id
+    for _ident in (sch, tbl, ucol):
+        if not _re_id.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", _ident or ""):
+            raise ValueError("اسم غير صالح")
+    _shim, _eng = _fmlk_external_exec(conn_name)
+    try:
+        _is_mssql = _eng.startswith("sqlserver") or _eng in ("mssql",)
+        _sch, _tbl = sch, tbl
+        if _eng == "oracle" or _eng.startswith("ora"):
+            _sch, _tbl = sch.upper(), tbl.upper()
+        if _is_mssql:
+            _qt = "[%s].[%s]" % (_sch, _tbl)
+        else:
+            _qt = '"%s"."%s"' % (_sch, _tbl)
+        # real-case column (Oracle "u_id" != U_ID)
+        _real_u = ucol
+        try:
+            _pc = _shim._exec("SELECT * FROM %s WHERE 1=0" % _qt, {})
+            try:
+                for _d in (_pc.description or []):
+                    if str(_d[0]).lower() == str(ucol).lower():
+                        _real_u = str(_d[0])
+                        break
+            finally:
+                try:
+                    _pc.close()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        _uq = ("[%s]" % _real_u) if _is_mssql else ('"%s"' % _real_u)
+        _lit = "'" + str(username or "").lower().replace("'", "''") + "'"
+        _sql = "SELECT COUNT(*) FROM %s WHERE LOWER(%s) = %s" % (_qt, _uq, _lit)
+        _cur = _shim._exec(_sql, {})
+        try:
+            _d = _cur.fetchone()
+            return int(_d[0] or 0) if _d else 0
+        finally:
+            try:
+                _cur.close()
+            except Exception:
+                pass
+    finally:
+        try:
+            getattr(_shim, "conn", None).close()
+        except Exception:
+            pass
+
+
+def _ws_auth_shape_ok(method, stored):
+    """Is the stored value shaped like the configured AUTH_HASH method?
+
+    Never touches passwords — pure format check for pre-save diagnosis.
+    """
+    try:
+        _m, _s = str(method or "auto").strip().lower(), str(stored or "").strip()
+        if _m in ("", "auto", "plain", "none", "plaintext"):
+            return True
+        if _m in ("md5", "sha1", "sha256"):
+            _n = {"md5": 32, "sha1": 40, "sha256": 64}[_m]
+            return len(_s) == _n and all(ch in "0123456789abcdefABCDEF" for ch in _s)
+        if _m == "mysql_sha1":
+            return len(_s) == 41 and _s.startswith("*")
+        if _m == "pg_md5":
+            return len(_s) == 35 and _s.lower().startswith("md5")
+        if _m == "caesar":
+            if _s.startswith("caesar$"):
+                _parts = _s[len("caesar$"):].split("$", 1)
+                if len(_parts) != 2 or not _parts[1]:
+                    return False
+                try:
+                    _v = int(_parts[0])
+                    return -1000 <= _v <= 1000
+                except (TypeError, ValueError):
+                    return False
+            return len(_s) > 0
+        if _m in ("atbash", "rot13"):
+            _pfx = "atbash$" if _m == "atbash" else "rot13$"
+            if _s.startswith(_pfx):
+                return len(_s) > len(_pfx)
+            return len(_s) > 0
+    except Exception:
+        pass
+    return False
+
+
+def _ws_login_diag_external(ws_id, username, cfg, utable):
+    """Diagnose an external auth source without touching passwords.
+
+    cfg may carry unsaved draft overrides {conn, user_col, pass_col,
+    full_col, hash, shift}. Returns a JsonResponse mirroring the local diag
+    shape (+ source/auth_conn/auth_hash/shape_ok).
+    """
+    _conn = str(cfg.get("conn") or "").strip()
+    if not _conn:
+        raise ValueError("حدد اتصال التخويل أولاً")
+    import re as _re_cfg
+    _method = str(cfg.get("hash") or "auto").strip().lower() or "auto"
+    if _method not in _WS_AUTH_HASHES:
+        raise ValueError("طريقة التشفير غير مدعومة")
+    for _k in ("user_col", "pass_col", "full_col"):
+        _vv = str(cfg.get(_k) or "").strip().lower()
+        if _vv and not _re_cfg.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", _vv):
+            raise ValueError("اسم عمود غير صالح")
+        cfg[_k] = _vv
+    _auth = {"user_col": cfg.get("user_col") or "", "pass_col": cfg.get("pass_col") or "",
+             "full_col": cfg.get("full_col") or "", "hash": _method,
+             "shift": cfg.get("shift", _WS_AUTH_SHIFT_DEFAULT)}
+    row, _ac, _su, _fn, _sch, _ucol, _pcol = _ws_login_row_external(
+        _conn, utable, "", username, _auth)
+    _table = utable if "." in (utable or "") else ("%s.%s" % (_sch, utable))
+    _base = {"source": "external", "auth_conn": _conn, "auth_hash": _method,
+             "table": _table,
+             "user_column": {"name": _ucol, "pinned": bool(_auth["user_col"])},
+             "password_column": {"name": _pcol, "pinned": bool(_auth["pass_col"])},
+             "full_column": {"name": _fn or "", "pinned": bool(_auth["full_col"])},
+             "found": row is not None}
+    if row is None:
+        _base.update({"verdict": "unknown-user",
+                       "hint": "لا صف بهذا الاسم في %s — تحقق من الجدول والأعمدة" % _table})
+        return JsonResponse(_base, json_dumps_params={"ensure_ascii": False})
+    try:
+        dupes = _ws_login_count_external(_conn, _sch, _ws_bare_table(utable), _ucol, username)
+    except Exception:
+        dupes = 0
+    try:
+        _active = str(row[2] if len(row) > 2 else "").lower() if _ac else ""
+    except Exception:
+        _active = ""
+    _off = bool(_ac) and _active in ("0", "false", "f", "no", "n", "off")
+    _ph = str(row[1] or "")
+    _shape = _ws_auth_shape_ok(_method, _ph)
+    if dupes > 1:
+        _verdict, _hint = ("duplicates",
+            "الاسم مكرر %d مرات في المصدر الخارجي — الدخول يقرأ أول صف فقط" % dupes)
+    elif _off:
+        _verdict, _hint = ("inactive", "الحساب موقوف في المصدر الخارجي")
+    elif not _shape:
+        _verdict, _hint = ("hash-mismatch",
+            "صيغة القيمة المخزنة لا تطابق طريقة «%s» — راجع الطريقة أو العمود" % _method)
+    else:
+        _verdict, _hint = ("ready", "الصف موجود والحساب نشط والصيغة مطابقة — جرّب الدخول")
+    _base.update({"duplicates": dupes,
+                   "is_active": (not _off) if _ac else None,
+                   "hash_format": _ws_hash_kind(_ph), "hash_length": len(_ph.strip()),
+                   "shape_ok": bool(_shape),
+                   "verdict": _verdict, "hint": _hint})
+    return JsonResponse(_base, json_dumps_params={"ensure_ascii": False})
+
+
+def _ws_bare_table(utable):
+    """Bare table of a possibly schema-qualified name."""
+    try:
+        t = str(utable or "").strip()
+        return t.split(".")[-1].strip() if t else ""
+    except Exception:
+        return ""
+
+
 def api_workspace_login(request, ws_id):
     """POST /api/workspaces/<id>/login/ {schema, username, password, mode?}.
 
     Users table from workspace.conf (schema-qualified as-is, else fiscal schema).
     Password checked plain → engine hashes → common schemes. Never returns hashes.
-    CSRF enforced; brute-force throttled (5/10min per IP+user); session rotated.
+    CSRF enforced; brute-force throttled (5/10min per user, 30/10min per IP); session rotated.
     """
     if request.method != "POST":
         return JsonResponse({"error": "POST required"}, status=405)
@@ -1965,7 +2764,7 @@ def api_workspace_login(request, ws_id):
         if mode == "edit" and not _ws_master_ok(request):
             return JsonResponse({"error": "master password required", "master_required": True}, status=403)
         _ip = _login_client_ip(request)
-        _tkey = _login_throttle_key(_ip, ws_id, username)
+        _tkey = _login_throttle_key(ws_id, username)
         _blocked, _retry = _login_locked(_ip, _tkey)
         if _blocked:
             return JsonResponse({"error": "محاولات كثيرة — حاول بعد %d دقائق" % max(1, int((_retry + 59) // 60)),
@@ -1981,20 +2780,79 @@ def api_workspace_login(request, ws_id):
             if not _re_id.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", _ident or ""):
                 return JsonResponse({"error": "اسم غير صالح في جدول %s" % _label}, status=400)
         try:
+            _xauth = _ws_auth_cfg(ws_id)
+        except Exception:
+            _xauth = {"conn": "", "table": "", "user_col": "", "pass_col": "", "full_col": "", "hash": "auto",
+                      "shift": _WS_AUTH_SHIFT_DEFAULT}
+        try:
+            _lauth = _ws_local_auth_cfg(ws_id)
+        except Exception:
+            _lauth = {"conn": "", "table": "", "user_col": "", "pass_col": "", "full_col": "", "hash": "auto"}
+
+        _xalgo = (_xauth.get("hash") or "auto")
+        _xshift = _xauth.get("shift", _WS_AUTH_SHIFT_DEFAULT)
+        _xtable = (_xauth.get("table") or "").strip()
+
+        # ── 1. External auth source first (if configured with connection & table) ──
+        if _xauth.get("conn") and _xtable:
+            _erow = None
+            try:
+                _erow, _eac, _esu, _efn, _esch, _eucol, _epcol = _ws_login_row_external(
+                    _xauth["conn"], _xtable, schema, username, _xauth)
+            except Exception as e:
+                try:
+                    _ws_login_log.warning("External auth error ws=%s user=%s: %s (falling back to local)",
+                                          ws_id, username[:64], e)
+                except Exception:
+                    pass
+                _erow = None
+            if _erow is not None:
+                _lerr, _uname, _fname, _is_su = _ws_login_check_row(
+                    _erow, _eac, _esu, _efn, username, password, _xalgo, _ip, _tkey, ws_id, sch,
+                    shift=_xshift)
+                if _lerr is None:
+                    return _ws_login_success_response(
+                        request, ws_id, mode,
+                        (_wsm.resolve_ws_fiscal_schema(ws_id, schema) or schema or _esch or sch),
+                        _uname, _fname, _is_su, _ip, _tkey)
+        try:
             conn = _ws_pg_connect(obj)
         except Exception as e:
             return JsonResponse({"error": "تعذر الاتصال بقاعدة البيانات: %s" % str(e)[:200]}, status=400)
         try:
             cur = conn.cursor()
-            cur.execute("SELECT column_name FROM information_schema.columns "
-                        "WHERE table_schema=%s AND table_name=%s", (sch, tbl))
-            cols = [str(r[0]).lower() for r in (cur.fetchall() or [])]
+            # Locate the users table regardless of local schema: fiscal first,
+            # then the connection's own schema, then the canonical 'users'.
+            _ltable = _lauth.get("table") or utable or "users"
+            _usch, _utbl, cols, _tried = sch, tbl, [], []
+            for (_cs, _ct) in _ws_login_local_candidates(obj, _ltable, schema, bool(_xauth.get("conn"))):
+                _ok_id = True
+                for _ident, _label in ((_cs, "schema"), (_ct, "المستخدمين")):
+                    if not _re_id.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", _ident or ""):
+                        _ok_id = False
+                        break
+                if not _ok_id:
+                    continue
+                cur.execute("SELECT column_name FROM information_schema.columns "
+                            "WHERE table_schema=%s AND table_name=%s", (_cs, _ct))
+                _got = [str(r[0]).lower() for r in (cur.fetchall() or [])]
+                _tried.append("%s.%s" % (_cs, _ct))
+                if _got:
+                    _usch, _utbl, cols = _cs, _ct, _got
+                    break
             if not cols:
                 try:
                     _cands = _ws_user_table_candidates(cur, tbl)
                 except Exception:
                     _cands = []
                 _msg = "جدول المستخدمين '%s' غير موجود في السنة المحددة (%s)" % (tbl, sch)
+                try:
+                    if _xauth.get("conn"):
+                        _msg += " — وغير موجود أيضاً في مصدر التخويل الخارجي (%s)" % _xauth["conn"]
+                except Exception:
+                    pass
+                if len(_tried) > 1:
+                    _msg += " — بحث أيضاً في: %s" % "، ".join(_tried[1:4])
                 if _cands:
                     _msg += " — المرشح: %s — حدّث جدول المستخدمين في إعدادات مساحة العمل" % _cands[0]
                     if len(_cands) > 1:
@@ -2008,7 +2866,7 @@ def api_workspace_login(request, ws_id):
             if not pcol:
                 return JsonResponse({"error": "لا عمود كلمة مرور في جدول المستخدمين"}, status=400)
             _uq, _pq = _ws_quote_ident(ucol), _ws_quote_ident(pcol)
-            _tq = "%s.%s" % (_ws_quote_ident(sch), _ws_quote_ident(tbl))
+            _tq = "%s.%s" % (_ws_quote_ident(_usch), _ws_quote_ident(_utbl))
             _active_col = "is_active" if "is_active" in cols else ("active" if "active" in cols else None)
             _aq = (", %s" % _ws_quote_ident(_active_col)) if _active_col else ""
             _su_col = next((c for c in ("is_superuser", "superuser", "super_user", "is_admin") if c in cols), None)
@@ -2046,15 +2904,16 @@ def api_workspace_login(request, ws_id):
                 _login_note_fail(_ip, _tkey)
                 try:
                     _ws_login_log.warning("login unknown user ws=%s schema=%s user=%s ip=%s",
-                                          ws_id, sch, username[:64], _ip)
+                                          ws_id, _usch, username[:64], _ip)
                 except Exception:
                     pass
                 return JsonResponse({"error": "بيانات الدخول غير صحيحة"}, status=403)
-            if not _verify_login_password(password, row[1], username=row[0]):
+            _lalgo = (_lauth.get("hash") or "auto")
+            if not _verify_login_password(password, row[1], username=row[0], algo=_lalgo):
                 _login_note_fail(_ip, _tkey)
                 try:
                     _ws_login_log.warning("login bad password ws=%s schema=%s user=%s ip=%s",
-                                          ws_id, sch, str(row[0])[:64], _ip)
+                                          ws_id, _usch, str(row[0])[:64], _ip)
                 except Exception:
                     pass
                 return JsonResponse({"error": "بيانات الدخول غير صحيحة"}, status=403)
@@ -2064,30 +2923,7 @@ def api_workspace_login(request, ws_id):
                 conn.close()
             except Exception:
                 pass
-        try:
-            _m = _FYEAR_RE.search(sch) if _FYEAR_RE else None
-        except Exception:
-            _m = None
-        try:
-            try:
-                request.session.cycle_key()
-            except Exception:
-                pass
-            request.session["workspace"] = ws_id
-            request.session["ws_mode"] = mode
-            request.session["fiscal_year"] = int(_m.group(0)) if _m else None
-            request.session["fiscal_schema"] = sch
-            request.session["ws_user"] = {
-                "username": str(_uname),
-                "full_name": str(_fname or _uname),
-                "is_superuser": bool(_is_su),
-            }
-        except Exception:
-            pass
-        _login_clear(_ip, _tkey)
-        return JsonResponse({"ok": True, "redirect": "/apps/",
-                             "user": {"username": str(_uname), "full_name": str(_fname or _uname), "is_superuser": bool(_is_su)}},
-                            json_dumps_params={"ensure_ascii": False})
+        return _ws_login_success_response(request, ws_id, mode, sch, _uname, _fname, _is_su, _ip, _tkey)
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
@@ -2106,7 +2942,13 @@ def workspace_login(request, ws_id):
         mode = (request.GET.get("mode") or "view").strip().lower()
         if mode not in ("view", "edit"):
             mode = "view"
-        return render(request, "enter.html", {"workspace": info, "ws_mode": mode})
+        try:
+            _acfg = _ws_auth_cfg(ws_id)
+            _has_ext = bool((_acfg or {}).get("conn"))
+        except Exception:
+            _has_ext = False
+        return render(request, "enter.html", {"workspace": info, "ws_mode": mode,
+                                              "has_external_auth": _has_ext})
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
@@ -2415,6 +3257,65 @@ def api_workspace_users_count(request, ws_id):
 
 
 @csrf_exempt
+def _ws_users_columns_external(conn_ref, table):
+    """Column list of a users table on an EXTERNAL connection (read-only).
+
+    Same {columns:[{name,data_type}]} shape as the primary path. Never
+    returns row data.
+    """
+    import re as _re_id
+    table = str(table or "").strip()
+    if "." in table:
+        sch, _, tbl = table.partition(".")
+    else:
+        sch, tbl = "", table
+    for _ident in (tbl,):
+        if not _re_id.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", _ident or ""):
+            raise ValueError("اسم غير صالح في جدول المستخدمين")
+    if sch and not _re_id.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", sch):
+        raise ValueError("اسم غير صالح في جدول المستخدمين")
+    _shim, _eng = _fmlk_external_exec(conn_ref)
+    try:
+        if _eng.startswith("sqlserver") or _eng in ("mssql",):
+            if not sch:
+                raise ValueError("حدد الجدول بالصيغة schema.table لمصدر SQL Server")
+            _sql = ("SELECT COLUMN_NAME, DATA_TYPE FROM [%s].INFORMATION_SCHEMA.COLUMNS "
+                    "WHERE TABLE_SCHEMA = '%s' AND TABLE_NAME = '%s' ORDER BY ORDINAL_POSITION"
+                    % (sch, sch.replace("'", "''"), tbl.replace("'", "''")))
+        elif _eng.startswith("postgres"):
+            if not sch:
+                sch = "public"
+            _sql = ("SELECT column_name, data_type FROM information_schema.columns "
+                    "WHERE table_schema = '%s' AND table_name = '%s' ORDER BY ordinal_position"
+                    % (sch.replace("'", "''"), tbl.replace("'", "''")))
+        elif _eng == "oracle" or _eng.startswith("ora"):
+            if not sch:
+                raise ValueError("حدد الجدول بالصيغة SCHEMA.TABLE لمصدر أوراكل")
+            _sql = ("SELECT column_name, data_type FROM ALL_TAB_COLUMNS "
+                    "WHERE owner = UPPER('%s') AND table_name = UPPER('%s') ORDER BY column_id"
+                    % (sch.replace("'", "''"), tbl.replace("'", "''")))
+        else:
+            raise ValueError("المحرك غير مدعوم هنا: %s" % _eng)
+        _cur = _shim._exec(_sql, {})
+        try:
+            _rows = _cur.fetchall() or []
+        finally:
+            try:
+                _cur.close()
+            except Exception:
+                pass
+    finally:
+        try:
+            getattr(_shim, "conn", None).close()
+        except Exception:
+            pass
+    _cols = [{"name": str(r[0]), "data_type": str(r[1]) if len(r) > 1 else ""} for r in _rows]
+    if not _cols:
+        raise ValueError("جدول المستخدمين '%s' غير موجود في المصدر الخارجي" % tbl)
+    return {"columns": _cols, "total": len(_cols), "schema": sch,
+            "table": ("%s.%s" % (sch, tbl)) if sch else tbl}
+
+
 def api_workspace_users_columns(request, ws_id):
     """GET /api/workspaces/<id>/users-columns/?table= → {columns:[{name,data_type}]}.
 
@@ -2434,6 +3335,16 @@ def api_workspace_users_columns(request, ws_id):
         override = str(request.GET.get("table") or "").strip()
         if override:
             utable = override
+        _xconn = str(request.GET.get("conn") or "").strip()
+        if _xconn:
+            # External auth-source columns (read-only, any engine)
+            try:
+                _ext = _ws_users_columns_external(_xconn, utable)
+                return JsonResponse(_ext, json_dumps_params={"ensure_ascii": False})
+            except ValueError as ve:
+                return JsonResponse({"error": str(ve)}, status=400)
+            except Exception as e:
+                return JsonResponse({"error": str(e)[:200]}, status=500)
         try:
             conn = _ws_pg_connect(obj)
         except Exception as e:
@@ -2549,6 +3460,53 @@ def api_workspace_login_diag(request, ws_id):
         username = str(data.get("username") or "").strip()
         if not username:
             return JsonResponse({"error": "اسم المستخدم مطلوب"}, status=400)
+        # External auth source diagnosis (saved conf or unsaved draft overrides)
+        try:
+            _dcfg = _ws_auth_cfg(ws_id)
+        except Exception:
+            _dcfg = {"conn": "", "user_col": "", "pass_col": "", "full_col": "",
+                     "hash": "auto", "shift": _WS_AUTH_SHIFT_DEFAULT}
+        _dconn = str(data.get("conn") or data.get("auth_conn") or "").strip() or (_dcfg.get("conn") or "")
+        if _dconn:
+            _draft = dict(_dcfg)
+            _draft["conn"] = _dconn
+            for _dk, _bod in (("user_col", ("user_column", "auth_user_column")),
+                              ("pass_col", ("password_column", "auth_password_column")),
+                              ("full_col", ("full_column", "auth_full_column"))):
+                for _bk in _bod:
+                    if _bk in data:
+                        _vv = str(data.get(_bk) or "").strip().lower()
+                        import re as _re_dg
+                        _draft[_dk] = _vv if _re_dg.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", _vv) else ""
+                        break
+            for _hk in ("hash", "auth_hash"):
+                if _hk in data:
+                    _hv = str(data.get(_hk) or "").strip().lower() or "auto"
+                    _draft["hash"] = _hv if _hv in _WS_AUTH_HASHES else "auto"
+                    break
+            for _sk in ("shift", "auth_shift"):
+                if _sk in data:
+                    try:
+                        _draft["shift"] = _ws_auth_shift(data.get(_sk))
+                    except Exception:
+                        _draft["shift"] = _WS_AUTH_SHIFT_DEFAULT
+                    break
+            _tov = str(data.get("table") or "").strip()
+            if not _tov:
+                try:
+                    _wsd = next((w for w in _wsm.workspace_dirs() if w.name == ws_id), None)
+                    _tov = ((_wsm.read_conf(_wsd / "workspace.conf").get("USERS_TABLE") or "").strip()
+                            if _wsd is not None else "")
+                except Exception:
+                    _tov = ""
+            if not _tov:
+                return JsonResponse({"error": "حدد جدول المستخدمين أولاً"}, status=400)
+            try:
+                return _ws_login_diag_external(ws_id, username, _draft, _tov)
+            except ValueError as ve:
+                return JsonResponse({"error": str(ve)}, status=400)
+            except Exception as e:
+                return JsonResponse({"error": str(e)[:300]}, status=500)
         obj, utable, err = _ws_login_connection(ws_id)
         if err or obj is None:
             return JsonResponse({"error": err or "no connection"}, status=400)
@@ -2696,6 +3654,59 @@ def api_workspace_login_reset(request, ws_id):
         except Exception:
             pass
         return JsonResponse({"ok": True, "username": username, "table": "%s.%s" % (sch, tbl)},
+                            json_dumps_params={"ensure_ascii": False})
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@csrf_exempt
+def api_workspace_login_unlock(request, ws_id):
+    """POST /api/workspaces/<id>/login/unlock/ {username?}.
+
+    Master only (session master_ok — obtain via /api/master/auth/).
+    Clears brute-force throttle counters for the user (any IP) and the
+    request IP, so a locked-out user can retry immediately without
+    restarting the server. Never touches passwords.
+    """
+    if request.method != "POST":
+        return JsonResponse({"error": "POST required"}, status=405)
+    if not _ws_master_ok(request):
+        return JsonResponse({"error": "master password required", "master_required": True}, status=403)
+    try:
+        from . import workspace as _wsm
+        ws_id = (ws_id or "").strip()
+        if ws_id not in {w.name for w in _wsm.workspace_dirs()}:
+            return JsonResponse({"error": "unknown workspace"}, status=404)
+        try:
+            data = json.loads(request.body.decode() or "{}")
+        except Exception:
+            return JsonResponse({"error": "invalid JSON"}, status=400)
+        if not isinstance(data, dict):
+            return JsonResponse({"error": "invalid JSON"}, status=400)
+        username = str(data.get("username") or "").strip()
+        _ip = _login_client_ip(request)
+        _cleared = []
+        try:
+            from django.core.cache import cache
+            if username:
+                try:
+                    cache.delete(_login_throttle_key(ws_id, username))
+                    _cleared.append("user")
+                except Exception:
+                    pass
+            try:
+                cache.delete("wslogin:ip:" + (_ip or "-"))
+                _cleared.append("ip")
+            except Exception:
+                pass
+        except Exception:
+            pass
+        try:
+            _ws_login_log.info("login unlock ws=%s user=%s ip=%s cleared=%s",
+                               ws_id, username[:64], _ip, ",".join(_cleared))
+        except Exception:
+            pass
+        return JsonResponse({"ok": True, "cleared": _cleared},
                             json_dumps_params={"ensure_ascii": False})
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
@@ -3090,6 +4101,8 @@ def home(request):
     _g = _gate_redirect(request)
     if _g is not None:
         return _g
+    if (request.GET.get("settings") or "").strip():
+        return redirect("/ws-settings/%s/" % (request.GET.get("settings") or "").strip())
     # NOTE: workspace entry happens ONLY via the login page (no param entry).
     # Dynamic apps: FOLDER-DRIVEN (workspace apps first, DB-only leftovers last)
     apps = _load_apps_folder_driven()
@@ -3150,6 +4163,789 @@ def dashboards(request):
     if _g is not None:
         return _g
     return render(request, "dashboards.html", {})
+
+
+# ── AD-System: دليل النظام الديناميكي + سجل الأنشطة ────────────────────
+def _ad_resolve_ws_dir(request=None, ws_id="", fml="", app=None):
+    """Workspace dir resolution.
+
+    Explicit ws → strict (unknown = None → caller 404s, as before).
+    Empty ws → session/pinned current login → fml/app file location
+    → primary → first. Never jumps to primary while a current workspace
+    is known (old bug: empty ws always showed the primary workspace
+    files in autocomplete)."""
+    try:
+        from . import workspace as _wsm
+        dirs = list(_wsm.workspace_dirs() or [])
+        if not dirs:
+            return None
+        _by_name = {w.name: w for w in dirs}
+        ws_id = ((ws_id if isinstance(ws_id, str) else str(ws_id or "")) or "").strip()
+        if ws_id:
+            # صريح → صارم (غير معروف = 404 عند المستدعي، كما قبل)
+            return _by_name.get(ws_id)
+        # current login workspace: middleware-pinned contextvar, then session dict
+        try:
+            _act = (_wsm.active_ws_id() or "").strip() if hasattr(_wsm, "active_ws_id") else ""
+        except Exception:
+            _act = ""
+        if (not _act) and request is not None:
+            try:
+                _sess = getattr(request, "session", None)
+                _act = str((_sess.get("workspace") if hasattr(_sess, "get") else "") or "").strip()
+            except Exception:
+                _act = ""
+        if _act and _act in _by_name:
+            return _by_name[_act]
+        # file location fallback (player/designer pass fml+app)
+        try:
+            _ff = (fml or "").strip()
+            if _ff:
+                _fp = _find_fml_path(_ff, app)
+                if _fp:
+                    for _p in _fp.parents:
+                        try:
+                            if ((_p / "workspace.conf").exists()
+                                    or (_p / "settings.py").exists()):
+                                if _p.name in _by_name:
+                                    return _by_name[_p.name]
+                                return _p
+                        except Exception:
+                            continue
+        except Exception:
+            pass
+        try:
+            _pw = _wsm.primary_workspace()
+            if _pw is not None and _pw.exists():
+                return _pw
+        except Exception:
+            pass
+        return dirs[0]
+    except Exception:
+        return None
+
+
+def _ad_ws_dir(ws_id):
+    """Workspace dir by id ('' → primary → first). None when unknown."""
+    try:
+        from . import workspace as _wsm
+        ws_id = (ws_id or "").strip()
+        dirs = list(_wsm.workspace_dirs() or [])
+        if not dirs:
+            return None
+        if ws_id:
+            for w in dirs:
+                if w.name == ws_id:
+                    return w
+            return None
+        try:
+            _pw = _wsm.primary_workspace()
+            if _pw is not None and _pw.exists():
+                return _pw
+        except Exception:
+            pass
+        return dirs[0]
+    except Exception:
+        return None
+
+
+def _ad_actor(request):
+    """(username, device) for activity rows: session user + ip/agent. Never raises."""
+    uname, device = "", ""
+    try:
+        _u = (request.session.get("ws_user") or {})
+        uname = str(_u.get("username") or "").strip()[:200]
+    except Exception:
+        pass
+    try:
+        ip = _login_client_ip(request)
+    except Exception:
+        try:
+            ip = str(request.META.get("REMOTE_ADDR") or "")
+        except Exception:
+            ip = ""
+    try:
+        ag = str(request.META.get("HTTP_USER_AGENT") or "")[:160]
+    except Exception:
+        ag = ""
+    try:
+        import re as _re_ag
+        ag = _re_ag.sub(r"\s+", " ", ag).strip()
+    except Exception:
+        pass
+    device = ((ip + " | " + ag) if ip and ag else (ip or ag))[:300]
+    return uname, device
+
+
+def _ad_log(ws_id="", username="", action="", entity="", entity_id="",
+            ref_table="", device="", details=""):
+    """Best-effort activity row. Never raises, never blocks callers."""
+    try:
+        from ad_system import engine as _ade
+        _ade.log(ws_id=ws_id, username=username, action=action, entity=entity,
+                 entity_id=entity_id, ref_table=ref_table, device=device,
+                 details=details)
+    except Exception:
+        pass
+
+
+def ad_logs_page(request):
+    """صفحة سجلات النظام — الأنشطة (إدخال/جلب/تعديل/حذف) لكل مستخدم وجهاز ووقت."""
+    _g = _gate_redirect(request)
+    if _g is not None:
+        return _g
+    return render(request, "ad_logs.html", {})
+
+
+def ad_tree_page(request):
+    """صفحة شجرة دليل النظام — النماذج/التقارير/القواعد/المصادر + إدارة المصادر."""
+    _g = _gate_redirect(request)
+    if _g is not None:
+        return _g
+    return render(request, "ad_tree.html", {})
+
+
+def _ad_blank_names(kind, rows):
+    """View (entry) mode: hide Arabic display names of builtin tree items.
+
+    Keys (file/number refs) stay so grids keep working; only human-readable
+    names (forms/reports/rules) are blanked. Custom src: sources untouched.
+    Never raises."""
+    try:
+        _fields = {"forms": ("form_name",), "reports": ("report_name",),
+                   "rules": ("rule_name",)}.get(kind) or ()
+        for r in (rows or []):
+            if not isinstance(r, dict):
+                continue
+            r["ref_name"] = ""
+            for _f in _fields:
+                if _f in r:
+                    r[_f] = ""
+    except Exception:
+        pass
+    return rows
+
+
+def _ad_blank_tree_names(tree):
+    """View (entry) mode: blank name_ar/rule_name across the directory."""
+    try:
+        for f in (tree.get("forms") or []):
+            if isinstance(f, dict):
+                f["name_ar"] = ""
+        for r in (tree.get("reports") or []):
+            if isinstance(r, dict):
+                r["name_ar"] = ""
+        for ru in (tree.get("rules") or []):
+            if isinstance(ru, dict):
+                ru["rule_name"] = ""
+    except Exception:
+        pass
+    return tree
+
+
+def api_ad_tree(request):
+    """GET /api/ad/tree/?ws=&counts= — الدليل الكامل (ملفات فقط، بلا DB)."""
+    try:
+        from ad_system import engine as _ade
+        wd = _ad_resolve_ws_dir(
+            request,
+            ws_id=(request.GET.get("ws") or "").strip(),
+            fml=(request.GET.get("fml") or "").strip(),
+            app=request.GET.get("app"))
+        if wd is None:
+            return JsonResponse({"error": "unknown workspace"}, status=404)
+        ws = wd.name
+        _counts = str(request.GET.get("counts") or "").strip().lower() in ("1", "true", "yes")
+        cb = (_ad_tree_counts if _counts else None)
+        tree = _ade.tree(wd, with_counts=cb)
+        tree["ws"] = wd.name
+        if not _ws_can_design(request):
+            tree = _ad_blank_tree_names(tree)
+        return JsonResponse(tree, json_dumps_params={"ensure_ascii": False})
+    except Exception as e:
+        return JsonResponse({"error": str(e)[:300]}, status=500)
+
+
+def _ad_tree_counts(forms):
+    """{table: n} best-effort record counts for tree forms (bounded)."""
+    out = {}
+    try:
+        from .models import Connection as _DC
+    except Exception:
+        return out
+    for f in (forms or [])[:60]:
+        tbl = str(f.get("table") or "").strip()
+        if not tbl or tbl in out:
+            continue
+        sch, _, bare = (tbl.partition(".") if "." in tbl else ("", tbl))
+        sch = (sch or f.get("schema") or "").strip()
+        conn = str(f.get("conn") or "").strip()
+        try:
+            row = None
+            if conn:
+                try:
+                    row = _DC.objects.filter(name=conn).first()
+                    if row is None and conn.isdigit():
+                        row = _DC.objects.filter(id=int(conn)).first()
+                except Exception:
+                    row = None
+            if row is None:
+                continue
+            shim, eng = _fmlk_external_exec(row.name)
+            try:
+                if eng.startswith("sqlserver") or eng in ("mssql",):
+                    fq = ("[%s].[%s]" % (sch, bare)) if sch else ("[%s]" % bare)
+                else:
+                    fq = ('"%s"."%s"' % (sch, bare)) if sch else ('"%s"' % bare)
+                cur = shim._exec("SELECT COUNT(*) FROM %s" % fq, {})
+                try:
+                    out[tbl] = (cur.fetchone() or [0])[0] or 0
+                finally:
+                    try:
+                        cur.close()
+                    except Exception:
+                        pass
+            finally:
+                try:
+                    getattr(shim, "conn", None).close()
+                except Exception:
+                    pass
+        except Exception:
+            continue
+    return out
+
+
+def api_ad_search(request):
+    """GET /api/ad/search/?ws=&kind=forms|reports|rules|src:<key>&q=&limit=
+
+    Autocomplete rows for permission grids + designer sub-tables. Builtin
+    kinds read the file tree; src:<key> queries the custom table source
+    (any connection) via the grid-source endpoint (ref number OR name).
+    """
+    try:
+        from ad_system import engine as _ade
+        kind = (request.GET.get("kind") or "").strip()
+        q = request.GET.get("q") or ""
+        try:
+            limit = max(1, min(int(request.GET.get("limit", "20") or 20), 200))
+        except (TypeError, ValueError):
+            limit = 20
+        wd = _ad_resolve_ws_dir(
+            request,
+            ws_id=(request.GET.get("ws") or "").strip(),
+            fml=(request.GET.get("fml") or "").strip(),
+            app=request.GET.get("app"))
+        if wd is None:
+            return JsonResponse({"error": "unknown workspace"}, status=404)
+        ws = wd.name
+        if kind.startswith("src:"):
+            key = kind[4:].strip()
+            src = next((s for s in _ade.all_sources(wd) if str(s.get("key") or "") == key), None)
+            if not src or str(src.get("kind") or "table") != "table":
+                return JsonResponse({"error": "مصدر غير معروف: %s" % key}, status=404)
+            tbl = str(src.get("table") or "").strip()
+            seq = str(src.get("seq_col") or "").strip()
+            nm = str(src.get("name_col") or "").strip() or seq
+            sch = str(src.get("schema") or "").strip()
+            if "." in tbl and not sch:
+                sch, tbl = tbl.split(".", 1)
+            conn = str(src.get("conn") or "").strip()
+            if not conn:
+                try:
+                    from . import workspace as _wsm
+                    conf = _wsm.read_conf(wd / "workspace.conf")
+                    conn = str(conf.get("PRIMARY_CONNECTION") or "").strip()
+                except Exception:
+                    conn = ""
+            from types import SimpleNamespace as _NS
+            fake = _NS(GET={"table": tbl, "key": seq, "label": nm, "conn": conn,
+                            "schema": sch, "q": q, "pageSize": str(limit)})
+            res = api_fmlk_grid_source(fake)
+            try:
+                import json as _js
+                body = _js.loads(res.content.decode() or "{}")
+            except Exception:
+                body = {}
+            if res.status_code != 200:
+                return JsonResponse({"error": body.get("error") or "source failed"}, status=res.status_code)
+            rows = []
+            for r in (body.get("rows") or []):
+                if not isinstance(r, dict):
+                    continue
+                rr = dict(r)
+                rr["ref_key"] = r.get(body.get("key") or seq)
+                rr["ref_name"] = r.get(body.get("label") or nm)
+                rows.append(rr)
+            return JsonResponse({"rows": rows, "total": body.get("total", len(rows)),
+                                 "key": body.get("key"), "label": body.get("label"),
+                                 "source": key}, json_dumps_params={"ensure_ascii": False})
+        if kind not in ("forms", "reports", "rules", "sources"):
+            return JsonResponse({"error": "kind: forms|reports|rules|sources|src:<key>"}, status=400)
+        tree = _ade.tree(wd)
+        rows = _ade.search_rows(kind, tree, q, limit)
+        if kind in ("forms", "reports", "rules") and not _ws_can_design(request):
+            rows = _ad_blank_names(kind, rows)
+        return JsonResponse({"rows": rows},
+                            json_dumps_params={"ensure_ascii": False})
+    except Exception as e:
+        return JsonResponse({"error": str(e)[:300]}, status=500)
+
+
+def api_ad_sources(request):
+    """GET list / POST add / PUT update / DELETE remove custom tree sources.
+
+    Writes are master-gated; reads are open (table names only, no secrets).
+    Body: {ws, key, ar, conn, table, schema, seq_col, name_col} / {ws, key, patch}.
+    """
+    try:
+        from ad_system import engine as _ade
+        if request.method == "GET":
+            wd = _ad_resolve_ws_dir(request, ws_id=(request.GET.get("ws") or "").strip())
+            if wd is None:
+                return JsonResponse({"error": "unknown workspace"}, status=404)
+            return JsonResponse({"sources": _ade.all_sources(wd)},
+                                json_dumps_params={"ensure_ascii": False})
+        if request.method not in ("POST", "PUT", "DELETE"):
+            return JsonResponse({"error": "method not allowed"}, status=405)
+        if not _ws_master_ok(request):
+            return JsonResponse({"error": "master password required", "master_required": True}, status=403)
+        try:
+            data = json.loads(request.body.decode() or "{}")
+        except Exception:
+            return JsonResponse({"error": "invalid JSON"}, status=400)
+        if not isinstance(data, dict):
+            return JsonResponse({"error": "invalid JSON"}, status=400)
+        wd = _ad_ws_dir(str(data.get("ws") or "").strip())
+        if wd is None:
+            return JsonResponse({"error": "unknown workspace"}, status=404)
+        srcs = [s for s in _ade.read_sources(wd)]
+        if request.method == "POST":
+            s = {"key": str(data.get("key") or "").strip(),
+                 "ar": str(data.get("ar") or data.get("key") or "").strip(),
+                 "kind": "table",
+                 "conn": str(data.get("conn") or "").strip(),
+                 "table": str(data.get("table") or "").strip(),
+                 "schema": str(data.get("schema") or "").strip(),
+                 "seq_col": str(data.get("seq_col") or "").strip(),
+                 "name_col": str(data.get("name_col") or "").strip()}
+            err = _ade.validate_source(s)
+            if err:
+                return JsonResponse({"error": err}, status=400)
+            if any(str(x.get("key") or "") == s["key"] for x in srcs):
+                return JsonResponse({"error": "المفتاح موجود مسبقاً"}, status=400)
+            srcs.append(s)
+            _ade.write_sources(wd, srcs)
+            return JsonResponse({"ok": True, "sources": _ade.all_sources(wd)},
+                                json_dumps_params={"ensure_ascii": False})
+        key = str(data.get("key") or "").strip()
+        ix = next((i for i, x in enumerate(srcs) if str(x.get("key") or "") == key), None)
+        if ix is None:
+            return JsonResponse({"error": "المصدر غير موجود"}, status=404)
+        if request.method == "DELETE":
+            del srcs[ix]
+            _ade.write_sources(wd, srcs)
+            return JsonResponse({"ok": True, "sources": _ade.all_sources(wd)},
+                                json_dumps_params={"ensure_ascii": False})
+        patch = data.get("patch") or {}
+        if not isinstance(patch, dict):
+            return JsonResponse({"error": "patch must be an object"}, status=400)
+        s = dict(srcs[ix])
+        for k in ("ar", "conn", "table", "schema", "seq_col", "name_col"):
+            if k in patch:
+                s[k] = str(patch.get(k) or "").strip()
+        err = _ade.validate_source(s)
+        if err:
+            return JsonResponse({"error": err}, status=400)
+        srcs[ix] = s
+        _ade.write_sources(wd, srcs)
+        return JsonResponse({"ok": True, "sources": _ade.all_sources(wd)},
+                            json_dumps_params={"ensure_ascii": False})
+    except Exception as e:
+        return JsonResponse({"error": str(e)[:300]}, status=500)
+
+
+def api_ad_logs(request):
+    """GET /api/ad/logs/?ws=&username=&action=&entity=&from=&to=&page= — master only."""
+    if not _ws_master_ok(request):
+        return JsonResponse({"error": "master password required", "master_required": True}, status=403)
+    try:
+        from ad_system import engine as _ade
+        return JsonResponse(_ade.query_log(
+            ws_id=(request.GET.get("ws") or "").strip(),
+            username=(request.GET.get("username") or "").strip(),
+            action=(request.GET.get("action") or "").strip(),
+            entity=(request.GET.get("entity") or "").strip(),
+            day_from=(request.GET.get("from") or "").strip(),
+            day_to=(request.GET.get("to") or "").strip(),
+            page=request.GET.get("page", 1),
+            page_size=request.GET.get("pageSize", request.GET.get("page_size", 50))),
+            json_dumps_params={"ensure_ascii": False})
+    except Exception as e:
+        return JsonResponse({"error": str(e)[:300]}, status=500)
+
+
+def api_ad_record_info(request):
+    """GET /api/ad/record-info/?ws=&table=&pk=&fml=&app= — creation/modification
+    info (user/device/time) for the forms-player info panel."""
+    try:
+        from ad_system import engine as _ade
+        ws = (request.GET.get("ws") or "").strip()
+        if not ws:
+            try:
+                _ff = (request.GET.get("fml") or "").strip()
+                _fa = request.GET.get("app")
+                if _ff:
+                    _fp = _find_fml_path(_ff, _fa)
+                    if _fp:
+                        for _p in _fp.parents:
+                            if ((_p / "workspace.conf").exists()
+                                    or (_p / "settings.py").exists()):
+                                ws = _p.name
+                                break
+            except Exception:
+                pass
+        return JsonResponse(_ade.record_info(
+            ref_table=(request.GET.get("table") or "").strip(),
+            entity_id=(request.GET.get("pk") or "").strip(),
+            ws_id=ws),
+            json_dumps_params={"ensure_ascii": False})
+    except Exception as e:
+        return JsonResponse({"error": str(e)[:300]}, status=500)
+
+
+# ── Permission enforcement (permissions.fmlk records → users) ─────────
+_PERM_CACHE = {}  # (ws, table, user) -> (ts, bundle)
+_PERM_TTL = 60
+
+
+def _perm_find_file(ws_id):
+    """permissions.fmlk path (settings app first, else any app). None when absent."""
+    try:
+        from . import workspace as _wsm
+        ws = next((w for w in _wsm.workspace_dirs() if w.name == (ws_id or "").strip()), None)
+        if ws is None:
+            return None
+        apps = ws / "apps"
+        roots = sorted([p for p in apps.iterdir() if p.is_dir()]) if apps.is_dir() else [ws]
+        cands = []
+        for app in roots:
+            for p in (sorted(app.glob("permissions.fmlk")) or []):
+                cands.append((0 if app.name == "settings" else 1, str(p), p))
+        if not cands:
+            return None
+        cands.sort(key=lambda t: (t[0], t[1]))
+        return cands[0][2]
+    except Exception:
+        return None
+
+
+def _perm_detail_kind(table_or_alias):
+    """ad_perm_forms/reports/rules → kind; anything else → objects."""
+    try:
+        s = str(table_or_alias or "").lower()
+        if "form" in s or "نماذج" in s or "نموذج" in s:
+            return "forms"
+        if "report" in s or "تقارير" in s or "تقرير" in s:
+            return "reports"
+        if "rule" in s or "قواعد" in s or "قاعدة" in s:
+            return "rules"
+    except Exception:
+        pass
+    return "objects"
+
+
+def _perm_read_bundle(ws_id, username):
+    """(bundle|None) from the workspace permissions form table. Never raises."""
+    try:
+        from fmlk_engine.compiler import FMLKFormCompiler
+        fpath = _perm_find_file(ws_id)
+        if fpath is None:
+            return None
+        comp = FMLKFormCompiler(path=fpath)
+        meta = comp.fml_metadata() or {}
+        table = str(meta.get("table") or "ad_permissions").strip() or "ad_permissions"
+        schema = str(meta.get("schema") or "").strip() or "public"
+        conn_name = str(meta.get("connection") or "").strip()
+        details = []
+        try:
+            for dd in (comp.details() or []):
+                d = dd.to_dict() if hasattr(dd, "to_dict") else dict(dd)
+                details.append(d)
+        except Exception:
+            details = []
+        from .models import Connection as _DC
+        row = None
+        if conn_name:
+            try:
+                row = _DC.objects.filter(name=conn_name).first()
+                if row is None and conn_name.isdigit():
+                    row = _DC.objects.filter(id=int(conn_name)).first()
+            except Exception:
+                row = None
+        if row is None:
+            return None
+        conn = _ws_pg_connect(row)
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT column_name FROM information_schema.columns "
+                        "WHERE table_schema=%s AND table_name=%s", (schema, table))
+            cols = [str(r[0]).lower() for r in (cur.fetchall() or [])]
+            if not cols:
+                return None
+            ucol = "user_name" if "user_name" in cols else ("username" if "username" in cols else None)
+            if not ucol:
+                return None
+            cur.execute('SELECT * FROM "%s"."%s" WHERE "%s" = %%s' % (schema, table, ucol),
+                        (username,))
+            names = [d[0] for d in (cur.description or [])]
+            headers = [dict(zip(names, r)) for r in (cur.fetchall() or [])]
+            if not headers:
+                return None
+            ids = []
+            for h in headers:
+                try:
+                    ids.append(h.get("id"))
+                except Exception:
+                    pass
+            ids = [i for i in ids if i is not None]
+            lines: Dict[str, Any] = {"forms": [], "reports": [], "rules": [], "objects": []}
+            for dd in details:
+                try:
+                    dtbl = str(dd.get("table") or "").strip()
+                    if not dtbl:
+                        continue
+                    fk = str(dd.get("detail") or "permission_id").strip() or "permission_id"
+                    cur.execute("SELECT column_name FROM information_schema.columns "
+                                "WHERE table_schema=%s AND table_name=%s", (schema, dtbl))
+                    dcols = [str(r[0]).lower() for r in (cur.fetchall() or [])]
+                    if not dcols or fk.lower() not in dcols:
+                        continue
+                    ph = ", ".join(["%s"] * len(ids))
+                    cur.execute('SELECT * FROM "%s"."%s" WHERE "%s" IN (%s)' % (schema, dtbl, fk, ph), ids)
+                    dn = [d[0] for d in (cur.description or [])]
+                    kind = _perm_detail_kind(dd.get("table") or dd.get("alias"))
+                    for r in (cur.fetchall() or []):
+                        lines[kind].append(dict(zip(dn, r)))
+                except Exception:
+                    continue
+            from urs import permission_engine as _pe
+            return _pe.build_bundle(headers, lines)
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    except Exception:
+        return None
+
+
+def _perm_bundle_for(request, ws_id):
+    """(username, bundle|None) with 60s cache. Fail-open: None → legacy behavior."""
+    try:
+        _u = ""
+        try:
+            _u = str(((request.session.get("ws_user") or {}).get("username")) or "").strip()
+        except Exception:
+            _u = ""
+        if not _u:
+            return "", None
+        from fmlk_engine.compiler import FMLKFormCompiler as _FC
+        _fp = _perm_find_file(ws_id)
+        _tbl = "ad_permissions"
+        try:
+            if _fp is not None:
+                _tbl = str((_FC(path=_fp).fml_metadata() or {}).get("table") or _tbl)
+        except Exception:
+            pass
+        import time as _tm
+        _ck = "%s\x00%s\x00%s" % (ws_id or "", _tbl, _u.lower())
+        try:
+            _ts, _b = _PERM_CACHE.get(_ck, (0, None))
+            if _tm.time() - float(_ts or 0) < _PERM_TTL:
+                return _u, _b
+        except Exception:
+            pass
+        _b = _perm_read_bundle(ws_id, _u)
+        try:
+            _PERM_CACHE[_ck] = (_tm.time(), _b)
+        except Exception:
+            pass
+        return _u, _b
+    except Exception:
+        return "", None
+
+
+def _perm_ws_for_file(kind, filename, app):
+    """Workspace owning a form/report file (for permission lookup)."""
+    try:
+        from . import workspace as _wsm
+        fn = str(filename or "").strip()
+        if not fn:
+            return None
+        for w in (_wsm.workspace_dirs() or []):
+            try:
+                apps = w / "apps"
+                roots = sorted([p for p in apps.iterdir() if p.is_dir()]) if apps.is_dir() else []
+                if app:
+                    roots = [p for p in roots if p.name == app] or roots
+                for r in roots:
+                    if (r / fn).exists():
+                        return w.name
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return None
+
+
+def _perm_is_su(request, username=None):
+    """Enterprise rule: only admin / superuser bypasses default-deny."""
+    try:
+        if getattr(request, "user", None) and getattr(request.user, "is_superuser", False):
+            return True
+        wu = request.session.get("ws_user") or {}
+        if isinstance(wu, dict) and (wu.get("is_superuser") or wu.get("is_admin")):
+            return True
+        u = str(username or (wu.get("username") if isinstance(wu, dict) else "") or "").strip().lower()
+        if u in ("admin", "administrator", "root"):
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _perm_matchalist(names):
+    try:
+        return [str(n or "").strip().lower() for n in (names or []) if str(n or "").strip()]
+    except Exception:
+        return []
+
+
+def _perm_gate_report(pipe, rml_file, bundle, is_superuser=False):
+    """View-gate (local scope) + drop flag-0 columns pre-SQL. Returns error|None."""
+    try:
+        if is_superuser:
+            return None
+        from urs import permission_engine as _pe
+        if not bundle or not _pe.check(bundle, "reports", rml_file, "view", is_superuser=False):
+            return JsonResponse({"error": "لا صلاحية عرض لهذا التقرير"}, status=403)
+        hidden = set(_pe.hidden_columns(bundle, "reports", rml_file))
+        if not hidden:
+            return None
+        for holder in (getattr(pipe, "rml_engine", None), pipe):
+            try:
+                cols = getattr(holder, "columns", None)
+                if not isinstance(cols, list):
+                    continue
+                keep = [c for c in cols if str(getattr(c, "alias", "") or "").strip().lower() not in hidden
+                        and str(getattr(c, "name", "") or "").strip().lower() not in hidden]
+                if not keep:
+                    return JsonResponse({"error": "لا أعمدة مسموحة في هذا التقرير"}, status=403)
+                holder.columns = keep
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return None
+
+
+def _perm_gate_form_engine(eng, fml_file, bundle, is_superuser=False):
+    """View-gate (local scope) + drop flag-0 inputs pre-SQL. Returns error|None."""
+    try:
+        if is_superuser:
+            return None
+        from urs import permission_engine as _pe
+        if not bundle or not _pe.check(bundle, "forms", fml_file, "view", is_superuser=False):
+            return JsonResponse({"error": "لا صلاحية عرض لهذا النموذج"}, status=403)
+        hidden = set(_pe.hidden_columns(bundle, "forms", fml_file))
+        if hidden and isinstance(getattr(eng, "fields", None), list):
+            eng.fields = [f for f in eng.fields
+                          if str(getattr(f, "name", "") or "").strip().lower() not in hidden]
+    except Exception:
+        pass
+    return None
+
+
+def _perm_filter_app_files(request, app_name, fml_files, rml_files):
+    """Filter catalog forms and reports for non-superusers by Default-Deny."""
+    try:
+        if _perm_is_su(request):
+            return fml_files, rml_files
+        from urs import permission_engine as _pe
+        from . import workspace as _wsm
+        ws_id = _wsm.active_ws_id() or request.session.get("workspace") or ""
+        _u, _b = _perm_bundle_for(request, ws_id)
+        if not _b:
+            return [], []
+        allowed_fml = []
+        for f in (fml_files or []):
+            fn = f.get("file") or f.get("name")
+            if fn and _pe.check(_b, "forms", fn, "view", is_superuser=False):
+                allowed_fml.append(f)
+        allowed_rml = []
+        for r in (rml_files or []):
+            rn = r.get("file") or r.get("name")
+            if rn and _pe.check(_b, "reports", rn, "view", is_superuser=False):
+                allowed_rml.append(r)
+        return allowed_fml, allowed_rml
+    except Exception:
+        return fml_files, rml_files
+
+
+def _perm_strip_payload(payload, hidden):
+    try:
+        if isinstance(payload, dict) and hidden:
+            deny = set(_perm_matchalist(hidden))
+            for k in [k for k in payload if str(k).strip().lower() in deny and str(k).strip().lower() != "id"]:
+                del payload[k]
+    except Exception:
+        pass
+    return payload
+
+
+def _perm_filter_row(row, hidden):
+    try:
+        if isinstance(row, dict) and hidden:
+            deny = set(_perm_matchalist(hidden))
+            for k in [k for k in row if str(k).strip().lower() in deny
+                      and str(k).strip().lower() not in ("id", "__pk_id")]:
+                del row[k]
+    except Exception:
+        pass
+    return row
+
+
+def api_ad_form_perm(request):
+    """GET /api/ad/form-perm/?ws=&fml=&app= — hidden inputs + actions for the
+    forms player (server already drops the data; this hides the widgets)."""
+    try:
+        from urs import permission_engine as _pe
+        fml = (request.GET.get("fml") or "").strip()
+        app = request.GET.get("app")
+        ws = (request.GET.get("ws") or "").strip() or _perm_ws_for_file("fml", fml, app) or ""
+        _u, _b = _perm_bundle_for(request, ws)
+        _is_su = _perm_is_su(request, _u)
+        if _is_su:
+            acts = {a: True for a in _pe.ACTIONS}
+            return JsonResponse({"hidden": [], "actions": acts, "custom_actions": ["*"], "is_superuser": True},
+                                json_dumps_params={"ensure_ascii": False})
+        if not _b:
+            acts = {a: False for a in _pe.ACTIONS}
+            return JsonResponse({"hidden": [], "actions": acts, "custom_actions": [], "is_superuser": False},
+                                json_dumps_params={"ensure_ascii": False})
+        acts = {}
+        try:
+            for _a in _pe.ACTIONS:
+                acts[_a] = bool(_pe.check(_b, "forms", fml, _a, is_superuser=False))
+        except Exception:
+            pass
+        return JsonResponse({"hidden": _pe.hidden_columns(_b, "forms", fml),
+                             "actions": acts,
+                             "custom_actions": list(_pe.allowed_custom_actions(_b, fml, is_superuser=False)),
+                             "is_superuser": False},
+                            json_dumps_params={"ensure_ascii": False})
+    except Exception as e:
+        return JsonResponse({"error": str(e)[:300]}, status=500)
 
 MY_DOCS_DIR = BASE_DIR / "my_docs"
 MY_DOCS_INDEX = MY_DOCS_DIR / "index.json"
@@ -3746,8 +5542,12 @@ def workspace_cp(request):
         from . import workspace as _wsm
         wid = ""
         try:
-            _sess = request.session
-            wid = (_sess.get("workspace") or "").strip()
+            wid = (request.GET.get("workspace") or request.GET.get("settings") or "").strip()
+            if not wid:
+                wid = (_wsm.active_ws_id() or "").strip()
+            if not wid:
+                _sess = getattr(request, "session", {})
+                wid = (_sess.get("workspace") or "").strip()
         except Exception:
             wid = ""
         infos = _wsm.workspaces_info()
@@ -3782,6 +5582,8 @@ def app_detail(request, app_name):
                               "display": _r.get("display"), "icon": _r.get("icon"),
                               "description": _r.get("description"),
                               "policy_count": len(_r.get("policies") or [])})
+    fml_files, rml_files, app_rules = _scrub_catalog_names(request, fml_files, rml_files, app_rules)
+    fml_files, rml_files = _perm_filter_app_files(request, app_name, fml_files, rml_files)
     return render(request, "app_detail.html", {
         "app": app_meta,
         "rml_files": rml_files,
@@ -3799,7 +5601,20 @@ def app_form_player(request, app_name, fml_file):
     _g = _gate_redirect(request)
     if _g is not None:
         return _g
+    try:
+        _ws = _perm_ws_for_file("fml", fml_file, app_name)
+        _u, _b = _perm_bundle_for(request, _ws or "")
+        _is_su = _perm_is_su(request, _u)
+        if not _is_su:
+            from urs import permission_engine as _pe
+            if not _b or not _pe.check(_b, "forms", fml_file, "view", is_superuser=False):
+                return HttpResponse("لا صلاحية عرض لهذا النموذج", status=403,
+                                    content_type="text/plain; charset=utf-8")
+    except Exception:
+        pass
     app_meta, fml_files, rml_files = _load_app_context(app_name)
+    fml_files, rml_files, _ = _scrub_catalog_names(request, fml_files, rml_files, None)
+    fml_files, rml_files = _perm_filter_app_files(request, app_name, fml_files, rml_files)
     # Load specific FML metadata for header
     fml_path = _find_fml_path(fml_file, app_name)
     fml_metadata = {"displayName": fml_file, "name": fml_file}
@@ -3862,7 +5677,20 @@ def app_report_player(request, app_name, rml_file):
     _g = _gate_redirect(request)
     if _g is not None:
         return _g
+    try:
+        _ws = _perm_ws_for_file("rml", rml_file, app_name)
+        _u, _b = _perm_bundle_for(request, _ws or "")
+        _is_su = _perm_is_su(request, _u)
+        if not _is_su:
+            from urs import permission_engine as _pe
+            if not _b or not _pe.check(_b, "reports", rml_file, "view", is_superuser=False):
+                return HttpResponse("لا صلاحية عرض لهذا التقرير", status=403,
+                                    content_type="text/plain; charset=utf-8")
+    except Exception:
+        pass
     app_meta, fml_files, rml_files = _load_app_context(app_name)
+    fml_files, rml_files, _ = _scrub_catalog_names(request, fml_files, rml_files, None)
+    fml_files, rml_files = _perm_filter_app_files(request, app_name, fml_files, rml_files)
     rml_path = _find_rml_path(rml_file, app_name)
     rml_metadata = {"displayName": rml_file, "name": rml_file}
     rml_columns = []
@@ -3887,6 +5715,17 @@ def app_report_player(request, app_name, rml_file):
                 rml_table_opts = comp.table_opts() or []
             except Exception:
                 rml_table_opts = []
+            try:
+                _ws = _perm_ws_for_file("rml", rml_file, app_name)
+                _u, _b = _perm_bundle_for(request, _ws or "")
+                from urs import permission_engine as _pe
+                _hid = set(_pe.hidden_columns(_b, "reports", rml_file)) if _b else set()
+                if _hid:
+                    rml_columns = [c for c in rml_columns
+                                   if str(c.get("alias") or "").strip().lower() not in _hid
+                                   and str(c.get("name") or "").strip().lower() not in _hid]
+            except Exception:
+                pass
         except Exception:
             pass
     # Ensure json-serializable for JS
@@ -3971,6 +5810,8 @@ def api_app_files(request, app_name):
     for cand in candidates:
         if cand.exists():
             for p in sorted(cand.glob("*.rml")):
+                if _is_internal_rml(p.name):
+                    continue
                 _dn = p.stem.replace("_", " ")
                 try:
                     from rml_python.compiler import RMLReportCompiler
@@ -4115,7 +5956,8 @@ def _fmlk_get_engine(fml_name, app_name=None):
         from .workspace import active_ws_id, active_fiscal_schema, workspace_dirs, read_conf
         ws_id = active_ws_id()
         if ws_id:
-            ws_sch = (active_fiscal_schema() or "").strip()
+            from .workspace import resolve_ws_fiscal_schema
+            ws_sch = resolve_ws_fiscal_schema(ws_id, active_fiscal_schema())
             if not ws_sch:
                 ws = next((w for w in workspace_dirs() if w.name == ws_id), None)
                 if ws:
@@ -4224,6 +6066,25 @@ def _fmlk_recover_missing_table(eng):
     except Exception:
         mod = None
     if not mod:
+        try:
+            if tbl and hasattr(eng, "build_create_table_ddl") and getattr(eng, "db", None) is not None and hasattr(eng.db, "_exec"):
+                eng.db._exec(f'CREATE SCHEMA IF NOT EXISTS "{sch}"', {})
+                _ddl = eng.build_create_table_ddl(schema=sch, table=tbl)
+                for _st in [s.strip() for s in (_ddl or "").split(";") if s.strip()]:
+                    eng.db._exec(_st, {})
+                if getattr(eng.db, "conn", None) is not None:
+                    try:
+                        eng.db.conn.commit()
+                    except Exception:
+                        pass
+                if tbl == "urs_connection":
+                    try:
+                        _sync_connections_both_ways(schema=sch)
+                    except Exception:
+                        pass
+                return True, ""
+        except Exception:
+            pass
         return False, (f"الجدول {full} غير موجود في قاعدة البيانات ولا يوجد له تعريف جدول مخصص — "
                        "أنشئ جدولاً مخصصاً بنفس الاسم ثم نفّذ (ترحيل)، أو صحّح اسم جدول النموذج")
     try:
@@ -4339,6 +6200,288 @@ def api_app_modal(request, app_name, file):
     return HttpResponse("modal not found", status=404, content_type="text/plain; charset=utf-8")
 
 
+def _fmlk_ident(s):
+    """Oracle-safe identifier check (table/column/schema names only)."""
+    import re as _re_id
+    return bool(_re_id.fullmatch(r"[A-Za-z_][A-Za-z0-9_$#]*", str(s or "").strip()))
+
+
+def _fmlk_conn_row(conn_ref):
+    """Django Connection row by id or name (+effective row). None when missing."""
+    try:
+        from .models import Connection as _DC
+        _row = None
+        try:
+            _row = _DC.objects.filter(id=int(str(conn_ref).strip())).first()
+        except (TypeError, ValueError):
+            _row = _DC.objects.filter(name=str(conn_ref).strip()).first()
+        if _row is None:
+            return None
+        try:
+            _row = _effective_or_row(_row.id)
+        except Exception:
+            pass
+        return _row
+    except Exception:
+        return None
+
+
+def _fmlk_external_exec(conn_ref):
+    """(live_shim, db_engine) for an EXTERNAL read-only connection.
+
+    Read-only by contract: only SELECT helpers below ever use it (forms never
+    INSERT/UPDATE on it). Raises ValueError with an Arabic message.
+    """
+    _row = _fmlk_conn_row(conn_ref)
+    if _row is None:
+        raise ValueError("الاتصال الخارجي غير موجود")
+    _eng = str(getattr(_row, "engine", "") or "").lower()
+    if _eng not in ("postgres", "postgresql", "sqlserver", "oracle"):
+        raise ValueError("الاتصال الخارجي غير قابل للاستعلام (%s)" % (_eng or "?"))
+    try:
+        _cid = int(getattr(_row, "id", 0) or 0)
+    except (TypeError, ValueError):
+        raise ValueError("الاتصال الخارجي غير موجود")
+    if not _cid:
+        raise ValueError("الاتصال الخارجي غير موجود")
+    _shim, _dbeng = _xsql_resolve_conn(_cid)
+    if _shim is None:
+        raise ValueError("تعذر الاتصال بالمصدر الخارجي (%s)" % (_dbeng or "?"))
+    return _shim, str(_dbeng or "").lower()
+
+
+def _fmlk_ext_q(s):
+    return '"' + str(s).replace('"', '""') + '"'
+
+
+def _fmlk_ext_probe_cols(shim, from_sql):
+    """Real column names of a remote table (probe). Raises ValueError when unavailable."""
+    try:
+        cur = shim._exec("SELECT * FROM %s WHERE 1=0" % from_sql, {})
+    except Exception:
+        raise ValueError("جدول المصدر الخارجي غير متاح")
+    try:
+        names = [str(d[0]) for d in (cur.description or [])]
+    finally:
+        try:
+            cur.close()
+        except Exception:
+            pass
+    if not names:
+        raise ValueError("جدول المصدر الخارجي بلا أعمدة")
+    return names
+
+
+def _fmlk_ext_real(name, real_cols):
+    """True-case identifier (case-insensitive match) — quoted idents are
+    case-sensitive, and Oracle folds unquoted names to UPPER (login works
+    this way; options/search must too — else ORA-00904)."""
+    try:
+        lut = {str(c).lower(): str(c) for c in (real_cols or [])}
+        return lut.get(str(name or "").strip().lower(), name)
+    except Exception:
+        return name
+
+
+def _fmlk_ext_from_variants(schema, table, eng):
+    """FROM candidates: as-given, then case-folded (Oracle UPPER)."""
+    sch, tbl = str(schema or "").strip(), str(table or "").strip()
+    if eng.startswith("sqlserver") or eng in ("mssql",):
+        q = lambda s, t: ("[%s].[%s]" % (s, t)) if s else ("[%s]" % t)
+        return [q(sch, tbl)]
+    if eng.startswith("postgres"):
+        out = ['%s.%s' % (_fmlk_ext_q(sch), _fmlk_ext_q(tbl)) if sch else _fmlk_ext_q(tbl)]
+        if tbl != tbl.lower():
+            out.append('%s.%s' % (_fmlk_ext_q(sch), _fmlk_ext_q(tbl.lower())) if sch
+                       else _fmlk_ext_q(tbl.lower()))
+        if sch and sch != sch.lower():
+            out.append('%s.%s' % (_fmlk_ext_q(sch.lower()), _fmlk_ext_q(tbl.lower())))
+        return out
+    out = ['%s.%s' % (_fmlk_ext_q(sch), _fmlk_ext_q(tbl)) if sch else _fmlk_ext_q(tbl)]
+    if tbl != tbl.upper():
+        out.append('%s.%s' % (_fmlk_ext_q(sch), _fmlk_ext_q(tbl.upper())) if sch
+                   else _fmlk_ext_q(tbl.upper()))
+    if sch and sch != sch.upper():
+        out.append('%s.%s' % (_fmlk_ext_q(sch.upper()), _fmlk_ext_q(tbl.upper())))
+    return out
+
+
+def _fmlk_ext_resolve_from(shim, eng, schema, table):
+    """(from_sql, real_cols): first variant whose probe succeeds."""
+    _err = None
+    for _fq in _fmlk_ext_from_variants(schema, table, eng):
+        try:
+            return _fq, _fmlk_ext_probe_cols(shim, _fq)
+        except ValueError as ve:
+            _err = ve
+            continue
+    raise _err if _err is not None else ValueError("جدول المصدر الخارجي غير متاح")
+
+
+def _fmlk_ext_like_esc(s):
+    return str(s).replace("\\", "\\\\").replace("'", "''").replace("%", "\\%").replace("_", "\\_")
+
+
+def _fmlk_ext_options(conn_ref, schema, table, column, display, search, limit):
+    """Read-only DISTINCT options from an external connection (any engine).
+
+    Returns {"options": [{value, label}], "sql": ..., "engine": ...}.
+    All literals inlined+escaped (same pattern as api_rml_values_source) —
+    never any INSERT/UPDATE on the external connection.
+    """
+    if not _fmlk_ident(table) or not _fmlk_ident(column):
+        raise ValueError("table / column غير صالحة")
+    if display and not _fmlk_ident(display):
+        raise ValueError("display غير صالحة")
+    if schema and not _fmlk_ident(schema):
+        raise ValueError("schema غير صالحة")
+    try:
+        limit = max(1, min(int(limit or 100), 500))
+    except (TypeError, ValueError):
+        limit = 100
+    _shim, _eng = _fmlk_external_exec(conn_ref)
+    _sch = str(schema or "").strip()
+    # True-case first: quoted lowercase on Oracle (or mixed-case anywhere)
+    # raises ORA-00904 — probe variants, then bind real column names.
+    _from, _realcols = _fmlk_ext_resolve_from(_shim, _eng, _sch, table)
+    column = _fmlk_ext_real(column, _realcols)
+    if display:
+        display = _fmlk_ext_real(display, _realcols)
+    if _eng.startswith("sqlserver") or _eng in ("mssql",):
+        _qt = "%s [T]" % _from
+        _qc, _qdc = ("[T].[%s]" % column), (("[T].[%s]" % display) if display and display != column else None)
+        _cast = "CAST(%s AS NVARCHAR(MAX))" % _qc
+        _cast_dc = ("CAST(%s AS NVARCHAR(MAX))" % _qdc) if _qdc else None
+        _conds = ["%s IS NOT NULL" % _qc]
+        if (search or "").strip():
+            _pat = "N'%%%s%%'" % _fmlk_ext_like_esc(search.strip())
+            _s1 = "%s LIKE %s ESCAPE '\\'" % (_cast, _pat)
+            _conds.append(("(%s OR %s LIKE %s ESCAPE '\\')" % (_s1, _cast_dc, _pat)) if _qdc else _s1)
+        _where = "WHERE " + " AND ".join(_conds)
+        _sel = ("%s AS [v], %s AS [label]" % (_qc, _qdc)) if _qdc else ("%s AS [v]" % _qc)
+        sql = "SELECT DISTINCT TOP(%d) %s FROM %s %s ORDER BY 1" % (limit + 1, _sel, _qt, _where)
+    elif _eng.startswith("postgres"):
+        _qt = '%s "T"' % _from
+        _qc, _qdc = ('"T".%s' % _fmlk_ext_q(column)), (('"T".%s' % _fmlk_ext_q(display)) if display and display != column else None)
+        _cast = "CAST(%s AS TEXT)" % _qc
+        _cast_dc = ("CAST(%s AS TEXT)" % _qdc) if _qdc else None
+        _conds = ["%s IS NOT NULL" % _qc]
+        if (search or "").strip():
+            _pat = "'%%%s%%'" % _fmlk_ext_like_esc(search.strip())
+            _s1 = "%s ILIKE %s ESCAPE '\\'" % (_cast, _pat)
+            _conds.append(("(%s OR %s ILIKE %s ESCAPE '\\')" % (_s1, _cast_dc, _pat)) if _qdc else _s1)
+        _where = "WHERE " + " AND ".join(_conds)
+        _sel = ('%s AS "v", %s AS "label"' % (_qc, _qdc)) if _qdc else ('%s AS "v"' % _qc)
+        sql = "SELECT DISTINCT %s FROM %s %s ORDER BY 1 LIMIT %d" % (_sel, _qt, _where, limit + 1)
+    elif _eng == "oracle" or _eng.startswith("ora"):
+        _qt = '%s "T"' % _from
+        _qc, _qdc = ('"T".%s' % _fmlk_ext_q(column)), (('"T".%s' % _fmlk_ext_q(display)) if display and display != column else None)
+        _cast = "CAST(%s AS VARCHAR2(4000))" % _qc
+        _cast_dc = ("CAST(%s AS VARCHAR2(4000))" % _qdc) if _qdc else None
+        _conds = ["%s IS NOT NULL" % _qc]
+        if (search or "").strip():
+            _pat = "'%%%s%%'" % _fmlk_ext_like_esc(search.strip().upper())
+            _s1 = "UPPER(%s) LIKE %s ESCAPE '\\'" % (_cast, _pat)
+            _conds.append(("(%s OR UPPER(%s) LIKE %s ESCAPE '\\')" % (_s1, _cast_dc, _pat)) if _qdc else _s1)
+        _where = "WHERE " + " AND ".join(_conds)
+        _sel = ('%s AS "v", %s AS "label"' % (_qc, _qdc)) if _qdc else ('%s AS "v"' % _qc)
+        sql = "SELECT DISTINCT %s FROM %s %s ORDER BY 1 FETCH FIRST %d ROWS ONLY" % (_sel, _qt, _where, limit + 1)
+    else:
+        raise ValueError("المحرك غير مدعوم هنا: %s" % _eng)
+    try:
+        _cur = _shim._exec(sql, {})
+        try:
+            _names = [str(d[0]).lower() for d in (_cur.description or [])]
+            _rows = _cur.fetchall() or []
+        finally:
+            try:
+                _cur.close()
+            except Exception:
+                pass
+    finally:
+        try:
+            getattr(_shim, "conn", None).close()
+        except Exception:
+            pass
+    import datetime as _dt
+
+    def _clean(v):
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return ""
+        if isinstance(v, bool):
+            return "1" if v else "0"
+        if isinstance(v, (int, float)):
+            return v
+        if isinstance(v, (_dt.datetime, _dt.date, _dt.time)):
+            return v.isoformat(sep=" ")
+        return str(v)
+
+    opts = []
+    for _r in _rows:
+        if isinstance(_r, dict):
+            _vv = _r.get("v", _r.get("V", next(iter(_r.values())) if _r else None))
+            _ll = (_r.get("label", _r.get("LABEL")) if _qdc else None)
+            if _ll is None and _qdc and len(_r) > 1:
+                _ll = list(_r.values())[1]
+        else:
+            _vv = _r[0] if _r else None
+            _ll = _r[1] if (_qdc and len(_r) > 1) else None
+        _vc, _lc = _clean(_vv), (_clean(_ll) if _qdc else _clean(_vv))
+        if _vc == "" or (isinstance(_vc, str) and not str(_vc).strip()):
+            continue
+        opts.append({"value": _vc, "label": _lc if str(_lc).strip() != "" else _vc})
+    return {"options": opts[:limit], "sql": sql, "engine": _eng}
+
+
+def _fmlk_ext_map(conn_ref, schema, table, key, show, keys):
+    """Batch key→show map from an external connection (read-only)."""
+    if not _fmlk_ident(table) or not _fmlk_ident(key):
+        raise ValueError("table / key غير صالحة")
+    if show and not _fmlk_ident(show):
+        raise ValueError("show غير صالحة")
+    keys = [k for k in (keys or []) if k is not None and str(k).strip() != ""][:500]
+    if not keys:
+        return {}
+    if schema and not _fmlk_ident(schema):
+        raise ValueError("schema غير صالحة")
+    _shim, _eng = _fmlk_external_exec(conn_ref)
+    _sch = str(schema or "").strip()
+    # True-case first (quoted lowercase breaks on Oracle — ORA-00904).
+    _from, _realcols = _fmlk_ext_resolve_from(_shim, _eng, _sch, table)
+    key = _fmlk_ext_real(key, _realcols)
+    _showcol = _fmlk_ext_real(show or key, _realcols)
+    if _eng.startswith("sqlserver") or _eng in ("mssql",):
+        _qt = "%s" % _from
+        _qk, _qs = ("[%s]" % key), ("[%s]" % _showcol)
+    else:
+        _qt = "%s" % _from
+        _qk, _qs = _fmlk_ext_q(key), _fmlk_ext_q(_showcol)
+    _lits = ", ".join("'%s'" % str(k).replace("'", "''") for k in keys)
+    sql = "SELECT DISTINCT %s, %s FROM %s WHERE %s IN (%s)" % (_qk, _qs, _qt, _qk, _lits)
+    try:
+        _cur = _shim._exec(sql, {})
+        try:
+            _rows = _cur.fetchall() or []
+        finally:
+            try:
+                _cur.close()
+            except Exception:
+                pass
+    finally:
+        try:
+            getattr(_shim, "conn", None).close()
+        except Exception:
+            pass
+    out = {}
+    for _r in _rows or []:
+        try:
+            _kv, _sv = (list(_r.values())[0], list(_r.values())[1]) if isinstance(_r, dict) else (_r[0], _r[1])
+            out[str(_kv)] = "" if _sv is None else str(_sv)
+        except Exception:
+            pass
+    return out
+
+
 def api_fmlk_options(request):
     """GET /api/fmlk/options?table=&column=&schema=&search=&limit=&display=&conn= — قيم مرجع [table.column]."""
     table = (request.GET.get("table") or "").strip()
@@ -4355,6 +6498,30 @@ def api_fmlk_options(request):
         limit = 500
     if not table or not column:
         return JsonResponse({"error": "table and column required"}, status=400)
+    if not _fmlk_ident(table) or not _fmlk_ident(column):
+        return JsonResponse({"error": "table / column غير صالحة"}, status=400)
+    if display and not _fmlk_ident(display):
+        return JsonResponse({"error": "display غير صالحة"}, status=400)
+    if schema and not _fmlk_ident(schema):
+        return JsonResponse({"error": "schema غير صالحة"}, status=400)
+    # External (non-postgres) connection → read-only helper (oracle/mssql/...)
+    if conn_ref:
+        try:
+            _ext_row = _fmlk_conn_row(conn_ref)
+            _ext_eng = str(getattr(_ext_row, "engine", "") or "").lower() if _ext_row is not None else ""
+        except Exception:
+            _ext_eng = ""
+        if _ext_row is not None and _ext_eng not in ("postgres", "postgresql", ""):
+            try:
+                _out = _fmlk_ext_options(conn_ref, schema, table, column, display, search, limit)
+                return JsonResponse({"table": table, "column": column, "schema": schema or "",
+                                      "display": display or column, "options": _out["options"],
+                                      "total": len(_out["options"]), "source": "external",
+                                      "engine": _out["engine"]})
+            except ValueError as ve:
+                return JsonResponse({"error": str(ve)}, status=400)
+            except Exception as e:
+                return JsonResponse({"error": str(e)[:300]}, status=400)
     try:
         from fmlk_engine.engine import get_options_source
         conn_params = None
@@ -4388,12 +6555,38 @@ def api_fmlk_lookup(request):
     app = request.GET.get("app", None)
     limit = int(request.GET.get("limit", "50") or 50)
     search = request.GET.get("search")
+    # explicit external triple (read-only): conn + table + fk/display
+    x_conn = (request.GET.get("conn") or request.GET.get("refConn") or "").strip()
+    x_fk = (request.GET.get("fk") or request.GET.get("refFk") or "").strip()
+    x_display = (request.GET.get("display") or request.GET.get("refDisplay") or "").strip()
+    x_schema = (request.GET.get("schema") or request.GET.get("refSchema") or "").strip()
     if not field and not table:
         return JsonResponse({"error": "field or table required"}, status=400)
     try:
         eng = _fmlk_get_engine(fml, app)
         if field:
             try:
+                _f = eng._field_map.get(field) if hasattr(eng, "_field_map") else None
+                _f_conn = (getattr(_f, "ref_conn", "") or "") if _f is not None else ""
+                _f_sch = (getattr(_f, "ref_schema", "") or "") if _f is not None else ""
+                if _f_conn and not x_conn:
+                    x_conn = str(_f_conn).strip()
+                if _f_sch and not x_schema:
+                    x_schema = str(_f_sch).strip()
+                if x_conn:
+                    _ft = (getattr(_f, "ref_table", "") or table or "") if _f is not None else table
+                    if not _ft:
+                        return JsonResponse({"error": "refTable غير محدد للحقل الخارجي"}, status=400)
+                    _sch2, _tbl2 = (x_schema or "", _ft)
+                    if "." in _ft and not x_schema:
+                        _sch2, _tbl2 = [p.strip() for p in _ft.split(".", 1)]
+                    _out = _fmlk_ext_options(x_conn, _sch2, _tbl2,
+                                             (getattr(_f, "ref_fk", "") or x_fk or "id") if _f is not None else (x_fk or "id"),
+                                             (getattr(_f, "ref_display", "") or x_display or "") if _f is not None else (x_display or ""),
+                                             search, limit)
+                    return JsonResponse({"field": field, "refTable": _ft, "refConn": x_conn,
+                                          "options": _out["options"], "source": "external",
+                                          "engine": _out["engine"]})
                 data = eng.get_field_lookup(field_name=field, limit=limit, search=search)
                 return JsonResponse(data)
             except ValueError as ve:
@@ -4401,6 +6594,22 @@ def api_fmlk_lookup(request):
                     pass
                 else:
                     return JsonResponse({"error": str(ve)}, status=404)
+            except Exception as e:
+                return JsonResponse({"error": str(e)[:300]}, status=400)
+        if table and x_conn:
+            # generic external table (read-only, no field config needed)
+            try:
+                if "." in table and not x_schema:
+                    x_schema, table = [p.strip() for p in table.split(".", 1)]
+                _out = _fmlk_ext_options(x_conn, x_schema, table, x_fk or "id",
+                                         x_display or "", search, limit)
+                return JsonResponse({"field": field or table, "refTable": table, "refConn": x_conn,
+                                      "options": _out["options"], "source": "external",
+                                      "engine": _out["engine"]})
+            except ValueError as ve:
+                return JsonResponse({"error": str(ve)}, status=400)
+            except Exception as e:
+                return JsonResponse({"error": str(e)[:300]}, status=400)
         # generic table fallback handled inside engine lookup? simple mock
         return JsonResponse({"field": field or table, "refTable": table, "options": [{"value": 1, "label": "الإدارة العامة"}, {"value": 2, "label": "الفرع الرئيسي"}], "source": "mock"})
     except Exception as e:
@@ -4714,7 +6923,7 @@ def api_models_design_save(request, app_name):
                 fx_el = ET.SubElement(el, "formula")
                 fx_el.text = fx
                 fx_el.set("mode", "computed")
-            for k in ("refTable", "refFk", "refDisplay", "placeholder",
+            for k in ("refTable", "refFk", "refDisplay", "refConn", "refSchema", "placeholder",
                         "displayTable", "displayKey", "displayFk", "displayShow", "displayExpr"):
                 if f.get(k):
                     el.set(k, str(f.get(k)))
@@ -4726,7 +6935,7 @@ def api_models_design_save(request, app_name):
                 for _ck in ("parent_field", "sync_source", "auto_condition", "calc_expr", "poly_types",
                             "tree_parent", "sub_fields", "grid_columns", "grid_rows",
                             "matrix_rows", "matrix_cols", "separator", "placeholder_add", "allow_new",
-                            "hash_algo", "shift"):
+                            "hash_algo", "shift", "src_expr", "key_col", "label_col"):
                     if _ck == "calc_expr" and not _has_fx:
                         continue  # شبح صيغة قديمة بعد إلغاء المحسوب — لا تُحفظ
                     if _cfg.get(_ck) not in (None, ""):
@@ -4736,6 +6945,7 @@ def api_models_design_save(request, app_name):
                 _opts = [o.strip() for o in _opts.split(",") if o.strip()]
             _srcs = f.get("options_source") or f.get("optionsSource") or []
             _ref_opts = []
+            _src_els = []
             if isinstance(_srcs, list):
                 for _s in _srcs:
                     if not isinstance(_s, dict):
@@ -4745,7 +6955,12 @@ def api_models_design_save(request, app_name):
                         continue
                     _tt, _cc, _ss = (_s.get("table") or "").strip(), (_s.get("column") or "").strip(), (_s.get("schema") or "").strip()
                     if _tt and _cc:
-                        _ref_opts.append(f"[{_ss + '.' if _ss else ''}{_tt}.{_cc}]")
+                        _cn = (_s.get("conn") or "").strip()
+                        if _cn:
+                            # external source survives only as an explicit child
+                            _src_els.append({"table": _tt, "schema": _ss, "column": _cc, "conn": _cn})
+                        else:
+                            _ref_opts.append(f"[{_ss + '.' if _ss else ''}{_tt}.{_cc}]")
             if _opts or _ref_opts:
                 o_el = ET.SubElement(el, "options")
                 for o in list(_opts) + _ref_opts:
@@ -4758,6 +6973,15 @@ def api_models_design_save(request, app_name):
                         oo.text = str(o.get("label", o.get("value", "")))
                     else:
                         oo.text = str(o)
+            if _src_els:
+                so_el = ET.SubElement(el, "options_source")
+                for _se in _src_els:
+                    se = ET.SubElement(so_el, "source")
+                    se.set("table", _se["table"])
+                    if _se["schema"]:
+                        se.set("schema", _se["schema"])
+                    se.set("column", _se["column"])
+                    se.set("conn", _se["conn"])
             vr = f.get("validation") or {}
             if isinstance(vr, dict) and vr:
                 v_el = ET.SubElement(el, "validation")
@@ -4777,6 +7001,11 @@ def api_models_design_save(request, app_name):
                 _mode = _detail_link_mode(_d)
                 if _mode == "direct" and not _dd:
                     return JsonResponse({"error": f"التفاصيل {_dt}: حدد عمود الربط (FK) — أو بدّل وضع الربط إلى «جدول ثالث» ليُبنى تلقائياً"}, status=400)
+                _dconn = str(_d.get("conn") or "").strip()
+                _dsch = str(_d.get("schema") or "").strip()
+                if _dconn and _mode == "direct":
+                    # External sub-tables are read-only: direct writes are forbidden
+                    return JsonResponse({"error": f"التفاصيل {_dt}: الجدول من اتصال خارجي (قراءة فقط) — بدّل وضع الربط إلى «جدول ثالث»"}, status=400)
                 _seen_c = {}
                 for _cc in _dcols:
                     if not isinstance(_cc, dict):
@@ -4796,6 +7025,10 @@ def api_models_design_save(request, app_name):
                 de = ET.SubElement(d_el, "detail")
                 de.set("table", _dt)
                 de.set("alias", str(_d.get("alias") or _dt))
+                if _dconn:
+                    de.set("conn", _dconn)
+                if _dsch:
+                    de.set("schema", _dsch)
                 _dtab = str(_d.get("tab") or _d.get("tabLabel") or "").strip()
                 if _dtab:
                     de.set("tab", _dtab)
@@ -4865,6 +7098,12 @@ def api_models_design_save(request, app_name):
                         if _cfx:
                             ce.set("formula", _cfx)
                             ce.set("calc_mode", "computed")
+                        # مصدر الإكمال المشروط لأعمدة الشبكة (جدول تعبيري + رقم/اسم + اتصال)
+                        for _sk, _sk2 in (("src_expr", "srcExpr"), ("key_col", "keyCol"),
+                                          ("label_col", "labelCol"), ("src_conn", "srcConn")):
+                            _sv = str(_c.get(_sk) or _c.get(_sk2) or "").strip()
+                            if _sv:
+                                ce.set(_sk, _sv)
         acts = data.get("actions") if "actions" in data else data.get("custom_actions")
         if acts is None and target.exists():
             try:
@@ -5074,6 +7313,109 @@ def api_models_migrate(request, app_name):
                 return (_a.strip() or _dflt), _b.strip()
             return _dflt, _t
 
+        # الجداول الفرعية المباشرة الجديدة: إنشاء IF NOT EXISTS + إضافة الناقص.
+        # كانت تُفترض موجودة دائماً (FK فقط) — فنماذج مثل الصلاحيات
+        # (ad_perm_forms/...) لم تُبنَ قط وفشل حفظها وبحثها. الخارجي يُتجاوز.
+        import re as _re_dt
+        direct_tables = []
+        try:
+            for _det2 in (comp.details() or []):
+                try:
+                    _dd2 = _det2.to_dict() if hasattr(_det2, "to_dict") else dict(_det2)
+                except Exception:
+                    continue
+                try:
+                    if _detail_link_mode(_dd2) == "junction":
+                        continue
+                    if str(_dd2.get("conn") or "").strip():
+                        continue
+                    _ds2, _dtb2 = _split_sch_tbl((_dd2.get("table") or "").strip(), sch)
+                    if not _dtb2 or not _re_dt.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", _dtb2):
+                        continue
+                    if not _re_dt.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", _ds2 or ""):
+                        _ds2 = sch
+                    _dsub2 = (_dd2.get("sub_key") or _dd2.get("subKey") or "id").strip() or "id"
+                    if not _re_dt.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", _dsub2):
+                        _dsub2 = "id"
+                    _dfk2 = (_dd2.get("detail") or "").strip()
+                    if _dfk2 and not _re_dt.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", _dfk2):
+                        _dfk2 = ""
+                    _dcols2 = [c for c in (_dd2.get("columns") or [])
+                               if isinstance(c, dict) and (c.get("name") or "").strip()
+                               and _re_dt.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", (c.get("name") or "").strip())
+                               and not c.get("junction")]
+                    try:
+                        cur.execute("SELECT column_name FROM information_schema.columns "
+                                    "WHERE table_schema=%s AND table_name=%s", (_ds2, _dtb2))
+                        _have2 = {str(r[0]).lower() for r in (cur.fetchall() or [])}
+                    except Exception:
+                        _have2 = set()
+                    _created2, _added2 = False, []
+                    _ddflt = lambda _c: str((_c.get("default") or "")).strip().replace("'", "''")
+                    if not _have2:
+                        _defs2, _seen2 = [], set()
+                        _defs2.append(f'"{_dsub2}" SERIAL PRIMARY KEY')
+                        _seen2.add(_dsub2.lower())
+                        if _dfk2 and _dfk2.lower() not in _seen2:
+                            _defs2.append(f'"{_dfk2}" INTEGER')
+                            _seen2.add(_dfk2.lower())
+                        for _c2 in _dcols2:
+                            _n2 = (_c2.get("name") or "").strip()
+                            if _n2.lower() in _seen2:
+                                continue
+                            _t2 = eng.DATA_TYPE_MAP.get(
+                                str(_c2.get("data_type") or _c2.get("dataType") or "VARCHAR"
+                                    ).upper().split("(")[0].strip(), "TEXT")
+                            _dv2 = _ddflt(_c2)
+                            _defs2.append(f'"{_n2}" {_t2}' + (" DEFAULT '%s'" % _dv2 if _dv2 else ""))
+                            _seen2.add(_n2.lower())
+                        try:
+                            cur.execute(f'CREATE TABLE IF NOT EXISTS "{_ds2}"."{_dtb2}" '
+                                        f'({", ".join(_defs2)})')
+                            _created2 = True
+                            try:
+                                cur.execute("SELECT column_name FROM information_schema.columns "
+                                            "WHERE table_schema=%s AND table_name=%s", (_ds2, _dtb2))
+                                _have2 = {str(r[0]).lower() for r in (cur.fetchall() or [])}
+                            except Exception:
+                                _have2 = set(_seen2)
+                        except Exception as _e2c:
+                            direct_tables.append({"detail": _dtb2, "schema": _ds2,
+                                                  "error": str(_e2c)[:160]})
+                            continue
+                    else:
+                        _need2 = []
+                        if _dsub2.lower() not in _have2:
+                            _need2.append((_dsub2, "INTEGER", ""))
+                        if _dfk2 and _dfk2.lower() not in _have2:
+                            _need2.append((_dfk2, "INTEGER", ""))
+                        for _c2 in _dcols2:
+                            _n2 = (_c2.get("name") or "").strip()
+                            if _n2.lower() in _have2:
+                                continue
+                            _t2 = eng.DATA_TYPE_MAP.get(
+                                str(_c2.get("data_type") or _c2.get("dataType") or "VARCHAR"
+                                    ).upper().split("(")[0].strip(), "TEXT")
+                            _need2.append((_n2, _t2, _ddflt(_c2)))
+                        for _n2, _t2, _dv2 in _need2:
+                            try:
+                                cur.execute(f'ALTER TABLE "{_ds2}"."{_dtb2}" '
+                                            f'ADD COLUMN IF NOT EXISTS "{_n2}" {_t2}'
+                                            + (" DEFAULT '%s'" % _dv2 if _dv2 else ""))
+                                _added2.append({"name": _n2, "type": _t2})
+                            except Exception:
+                                pass
+                    direct_tables.append({"detail": _dtb2, "schema": _ds2,
+                                          "created": _created2, "added": _added2})
+                except Exception as _e2:
+                    try:
+                        direct_tables.append({"detail": str((_dd2.get("table") or ""))[:80],
+                                              "error": str(_e2)[:160]})
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
         # الجداول الرابطة: وضع junction → موديل main_sub + ترحيله دائماً
         # (الحقول المخصصة اختيارية: id تسلسلي + master_id + detail_id في كل الأحوال)
         # وضع direct → المسار المباشر FK القديم (sub.<detail> → main.<master>)
@@ -5100,7 +7442,8 @@ def api_models_migrate(request, app_name):
                 try:
                     _jm, _jerr = _cmj.ensure_junction(tbl, _dtab_bare, sch, conn_name, _cust,
                                                       refs={"master_table": tbl, "master_col": _dmaster,
-                                                            "sub_table": _dtab_bare, "sub_col": _dsub})
+                                                            "sub_table": _dtab_bare, "sub_col": _dsub},
+                                                      detail_text=bool(str((_dd.get("conn") or "")).strip()))
                 except Exception as _je:
                     _jm, _jerr = None, str(_je)
                 if _jerr or _jm is None:
@@ -5122,14 +7465,19 @@ def api_models_migrate(request, app_name):
                 if _jtbl:
                     fks.append(dict({"mode": "junction-master", "detail": _dtab_bare},
                                     **_fk_add(_jsch, _jtbl, "master_id", sch, tbl, _dmaster)))
-                    fks.append(dict({"mode": "junction-detail", "detail": _dtab_bare},
-                                    **_fk_add(_jsch, _jtbl, "detail_id", _dsch, _dtab_bare, _dsub)))
+                    if not str((_dd.get("conn") or "")).strip():
+                        fks.append(dict({"mode": "junction-detail", "detail": _dtab_bare},
+                                        **_fk_add(_jsch, _jtbl, "detail_id", _dsch, _dtab_bare, _dsub)))
+                    else:
+                        fks.append({"mode": "junction-detail", "detail": _dtab_bare,
+                                    "skipped": "external sub-table (read-only) — لا قيد خارجي لقاعدة أخرى"})
         except Exception as _jeall:
             junctions.append({"error": str(_jeall)})
         conn.close()
         return JsonResponse({"ok": True, "file": path.name, "schema": sch, "table": tbl,
                              "ddl": ddl, "columns": cols, "added": added,
                              "renamed": renamed, "junctions": junctions, "fks": fks,
+                             "direct_tables": direct_tables,
                              "primary_keys": eng.primary_key_fields()})
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
@@ -5188,9 +7536,45 @@ def api_models_migrate_preview(request, app_name):
             pg_t = eng.DATA_TYPE_MAP.get(f["type"].split("(")[0].strip(), "TEXT")
             new_inputs.append({**f, "db_type": pg_t})
             ddl_add.append(f'ALTER TABLE "{sch}"."{tbl}" ADD COLUMN IF NOT EXISTS "{f["name"]}" {pg_t};')
+        import re as _re_dtp
+        direct_tables = []
+        try:
+            _comp2 = comp
+            for _detp in (_comp2.details() or []):
+                try:
+                    _ddp = _detp.to_dict() if hasattr(_detp, "to_dict") else dict(_detp)
+                except Exception:
+                    continue
+                try:
+                    if _detail_link_mode(_ddp) == "junction":
+                        continue
+                    if str(_ddp.get("conn") or "").strip():
+                        continue
+                    _tp = (_ddp.get("table") or "").strip().split(".")[-1].strip()
+                    if not _tp or not _re_dtp.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", _tp):
+                        continue
+                    _cols_p = [str((c.get("name") or "")).strip() for c in (_ddp.get("columns") or [])
+                               if isinstance(c, dict) and (c.get("name") or "").strip()]
+                    _sub2 = (_ddp.get("detail") or "").strip()
+                    _exists = None
+                    try:
+                        if _dj is not None and str(getattr(_dj, "engine", "") or "").lower() == "postgres":
+                            _exists = any(True for _r in _table_columns_obj(_dj, sch, _tp))
+                    except Exception:
+                        _exists = None
+                    direct_tables.append({"detail": _tp, "schema": sch,
+                                          "sub_key": (_ddp.get("sub_key") or _ddp.get("subKey") or "id"),
+                                          "fk": _sub2, "columns": _cols_p,
+                                          "status": ("exists" if _exists else
+                                                     ("new" if _exists is False else "unknown"))})
+                except Exception:
+                    continue
+        except Exception:
+            pass
         return JsonResponse({"ok": True, "file": path.name, "table": tbl, "schema": sch,
                              "connection": conn_name, "db_columns": db_cols, "new_inputs": new_inputs,
-                             "ddl_add": ddl_add, "form_fields": len(fields), "note": note},
+                             "ddl_add": ddl_add, "form_fields": len(fields), "note": note,
+                             "direct_tables": direct_tables},
                             json_dumps_params={"ensure_ascii": False})
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
@@ -5843,6 +8227,21 @@ def api_fmlk_display_map(request):
         keys = [k for k in (keys or []) if k is not None and str(k).strip() != ""][:500]
         if not keys:
             return JsonResponse({"ok": True, "map": {}})
+        _dm_conn = str(data.get("conn") or data.get("refConn") or "").strip()
+        if _dm_conn:
+            # external read-only map (oracle/mssql/postgres)
+            try:
+                parts = table.split(".")
+                if len(parts) == 2:
+                    sch, tbl = parts
+                else:
+                    sch, tbl = "", parts[-1]
+                _mp = _fmlk_ext_map(_dm_conn, sch, tbl, key, show, keys)
+                return JsonResponse({"ok": True, "map": _mp, "source": "external"})
+            except ValueError as ve:
+                return JsonResponse({"error": str(ve)}, status=400)
+            except Exception as e:
+                return JsonResponse({"error": str(e)[:300]}, status=400)
         parts = table.split(".")
         if len(parts) == 2:
             sch, tbl = parts
@@ -5936,7 +8335,28 @@ def api_fmlk_create(request):
         app = data.get("app")
         payload = data.get("data", {})
         eng = _fmlk_get_engine(fml, app)
+        try:
+            _ws = _perm_ws_for_file("fml", fml, app)
+            _u, _b = _perm_bundle_for(request, _ws or "")
+            _is_su = _perm_is_su(request, _u)
+            if not _is_su:
+                from urs import permission_engine as _pe
+                if not _b or not _pe.check(_b, "forms", fml, "add", is_superuser=False):
+                    return JsonResponse({"error": "لا صلاحية إضافة في هذا النموذج"}, status=403)
+            if _b:
+                from urs import permission_engine as _pe
+                payload = _perm_strip_payload(
+                    payload, _pe.hidden_columns(_b, "forms", fml))
+        except Exception:
+            pass
         res = eng.create_record(payload)
+        try:
+            _u, _d = _ad_actor(request)
+            _ad_log(ws_id=str(app or ""), username=_u, action="insert", entity=str(fml or ""),
+                    entity_id=str((res or {}).get("id") or ""),
+                    ref_table=str(getattr(eng, "_table", "") or ""), device=_d)
+        except Exception:
+            pass
         if eng and "urs_connection" in str(getattr(eng, "_table", "")).lower():
             try:
                 _sync_fmlk_conn_to_django(payload, res.get("id"))
@@ -5957,7 +8377,28 @@ def api_fmlk_update(request):
         payload = data.get("data", {})
         eng = _fmlk_get_engine(fml, app)
         pk = {"id": rid}
+        try:
+            _ws = _perm_ws_for_file("fml", fml, app)
+            _u, _b = _perm_bundle_for(request, _ws or "")
+            _is_su = _perm_is_su(request, _u)
+            if not _is_su:
+                from urs import permission_engine as _pe
+                if not _b or not _pe.check(_b, "forms", fml, "edit", is_superuser=False):
+                    return JsonResponse({"error": "لا صلاحية تعديل في هذا النموذج"}, status=403)
+            if _b:
+                from urs import permission_engine as _pe
+                payload = _perm_strip_payload(
+                    payload, _pe.hidden_columns(_b, "forms", fml))
+        except Exception:
+            pass
         res = eng.update_record(pk, payload)
+        try:
+            _u, _d = _ad_actor(request)
+            _ad_log(ws_id=str(app or ""), username=_u, action="update", entity=str(fml or ""),
+                    entity_id=str(rid or ""),
+                    ref_table=str(getattr(eng, "_table", "") or ""), device=_d)
+        except Exception:
+            pass
         if eng and "urs_connection" in str(getattr(eng, "_table", "")).lower():
             try:
                 _sync_fmlk_conn_to_django(payload, rid)
@@ -5977,7 +8418,24 @@ def api_fmlk_delete(request):
         rid = data.get("id")
         eng = _fmlk_get_engine(fml, app)
         pk = {"id": rid}
+        try:
+            _ws = _perm_ws_for_file("fml", fml, app)
+            _u, _b = _perm_bundle_for(request, _ws or "")
+            _is_su = _perm_is_su(request, _u)
+            if not _is_su:
+                from urs import permission_engine as _pe
+                if not _b or not _pe.check(_b, "forms", fml, "delete", is_superuser=False):
+                    return JsonResponse({"error": "لا صلاحية حذف في هذا النموذج"}, status=403)
+        except Exception:
+            pass
         res = eng.delete_record(pk)
+        try:
+            _u, _d = _ad_actor(request)
+            _ad_log(ws_id=str(app or ""), username=_u, action="delete", entity=str(fml or ""),
+                    entity_id=str(rid or ""),
+                    ref_table=str(getattr(eng, "_table", "") or ""), device=_d)
+        except Exception:
+            pass
         return JsonResponse(res)
     except Exception as e:
         _r = _fmlk_records_err(e, locals().get("eng"), lambda: eng.delete_record(pk))
@@ -6092,7 +8550,43 @@ def api_fmlk_records(request):
                 filters = None
     try:
         eng = _fmlk_get_engine(fml, app)
+        from urs import permission_engine as _pe
+        _b = None
+        _fh = []
+        try:
+            _ws = _perm_ws_for_file("fml", fml, app)
+            _u, _b = _perm_bundle_for(request, _ws or "")
+            _is_su = _perm_is_su(request, _u)
+            if not _is_su:
+                if not _b or not _pe.check(_b, "forms", fml, "view", is_superuser=False):
+                    return JsonResponse({"error": "لا صلاحية عرض لهذا النموذج"}, status=403)
+            _fh = _pe.hidden_columns(_b, "forms", fml) if _b else []
+            if _fh and isinstance(getattr(eng, "fields", None), list):
+                _deny = set([str(x or "").strip().lower() for x in _fh])
+                eng.fields = [f for f in eng.fields
+                              if str(getattr(f, "name", "") or "").strip().lower() not in _deny]
+        except Exception:
+            pass
         res = eng.list_records(filters=filters, page=page, page_size=pageSize)
+        try:
+            _u, _d = _ad_actor(request)
+            _ad_log(ws_id=str(app or ""), username=_u, action="fetch", entity=str(fml or ""),
+                    ref_table=str(getattr(eng, "_table", "") or ""), device=_d,
+                    details="page %s/%s" % (page, pageSize))
+        except Exception:
+            pass
+        try:
+            if _fh and isinstance(res, dict):
+                for _rk in ("rows", "records", "data"):
+                    try:
+                        _rl = res.get(_rk)
+                        if isinstance(_rl, list):
+                            res[_rk] = [_perm_filter_row(dict(r) if isinstance(r, dict) else r, _fh)
+                                        for r in _rl]
+                    except Exception:
+                        continue
+        except Exception:
+            pass
         return JsonResponse(res)
     except Exception as e:
         _r = _fmlk_records_err(e, locals().get("eng"),
@@ -6479,6 +8973,107 @@ def _detail_sub_table(det):
     return None, t
 
 
+def _fmlk_detail_search_external(det, conn_ref, schema, table, q, col, page, page_size):
+    """Detail-search on an EXTERNAL sub-table (read-only, any engine).
+
+    Same contract as api_fmlk_detail_search (columns/rows/total/sub_key) —
+    junction rows are still written to the local third table only.
+    """
+    from django.http import JsonResponse as _JR
+    if not _fmlk_ident(table):
+        raise ValueError("invalid table")
+    if schema and not _fmlk_ident(schema):
+        raise ValueError("schema غير صالحة")
+    if col and not _fmlk_ident(col):
+        raise ValueError("col غير صالحة")
+    _shim, _eng = _fmlk_external_exec(conn_ref)
+    _sch = str(schema or "").strip()
+    # True-case first (quoted lowercase breaks on Oracle) — variants + real names.
+    try:
+        _from, _allcols = _fmlk_ext_resolve_from(_shim, _eng, _sch, table)
+    except ValueError:
+        raise ValueError("جدول المصدر الخارجي غير متاح")
+    if _eng.startswith("sqlserver") or _eng in ("mssql",):
+        _qc = lambda c: "[%s]" % c
+        _cast = lambda c: "CAST([%s] AS NVARCHAR(MAX))" % c
+        _like = lambda cast: "%s LIKE N'%%%s%%' ESCAPE '\\'" % (cast, _fmlk_ext_like_esc(q.strip()))
+    elif _eng.startswith("postgres"):
+        _qc = lambda c: _fmlk_ext_q(c)
+        _cast = lambda c: "CAST(%s AS TEXT)" % _fmlk_ext_q(c)
+        _like = lambda cast: "%s ILIKE '%%%s%%' ESCAPE '\\'" % (cast, _fmlk_ext_like_esc(q.strip()))
+    elif _eng == "oracle" or _eng.startswith("ora"):
+        _qc = lambda c: _fmlk_ext_q(c)
+        _cast = lambda c: "CAST(%s AS VARCHAR2(4000))" % _fmlk_ext_q(c)
+        _like = lambda cast: "UPPER(%s) LIKE '%%%s%%' ESCAPE '\\'" % (cast, _fmlk_ext_like_esc(q.strip().upper()))
+    else:
+        raise ValueError("المحرك غير مدعوم هنا: %s" % (_eng or "?"))
+    # _from/_allcols محلولة أعلاه (متغيرات الحالة + الأسماء الحقيقية) — لا فحص ثانٍ.
+    if not _allcols:
+        return _JR({"columns": [], "rows": [], "total": 0, "page": page, "pageSize": page_size})
+    _subkey = (det.get("sub_key") or det.get("subKey") or "id").strip() or "id"
+    _show = [c for c in (det.get("columns") or []) if isinstance(c, dict) and not c.get("junction")]
+    _alias = {c["name"]: (c.get("alias") or c["name"]) for c in _show}
+    _pw_search = {c.get("name") for c in (det.get("columns") or [])
+                  if isinstance(c, dict) and str(c.get("input_type") or "").lower() == "password"
+                  and c.get("name") and c.get("name") != _subkey}
+    _cols = [c for c in _allcols[:20] if c not in _pw_search]
+    if _subkey not in _cols and _subkey in _allcols:
+        _cols = [_subkey] + _cols
+    if not _cols:
+        return _JR({"columns": [], "rows": [], "total": 0, "page": page, "pageSize": page_size})
+    _sel = ", ".join(_qc(c) for c in _cols)
+    col, _col_found, _col_alias = _detail_search_col(det, col, _allcols)
+    _where = ""
+    if q:
+        if _col_found:
+            _where = " WHERE " + _like(_cast(col))
+        else:
+            _where = " WHERE (" + " OR ".join(_like(_cast(c)) for c in _cols[:12]) + ")"
+    _shim2, _ = _fmlk_external_exec(conn_ref)
+    try:
+        _, _crows = _run2(_shim2, "SELECT COUNT(*) FROM %s%s" % (_from, _where))
+        total = (_crows[0][0] if _crows else 0) or 0
+    except Exception:
+        total = 0
+    _off = (page - 1) * page_size
+    if _eng.startswith("sqlserver") or _eng in ("mssql",):
+        _page = " ORDER BY 1 OFFSET %d ROWS FETCH NEXT %d ROWS ONLY" % (_off, page_size)
+    elif _eng.startswith("postgres"):
+        _page = " ORDER BY 1 LIMIT %d OFFSET %d" % (page_size, _off)
+    else:
+        _page = " ORDER BY 1 OFFSET %d ROWS FETCH NEXT %d ROWS ONLY" % (_off, page_size)
+    try:
+        names, _rows = _run2(_shim2, "SELECT %s FROM %s%s%s" % (_sel, _from, _where, _page))
+    finally:
+        try:
+            getattr(_shim2, "conn", None).close()
+        except Exception:
+            pass
+    rows = [dict(zip(names, r)) for r in (_rows or [])]
+    if _col_alias:
+        for _r in rows:
+            if isinstance(_r, dict) and _col_alias not in _r:
+                _r[_col_alias] = _r.get(col)
+    _out_cols = [{"name": c, "alias": _alias.get(c, c),
+                  "sub_key": (c == _subkey)} for c in names]
+    return _JR({"columns": _out_cols, "rows": rows, "total": total,
+                "page": page, "pageSize": page_size, "sub_key": _subkey,
+                "col_found": _col_found, "source": "external"})
+
+
+def _run2(_shim, sql):
+    _cur = _shim._exec(sql, {})
+    try:
+        _names = [str(d[0]) for d in (_cur.description or [])]
+        _rows = _cur.fetchall() or []
+    finally:
+        try:
+            _cur.close()
+        except Exception:
+            pass
+    return _names, _rows
+
+
 def api_fmlk_detail_search(request):
     """GET /api/fmlk/detail-search?fml=&app=&detail=&q=&col=&page=&pageSize= — search sub-table rows.
 
@@ -6515,6 +9110,18 @@ def api_fmlk_detail_search(request):
         sch = _ssch or (comp.fml_metadata().get("schema") or "public")
         if not _re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", _stbl):
             return JsonResponse({"error": "invalid table"}, status=400)
+        _dconn = str(det.get("conn") or "").strip()
+        _dsch = str(det.get("schema") or "").strip() or (_ssch or "")
+        if _dconn:
+            # External sub-table (read-only: oracle/mssql/postgres) — the
+            # junction/third table itself always stays on the main connection.
+            try:
+                return _fmlk_detail_search_external(det, _dconn, _dsch, _stbl, q, col,
+                                                    page, page_size)
+            except ValueError as ve:
+                return JsonResponse({"error": str(ve)}, status=400)
+            except Exception as e:
+                return JsonResponse({"error": str(e)[:300]}, status=400)
         eng = _fmlk_get_engine(fml, app)
         db = eng.db
         if not getattr(db, "conn", None):
@@ -6584,12 +9191,196 @@ def api_fmlk_detail_search(request):
                 if isinstance(_r, dict) and _col_alias not in _r:
                     _r[_col_alias] = _r.get(col)
         _out_cols = [{"name": c, "alias": _alias.get(c, c),
-                      "sub_key": (c == _subkey)} for c in names]
+                       "sub_key": (c == _subkey)} for c in names]
         return JsonResponse({"columns": _out_cols, "rows": rows, "total": total,
                              "page": page, "pageSize": page_size, "sub_key": _subkey,
                              "col_found": _col_found})
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
+
+
+def _fmlk_grid_source_external(conn_ref, schema, table, key, label, q, page_size):
+    """Read-only grid-source search on an EXTERNAL table (any engine).
+
+    Same contract as the local path: full records matching the ref number
+    (key) OR the name (label). Only SELECT helpers use it (never writes).
+    """
+    from django.http import JsonResponse as _JR
+    if not _fmlk_ident(table):
+        raise ValueError("invalid table")
+    if schema and not _fmlk_ident(schema):
+        raise ValueError("schema غير صالحة")
+    _shim, _eng = _fmlk_external_exec(conn_ref)
+    _sch = str(schema or "").strip()
+    # True-case first (quoted lowercase breaks on Oracle) — variants + real names.
+    try:
+        _from, _allcols = _fmlk_ext_resolve_from(_shim, _eng, _sch, table)
+    except ValueError:
+        raise ValueError("جدول المصدر الخارجي غير متاح")
+    if _eng.startswith("sqlserver") or _eng in ("mssql",):
+        _qc = lambda c: "[%s]" % c
+        _cast = lambda c: "CAST([%s] AS NVARCHAR(MAX))" % c
+        _like = lambda cast: "%s LIKE N'%%%s%%' ESCAPE '\\'" % (cast, _fmlk_ext_like_esc(q.strip()))
+        _page = " ORDER BY 1 OFFSET 0 ROWS FETCH NEXT %d ROWS ONLY" % page_size
+    elif _eng.startswith("postgres"):
+        _qc = lambda c: _fmlk_ext_q(c)
+        _cast = lambda c: "CAST(%s AS TEXT)" % _fmlk_ext_q(c)
+        _like = lambda cast: "%s ILIKE '%%%s%%' ESCAPE '\\'" % (cast, _fmlk_ext_like_esc(q.strip()))
+        _page = " ORDER BY 1 LIMIT %d OFFSET 0" % page_size
+    elif _eng == "oracle" or _eng.startswith("ora"):
+        _qc = lambda c: _fmlk_ext_q(c)
+        _cast = lambda c: "CAST(%s AS VARCHAR2(4000))" % _fmlk_ext_q(c)
+        _like = lambda cast: "UPPER(%s) LIKE '%%%s%%' ESCAPE '\\'" % (cast, _fmlk_ext_like_esc(q.strip().upper()))
+        _page = " ORDER BY 1 OFFSET 0 ROWS FETCH NEXT %d ROWS ONLY" % page_size
+    else:
+        raise ValueError("المحرك غير مدعوم هنا: %s" % (_eng or "?"))
+    if not _allcols:
+        return _JR({"columns": [], "rows": [], "total": 0, "key": key, "label": label,
+                    "sub_key": key, "source": "external"})
+    _up = {c.upper(): c for c in _allcols}
+    _kcol = _up.get(key.upper(), key if key in _allcols else _allcols[0])
+    _lcol = _up.get(label.upper(), label if label in _allcols else _kcol)
+    _cols = [c for c in _allcols[:20]]
+    if _kcol not in _cols:
+        _cols = [_kcol] + _cols
+    _sel = ", ".join(_qc(c) for c in _cols)
+    _where = ""
+    if q:
+        if _lcol == _kcol:
+            _where = " WHERE " + _like(_cast(_kcol))
+        else:
+            _where = " WHERE (" + _like(_cast(_kcol)) + " OR " + _like(_cast(_lcol)) + ")"
+    _shim2, _ = _fmlk_external_exec(conn_ref)
+    try:
+        _, _crows = _run2(_shim2, "SELECT COUNT(*) FROM %s%s" % (_from, _where))
+        total = (_crows[0][0] if _crows else 0) or 0
+    except Exception:
+        total = 0
+    try:
+        _names, _rrows = _run2(_shim2, "SELECT %s FROM %s%s%s" % (_sel, _from, _where, _page))
+    finally:
+        try:
+            getattr(_shim2, "conn", None).close()
+        except Exception:
+            pass
+    rows = [dict(zip(_names, r)) for r in (_rrows or [])]
+    _out = [{"name": c, "sub_key": (c == _kcol)} for c in _names]
+    return _JR({"columns": _out, "rows": rows, "total": total, "page": 1,
+                "pageSize": page_size, "sub_key": _kcol, "key": _kcol,
+                "label": _lcol, "source": "external"})
+
+
+@csrf_exempt
+def api_fmlk_grid_source(request):
+    """GET /api/fmlk/grid-source?table=&key=&label=&conn=&schema=&fml=&app=&q=&pageSize=
+
+    Autocomplete source for grid cells whose table is expression-resolved
+    (conditional source): full records from ANY connection — local default
+    (fml/app engine) or external read-only (conn id/name) — matching the ref
+    number (key) OR the name (label). Response rows always carry the key so
+    the player can fill the row + detail_id.
+    """
+    table = (request.GET.get("table") or "").strip()
+    key = (request.GET.get("key") or "").strip()
+    label = (request.GET.get("label") or "").strip() or key
+    conn_ref = (request.GET.get("conn") or "").strip()
+    schema = (request.GET.get("schema") or "").strip()
+    fml = (request.GET.get("fml") or "").strip()
+    app = request.GET.get("app")
+    q = (request.GET.get("q") or "").strip()
+    if "." in table and not schema:
+        schema, table = table.split(".", 1)
+    try:
+        page_size = max(1, min(int(request.GET.get("pageSize", "8") or 8), 200))
+    except (TypeError, ValueError):
+        page_size = 8
+    if not table or not key:
+        return JsonResponse({"error": "table and key required"}, status=400)
+    for _v, _n in ((table, "table"), (key, "key"), (label, "label")):
+        if not _fmlk_ident(_v):
+            return JsonResponse({"error": "%s غير صالحة" % _n}, status=400)
+    if schema and not _fmlk_ident(schema):
+        return JsonResponse({"error": "schema غير صالحة"}, status=400)
+    try:
+        if conn_ref:
+            return _fmlk_grid_source_external(conn_ref, schema, table, key, label, q, page_size)
+        if not fml:
+            return JsonResponse({"error": "conn أو النموذج (fml) مطلوب"}, status=400)
+        eng = _fmlk_get_engine(fml, app)
+        db = eng.db
+        if not getattr(db, "conn", None):
+            db.connect()
+        try:
+            _nm = (type(db).__name__ or "").lower() + " " + (type(db).__module__ or "").lower()
+        except Exception:
+            _nm = ""
+        _is_ora = "oracle" in _nm
+        _is_ms = ("mssql" in _nm or "sqlserver" in _nm) and not _is_ora
+        _sch = schema or "public"
+        try:
+            _probe = db._exec(f'SELECT * FROM "{_sch}"."{table}" WHERE 1=0', {})
+            _allcols = [d[0] for d in (_probe.description or [])]
+            try:
+                _probe.close()
+            except Exception:
+                pass
+        except Exception:
+            return JsonResponse({"error": "جدول المصدر غير موجود — تحقق من الاسم"}, status=400)
+        if not _allcols:
+            return JsonResponse({"columns": [], "rows": [], "total": 0,
+                                 "key": key, "label": label, "sub_key": key})
+        _up = {c.upper(): c for c in _allcols}
+        _kcol = _up.get(key.upper(), key if key in _allcols else _allcols[0])
+        _lcol = _up.get(label.upper(), label if label in _allcols else _kcol)
+        _cols = [c for c in _allcols[:20]]
+        if _kcol not in _cols:
+            _cols = [_kcol] + _cols
+        _sel = ", ".join(f'"{c}"' for c in _cols)
+        _where, _params = "", {}
+        if q:
+            if _is_ora:
+                _cmp = lambda c: f'UPPER(CAST("{c}" AS VARCHAR2(4000))) LIKE :q'
+                _params["q"] = f"%{q.upper()}%"
+            elif _is_ms:
+                _cmp = lambda c: f'CAST("{c}" AS NVARCHAR(MAX)) LIKE :q'
+                _params["q"] = f"%{q}%"
+            else:
+                _cmp = lambda c: f'CAST("{c}" AS TEXT) ILIKE :q'
+                _params["q"] = f"%{q}%"
+            if _lcol == _kcol:
+                _where = f" WHERE {_cmp(_kcol)}"
+            else:
+                _where = f" WHERE ({_cmp(_kcol)} OR {_cmp(_lcol)})"
+        try:
+            _cc = db._exec(f'SELECT COUNT(*) FROM "{_sch}"."{table}"{_where}', dict(_params))
+            total = (_cc.fetchone() or [0])[0]
+            try:
+                _cc.close()
+            except Exception:
+                pass
+        except Exception:
+            total = 0
+        try:
+            _cur = db._exec(f'SELECT {_sel} FROM "{_sch}"."{table}"{_where} '
+                            f'ORDER BY 1 OFFSET :off ROWS FETCH NEXT :lim ROWS ONLY',
+                            {**_params, "off": 0, "lim": page_size})
+        except Exception:
+            _cur = db._exec(f'SELECT {_sel} FROM "{_sch}"."{table}"{_where} LIMIT :lim OFFSET :off',
+                            {**_params, "off": 0, "lim": page_size})
+        names = [d[0] for d in (_cur.description or [])]
+        rows = [dict(zip(names, r)) for r in (_cur.fetchall() or [])]
+        try:
+            _cur.close()
+        except Exception:
+            pass
+        _out_cols = [{"name": c, "sub_key": (c == _kcol)} for c in names]
+        return JsonResponse({"columns": _out_cols, "rows": rows, "total": total, "page": 1,
+                             "pageSize": page_size, "sub_key": _kcol, "key": _kcol,
+                             "label": _lcol})
+    except ValueError as ve:
+        return JsonResponse({"error": str(ve)}, status=400)
+    except Exception as e:
+        return JsonResponse({"error": str(e)[:300]}, status=500)
 
 
 def api_fmlk_detail_sources(request):
@@ -6924,7 +9715,36 @@ def api_fmlk_record(request):
     rid = request.GET.get("id", "1")
     try:
         eng = _fmlk_get_engine(fml, app)
+        try:
+            _ws = _perm_ws_for_file("fml", fml, app)
+            _u, _b = _perm_bundle_for(request, _ws or "")
+            _is_su = _perm_is_su(request, _u)
+            from urs import permission_engine as _pe
+            if not _is_su:
+                if not _b or not _pe.check(_b, "forms", fml, "view", is_superuser=False):
+                    return JsonResponse({"error": "لا صلاحية عرض لهذا النموذج"}, status=403)
+            _fh = _pe.hidden_columns(_b, "forms", fml) if _b else []
+            if _fh and isinstance(getattr(eng, "fields", None), list):
+                _deny = set([str(getattr(f, "name", "") or "").strip().lower() for f in _fh])
+                eng.fields = [f for f in eng.fields
+                              if str(getattr(f, "name", "") or "").strip().lower() not in _deny]
+        except Exception:
+            pass
         row = eng.get_record({"id": rid})
+        try:
+            _u, _d = _ad_actor(request)
+            _ad_log(ws_id=str(app or ""), username=_u, action="fetch", entity=str(fml or ""),
+                    entity_id=str(rid or ""),
+                    ref_table=str(getattr(eng, "_table", "") or ""), device=_d)
+        except Exception:
+            pass
+        try:
+            _ws = _perm_ws_for_file("fml", fml, app)
+            _u2, _b2 = _perm_bundle_for(request, _ws or "")
+            from urs import permission_engine as _pe2
+            row = _perm_filter_row(row, _pe2.hidden_columns(_b2, "forms", fml) if _b2 else [])
+        except Exception:
+            pass
         return JsonResponse({"row": row})
     except Exception as e:
         return JsonResponse({"error": f"id={str(rid)[:60]}: {str(e)[:240]}"}, status=400)
@@ -7229,7 +10049,11 @@ def api_rml_metadata(request):
         _doct = comp.doc_template() if hasattr(comp, "doc_template") else ""
         _gw = comp.general_where() if hasattr(comp, "general_where") else ""
         _dparams = [p.to_dict() if hasattr(p, "to_dict") else p for p in (comp.doc_params() if hasattr(comp, "doc_params") else [])]
-        return JsonResponse({"metadata": comp.rpt_metadata(), "columns": [c.to_dict() for c in comp.columns()], "fields": [f.to_dict() for f in comp.fields()], "connections": [c.to_dict() for c in comp.connections()], "charts": [c.to_dict() for c in comp.charts()], "rules": [r.to_dict() for r in comp.rules()], "groups": [g.to_dict() for g in comp.groups()], "detail": (_det.to_dict() if _det else None), "links": comp.links(), "table_opts": comp.table_opts(), "doc_template": _doct, "docTemplate": _doct, "doc_params": _dparams, "docParams": _dparams, "general_where": _gw, "generalWhere": _gw})
+        _gbys = comp.group_bys() if hasattr(comp, "group_bys") else []
+        _views = comp.views() if hasattr(comp, "views") else []
+        _vrefs = comp.view_refs() if hasattr(comp, "view_refs") else []
+        _unions = comp.unions() if hasattr(comp, "unions") else []
+        return JsonResponse({"metadata": comp.rpt_metadata(), "columns": [c.to_dict() for c in comp.columns()], "fields": [f.to_dict() for f in comp.fields()], "connections": [c.to_dict() for c in comp.connections()], "charts": [c.to_dict() for c in comp.charts()], "rules": [r.to_dict() for r in comp.rules()], "groups": [g.to_dict() for g in comp.groups()], "group_bys": _gbys, "groupBys": _gbys, "views": _views, "view_refs": _vrefs, "viewRefs": _vrefs, "unions": _unions, "detail": (_det.to_dict() if _det else None), "links": comp.links(), "table_opts": comp.table_opts(), "doc_template": _doct, "docTemplate": _doct, "doc_params": _dparams, "docParams": _dparams, "general_where": _gw, "generalWhere": _gw})
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=400)
 
@@ -7314,6 +10138,19 @@ def api_rml_parse_sql(request):
                 return _table_fks_obj(dj, sch or _default_schema_for(dj), tbl)
             except Exception:
                 return []
+
+        from rml_python.sql_import import parse_with, strip_comments as _strip_sql_comments
+        try:
+            _head = _strip_sql_comments(sql).strip()
+        except Exception:
+            _head = sql
+        if _re_stage.match(r"\s*WITH\b", _head or ""):
+            _wres = parse_with(sql, conn_id=(str(dj.id) if dj is not None else cid),
+                               default_schema=schema or (_default_schema_for(dj) if dj is not None else ""),
+                               expand_star=_expand, describe=_describe, fk_of=_fk_of)
+            return JsonResponse({"ok": True, "mode": "with", "views": _wres["views"],
+                                 "warnings": _wres.get("warnings", [])},
+                                json_dumps_params={"ensure_ascii": False})
 
         res = parse_sql(sql, conn_id=(str(dj.id) if dj is not None else cid),
                         default_schema=schema or (_default_schema_for(dj) if dj is not None else ""),
@@ -7748,6 +10585,161 @@ def api_rml_distinct(request):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
+_OPTION_BRACKET_RE = _re_pg.compile(r"\[([^\[\]]+)\]")
+
+
+def _report_default_conn(app_name, file_name):
+    """Default connection of a saved report (default table's conn, else first)."""
+    try:
+        from rml_python.compiler import RMLReportCompiler
+        _ad, target, err = _resolve_rml_target(app_name, file_name)
+        if err or target is None or not target.exists():
+            return ""
+        comp = RMLReportCompiler(path=target)
+        try:
+            for t in (comp.table_opts() or []):
+                if not isinstance(t, dict):
+                    continue
+                _isd = str(t.get("is_default") or t.get("isDefault") or "").strip().lower() in ("1", "true", "yes", "y")
+                _cn = str(t.get("conn") or t.get("conn_id") or t.get("connection_id") or "").strip()
+                if _isd and _cn:
+                    return _cn
+        except Exception:
+            pass
+        try:
+            for c in (comp.connections() or []):
+                _cid = str(getattr(c, "connection_id", None) or getattr(c, "id", None) or "").strip()
+                if _cid:
+                    return _cid
+        except Exception:
+            pass
+    except Exception:
+        pass
+    return ""
+
+
+def _resolve_option_exprs(value_expr, label_expr=None, app_name=None, file_name=None):
+    """Resolve option value/label expressions → (conn_ref, [table], v_sql, l_sql|None).
+
+    Refs: [conn.table.col] or [table.col] (report default conn). Both expressions
+    must point at ONE table. Raises ValueError with Arabic guidance.
+    """
+    from rml_python.namespaces import _resolve_expression, _norm_tname
+    from types import SimpleNamespace
+    v = str(value_expr or "").strip()
+    if not v:
+        raise ValueError("أدخل تعبير قيم الخيارات أولاً")
+    lexprs = [v] + ([str(label_expr).strip()] if str(label_expr or "").strip() else [])
+    pairs = []
+    for ex in lexprs:
+        try:
+            segs = _re_pg.split(r"('(?:[^']|'')*')", ex)
+        except Exception:
+            segs = [ex]
+        for seg in segs[0::2]:
+            for m in _OPTION_BRACKET_RE.finditer(seg):
+                inner = m.group(1).strip()
+                parts = [p.strip() for p in inner.split(".") if p.strip() != ""]
+                if len(parts) == 3:
+                    pairs.append((parts[0], parts[1], parts[2]))
+                elif len(parts) == 2:
+                    pairs.append((None, parts[0], parts[1]))
+                elif len(parts) == 1:
+                    raise ValueError(
+                        f"المرجع [{inner}] يحتاج جدولاً — اكتب [الجدول.{parts[0]}] أو [اتصال.جدول.{parts[0]}]")
+                else:
+                    raise ValueError(
+                        f"المرجع [{inner}] غير صالح — الصيغة [جدول.عمود] أو [اتصال.جدول.عمود]")
+    if not pairs:
+        raise ValueError("التعبيران يحتاجان مرجع عمود واحداً على الأقل ([جدول.عمود])")
+    tables = {_norm_tname(t) for (_c, t, _co) in pairs}
+    tables.discard("")
+    if len(tables) != 1:
+        raise ValueError("تعبيرا القيمة والتسمية يجب أن يشيرا لجدول واحد فقط")
+    table = next(t for (_c, t, _co) in pairs)
+    conns = {str(_c).strip() for (_c, _t, _co) in pairs if _c and str(_c).strip()}
+    if len(conns) > 1:
+        raise ValueError("تعارُض الاتصالات في التعبيرين — وحّد الاتصال")
+    conn = next(iter(conns)) if conns else ""
+    if not conn:
+        conn = _report_default_conn(app_name, file_name) if (app_name and file_name) else ""
+        if not conn:
+            raise ValueError("حدد الاتصال في المراجع ([اتصال.جدول.عمود]) أو افتح الخيارات من تقرير محفوظ")
+    seen, pf = set(), []
+    for (_c, _t, _co) in pairs:
+        key = (_norm_tname(_t), str(_co).strip().lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        pf.append(SimpleNamespace(name=str(_co).strip(), table_source=str(_t).strip(),
+                                  connection_id=conn))
+    tmap = {str(_co).strip().lower(): "T" for (_c, _t, _co) in pairs}
+    alias_by_table = {_norm_tname(table): "T"}
+    conn_map = {_norm_tname(table): conn}
+    try:
+        v_sql = _resolve_expression(v, pf, {}, set(), tmap, conn_map, alias_by_table, None)
+        l_sql = _resolve_expression(lexprs[1], pf, {}, set(), tmap, conn_map, alias_by_table, None) \
+            if len(lexprs) > 1 else None
+    except ValueError as _ve:
+        raise ValueError(str(_ve)[:200])
+    return conn, [table], v_sql, l_sql
+
+
+def _extract_table_where_sql(where_text, target_table, dialect="oracle"):
+    """Extract single-table condition fragments from general_where or table where,
+
+    rewriting bracket tokens ([conn.T.C], [T.C], [C]) to alias "T" ("T"."C" or [T].[C]).
+    Fragments referencing other tables are omitted.
+    """
+    import html as _html
+    from rml_python.namespaces import _norm_tname
+    text = _html.unescape(str(where_text or "").strip())
+    if not text:
+        return []
+    parts = _split_top_and(text)
+    norm_target = _norm_tname(target_table)
+    matched = []
+    for part in parts:
+        part = str(part or "").strip()
+        if not part:
+            continue
+        try:
+            segs = _re_pg.split(r"('(?:[^']|'')*')", part)
+        except Exception:
+            segs = [part]
+        table_refs = set()
+        has_other_table = False
+        for seg in segs[0::2]:
+            for m in _OPTION_BRACKET_RE.finditer(seg):
+                inner = m.group(1).strip()
+                tokens = [p.strip() for p in inner.split(".") if p.strip()]
+                if len(tokens) >= 2:
+                    tbl = _norm_tname(tokens[-2])
+                    table_refs.add(tbl)
+                    if tbl != norm_target:
+                        has_other_table = True
+        if has_other_table:
+            continue
+        def _rep(m):
+            inner = m.group(1).strip()
+            tokens = [p.strip() for p in inner.split(".") if p.strip()]
+            col = tokens[-1]
+            if dialect == "mssql":
+                return f"[T].[{col}]"
+            else:
+                return f'"T"."{col}"'
+        rewritten = []
+        for j, s in enumerate(segs):
+            if j % 2 == 0:
+                rewritten.append(_OPTION_BRACKET_RE.sub(_rep, s))
+            else:
+                rewritten.append(s)
+        res = "".join(rewritten).strip()
+        if res:
+            matched.append(res)
+    return matched
+
+
 @csrf_exempt
 def api_rml_values_source(request):
     """Distinct values of ONE column from a designer-chosen source (fast path).
@@ -7766,6 +10758,7 @@ def api_rml_values_source(request):
         if not isinstance(data, dict):
             return JsonResponse({"error": "invalid JSON"}, status=400)
         import re as _re_vs
+        from rml_python.namespaces import _norm_tname
         conn_ref = data.get("connection", data.get("conn", data.get("src_conn", "")))
         table = str(data.get("table", data.get("src_table", "")) or "").strip()
         column = str(data.get("column", data.get("src_column", "")) or "").strip()
@@ -7776,9 +10769,43 @@ def api_rml_values_source(request):
             limit = 50
         limit = max(1, min(limit, 500))
         display_column = str(data.get("display_column", data.get("displayColumn", data.get("src_display_column", data.get("ref_display", data.get("refDisplay", ""))))) or "").strip()
+        _app_in = str(data.get("app", data.get("app_name", "")) or "").strip()
+        _file_in = str(data.get("file", data.get("report", data.get("rml", ""))) or "").strip()
+        apply_gw = data.get("apply_general_where", data.get("applyGeneralWhere"))
+        apply_gw = True if apply_gw is None else (str(apply_gw).strip().lower() not in ("0", "false", "no", "off"))
+        gw_in = str(data.get("general_where", data.get("generalWhere", "")) or "").strip()
+        src_wh_in = str(data.get("src_where", data.get("srcWhere", data.get("where", ""))) or "").strip()
+        tbl_wh_in = str(data.get("table_where", data.get("tableWhere", "")) or "").strip()
+        # Expression mode: value/label expressions instead of table+column
+        _expr_mode = False
+        _expr_vsql = _expr_lsql = ""
+        _vexpr_in = str(data.get("value_expr", data.get("valueExpr", data.get("src_value_expr", data.get("srcValueExpr", "")))) or "").strip()
+        _lexpr_in = str(data.get("label_expr", data.get("labelExpr", data.get("src_label_expr", data.get("srcLabelExpr", "")))) or "").strip()
+        if _vexpr_in:
+            try:
+                _econn, _etparts, _expr_vsql, _expr_lsql = _resolve_option_exprs(
+                    _vexpr_in, _lexpr_in or None, _app_in or None, _file_in or None)
+            except ValueError as _ve:
+                return JsonResponse({"error": str(_ve)[:200]}, status=400)
+            conn_ref = _econn
+            table = _etparts[0]
+            column = ""
+            display_column = ""
+            _expr_mode = True
         _ident = _re_vs.compile(r"[A-Za-z_][A-Za-z0-9_]*")
         tparts = [p for p in table.split(".") if p]
-        if not (conn_ref and tparts and column) or not _ident.fullmatch(column) \
+        if not conn_ref:
+            try:
+                from .models import Connection as _DC
+                _fc = _DC.objects.first()
+                if _fc:
+                    conn_ref = _fc.id
+            except Exception:
+                pass
+        if _expr_mode:
+            if not (conn_ref and tparts):
+                return JsonResponse({"error": "تعذر تحديد الاتصال والجدول من التعبيرين"}, status=400)
+        elif not (conn_ref and tparts and column) or not _ident.fullmatch(column) \
                 or not all(_ident.fullmatch(p) for p in tparts) or len(tparts) > 2:
             return JsonResponse({"error": "connection / table / column غير صالحة"}, status=400)
         if display_column and not _ident.fullmatch(display_column):
@@ -7802,43 +10829,132 @@ def api_rml_values_source(request):
         if db_obj is None:
             return JsonResponse({"error": "تعذر الاتصال بالمصدر (%s)" % (eng or "?")}, status=400)
         eng = str(eng or "").lower()
+        # Schema resolution: connection schema or default
+        _expr_schema = ""
+        try:
+            _expr_schema = str(_resolve_connection_schema(request, _row) or _default_schema_for(_row) or "").strip()
+        except Exception:
+            try:
+                _expr_schema = str(_default_schema_for(_row) or "").strip()
+            except Exception:
+                _expr_schema = ""
+        if len(tparts) >= 2:
+            _sch = tparts[0]
+            _tbl = tparts[1]
+        else:
+            _sch = _expr_schema
+            _tbl = tparts[0] if tparts else table
+
         if eng.startswith("sqlserver") or eng in ("mssql",):
-            qc = "[%s]" % column
-            qdc = "[%s]" % display_column if display_column and display_column != column else None
-            qt = ".".join("[%s]" % p for p in tparts)
+            qt = ("[%s].[%s] [T]" % (_sch, _tbl)) if _sch else ("[%s] [T]" % _tbl)
+            if _expr_mode:
+                qc = "(%s)" % _expr_vsql
+                qdc = ("(%s)" % _expr_lsql) if _expr_lsql else None
+            else:
+                qc = "[T].[%s]" % column
+                qdc = ("[T].[%s]" % display_column) if display_column and display_column != column else None
             cast = "CAST(%s AS NVARCHAR(MAX))" % qc
             cast_dc = "CAST(%s AS NVARCHAR(MAX))" % qdc if qdc else None
             dialect = "mssql"
         elif eng.startswith("postgres"):
-            qc = '"%s"' % column
-            qdc = '"%s"' % display_column if display_column and display_column != column else None
-            qt = ".".join('"%s"' % p for p in tparts)
+            qt = (('"%s"."%s" "T"' % (_sch, _tbl)) if _sch else ('"%s" "T"' % _tbl))
+            if _expr_mode:
+                qc = "(%s)" % _expr_vsql
+                qdc = ("(%s)" % _expr_lsql) if _expr_lsql else None
+            else:
+                qc = '"T"."%s"' % column
+                qdc = ('"T"."%s"' % display_column) if display_column and display_column != column else None
             cast = "CAST(%s AS TEXT)" % qc
             cast_dc = "CAST(%s AS TEXT)" % qdc if qdc else None
             dialect = "pg"
+        elif eng == "oracle" or eng.startswith("ora"):
+            qt = (('"%s"."%s" "T"' % (_sch, _tbl)) if _sch else ('"%s" "T"' % _tbl))
+            if _expr_mode:
+                qc = "(%s)" % _expr_vsql
+                qdc = ("(%s)" % _expr_lsql) if _expr_lsql else None
+            else:
+                qc = '"T"."%s"' % column
+                qdc = ('"T"."%s"' % display_column) if display_column and display_column != column else None
+            cast = "CAST(%s AS VARCHAR2(4000))" % qc
+            cast_dc = "CAST(%s AS VARCHAR2(4000))" % qdc if qdc else None
+            dialect = "oracle"
         else:
             return JsonResponse({"error": "المحرك غير مدعوم هنا: %s" % eng}, status=400)
+
+        # Resolve general_where and table/src conditions
+        extra_conds = []
+        if apply_gw and not gw_in and (_app_in and _file_in):
+            try:
+                from rml_python.compiler import RMLReportCompiler
+                _ad, _target, _err = _resolve_rml_target(_app_in, _file_in)
+                if not _err and _target and _target.exists():
+                    _comp = RMLReportCompiler(path=_target)
+                    gw_in = str(_comp.general_where() or "").strip()
+                    if not tbl_wh_in and not src_wh_in:
+                        for _to in (_comp.table_opts() or []):
+                            if isinstance(_to, dict):
+                                _tn = str(_to.get("name") or _to.get("table") or "").strip()
+                                if _norm_tname(_tn) == _norm_tname(_tbl):
+                                    tbl_wh_in = str(_to.get("where") or "").strip()
+                                    break
+            except Exception:
+                pass
+
+        if apply_gw and gw_in:
+            extra_conds.extend(_extract_table_where_sql(gw_in, _tbl, dialect=dialect))
+        if tbl_wh_in:
+            extra_conds.extend(_extract_table_where_sql(tbl_wh_in, _tbl, dialect=dialect))
+        if src_wh_in:
+            extra_conds.extend(_extract_table_where_sql(src_wh_in, _tbl, dialect=dialect))
 
         def _like_esc(s):
             return str(s).replace("\\", "\\\\").replace("'", "''").replace("%", "\\%").replace("_", "\\_")
 
         conds = ["%s IS NOT NULL" % qc]
+        for c in extra_conds:
+            conds.append("(%s)" % c)
         if search.strip():
-            pat = "N'%%%s%%'" % _like_esc(search.strip()) if dialect == "mssql" \
-                else "'%%%s%%'" % _like_esc(search.strip())
-            op = "LIKE" if dialect == "mssql" else "ILIKE"
-            if qdc and cast_dc:
-                conds.append("(%s %s %s ESCAPE '\\' OR %s %s %s ESCAPE '\\')" % (cast, op, pat, cast_dc, op, pat))
+            if dialect == "mssql":
+                pat = "N'%%%s%%'" % _like_esc(search.strip())
+                op = "LIKE"
+                cast_s, cast_dc_s = cast, cast_dc
+            elif dialect == "oracle":
+                pat = "'%%%s%%'" % _like_esc(search.strip().upper())
+                op = "LIKE"
+                cast_s, cast_dc_s = "UPPER(%s)" % cast, ("UPPER(%s)" % cast_dc if cast_dc else None)
             else:
-                conds.append("%s %s %s ESCAPE '\\'" % (cast, op, pat))
+                pat = "'%%%s%%'" % _like_esc(search.strip())
+                op = "ILIKE"
+                cast_s, cast_dc_s = cast, cast_dc
+            if qdc and cast_dc_s:
+                conds.append("(%s %s %s ESCAPE '\\' OR %s %s %s ESCAPE '\\')" % (cast_s, op, pat, cast_dc_s, op, pat))
+            else:
+                conds.append("%s %s %s ESCAPE '\\'" % (cast_s, op, pat))
         where = "WHERE " + " AND ".join(conds)
-        sel_cols = "%s AS v, %s AS label" % (qc, qdc) if qdc else "%s AS v" % qc
+        if dialect == "mssql":
+            sel_cols = "%s AS [v], %s AS [label]" % (qc, qdc) if qdc else "%s AS [v]" % qc
+        else:
+            sel_cols = '%s AS "v", %s AS "label"' % (qc, qdc) if qdc else '%s AS "v"' % qc
         if dialect == "mssql":
             sql = "SELECT DISTINCT TOP(%d) %s FROM %s %s ORDER BY 1" % (limit + 1, sel_cols, qt, where)
+        elif dialect == "oracle":
+            sql = "SELECT DISTINCT %s FROM %s %s ORDER BY 1 FETCH FIRST %d ROWS ONLY" % (sel_cols, qt, where, limit + 1)
+            if _oracle_bind_scan(sql):
+                return JsonResponse({"error": "التعبير يحوي متغير ربط (:name أو ؟) — استخدم قيماً حرفية في خيارات أوراكل"}, status=400)
         else:
             sql = "SELECT DISTINCT %s FROM %s %s ORDER BY 1 LIMIT %d" % (sel_cols, qt, where, limit + 1)
         try:
-            rows, _names = _xsql_exec_on_db(db_obj, sql, {})
+            try:
+                rows, _names = _xsql_exec_on_db(db_obj, sql, {})
+            except Exception as _e0:
+                if not (dialect == "oracle" and _expr_mode and _expr_schema
+                        and "ORA-00942" in str(_e0)):
+                    raise
+                # الجدول غير مرئي بالسكيما المؤهلة — قد يكون عبر synonym:
+                # إعادة المحاولة بلا تأهيل قبل إعلان الفشل
+                sql = sql.replace(qt, '"%s" "T"' % tparts[0], 1)
+                _expr_schema = ""
+                rows, _names = _xsql_exec_on_db(db_obj, sql, {})
         finally:
             try:
                 getattr(db_obj, "conn", None).close()
@@ -7860,22 +10976,33 @@ def api_rml_values_source(request):
 
             for r in (rows or []):
                 if isinstance(r, dict):
-                    v_raw = r.get("v")
-                    lbl_raw = r.get("label") if qdc else None
+                    v_raw = r.get("v") if "v" in r else r.get("V", next(iter(r.values())) if r else None)
+                    if qdc:
+                        lbl_raw = r.get("label") if "label" in r else r.get("LABEL")
+                        if lbl_raw is None and len(r) > 1:
+                            lbl_raw = list(r.values())[1]
+                    else:
+                        lbl_raw = None
                 else:
                     v_raw = r[0] if r else None
                     lbl_raw = r[1] if (qdc and len(r) > 1) else None
 
                 v_clean = _clean_val(v_raw)
-                if v_clean == "" and v_clean != 0:
+                if v_clean is None or (isinstance(v_clean, str) and not v_clean.strip()):
                     continue
 
                 if qdc:
                     lbl_clean = _clean_val(lbl_raw)
-                    vals.append({
-                        "value": str(v_clean),
-                        "label": "%s - %s" % (v_clean, lbl_clean) if lbl_clean != "" else str(v_clean)
-                    })
+                    if _expr_mode:
+                        vals.append({
+                            "value": str(v_clean),
+                            "label": str(lbl_clean) if lbl_clean != "" else str(v_clean)
+                        })
+                    else:
+                        vals.append({
+                            "value": str(v_clean),
+                            "label": "%s - %s" % (v_clean, lbl_clean) if lbl_clean != "" else str(v_clean)
+                        })
                 else:
                     vals.append(v_clean)
         except Exception:
@@ -7884,44 +11011,70 @@ def api_rml_values_source(request):
         vals = vals[:limit]
         return JsonResponse({"values": vals, "count": len(vals), "truncated": truncated,
                              "connection": getattr(_row, "name", ""),
-                             "table": table, "column": column, "display_column": display_column},
+                             "table": table, "column": column, "display_column": display_column,
+                             "sql": sql, "schema": _sch,
+                             "applied_where": extra_conds},
                             json_dumps_params={"ensure_ascii": False})
     except Exception as e:
         return JsonResponse({"error": str(e)[:200]}, status=500)
 
 @csrf_exempt
 def api_search_excel_template(request):
-    """GET /api/search/excel-template/?column=<name> — قالب Excel لاستيراد قيم مطابقة سياسة.
-
-    ملف xlsx بسطر عناوين واحد باسم العمود المطلوب (يُقرأ أول عمود غير فارغ
-    عند الاستيراد عبر /api/search/import-excel/ — ضع قيمة في كل سطر).
+    """GET /api/search/excel-template/?column=<name> أو ?columns=<c1,c2,...>&filename=<fn> — قالب Excel لاستيراد قيم مطابقة سياسة.
     """
     try:
         from django.http import HttpResponse as _HR
-        col = str(request.GET.get("column") or "").strip()
-        if not col or len(col) > 100:
-            return JsonResponse({"error": "column required (≤100 chars)"}, status=400)
         import io as _io
         from openpyxl import Workbook as _WB
-        from openpyxl.styles import Font as _Font, PatternFill as _Fill, Alignment as _Align
+        from openpyxl.styles import Font as _Font, PatternFill as _Fill, Alignment as _Align, Border as _Border, Side as _Side
+        from openpyxl.utils import get_column_letter
+
+        cols_raw = str(request.GET.get("columns") or "").strip()
+        col = str(request.GET.get("column") or "").strip()
+        cols = [c.strip() for c in cols_raw.split(",") if c.strip()] if cols_raw else ([col] if col else [])
+        if not cols:
+            return JsonResponse({"error": "column or columns required"}, status=400)
+
         wb = _WB()
         ws = wb.active
         try:
-            ws.title = "values"
+            ws.title = "template"
         except Exception:
             pass
         try:
             ws.sheet_view.rightToLeft = True
         except Exception:
             pass
-        ws["A1"] = col
-        try:
-            ws["A1"].font = _Font(bold=True, color="FFFFFF")
-            ws["A1"].fill = _Fill(start_color="059669", end_color="059669", fill_type="solid")
-            ws["A1"].alignment = _Align(horizontal="center", vertical="center")
-            ws.column_dimensions["A"].width = max(22, min(len(col) + 10, 60))
-        except Exception:
-            pass
+
+        thin_border = _Border(
+            left=_Side(style='thin', color='CBD5E1'),
+            right=_Side(style='thin', color='CBD5E1'),
+            top=_Side(style='thin', color='CBD5E1'),
+            bottom=_Side(style='thin', color='CBD5E1')
+        )
+
+        for idx, col_name in enumerate(cols, start=1):
+            cell = ws.cell(row=1, column=idx, value=col_name)
+            col_letter = get_column_letter(idx)
+            try:
+                cell.font = _Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+                fill_color = "059669" if idx == 1 else "D97706"
+                cell.fill = _Fill(start_color=fill_color, end_color=fill_color, fill_type="solid")
+                cell.alignment = _Align(horizontal="center", vertical="center")
+                cell.border = thin_border
+                ws.column_dimensions[col_letter].width = max(20, min(len(col_name) + 12, 55))
+            except Exception:
+                pass
+
+        for r in range(2, 6):
+            for c in range(1, len(cols) + 1):
+                cell = ws.cell(row=r, column=c)
+                try:
+                    cell.border = thin_border
+                    cell.alignment = _Align(horizontal="center", vertical="center")
+                except Exception:
+                    pass
+
         buf = _io.BytesIO()
         wb.save(buf)
         try:
@@ -7932,7 +11085,8 @@ def api_search_excel_template(request):
         resp = _HR(data, content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         try:
             from urllib.parse import quote as _quote
-            _fn = "template_%s.xlsx" % (_quote(col, safe="")[:80] or "values")
+            custom_fn = str(request.GET.get("filename") or "").strip()
+            _fn = "%s.xlsx" % (_quote(custom_fn or (col or 'template'), safe="")[:80] or "template")
             resp["Content-Disposition"] = "attachment; filename*=UTF-8''%s" % _fn
         except Exception:
             pass
@@ -7943,17 +11097,11 @@ def api_search_excel_template(request):
 
 @csrf_exempt
 def api_search_import_excel(request):
-    """POST /api/search/import-excel/ (multipart file=, ‏column_index?=) — قيم بحث من ملف.
+    """POST /api/search/import-excel/ (multipart file=, ‏column_index?=, mode?=) — قيم بحث من ملف.
 
     يقبل xlsx/xlsm/csv/txt (حتى 10MB)، يقرأ أول 20 عموداً من أول ورقة/ملف،
-    ويعيد القيم المفرّدة بالترتيب (بحد أقصى 5000) لبناء فلتر IN على عمود محدد.
-    ‏column_index (اختياري، يبدأ من 1): عمود الملف المطلوب استخراج قيمه —
-    بدونه يُختار أول عمود غير فارغ تلقائياً.
-    تطبيع الأرقام: int/float صحيح ← أرقام صافية، أرقام عربية ← غربية،
-    فواصل الآلاف/المسافات داخل الرقم تُحذف، و'.0' النصية تُسقط —
-    حتى تطابق القيم المخزنة (أرقام الحوالات) حرفياً.
-    → {values, count, truncated, filename, columns, column_index}
-    (columns: [{index, header, sample, count}] لأول 20 عموداً غير فارغ)
+    ويعيد القيم المفرّدة بالترتيب (بحد أقصى 5000) لبناء فلتر IN على عمود محدد،
+    أو يعيد الجدول كاملاً إذا كان mode=table.
     """
     import datetime as _sx_dt
     import re as _sx_re
@@ -7996,9 +11144,9 @@ def api_search_import_excel(request):
         if len(raw) > 10 * 1024 * 1024:
             return JsonResponse({"error": ">10MB"}, status=400)
         import io as _io
-        # — قراءة الملف إلى أعمدة خام (بحد أقصى 20 عموداً × 20000 صف) —
         _MAX_COLS, _MAX_ROWS = 20, 20000
-        raw_cols = []  # list[list[raw value]]
+        is_table_mode = (request.POST.get("mode") == "table" or request.GET.get("mode") == "table")
+        raw_cols = []
         if ext in ("xlsx", "xlsm"):
             if raw[:2] != b"PK":
                 return JsonResponse({"error": "not a valid xlsx file"}, status=400)
@@ -8008,6 +11156,15 @@ def api_search_import_excel(request):
                 ws = wb.active
                 if ws is None:
                     return JsonResponse({"error": "empty workbook"}, status=400)
+                if is_table_mode:
+                    table_rows = []
+                    for ri, row in enumerate(ws.iter_rows(values_only=True)):
+                        if ri >= _MAX_ROWS:
+                            break
+                        row_vals = [_sx_norm(v) for v in (row or [])]
+                        if any(row_vals):
+                            table_rows.append(row_vals)
+                    return JsonResponse({"table": table_rows, "filename": f.name or ""}, json_dumps_params={"ensure_ascii": False})
                 raw_cols = [[] for _ in range(_MAX_COLS)]
                 for ri, row in enumerate(ws.iter_rows(min_col=1, max_col=_MAX_COLS, values_only=True)):
                     if ri >= _MAX_ROWS:
@@ -8032,6 +11189,13 @@ def api_search_import_excel(request):
             sh = book.sheet_by_index(0)
             ncols = min(sh.ncols, _MAX_COLS)
             nrows = min(sh.nrows, _MAX_ROWS)
+            if is_table_mode:
+                table_rows = []
+                for ri in range(nrows):
+                    row_vals = [_sx_norm(sh.cell_value(ri, ci)) for ci in range(ncols)]
+                    if any(row_vals):
+                        table_rows.append(row_vals)
+                return JsonResponse({"table": table_rows, "filename": f.name or ""}, json_dumps_params={"ensure_ascii": False})
             raw_cols = [[] for _ in range(ncols)]
             for ri in range(nrows):
                 for ci in range(ncols):
@@ -8058,6 +11222,15 @@ def api_search_import_excel(request):
             except Exception:
                 dialect = _csv.excel
             reader = _csv.reader(_io.StringIO(text), dialect)
+            if is_table_mode:
+                table_rows = []
+                for ri, row in enumerate(reader):
+                    if ri >= _MAX_ROWS:
+                        break
+                    row_vals = [_sx_norm(v) for v in (row or [])]
+                    if any(row_vals):
+                        table_rows.append(row_vals)
+                return JsonResponse({"table": table_rows, "filename": f.name or ""}, json_dumps_params={"ensure_ascii": False})
             raw_cols = [[] for _ in range(_MAX_COLS)]
             for ri, row in enumerate(reader):
                 if ri >= _MAX_ROWS:
@@ -8177,10 +11350,11 @@ def _scan_app_rules(app_name):
     return out
 
 
-def _save_rule_policies_xml(rml_path, rule_name, policies, variables=None):
+def _save_rule_policies_xml(rml_path, rule_name, policies, variables=None, entry_mode=None):
     """استبدال سياسات قاعدة واحدة داخل ملف RML مع الحفاظ على باقي الملف.
     variables: قائمة متغيرات (name/display/type/options) — تُستبدل عند تمريرها
-    (تُستخدم لتثبيت الأنواع المكتشفة تلقائياً من قيم السياسات)."""
+    (تُستخدم لتثبيت الأنواع المكتشفة تلقائياً من قيم السياسات).
+    entry_mode: نوع الإدخال (batch | single) — يُحدّث على وسم القاعدة."""
     import xml.etree.ElementTree as ET
     raw = rml_path.read_text(encoding="utf-8").lstrip("\ufeff")
     root = ET.fromstring(raw)
@@ -8195,11 +11369,15 @@ def _save_rule_policies_xml(rml_path, rule_name, policies, variables=None):
             break
     if target is None:
         raise ValueError(f"القاعدة '{rule_name}' غير موجودة في {rml_path.name}")
+    if entry_mode is not None:
+        em = "single" if str(entry_mode).strip().lower() in ("single", "individual", "1", "منفرد") else "batch"
+        target.set("entry_mode", em)
     for ch in [c for c in list(target) if c.tag.lower() == "policies"]:
         target.remove(ch)
     if policies:
         tmp = ET.Element("rule")
         _write_rule_element(tmp, {"id": target.attrib.get("id", "1"), "name": rule_name,
+                                  "entry_mode": target.attrib.get("entry_mode", "batch"),
                                   "policies": policies}, 1)
         for ch in [c for c in list(tmp) if c.tag.lower() == "policies"]:
             target.append(ch)
@@ -8209,6 +11387,7 @@ def _save_rule_policies_xml(rml_path, rule_name, policies, variables=None):
         if variables:
             tmp = ET.Element("rule")
             _write_rule_element(tmp, {"id": target.attrib.get("id", "1"), "name": rule_name,
+                                      "entry_mode": target.attrib.get("entry_mode", "batch"),
                                       "variables": variables}, 1)
             for ch in [c for c in list(tmp) if c.tag.lower() == "variables"]:
                 target.append(ch)
@@ -8218,7 +11397,7 @@ def _save_rule_policies_xml(rml_path, rule_name, policies, variables=None):
 
 
 def api_app_rules(request, app_name):
-    """GET /api/apps/<app>/rules/ → {rules:[{file,name,display,icon,description,sources,variables,policies,warnings}]}"""
+    """GET /api/apps/<app>/rules/ → {rules:[{file,name,display,icon,description,entry_mode,sources,variables,policies,warnings}]}"""
     try:
         from rml_python.rulevars import detect_policy_overlaps
         rules = _scan_app_rules(app_name)
@@ -8236,6 +11415,7 @@ def api_app_rules(request, app_name):
                 _warns = []
             lite.append({"file": r.get("file"), "name": r.get("name"), "display": r.get("display"),
                          "icon": r.get("icon"), "description": r.get("description"),
+                         "entry_mode": r.get("entry_mode", "batch") or "batch",
                          "sources": r.get("sources"), "source_aliases": r.get("source_aliases") or {},
                          "variables": r.get("variables"),
                          "policies": r.get("policies"),
@@ -8279,6 +11459,25 @@ def api_app_rule_policy_save(request, app_name):
         if cur is None:
             return JsonResponse({"error": f"القاعدة '{rule}' غير موجودة"}, status=404)
         policies = [p.to_dict() for p in (cur.policies or [])]
+        entry_mode = data.get("entry_mode")
+        policies_bulk = data.get("policies")
+        if policies_bulk is not None and isinstance(policies_bulk, list):
+            cleaned_pols = []
+            for p in policies_bulk:
+                m = p.get("match") or {}
+                vals = p.get("values") or {}
+                if not m and not p.get("is_default"):
+                    continue
+                cleaned_pols.append({
+                    "id": str(p.get("id") or f"p{len(cleaned_pols)+1}"),
+                    "name": str(p.get("name") or p.get("id") or ""),
+                    "priority": int(p.get("priority", 100) or 100),
+                    "is_default": bool(p.get("is_default")),
+                    "match": m,
+                    "values": vals,
+                })
+            _save_rule_policies_xml(rml_path, cur.name, cleaned_pols, entry_mode=entry_mode)
+            return JsonResponse({"ok": True, "policy_count": len(cleaned_pols), "entry_mode": entry_mode or getattr(cur, "entry_mode", "batch")})
         pid = str(policy.get("id") or "").strip()
         pname = str(policy.get("name") or "").strip()
         if not pname:
@@ -8322,7 +11521,7 @@ def api_app_rule_policy_save(request, app_name):
                 break
         if not done:
             policies.append(new_pol)
-        _save_rule_policies_xml(rml_path, cur.name, policies)
+        _save_rule_policies_xml(rml_path, cur.name, policies, entry_mode=entry_mode)
         # تحذير التداخل بعد الحفظ (لا يمنع — الأولوية تحسم الفائز)
         warnings = []
         try:
@@ -8463,6 +11662,24 @@ def _rml_job_run(job_id, rml, app, payload):
                 eng._progress_cb = lambda info: _rml_job_progress(job_id, info)
         except Exception:
             pass
+        try:
+            with _RML_JOBS_LOCK:
+                _rec0 = _RML_JOBS.get(job_id) or {}
+                _ph = [str(x or "").strip().lower() for x in (_rec0.get("perm_hidden") or []) if str(x or "").strip()]
+            if _ph and getattr(pipe, "rml_engine", None) is not None:
+                for holder in (pipe.rml_engine, pipe):
+                    try:
+                        _cols = getattr(holder, "columns", None)
+                        if isinstance(_cols, list):
+                            _keep = [c for c in _cols
+                                     if str(getattr(c, "alias", "") or "").strip().lower() not in _ph
+                                     and str(getattr(c, "name", "") or "").strip().lower() not in _ph]
+                            if _keep:
+                                holder.columns = _keep
+                    except Exception:
+                        continue
+        except Exception:
+            pass
         with _RML_JOBS_LOCK:
             rec = _RML_JOBS.get(job_id)
             if rec is not None:
@@ -8516,6 +11733,21 @@ def api_rml_execute_async(request):
         _RML_JOBS[job] = {"status": "queued", "progress": {"stage": "queued", "text": "في الانتظار…"},
                           "created": now, "done_at": None, "_last_prog": 0.0,
                           "rml": data.get("rml"), "app": data.get("app")}
+        try:
+            _ws = _perm_ws_for_file("rml", data.get("rml"), data.get("app"))
+            _u, _b = _perm_bundle_for(request, _ws or "")
+            _is_su = _perm_is_su(request, _u)
+            if not _is_su:
+                from urs import permission_engine as _pe
+                if not _b or not _pe.check(_b, "reports", data.get("rml"), "view", is_superuser=False):
+                    _RML_JOBS[job]["status"] = "error"
+                    _RML_JOBS[job]["error"] = "لا صلاحية عرض لهذا التقرير"
+                    return JsonResponse({"error": "لا صلاحية عرض لهذا التقرير"}, status=403)
+            if _b:
+                from urs import permission_engine as _pe
+                _RML_JOBS[job]["perm_hidden"] = _pe.hidden_columns(_b, "reports", data.get("rml"))
+        except Exception:
+            pass
     t = _th.Thread(target=_rml_job_run,
                    args=(job, data.get("rml", "emp_report"), data.get("app"), data.get("payload", {})),
                    daemon=True)
@@ -8546,8 +11778,8 @@ def _xsql_resolve_conn(conn_key):
     """Return (live_engine_obj, db_engine_str) for a Django Connection id.
 
     Builds a real, connected engine wrapper (SqlServerDirect for SQL Server,
-    psycopg2-backed wrapper for Postgres) so the XSQL executor can run
-    SQL on it directly.
+    psycopg2-backed wrapper for Postgres, oracledb-backed wrapper for Oracle)
+    so the XSQL executor can run SQL on it directly.
     """
     try:
         from .models import Connection as _DC
@@ -8572,6 +11804,29 @@ def _xsql_resolve_conn(conn_key):
             return w, eng
         except Exception:
             return None, eng
+    # oracle: native driver (psycopg2 below cannot talk to Oracle)
+    if eng in ("oracle",):
+        try:
+            ocn = _oracle_connect_obj(row)
+        except Exception:
+            return None, eng
+
+        class _OraShim:
+            def __init__(self, conn):
+                self.conn = conn
+
+            def _exec(self, sql, params):
+                cur = self.conn.cursor()
+                try:
+                    cur.execute(sql, params or {})
+                    return cur
+                except Exception:
+                    try:
+                        cur.close()
+                    except Exception:
+                        pass
+                    raise
+        return _OraShim(ocn), eng
     # postgres (and oracle via same psycopg2 path used elsewhere)
     try:
         import psycopg2 as _pg
@@ -8610,6 +11865,31 @@ def _xsql_resolve_conn(conn_key):
     return _PgShim(cn), eng
 
 
+def _is_oracle_conn(conn):
+    """True when a live DBAPI connection is Oracle (oracledb/cx_Oracle)."""
+    try:
+        return "oracledb" in (type(conn).__module__ or "").lower() \
+            or "cx_oracle" in (type(conn).__module__ or "").lower()
+    except Exception:
+        return False
+
+
+def _oracle_bind_scan(sql):
+    """True when raw SQL carries bind-style tokens outside literals.
+
+    oracledb raises DPY-2006 (positional+named mix) or missing-bind errors on
+    `:name` / `?` — option/value fragments must be fully inlined instead.
+    """
+    try:
+        import re as _re_obs
+        for _s in _re_obs.split(r"('(?:[^']|'')*')", str(sql or ""))[0::2]:
+            if _re_obs.search(r"(?<!:):([A-Za-z_][A-Za-z0-9_]*)|\?", _s):
+                return True
+    except Exception:
+        pass
+    return False
+
+
 def _xsql_exec_on_db(db_obj, sql, params):
     """Execute sql on a live engine and return rows as list[dict]."""
     # Rollback any in-flight aborted transaction from a previous failure
@@ -8623,14 +11903,19 @@ def _xsql_exec_on_db(db_obj, sql, params):
         pass
     cur = db_obj.conn.cursor()
     try:
-        # Postgres wants %s placeholders; SQL Server uses {}. Transpile if needed.
-        from rml_python.engine import _mssql_transpile_sql, _mssql_bind_values
-        try:
-            transpiled_sql = _mssql_transpile_sql(sql, convert_binds=True)
-            binds = _mssql_bind_values(sql, params)
-            cur.execute(transpiled_sql, binds)
-        except Exception:
+        if _is_oracle_conn(getattr(db_obj, "conn", None)):
+            # oracledb native: named :binds only — the MSSQL transpile would
+            # rewrite :name→? and mix bind styles (DPY-2006), so bypass it.
             cur.execute(sql, params or {})
+        else:
+            # Postgres wants %s placeholders; SQL Server uses {}. Transpile if needed.
+            from rml_python.engine import _mssql_transpile_sql, _mssql_bind_values
+            try:
+                transpiled_sql = _mssql_transpile_sql(sql, convert_binds=True)
+                binds = _mssql_bind_values(sql, params)
+                cur.execute(transpiled_sql, binds)
+            except Exception:
+                cur.execute(sql, params or {})
         names = [d[0] for d in (cur.description or [])] if cur.description else []
         rows = [dict(zip(names, r)) for r in cur.fetchall()]
         try: db_obj.conn.commit()
@@ -9171,7 +12456,23 @@ def api_rml_execute(request):
         app = data.get("app")
         payload = data.get("payload", {})
         pipe = _rml_get_pipeline(rml, app)
+        try:
+            _ws = _perm_ws_for_file("rml", rml, app)
+            _u, _b = _perm_bundle_for(request, _ws or "")
+            _is_su = _perm_is_su(request, _u)
+            _perr = _perm_gate_report(pipe, rml, _b, is_superuser=_is_su)
+            if _perr is not None:
+                return _perr
+        except Exception:
+            pass
         result = pipe.execute(payload)
+        try:
+            _u, _d = _ad_actor(request)
+            _ad_log(ws_id=str(app or ""), username=_u, action="fetch", entity=str(rml or ""),
+                    details="rows %s" % ((result or {}).get("total", "") if isinstance(result, dict) else ""),
+                    device=_d)
+        except Exception:
+            pass
         return JsonResponse(result, json_dumps_params={"ensure_ascii": False})
     except Exception as e:
         msg = str(e)
@@ -9400,10 +12701,11 @@ def _norm_join_type(v) -> str:
 
 
 def _write_table_opts_el(rml, ET, table_opts):
-    """Write <table_opts><table name conn is_default is_sub/> (designer table roles)."""
+    """Write <table_opts><table name conn is_default is_sub where where_rows where_match/> (designer table roles + persisted filter rows)."""
     if not table_opts:
         return
     try:
+        import json as _json
         opts_el = ET.SubElement(rml, "table_opts")
         for t in (table_opts or []):
             if not isinstance(t, dict):
@@ -9423,6 +12725,38 @@ def _write_table_opts_el(rml, ET, table_opts):
             wh = str(t.get("where") or "").strip()
             if wh:
                 t_el.set("where", wh)
+            rows = t.get("where_rows", t.get("whereRows", t.get("filter_rows", t.get("filterRows", [])))) or []
+            clean = []
+            if isinstance(rows, list):
+                for r in rows[:200]:
+                    if not isinstance(r, dict):
+                        continue
+                    col = str(r.get("col") or r.get("column") or r.get("field") or "").strip()[:128]
+                    op = str(r.get("op") or "=").strip().lower()[:16]
+                    if op not in ("=", "!=", ">", ">=", "<", "<=", "between", "contains",
+                                  "startswith", "endswith", "is_null", "not_null"):
+                        continue
+                    if not col:
+                        continue
+                    clean.append({"col": col, "op": op,
+                                  "val": str(r.get("val", "") or "")[:500],
+                                  "val2": str(r.get("val2", "") or "")[:500]})
+            if clean:
+                try:
+                    t_el.set("where_rows", _json.dumps(clean, ensure_ascii=False))
+                except Exception:
+                    pass
+            mm = str(t.get("where_match", t.get("whereMatch", t.get("match_mode", t.get("matchMode", "")))) or "").strip().lower()
+            if mm in ("any", "or", "any_match", "any match"):
+                t_el.set("where_match", "any")
+            elif mm in ("all", "and"):
+                t_el.set("where_match", "all")
+            _disp = str(t.get("display", t.get("display_name", t.get("displayName", ""))) or "").strip()[:128]
+            if _disp:
+                t_el.set("display", _disp)
+            _src = str(t.get("source", t.get("from_source", t.get("fromSource", ""))) or "").strip().lower()[:16]
+            if _src in ("select", "subquery", "sub"):
+                t_el.set("source", "select")
     except Exception:
         pass
 
@@ -9457,6 +12791,227 @@ def _write_links_el(rml, ET, links):
         pat = str(l.get("pattern") or l.get("regex") or "").strip()
         if pat:
             el.set("pattern", pat)
+
+
+def _write_view_refs_el(rml, ET, view_refs):
+    """Write <view_refs><ref namespace name/> — calls to shared library views."""
+    if not view_refs:
+        return
+    try:
+        seen = set()
+        el = ET.SubElement(rml, "view_refs")
+        for r in (view_refs or []):
+            if not isinstance(r, dict):
+                continue
+            ns = str(r.get("namespace") or r.get("ns") or "").strip()[:128]
+            nm = str(r.get("name") or r.get("view") or "").strip()[:128]
+            if not nm or (ns.lower(), nm.lower()) in seen:
+                continue
+            seen.add((ns.lower(), nm.lower()))
+            ref = ET.SubElement(el, "ref")
+            if ns:
+                ref.set("namespace", ns)
+            ref.set("name", nm)
+    except Exception:
+        pass
+
+
+def _write_views_el(rml, ET, views):
+    """Write <views><view name display><sources><source id table_name conn/>...</sources><merges><merge type s1 s2 .../>...</merges><columns><column .../>...</columns><groups><group name group_by expr/>...</groups></view></views> (legacy group keys are preserved when present)."""
+    if not views:
+        return
+    try:
+        import json as _json
+        views_el = ET.SubElement(rml, "views")
+        for v in (views or []):
+            if not isinstance(v, dict):
+                continue
+            nm = str(v.get("name") or "").strip()
+            if not nm:
+                continue
+            v_el = ET.SubElement(views_el, "view")
+            v_el.set("name", nm[:128])
+            _vd = str(v.get("display") or "").strip()
+            if _vd:
+                v_el.set("display", _vd[:128])
+            if v.get("imported") is True or str(v.get("imported") or "").strip().lower() in ("1", "true", "yes"):
+                v_el.set("imported", "1")
+            srcs = ET.SubElement(v_el, "sources")
+            for s in (v.get("sources") or []):
+                if not isinstance(s, dict):
+                    continue
+                tn = str(s.get("table_name") or s.get("table") or "").strip()
+                if not tn:
+                    continue
+                s_el = ET.SubElement(srcs, "source")
+                s_el.set("id", str(s.get("id") or "")[:32])
+                s_el.set("table_name", tn[:256])
+                _sc = str(s.get("conn") or s.get("conn_id") or "").strip()
+                if _sc:
+                    s_el.set("conn", _sc[:64])
+                _sf = str(s.get("filter") or s.get("where") or "").strip()
+                if _sf:
+                    s_el.set("filter", _sf[:2000])
+            merges = ET.SubElement(v_el, "merges")
+            for mg in (v.get("merges") or []):
+                if not isinstance(mg, dict):
+                    continue
+                m_el = ET.SubElement(merges, "merge")
+                m_el.set("type", str(mg.get("type") or "join")[:32])
+                m_el.set("source_1_id", str(mg.get("s1") or mg.get("source_1_id") or "")[:32])
+                m_el.set("source_2_id", str(mg.get("s2") or mg.get("source_2_id") or "")[:32])
+                for _ak, _kk in (("join_type", ("join_type", "joinType")),
+                                 ("key_1", ("key_1", "key1")),
+                                 ("key_2", ("key_2", "key2"))):
+                    _vv = ""
+                    for _kkk in _kk:
+                        if str(mg.get(_kkk) or "").strip():
+                            _vv = str(mg.get(_kkk)).strip()
+                            break
+                    if _vv:
+                        m_el.set(_ak, _vv[:128])
+            cols = ET.SubElement(v_el, "columns")
+            for c in (v.get("columns") or []):
+                if not isinstance(c, dict):
+                    continue
+                _cn = str(c.get("name") or c.get("alias") or "").strip()
+                if not _cn:
+                    continue
+                c_el = ET.SubElement(cols, "column")
+                c_el.set("name", _cn[:256])
+                if str(c.get("alias") or "").strip():
+                    c_el.set("alias", str(c.get("alias")).strip()[:256])
+                if str(c.get("expr") or "").strip():
+                    c_el.set("expr", str(c.get("expr")).strip()[:2000])
+                if str(c.get("type") or "").strip():
+                    c_el.set("type", str(c.get("type")).strip()[:64])
+            grps = ET.SubElement(v_el, "groups")
+            for gp in (v.get("groups") or []):
+                if not isinstance(gp, dict):
+                    continue
+                g_el = ET.SubElement(grps, "group")
+                if str(gp.get("name") or "").strip():
+                    # New named-group shape: اسم التجميع + تعبير التجميع + عمود التجميع
+                    g_el.set("name", str(gp.get("name")).strip()[:128])
+                    g_el.set("group_by", str(gp.get("group_by") or gp.get("groupBy") or "")[:256])
+                    g_el.set("expr", str(gp.get("expr") or gp.get("expression") or "")[:2000])
+                    continue
+                g_el.set("source_column", str(gp.get("source_column") or gp.get("sourceColumn") or "")[:256])
+                g_el.set("expression", str(gp.get("expression") or "")[:2000])
+                g_el.set("type", "conditional" if str(gp.get("type") or "").lower().startswith("cond") else "normal")
+                if str(gp.get("agg") or "").strip():
+                    g_el.set("agg", str(gp.get("agg")).strip().upper()[:16])
+                if str(gp.get("agg_col") or gp.get("aggCol") or "").strip():
+                    g_el.set("agg_col", str(gp.get("agg_col") or gp.get("aggCol")).strip()[:256])
+                _brs = gp.get("conditions") or gp.get("branches") or []
+                if isinstance(_brs, list) and _brs:
+                    c_el = ET.SubElement(g_el, "conditions")
+                    for _b in _brs[:50]:
+                        if not isinstance(_b, dict):
+                            continue
+                        gi = ET.SubElement(c_el, "g_if")
+                        gi.set("if", str(_b.get("group_by") or _b.get("if") or "")[:256])
+                        gi.set("value", str(_b.get("value", "") or "")[:256])
+                        if str(_b.get("op") or "").strip():
+                            gi.set("op", str(_b.get("op")).strip()[:8])
+                        gi.set("then", str(_b.get("then") or "")[:256])
+                        if str(_b.get("expression") or "").strip():
+                            gi.set("expression", str(_b.get("expression")).strip()[:2000])
+            _vvars = [x for x in (v.get("variables") or []) if isinstance(x, dict)
+                      and str(x.get("name") or "").strip()]
+            if _vvars:
+                vv_el = ET.SubElement(v_el, "variables")
+                for _vv in _vvars[:50]:
+                    _vn = str(_vv.get("name") or "").strip()
+                    if not _vn:
+                        continue
+                    var_el = ET.SubElement(vv_el, "var")
+                    var_el.set("name", _vn[:64])
+                    _vt = str(_vv.get("type") or "text").strip().lower()
+                    var_el.set("type", _vt[:16] if _vt in ("number", "text", "date") else "text")
+                    _vd2 = str(_vv.get("default", "") if _vv.get("default", "") is not None else "")
+                    if _vd2.strip():
+                        var_el.set("default", _vd2.strip()[:256])
+    except Exception:
+        pass
+
+
+def _write_unions_el(rml, ET, unions):
+    """Write <unions><union name display imported><view name/>...</union></unions> — UNION ALL merges of whole views."""
+    if not unions:
+        return
+    try:
+        unions_el = ET.SubElement(rml, "unions")
+        for u in (unions or []):
+            if not isinstance(u, dict):
+                continue
+            nm = str(u.get("name") or "").strip()
+            if not nm:
+                continue
+            members = [str(x or "").strip() for x in (u.get("views") or u.get("members") or [])
+                       if str(x or "").strip()]
+            if len(members) < 2:
+                continue
+            u_el = ET.SubElement(unions_el, "union")
+            u_el.set("name", nm[:128])
+            _ud = str(u.get("display") or "").strip()
+            if _ud:
+                u_el.set("display", _ud[:128])
+            if u.get("imported") is True or str(u.get("imported") or "").strip().lower() in ("1", "true", "yes"):
+                u_el.set("imported", "1")
+            for _mn in members:
+                _m = ET.SubElement(u_el, "view")
+                _m.set("name", _mn[:128])
+    except Exception:
+        pass
+
+
+def _write_group_bys_el(rml, ET, group_bys):
+    """Write <group_bys><gb field/>...</group_bys> — SQL GROUP BY keys (multi)."""
+    if not group_bys:
+        return
+    seen = set()
+    items = []
+    for g in (group_bys or []):
+        f = g.get("field") if isinstance(g, dict) else g
+        f = str(f or "").strip()
+        if f and f not in seen:
+            seen.add(f)
+            items.append(f)
+    if not items:
+        return
+    el = ET.SubElement(rml, "group_bys")
+    for idx, f in enumerate(items, start=1):
+        gb = ET.SubElement(el, "gb")
+        gb.set("field", f)
+        gb.set("order", str(idx))
+        try:
+            _src = next((g for g in (group_bys or []) if isinstance(g, dict)
+                         and str(g.get("field") or "").strip() == f and isinstance(g.get("cond"), dict)), None)
+            if _src is not None:
+                _c = _src.get("cond") or {}
+                if str(_c.get("when_field") or "").strip() and str(_c.get("then_field") or "").strip():
+                    gb.set("when_field", str(_c.get("when_field")).strip())
+                    gb.set("op", str(_c.get("op") or "=").strip())
+                    gb.set("value", str(_c.get("value", "") or ""))
+                    gb.set("then_field", str(_c.get("then_field")).strip())
+                    if str(_c.get("else_field") or "").strip():
+                        gb.set("else_field", str(_c.get("else_field")).strip())
+                _brs = [b for b in (_c.get("branches") or []) if isinstance(b, dict)]
+                if _brs:
+                    _cc = ET.SubElement(gb, "conditions")
+                    for _b in _brs[:50]:
+                        _wf = str(_b.get("when_field") or _b.get("if") or _b.get("group_by") or "").strip()
+                        _tf = str(_b.get("then_field") or _b.get("then") or "").strip()
+                        if not _wf or not _tf:
+                            continue
+                        _gi = ET.SubElement(_cc, "g_if")
+                        _gi.set("if", _wf)
+                        _gi.set("op", str(_b.get("op") or "=").strip())
+                        _gi.set("value", str(_b.get("value", "") or ""))
+                        _gi.set("then", _tf)
+        except Exception:
+            pass
 
 
 def _write_groups_el(rml, ET, groups):
@@ -9611,6 +13166,10 @@ def _write_detail_el(rml, ET, detail):
         _write_col_format(col_el, col)
         if col.get("is_amount") or col.get("isAmount"):
             col_el.set("is_amount", "1")
+        if col.get("hide_blank") or col.get("hideBlank"):
+            col_el.set("hide_blank", "1")
+        if col.get("hide_zero") or col.get("hideZero"):
+            col_el.set("hide_zero", "1")
         if col.get("currency_field") or col.get("currencyField"):
             col_el.set("currency_field", str(col.get("currency_field") or col.get("currencyField")))
         _csym = col.get("currency_symbol") or col.get("currencySymbol")
@@ -9677,12 +13236,12 @@ def _write_rule_element(r_el, r, idx=1):
     rconn = r.get("connection_id") or r.get("conn_id") or r.get("connectionId")
     if rconn:
         r_el.set("connection_id", str(rconn))
-    if r.get("type"):
-        r_el.set("type", str(r.get("type")))
     if r.get("message"):
         r_el.set("message", str(r.get("message")))
     if r.get("value") is not None:
         r_el.set("value", str(r.get("value")))
+    raw_em = str(r.get("entry_mode") or r.get("entryMode") or r.get("input_mode") or r.get("mode") or "batch").strip().lower()
+    r_el.set("entry_mode", "single" if raw_em in ("single", "individual", "1", "منفرد") else "batch")
     srcs = r.get("sources") or []
     if srcs:
         import xml.etree.ElementTree as _ET
@@ -9782,6 +13341,20 @@ def _write_doc_params_el(rml, _ET3, doc_params):
         prn = str(p.get("param_refname") or p.get("paramRefname") or p.get("refname") or p.get("ref_name") or "").strip()
         if prn:
             c_el.set("param_refname", prn)
+        # ربط بمتغير ديناميكي من خيارات إدخال جدول معروض (&VAR)
+        _vlink = str(p.get("var") or p.get("var_name") or p.get("varname") or p.get("dyn_var") or "").strip()
+        if _vlink:
+            c_el.set("var", _vlink[:64])
+        # نمط المصدر الديناميكي: table | expr + تعبيرا القيمة/التسمية
+        _smode = str(p.get("src_mode") or p.get("srcMode") or "").strip().lower()
+        if _smode in ("table", "expr"):
+            c_el.set("src_mode", _smode)
+        _svex = str(p.get("src_value_expr") or p.get("srcValueExpr") or "").strip()
+        if _svex:
+            c_el.set("src_value_expr", _svex[:2000])
+        _slex = str(p.get("src_label_expr") or p.get("srcLabelExpr") or "").strip()
+        if _slex:
+            c_el.set("src_label_expr", _slex[:2000])
         # value source for select boxes (designer-chosen: connection/table/column)
         # accepts {source:{connection,table,column}} or flat src_* keys
         _sinfo = p.get("source") if isinstance(p.get("source"), dict) else {}
@@ -9807,6 +13380,12 @@ def _write_doc_params_el(rml, _ET3, doc_params):
             c_el.set("src_table", _src_table)
         if _src_column:
             c_el.set("src_column", _src_column)
+        _swh = str(p.get("src_where") or p.get("srcWhere") or p.get("where") or "").strip()
+        if _swh:
+            c_el.set("src_where", _swh[:2000])
+        _agw = p.get("apply_general_where", p.get("applyGeneralWhere"))
+        if _agw is not None and str(_agw).strip().lower() in ("0", "false", "no", "off"):
+            c_el.set("apply_general_where", "0")
         _sch = p.get("searchable", p.get("searchAble", ""))
         if str(_sch).strip().lower() in ("0", "false", "no", "off"):
             c_el.set("searchable", "0")
@@ -9814,6 +13393,35 @@ def _write_doc_params_el(rml, _ET3, doc_params):
             c_el.set("is_custom", "1")
         if p.get("no_filter") or p.get("noFilter"):
             c_el.set("no_filter", "1")
+        # حدث المدخل: filter | group | variable
+        _ev = str(p.get("event") or "").strip().lower()
+        if _ev in ("group", "grouping"):
+            c_el.set("event", "group")
+        elif _ev in ("variable", "var", "varcol"):
+            c_el.set("event", "variable")
+        elif _ev in ("filter",):
+            c_el.set("event", "filter")
+        # مصدر القيمة للفلترة: input | static | dynamic
+        _sk = str(p.get("src") or p.get("value_src") or p.get("valueSrc") or "").strip().lower()
+        if not _sk:
+            if str(p.get("src_table") or "").strip() or str(p.get("src_value_expr") or "").strip() or str(p.get("src_mode") or "").strip() == "expr":
+                _sk = "dynamic"
+            elif p.get("options") or str(p.get("type") or "").lower() == "select":
+                _sk = "static"
+            else:
+                _sk = "input"
+        if _sk in ("input", "free"):
+            c_el.set("src", "input")
+        elif _sk in ("static", "dynamic"):
+            c_el.set("src", _sk)
+        # التجميع: التعبير + متغيرات التجميع
+        _gexpr = str(p.get("group_expr") or p.get("groupExpr") or "").strip()
+        if _gexpr:
+            c_el.set("group_expr", _gexpr[:2000])
+        # العمود المتغير: العمود المتأثر
+        _tcol = str(p.get("target_column") or p.get("targetColumn") or "").strip()
+        if _tcol:
+            c_el.set("target_column", _tcol[:256])
         # Custom options list for select type: [{'name': 'o1', 'value': 'نقد'}, ...] or strings
         raw_opts = p.get("options") or []
         if isinstance(raw_opts, (list, tuple)) and raw_opts:
@@ -9841,11 +13449,42 @@ def _write_doc_params_el(rml, _ET3, doc_params):
                             opt_el.text = s_opt
         elif isinstance(raw_opts, str) and raw_opts.strip():
             c_el.set("options", raw_opts.strip())
+        # متغيرات التجميع: <group_var n label table column/>
+        for _gv in (p.get("group_vars") or p.get("groupVars") or []):
+            if not isinstance(_gv, dict):
+                continue
+            _gl = str(_gv.get("label") or _gv.get("display") or _gv.get("name") or "").strip()
+            _gt = str(_gv.get("table") or _gv.get("table_name") or "").strip()
+            _gc = str(_gv.get("column") or _gv.get("col") or "").strip()
+            if not (_gl or _gt or _gc):
+                continue
+            _g = _ET3.SubElement(c_el, "group_var")
+            _g.set("n", str(_gv.get("n") or _gv.get("no") or _gv.get("num") or "").strip()[:16])
+            if _gl:
+                _g.set("label", _gl[:256])
+            if _gt:
+                _g.set("table", _gt[:256])
+            if _gc:
+                _g.set("column", _gc[:256])
+        # مصادر العمود المتغير: <var_source n label expr/>
+        for _vs in (p.get("var_sources") or p.get("varSources") or []):
+            if not isinstance(_vs, dict):
+                continue
+            _vl = str(_vs.get("label") or _vs.get("display") or _vs.get("name") or "").strip()
+            _vx = str(_vs.get("expr") or _vs.get("expression") or "").strip()
+            if not (_vl or _vx):
+                continue
+            _s = _ET3.SubElement(c_el, "var_source")
+            _s.set("n", str(_vs.get("n") or _vs.get("no") or _vs.get("num") or "").strip()[:16])
+            if _vl:
+                _s.set("label", _vl[:256])
+            if _vx:
+                _s.set("expr", _vx[:2000])
     return True
 
 
 def _render_rml_xml(prog_name, displayName, icon, category, schema, description, namespace,
-                    connections, fields, columns, charts, rules, report_type="master", detail=None, links=None, doc_template=None, groups=None, distinct=False, table_opts=None, group_levels=1, general_where=None, extra_meta=None, doc_params=None, doc_layout=None, alt_row_color_1=None, alt_row_color_2=None):
+                    connections, fields, columns, charts, rules, report_type="master", detail=None, links=None, doc_template=None, groups=None, distinct=False, table_opts=None, group_levels=1, general_where=None, extra_meta=None, doc_params=None,                      doc_layout=None, alt_row_color_1=None, alt_row_color_2=None, group_bys=None, views=None, view_refs=None, unions=None):
     """Build pretty RML XML from wizard payload (shared by create/update)."""
     import xml.etree.ElementTree as ET, xml.dom.minidom
     rml = ET.Element("rml")
@@ -9907,6 +13546,11 @@ def _render_rml_xml(prog_name, displayName, icon, category, schema, description,
             if ch.get("y"): c.set("y", ch.get("y"))
             if ch.get("y2"): c.set("y2", ch.get("y2"))
             if ch.get("title"): c.set("title", ch.get("title"))
+            # named slots for the 10 chart families (only non-empty are stored)
+            for _ck in ("category", "value", "series", "size", "color", "parent",
+                        "min", "max", "target", "thresholds", "stacking", "totals"):
+                if ch.get(_ck) not in (None, ""):
+                    c.set(_ck, str(ch.get(_ck)))
     # rules — computed business rules, addressable cross-file as ns.name
     # + rule variables/policies ($rule.var$ per-record values)
     if rules:
@@ -9989,6 +13633,10 @@ def _render_rml_xml(prog_name, displayName, icon, category, schema, description,
         _write_col_style(col_el, col)
         if col.get("is_amount") or col.get("isAmount"):
             col_el.set("is_amount", "1")
+        if col.get("hide_blank") or col.get("hideBlank"):
+            col_el.set("hide_blank", "1")
+        if col.get("hide_zero") or col.get("hideZero"):
+            col_el.set("hide_zero", "1")
         if col.get("currency_field") or col.get("currencyField"):
             col_el.set("currency_field", str(col.get("currency_field") or col.get("currencyField")))
         _csym = col.get("currency_symbol") or col.get("currencySymbol")
@@ -10001,6 +13649,14 @@ def _render_rml_xml(prog_name, displayName, icon, category, schema, description,
     _write_table_opts_el(rml, ET, table_opts)
     # groups — column header spanning: <groups><group name order><column alias/>
     _write_groups_el(rml, ET, groups)
+    # group_bys — SQL GROUP BY keys (multi): <group_bys><gb field/>
+    _write_group_bys_el(rml, ET, group_bys)
+    # views — displayed (virtual) tables: <views><view name><sources><merges><columns><groups>
+    _write_views_el(rml, ET, views)
+    # unions — UNION ALL merges of whole views: <unions><union name><view name/>...
+    _write_unions_el(rml, ET, unions)
+    # view_refs — calls to shared library views: <view_refs><ref namespace name/>
+    _write_view_refs_el(rml, ET, view_refs)
     # doc_params — required filter inputs for document reports
     _write_doc_params_el(rml, ET, doc_params)
     # doc_template — print layout for doc-type reports ({{column_alias}} vars)
@@ -10018,6 +13674,156 @@ def _render_rml_xml(prog_name, displayName, icon, category, schema, description,
 
 _RML_REF3_RE = _re_pg.compile(r"\[([A-Za-z0-9_]+)\.([A-Za-z0-9_]+)\.([A-Za-z0-9_]+)\]|\{([A-Za-z0-9_]+)\.([A-Za-z0-9_]+)\.([A-Za-z0-9_]+)\}")
 _RML_REF2_RE = _re_pg.compile(r"\[([A-Za-z0-9_]+)\.([A-Za-z0-9_]+)\]|\{([A-Za-z0-9_]+)\.([A-Za-z0-9_]+)\}")
+
+
+def _split_top_and(text):
+    """Split text on top-level AND (paren-nesting and single-quote aware)."""
+    parts, depth, cur = [], 0, []
+    s = str(text or "")
+    n, i = len(s), 0
+    in_q = False
+    while i < n:
+        ch = s[i]
+        if in_q:
+            cur.append(ch)
+            if ch == "'":
+                if i + 1 < n and s[i + 1] == "'":
+                    cur.append(s[i + 1])
+                    i += 1
+                else:
+                    in_q = False
+            i += 1
+            continue
+        if ch == "'":
+            in_q = True
+            cur.append(ch)
+            i += 1
+            continue
+        if ch == "(":
+            depth += 1
+            cur.append(ch)
+            i += 1
+            continue
+        if ch == ")":
+            depth = max(0, depth - 1)
+            cur.append(ch)
+            i += 1
+            continue
+        if depth == 0 and s[i:i + 3].upper() == "AND":
+            _prev = s[i - 1] if i > 0 else " "
+            _nxt = s[i + 3] if i + 3 < n else " "
+            if not (_prev.isalnum() or _prev == "_") and not (_nxt.isalnum() or _nxt == "_"):
+                parts.append("".join(cur))
+                cur = []
+                i += 3
+                continue
+        cur.append(ch)
+        i += 1
+    parts.append("".join(cur))
+    return parts
+
+
+def _gw_known_tables(data):
+    """Upper short table names still in the report (fields/views/unions/table_opts/detail)."""
+    known = set()
+
+    def _add(t):
+        t = str(t or "").strip().replace('"', "")
+        if not t:
+            return
+        known.add(t.split(".")[-1].strip().upper())
+
+    try:
+        for f in (data.get("fields") or []):
+            if isinstance(f, dict):
+                _add(f.get("table_source") or f.get("tableSource") or f.get("table"))
+        for v in (data.get("views") or []):
+            if isinstance(v, dict):
+                _add(v.get("name"))
+        for u in (data.get("unions") or []):
+            if isinstance(u, dict):
+                _add(u.get("name"))
+        for t in (data.get("table_opts") or data.get("tableOpts") or []):
+            if isinstance(t, dict):
+                _add(t.get("name") or t.get("table"))
+        _det = data.get("detail")
+        if isinstance(_det, dict):
+            _add(_det.get("table"))
+    except Exception:
+        pass
+    known.discard("")
+    return known
+
+
+def _prune_stale_general_where(gw_text, known_tables, namespaces=()):
+    """Drop top-level AND conjuncts of tables no longer in the report.
+
+    A conjunct is dropped only when it carries bracketed table refs
+    ([T.C]/{T.C}/[A.T.C]) and EVERY head is outside known_tables and not a
+    namespace member. Single-part refs ([col]/@ref/:ref), quoted "T"."C"
+    and namespace members are never attributed → kept. Mixed conjuncts
+    (some heads known) are kept so the engine still fails loudly on the
+    real culprit instead of silently changing semantics.
+    Returns (kept_text, dropped_list).
+    """
+    gw = str(gw_text or "")
+    if not gw.strip():
+        return "", []
+    try:
+        _known = {str(t or "").strip().upper() for t in (known_tables or set())}
+    except Exception:
+        _known = set()
+    try:
+        _ns = {str(t or "").strip().lower() for t in (namespaces or set())}
+    except Exception:
+        _ns = set()
+    kept, dropped = [], []
+    for _part in _split_top_and(gw):
+        _c = _part.strip()
+        if not _c:
+            continue
+        _heads = []
+        try:
+            for _m in _RML_REF3_RE.finditer(_c):
+                _g = _m.groups()
+                _tbl = _g[1] if _g[0] is not None else _g[4]
+                if _tbl:
+                    _heads.append(str(_tbl).strip())
+            for _m in _RML_REF2_RE.finditer(_c):
+                _g = _m.groups()
+                _tbl = _g[0] if _g[0] is not None else _g[2]
+                if _tbl:
+                    _heads.append(str(_tbl).strip())
+        except Exception:
+            _heads = []
+        if _heads and all((_h.upper() not in _known and _h.lower() not in _ns) for _h in _heads):
+            dropped.append(_c[:200])
+            continue
+        kept.append(_c)
+    return " AND ".join(kept), dropped
+
+
+def _apply_gw_prune(data):
+    """Remove general_where conjuncts of removed-table imports (file side of the agreement).
+
+    Mutates data (general_where) and records data['_pruned_general_where'].
+    Never raises.
+    """
+    try:
+        gw = data.get("general_where", data.get("generalWhere", "")) or ""
+        if not isinstance(gw, str) or not gw.strip():
+            return
+        try:
+            from rml_python.namespaces import build_registry as _breg
+            _ns = set((_breg() or {}).keys())
+        except Exception:
+            _ns = set()
+        kept, dropped = _prune_stale_general_where(gw, _gw_known_tables(data), _ns)
+        if dropped:
+            data["general_where"] = kept
+            data["_pruned_general_where"] = dropped
+    except Exception:
+        pass
 
 
 def _sync_rml_table_refs(fields, columns, detail=None, general_where=""):
@@ -10228,6 +14034,8 @@ def api_create_rml(request, app_name):
         _, _gw_sync = _sync_rml_table_refs(fields, columns, data.get("detail"), data.get("general_where", data.get("generalWhere", "")))
         if _gw_sync:
             data["general_where"] = _gw_sync
+        # إزالة استيراد جدول تُسقط شرطه العام من الملف (بنده فقط — الباقي يُحفظ)
+        _apply_gw_prune(data)
         # السكيما من الجداول/الاتصال — لا HR_SYS ثابتة (المرايا في public)
         schema = _infer_rml_schema(fields, connections, schema) or "HR_SYS"
         if not file:
@@ -10283,6 +14091,11 @@ def api_create_rml(request, app_name):
                 if ch.get("x"): c.set("x", ch.get("x"))
                 if ch.get("y"): c.set("y", ch.get("y"))
                 if ch.get("title"): c.set("title", ch.get("title"))
+                # named slots for the 10 chart families (only non-empty are stored)
+                for _ck in ("category", "value", "series", "size", "color", "parent",
+                            "min", "max", "target", "thresholds", "stacking", "totals"):
+                    if ch.get(_ck) not in (None, ""):
+                        c.set(_ck, str(ch.get(_ck)))
         # rules — computed business rules, addressable cross-file as ns.name
         # + rule variables/policies ($rule.var$ per-record values)
         if rules:
@@ -10347,6 +14160,10 @@ def api_create_rml(request, app_name):
             col_el.set("icon", str(col.get("icon")))
         if col.get("is_amount") or col.get("isAmount"):
             col_el.set("is_amount", "1")
+        if col.get("hide_blank") or col.get("hideBlank"):
+            col_el.set("hide_blank", "1")
+        if col.get("hide_zero") or col.get("hideZero"):
+            col_el.set("hide_zero", "1")
         if col.get("currency_field") or col.get("currencyField"):
             col_el.set("currency_field", str(col.get("currency_field") or col.get("currencyField")))
         _csym = col.get("currency_symbol") or col.get("currencySymbol")
@@ -10371,7 +14188,8 @@ def api_create_rml(request, app_name):
         pretty = xml.dom.minidom.parseString(raw).toprettyxml(indent="  ", encoding="utf-8").decode("utf-8")
         pretty = "\n".join([l for l in pretty.split("\n") if l.strip()])
         target.write_text(pretty, encoding="utf-8")
-        return JsonResponse({"ok": True, "file": target.name, "path": str(target), "updated": True})
+        return JsonResponse({"ok": True, "file": target.name, "path": str(target), "updated": True,
+                             "pruned": data.get("_pruned_general_where") or []})
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
@@ -10432,6 +14250,8 @@ def _rml_normalize_payload(data, target_stem=None):
                                        data.get("general_where", data.get("generalWhere", "")))
     if _gw_sync:
         data["general_where"] = _gw_sync
+    # إزالة استيراد جدول تُسقط شرطه العام من الملف (بنده فقط — الباقي يُحفظ)
+    _apply_gw_prune(data)
     data["_schema"] = _infer_rml_schema(data.get("fields", []), data.get("connections", []),
                                         data.get("schema", "").strip()) or "HR_SYS"
     return data, None
@@ -10484,7 +14304,11 @@ def api_rml_draft(request, app_name):
             data.get("doc_params", data.get("docParams", [])),
             doc_layout=data.get("doc_layout", data.get("docLayout", data.get("layout", ""))),
             alt_row_color_1=data.get("alt_row_color_1", data.get("altRowColor1", "")),
-            alt_row_color_2=data.get("alt_row_color_2", data.get("altRowColor2", "")))
+            alt_row_color_2=data.get("alt_row_color_2", data.get("altRowColor2", "")),
+            group_bys=data.get("group_bys", data.get("groupBys", [])),
+            views=data.get("views", []),
+            view_refs=data.get("view_refs", data.get("viewRefs", [])),
+            unions=data.get("unions", []))
         target.write_text(pretty, encoding="utf-8")
         job = _uuid.uuid4().hex[:16]
         with _RML_JOBS_LOCK:
@@ -10494,7 +14318,8 @@ def api_rml_draft(request, app_name):
         t = _th.Thread(target=_rml_job_run, args=(job, draft, app_name, {"page": 1, "pageSize": 5}),
                        daemon=True)
         t.start()
-        return JsonResponse({"draft": draft, "job": job})
+        return JsonResponse({"draft": draft, "job": job,
+                             "pruned": data.get("_pruned_general_where") or []})
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
@@ -10528,6 +14353,92 @@ def api_rml_draft_finalize(request, app_name):
             pass
         return JsonResponse({"ok": True, "file": target.name, "path": str(target),
                              "updated": mode == "update"})
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+_VIEW_LIBRARY_FILE = "_view_library.rml"
+
+#: RML files that are storage, not reports — never listed in sidebars.
+_INTERNAL_RML_NAMES = frozenset({_VIEW_LIBRARY_FILE})
+_INTERNAL_RML_PREFIXES = ("__draft_", "__preview_")
+
+
+def _is_internal_rml(filename):
+    """True for library/draft/preview storage files (not openable reports)."""
+    nm = str(filename or "")
+    return nm in _INTERNAL_RML_NAMES or nm.startswith(_INTERNAL_RML_PREFIXES)
+
+
+def _read_view_library(app_name):
+    """Read the shared view library of an app → (namespace, [views])."""
+    from rml_python.compiler import RMLReportCompiler
+    _ad, target, err = _resolve_rml_target(app_name, _VIEW_LIBRARY_FILE)
+    if err:
+        return str(app_name or ""), []
+    try:
+        if target.exists():
+            comp = RMLReportCompiler(path=target)
+            return str(app_name or ""), comp.views()
+    except Exception:
+        pass
+    return str(app_name or ""), []
+
+
+def _write_view_library(app_name, views):
+    """Persist the shared view library of an app."""
+    import xml.etree.ElementTree as ET
+    import xml.dom.minidom
+    _ad, target, err = _resolve_rml_target(app_name, _VIEW_LIBRARY_FILE)
+    if err:
+        return None, err
+    rml = ET.Element("rml")
+    md = ET.SubElement(rml, "rpt_metadata")
+    md.set("name", "__view_library__")
+    md.set("displayName", "مكتبة الجداول المعروضة")
+    md.set("namespace", str(app_name or ""))
+    _write_views_el(rml, ET, views)
+    raw = ET.tostring(rml, encoding="utf-8")
+    pretty = xml.dom.minidom.parseString(raw).toprettyxml(indent="  ", encoding="utf-8").decode("utf-8")
+    target.write_text("\n".join([l for l in pretty.split("\n") if l.strip()]), encoding="utf-8")
+    return target, None
+
+
+@csrf_exempt
+def api_view_library(request, app_name):
+    """GET /api/apps/<app>/views/library/ → {namespace, views}.
+    POST {action: save, view: {...}} upsert by name / {action: delete, name}."""
+    if request.method == "GET":
+        ns, views = _read_view_library(app_name)
+        return JsonResponse({"namespace": ns, "views": views})
+    if request.method != "POST":
+        return JsonResponse({"error": "GET/POST required"}, status=405)
+    _wd = _ws_require_design(request)
+    if _wd is not None:
+        return _wd
+    try:
+        data = json.loads(request.body.decode() or "{}")
+        action = str(data.get("action") or "").strip().lower()
+        ns, views = _read_view_library(app_name)
+        if action == "save":
+            v = data.get("view") or {}
+            nm = str(v.get("name") or "").strip()
+            if not nm:
+                return JsonResponse({"error": "view name required"}, status=400)
+            views = [x for x in views if str(x.get("name") or "").lower() != nm.lower()]
+            views.append(v)
+            _t, err = _write_view_library(app_name, views)
+            if err:
+                return JsonResponse({"error": err}, status=400)
+            return JsonResponse({"ok": True, "namespace": ns, "views": views})
+        if action == "delete":
+            nm = str(data.get("name") or "").strip().lower()
+            views = [x for x in views if str(x.get("name") or "").lower() != nm]
+            _t, err = _write_view_library(app_name, views)
+            if err:
+                return JsonResponse({"error": err}, status=400)
+            return JsonResponse({"ok": True, "namespace": ns, "views": views})
+        return JsonResponse({"error": "unknown action"}, status=400)
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
@@ -10594,7 +14505,11 @@ def api_rml_fetch_query(request, app_name):
             data.get("doc_params", data.get("docParams", [])),
             doc_layout=data.get("doc_layout", data.get("docLayout", data.get("layout", ""))),
             alt_row_color_1=data.get("alt_row_color_1", data.get("altRowColor1", "")),
-            alt_row_color_2=data.get("alt_row_color_2", data.get("altRowColor2", "")))
+            alt_row_color_2=data.get("alt_row_color_2", data.get("altRowColor2", "")),
+            group_bys=data.get("group_bys", data.get("groupBys", [])),
+            views=data.get("views", []),
+            view_refs=data.get("view_refs", data.get("viewRefs", [])),
+            unions=data.get("unions", []))
         fname = "__fetchq_%s.rml" % _uuid.uuid4().hex[:12]
         _ad, target, err = _resolve_rml_target(app_name, fname)
         if err or target is None:
@@ -10653,7 +14568,11 @@ def api_rml_design_preview(request, app_name):
             data.get("doc_params", data.get("docParams", [])),
             doc_layout=data.get("doc_layout", data.get("docLayout", data.get("layout", ""))),
             alt_row_color_1=data.get("alt_row_color_1", data.get("altRowColor1", "")),
-            alt_row_color_2=data.get("alt_row_color_2", data.get("altRowColor2", "")))
+            alt_row_color_2=data.get("alt_row_color_2", data.get("altRowColor2", "")),
+            group_bys=data.get("group_bys", data.get("groupBys", [])),
+            views=data.get("views", []),
+            view_refs=data.get("view_refs", data.get("viewRefs", [])),
+            unions=data.get("unions", []))
         fname = "__preview_%s.rml" % _uuid.uuid4().hex[:12]
         _ad, target, err = _resolve_rml_target(app_name, fname)
         if err or target is None:
@@ -10749,6 +14668,8 @@ def api_update_rml(request, app_name):
         _, _gw_sync = _sync_rml_table_refs(fields, columns, data.get("detail"), data.get("general_where", data.get("generalWhere", "")))
         if _gw_sync:
             data["general_where"] = _gw_sync
+        # إزالة استيراد جدول تُسقط شرطه العام من الملف (بنده فقط — الباقي يُحفظ)
+        _apply_gw_prune(data)
         # السكيما من الجداول/الاتصال — لا HR_SYS ثابتة (المرايا في public)
         schema = _infer_rml_schema(fields, connections, schema) or "HR_SYS"
         charts = data.get("charts", [])
@@ -10776,7 +14697,11 @@ def api_update_rml(request, app_name):
                                  data.get("doc_params", data.get("docParams", [])),
                                  doc_layout=data.get("doc_layout", data.get("docLayout", data.get("layout", ""))),
             alt_row_color_1=data.get("alt_row_color_1", data.get("altRowColor1", "")),
-            alt_row_color_2=data.get("alt_row_color_2", data.get("altRowColor2", "")))
+            alt_row_color_2=data.get("alt_row_color_2", data.get("altRowColor2", "")),
+            group_bys=data.get("group_bys", data.get("groupBys", [])),
+            views=data.get("views", []),
+            view_refs=data.get("view_refs", data.get("viewRefs", [])),
+            unions=data.get("unions", []))
         target.write_text(pretty, encoding="utf-8")
         return JsonResponse({"ok": True, "file": target.name, "path": str(target), "updated": True})
     except Exception as e:
@@ -10948,6 +14873,8 @@ def _ws_session_context(request):
             if ws is not None:
                 conf = read_conf(ws / "workspace.conf")
                 primary_conn = (conf.get("PRIMARY_CONNECTION") or "").strip()
+                from .workspace import resolve_ws_fiscal_schema
+                fiscal_schema = resolve_ws_fiscal_schema(ws_id, fiscal_schema)
                 if not fiscal_schema:
                     fiscal_schema = (conf.get("SCHEMA") or "").strip()
         return ws_id, fiscal_schema, primary_conn
@@ -10976,7 +14903,7 @@ def api_connections_list(request):
             pg_names = set()
 
         if ws_id and primary_conn:
-            target_names = {primary_conn} | set(pg_names)
+            target_names = ({primary_conn} | set(pg_names)) if (pg_names and not request.GET.get("all")) else set(Connection.objects.values_list("name", flat=True))
             conns = list(Connection.objects.filter(name__in=target_names).order_by("name"))
             if not conns and primary_conn.isdigit():
                 conns = list(Connection.objects.filter(id=int(primary_conn)))
@@ -11053,7 +14980,29 @@ def api_connection_create(request):
             _json_c.loads(devices_json or "[]")
         except Exception:
             devices_json = "[]"
+        _defaults = dict(
+            host=(data.get("host") or ("172.16.10.101" if conn_type == "database" else "")),
+            port=(0 if conn_type == "json" else port),
+            user=data.get("user") or "postgres",
+            password=data.get("password") or "postgres",
+            instance=data.get("instance") or "urs",
+            instance_name=data.get("instance_name", "") or "",
+            engine=engine,
+            conn_type=conn_type,
+            is_local=bool(data.get("is_local", True)),
+            is_queryable=is_queryable,
+            schema=data.get("schema", ""),
+            devices=devices_json,
+            endpoint=endpoint,
+            description=data.get("description", ""),
+        )
+        if data.get("upsert"):
+            if not data.get("password"):
+                _defaults.pop("password", None)
+            obj, _ = Connection.objects.update_or_create(name=data["name"].strip(), defaults=_defaults)
+            return JsonResponse({"ok": True, "connection": obj.to_dict()})
         obj = Connection.objects.create(
+            instance_name=data.get("instance_name", "") or "",
             name=data["name"],
             host=(data.get("host") or ("172.16.10.101" if conn_type == "database" else "")),
             port=(0 if conn_type == "json" else port),
@@ -11086,7 +15035,7 @@ def api_connection_update(request, conn_id):
             obj = Connection.objects.get(id=conn_id)
         except Connection.DoesNotExist:
             return JsonResponse({"error": "not found"}, status=404)
-        for f in ["name", "host", "port", "user", "password", "instance", "engine", "conn_type", "devices", "endpoint", "is_local", "is_queryable", "schema", "description"]:
+        for f in ["name", "host", "port", "user", "password", "instance", "instance_name", "engine", "conn_type", "devices", "endpoint", "is_local", "is_queryable", "schema", "description"]:
             if f in data:
                 if f == "port":
                     try:
@@ -11129,6 +15078,8 @@ def api_connection_update(request, conn_id):
                     except Exception:
                         pass
                 else:
+                    if f == "password" and str(data[f] or "") == "" and not data.get("clear_password"):
+                        continue
                     setattr(obj, f, data[f])
         obj.save()
         return JsonResponse({"ok": True, "connection": obj.to_dict()})
@@ -12337,16 +16288,171 @@ def _preview_cell(v):
             return {"$hex": bytes(v[:64]).hex(), "len": len(v)}
         except Exception:
             return None
+    try:
+        if hasattr(v, "read") and not isinstance(v, (str, bytes, bytearray)):
+            try:
+                _lob = v.read()
+                return _lob if isinstance(_lob, (str, int, float)) else str(_lob)
+            except Exception:
+                return None
+    except Exception:
+        pass
     return v
 
 
-def _table_preview_obj(obj, schema: str, table: str, limit: int, q=None, filters=None):
-    """أول N صفاً من جدول في أي اتصال → {columns, rows} (للاستعلام التجريبي).
+def _resolve_preview_where(obj, schema: str, table: str, cols_info, where_text,
+                             var_defaults=None, conn_ref=None):
+    """Resolve a table general-condition text to a SQL fragment (trial query).
+
+    [T.C]/[C] refs validate against the table's real columns; [conn.T.C] must
+    name this connection; IF/XLOOKUP/ISNULL transpiled as in reports; &VAR
+    inlines from var_defaults ({NAME: {value, type}} — no live filters here).
+    Raises ValueError with Arabic guidance. String literals never touched.
+    """
+    from rml_python.namespaces import _resolve_expression, _norm_tname
+    from types import SimpleNamespace
+    text = str(where_text or "").strip()
+    if not text:
+        return ""
+    short_tbl = (str(table or "").split(".")[-1] or "").strip()
+    norm_tbl = _norm_tname(short_tbl)
+    try:
+        lit_segs = _re_pg.split(r"('(?:[^']|'')*')", text)
+    except Exception:
+        lit_segs = [text]
+    # 1) &VAR from defaults (outside literals only)
+    defs = {}
+    try:
+        for _k, _d in (var_defaults or {}).items():
+            if isinstance(_d, dict):
+                defs[str(_k).strip().upper()] = _d
+    except Exception:
+        pass
+    for _i in range(0, len(lit_segs), 2):
+        def _vrep(_m):
+            _nm = _m.group(1)
+            _d = defs.get(str(_nm).upper())
+            if _d is None:
+                raise ValueError(
+                    f"الشرط يستخدم &{_nm} بلا قيمة افتراضية — عرّفها في «خيارات الإدخال» للجدول المعروض")
+            _vv = "" if _d.get("value") is None else str(_d.get("value")).strip()
+            if _vv == "":
+                raise ValueError(
+                    f"الشرط يستخدم &{_nm} بلا قيمة افتراضية — عرّفها في «خيارات الإدخال» للجدول المعروض")
+            _tp = str(_d.get("type") or "text").strip().lower()
+            if _vv.upper() == "CURRENT_DATE":
+                return "CURRENT_DATE"
+            if _tp == "number" and _re_pg.fullmatch(r"-?\d+(\.\d+)?", _vv):
+                return _vv
+            return "'" + _vv.replace("'", "''") + "'"
+        try:
+            lit_segs[_i] = _re_pg.sub(r"(?<![\w$#@&])&([A-Za-z_][A-Za-z0-9_]*)", _vrep, lit_segs[_i])
+        except ValueError:
+            raise
+        except Exception:
+            pass
+    for _i in range(1, len(lit_segs), 2):
+        _seg = lit_segs[_i]
+        if _seg.startswith("'") and _seg.endswith("'"):
+            _inner = _seg[1:-1]
+            _changed = False
+            for _nm, _d in defs.items():
+                if f"&{_nm}" in _inner:
+                    _vv = "" if _d.get("value") is None else str(_d.get("value")).strip()
+                    _inner = _inner.replace(f"&{_nm}", _vv)
+                    _changed = True
+            if _changed:
+                lit_segs[_i] = "'" + _inner.replace("'", "''") + "'"
+    text = "".join(lit_segs)
+    # 2) normalize brackets: [conn.T.C] must name this connection; [T.C] this table
+    try:
+        _tokens = {str(conn_ref).strip().lower()} if str(conn_ref or "").strip() else set()
+        _tokens |= {str(getattr(obj, "id", "") or "").strip().lower(),
+                    str(getattr(obj, "name", "") or "").strip().lower()}
+        _tokens.discard("")
+    except Exception:
+        _tokens = set()
+    _known_cols = set()
+    try:
+        for _c in (cols_info or []):
+            if isinstance(_c, dict) and str(_c.get("name") or "").strip():
+                _known_cols.add(str(_c.get("name")).strip().lower())
+    except Exception:
+        pass
+
+    def _brep(_m):
+        _inner = _m.group(1).strip()
+        _parts = [p.strip() for p in _inner.split(".") if p.strip() != ""]
+        if len(_parts) == 3:
+            if _parts[0].lower() not in _tokens:
+                raise ValueError(
+                    f"المرجع [{_inner}] لاتصال آخر — الشرط التجريبي لجدول واحد فقط")
+            return "[%s.%s]" % (_parts[1], _parts[2])
+        if len(_parts) == 2:
+            if _norm_tname(_parts[0]) != norm_tbl:
+                raise ValueError(
+                    f"المرجع [{_inner}] لجدول آخر ({_parts[0]}) — الشرط التجريبي لجدول {short_tbl} فقط")
+            return "[%s.%s]" % (_parts[0], _parts[1])
+        return _m.group(0)
+
+    try:
+        _nsegs = _re_pg.split(r"('(?:[^']|'')*')", text)
+    except Exception:
+        _nsegs = [text]
+    for _i in range(0, len(_nsegs), 2):
+        try:
+            _nsegs[_i] = _re_pg.sub(r"\[([^\[\]]+)\]", _brep, _nsegs[_i])
+        except ValueError:
+            raise
+        except Exception:
+            pass
+    text = "".join(_nsegs)
+    # 3) pseudo-fields from the real columns + shared resolver
+    _pf = [SimpleNamespace(name=str(_c.get("name")).strip(), table_source=short_tbl,
+                           connection_id=str(conn_ref or "")) for _c in (cols_info or [])
+           if isinstance(_c, dict) and str(_c.get("name") or "").strip()]
+    _tmap = {str(_c.get("name")).strip().lower(): short_tbl for _c in (cols_info or [])
+             if isinstance(_c, dict) and str(_c.get("name") or "").strip()}
+
+    # Auto-register any column of short_tbl referenced in text so _resolve_expression
+    # never fails with unknown reference for fields of this table:
+    for _m in _re_pg.finditer(r"\[([^\[\]]+)\]", text):
+        _tok = _m.group(1).strip()
+        _parts = [p.strip() for p in _tok.split(".") if p.strip()]
+        _col_name = None
+        if len(_parts) == 1:
+            _col_name = _parts[0]
+        elif len(_parts) == 2 and _norm_tname(_parts[0]) == norm_tbl:
+            _col_name = _parts[1]
+        elif len(_parts) == 3 and _norm_tname(_parts[1]) == norm_tbl:
+            _col_name = _parts[2]
+        if _col_name and _col_name.lower() not in _tmap:
+            _pf.append(SimpleNamespace(name=_col_name, table_source=short_tbl,
+                                       connection_id=str(conn_ref or "")))
+            _tmap[_col_name.lower()] = short_tbl
+
+    _abt = {norm_tbl: short_tbl, short_tbl: short_tbl}
+    try:
+        return _resolve_expression(text, _pf, {}, set(), _tmap, {}, _abt, None)
+    except ValueError as _ve:
+        raise ValueError(str(_ve)[:300])
+
+
+def _table_preview_obj(obj, schema: str, table: str, limit: int, q=None, filters=None,
+                       where=None, var_defaults=None, conn_ref=None,
+                       view_sql=None, view_cols=None):
+    """أول N صفاً من جدول أو عرض في أي اتصال → {columns, rows} (للاستعلام التجريبي).
 
     q: بحث عام (يحتوي) عبر كل الأعمدة. filters: [{col, op, val}] تُجمع بـ AND —
     op ∈ contains/equals/gt/lt. أسماء الأعمدة تُطابق ضد أعمدة الجدول الفعلية.
+    where: نص الشرط العام للجدول ([T.C]/[C] + دوال) — يُحل ويُضاف AND.
+    var_defaults: {NAME: {value, type}} لقيم &VAR (بلا فلاتر حية هنا).
+    view_sql: استعلام فرعي للعروض (Views) لتنفيذه كـ subquery بدلاً من جدول حقيقي.
+    view_cols: قائمة أعمدة العرض المعرفة مسبقاً إذا لم يكن جدولاً مادياً في القاعدة.
     """
     if str(getattr(obj, "engine", "") or "").lower() == "json":
+        if str(where or "").strip():
+            raise ValueError("الشرط العام غير مدعوم في الاستعلام التجريبي لاتصالات JSON — يُطبق عند تشغيل التقرير")
         from . import json_source as _jsrc
         try:
             doc, _mode = _jsrc.load(str(getattr(obj, "host", "") or ""), BASE_DIR)
@@ -12357,7 +16463,21 @@ def _table_preview_obj(obj, schema: str, table: str, limit: int, q=None, filters
         except ValueError as ve:
             raise ValueError(str(ve))
     n = max(1, min(int(limit or 50), 200))
-    cols_info = _table_columns_obj(obj, schema, table)
+    if view_cols and isinstance(view_cols, list) and len(view_cols) > 0:
+        cols_info = [{"name": (c["name"] if isinstance(c, dict) else str(c)),
+                      "type": (c.get("type", "text") if isinstance(c, dict) else "text"),
+                      "db_type": (c.get("db_type", "VARCHAR") if isinstance(c, dict) else "VARCHAR")}
+                     for c in view_cols if (c.get("name") if isinstance(c, dict) else str(c))]
+    else:
+        try:
+            cols_info = _table_columns_obj(obj, schema, table)
+        except Exception:
+            cols_info = []
+        if not cols_info and view_cols and isinstance(view_cols, list):
+            cols_info = [{"name": (c["name"] if isinstance(c, dict) else str(c)),
+                          "type": (c.get("type", "text") if isinstance(c, dict) else "text"),
+                          "db_type": (c.get("db_type", "VARCHAR") if isinstance(c, dict) else "VARCHAR")}
+                         for c in view_cols if (c.get("name") if isinstance(c, dict) else str(c))]
     names = [c["name"] for c in cols_info]
     lookup = {c["name"]: c for c in cols_info}
     lookup_u = {c["name"].upper(): c for c in cols_info}
@@ -12470,6 +16590,69 @@ def _table_preview_obj(obj, schema: str, table: str, limit: int, q=None, filters
         if flt.get("col") and str(flt.get("val", "")).strip() != "":
             _one(flt["col"], flt.get("op"), str(flt["val"]).strip(), ands, f"f{i}")
 
+    # General table condition (designer WHERE text) — resolved once, ANDed as-is
+    _short = (str(table or "").split(".")[-1] or "").strip()
+    _extra_sql = ""
+    if str(where or "").strip():
+        _extra_sql = _resolve_preview_where(obj, schema, _short or table, cols_info,
+                                            where, var_defaults, conn_ref)
+
+    if view_sql and str(view_sql).strip():
+        _clean_vsql = str(view_sql).strip().rstrip(";").strip()
+        if var_defaults and isinstance(var_defaults, dict) and "&" in _clean_vsql:
+            defs = {}
+            for _k, _d in var_defaults.items():
+                if isinstance(_d, dict):
+                    defs[str(_k).strip().upper()] = _d
+            try:
+                lit_segs = _re_pg.split(r"('(?:[^']|'')*')", _clean_vsql)
+            except Exception:
+                lit_segs = [_clean_vsql]
+            for _i in range(0, len(lit_segs), 2):
+                def _vrep(_m):
+                    _nm = _m.group(1)
+                    _d = defs.get(str(_nm).upper())
+                    if not _d:
+                        return _m.group(0)
+                    _vv = "" if _d.get("value") is None else str(_d.get("value")).strip()
+                    _tp = str(_d.get("type") or "text").strip().lower()
+                    if _vv.upper() == "CURRENT_DATE":
+                        return "CURRENT_DATE"
+                    if _tp == "number" and _re_pg.fullmatch(r"-?\d+(\.\d+)?", _vv):
+                        return _vv
+                    return "'" + _vv.replace("'", "''") + "'"
+                lit_segs[_i] = _re_pg.sub(r"(?<![\w$#@&])&([A-Za-z_][A-Za-z0-9_]*)", _vrep, lit_segs[_i])
+            for _i in range(1, len(lit_segs), 2):
+                _seg = lit_segs[_i]
+                if _seg.startswith("'") and _seg.endswith("'"):
+                    _inner = _seg[1:-1]
+                    _changed = False
+                    for _nm, _d in defs.items():
+                        if f"&{_nm}" in _inner:
+                            _vv = "" if _d.get("value") is None else str(_d.get("value")).strip()
+                            _inner = _inner.replace(f"&{_nm}", _vv)
+                            _changed = True
+                    if _changed:
+                        lit_segs[_i] = "'" + _inner.replace("'", "''") + "'"
+            _clean_vsql = "".join(lit_segs)
+        if eng == "oracle":
+            _from_target = f'({_clean_vsql}) "{_short}"'
+        elif eng == "sqlserver":
+            _from_target = f'({_clean_vsql}) AS [{_short}]'
+        elif eng == "postgres":
+            _from_target = f'({_clean_vsql}) AS "{_short}"'
+        else:
+            _from_target = f'({_clean_vsql}) AS `{_short}`'
+    else:
+        if eng == "oracle":
+            _from_target = f'"{schema}"."{table}"' if schema else f'"{table}"'
+        elif eng == "sqlserver":
+            _from_target = f'[{schema}].[{table}]' if schema else f'[{table}]'
+        elif eng == "postgres":
+            _from_target = f'"{schema}"."{table}"' if schema else f'"{table}"'
+        else:
+            _from_target = f'`{schema}`.`{table}`' if schema else f'`{table}`'
+
     def _merge_oracle(parts):
         where, params = [], {}
         for sql, pd in parts:
@@ -12489,8 +16672,12 @@ def _table_preview_obj(obj, schema: str, table: str, limit: int, q=None, filters
             for sql, pd in ands:
                 clauses.append("(" + sql + ")")
                 params.update(pd)
+            if _extra_sql:
+                clauses.append("(" + _extra_sql + ")")
+            if _extra_sql and _oracle_bind_scan(_extra_sql):
+                raise ValueError("الشرط العام يحوي متغير ربط (:name أو ؟) — استخدم قيماً حرفية في معاينة أوراكل")
             where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
-            cur.execute(f'SELECT * FROM "{schema}"."{table}"{where} FETCH FIRST {n} ROWS ONLY', params)
+            cur.execute(f'SELECT * FROM {_from_target}{where} FETCH FIRST {n} ROWS ONLY', params)
             cols = [d[0] for d in (cur.description or [])]
             rows = [[_preview_cell(v) for v in r] for r in cur.fetchall()]
             cur.close()
@@ -12513,7 +16700,7 @@ def _table_preview_obj(obj, schema: str, table: str, limit: int, q=None, filters
     else:
         import MySQLdb
         conn = MySQLdb.connect(host=obj.host, user=obj.user, passwd=obj.password or "",
-                               db=obj.instance or None, port=int(obj.port or 3306), connect_timeout=10)
+                                db=obj.instance or None, port=int(obj.port or 3306), connect_timeout=10)
         closer = conn.close
         qmark = "%s"
     try:
@@ -12528,13 +16715,15 @@ def _table_preview_obj(obj, schema: str, table: str, limit: int, q=None, filters
         for sql, v in ands:
             clauses.append("(" + sql + ")")
             params.append(v)
+        if _extra_sql:
+            clauses.append("(" + _extra_sql + ")")
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
         if eng == "postgres":
-            cur.execute(f'SELECT * FROM "{schema}"."{table}"{where} LIMIT {n}', params)
+            cur.execute(f'SELECT * FROM {_from_target}{where} LIMIT {n}', params)
         elif eng == "sqlserver":
-            cur.execute(f"SELECT TOP {n} * FROM [{schema}].[{table}]{where}", params)
+            cur.execute(f"SELECT TOP {n} * FROM {_from_target}{where}", params)
         else:
-            cur.execute(f"SELECT * FROM `{schema}`.`{table}`{where} LIMIT {n}", params)
+            cur.execute(f"SELECT * FROM {_from_target}{where} LIMIT {n}", params)
         cols = [d[0] for d in (cur.description or [])]
         rows = [[_preview_cell(v) for v in r] for r in cur.fetchall()]
         cur.close()
@@ -12543,8 +16732,9 @@ def _table_preview_obj(obj, schema: str, table: str, limit: int, q=None, filters
     return cols, rows
 
 
+@csrf_exempt
 def api_connection_table_preview(request, conn_id, table):
-    """GET /api/connections/<id>/tables/<table>/preview/?limit=50 — استعلام تجريبي (أول N صفاً).
+    """GET/POST /api/connections/<id>/tables/<table>/preview/?limit=50 — استعلام تجريبي (أول N صفاً).
 
     اتصال IoT يُحوَّل تلقائياً لجدول المرآة على الاتصال المحلي.
     """
@@ -12557,22 +16747,87 @@ def api_connection_table_preview(request, conn_id, table):
         eff_schema = _resolve_connection_schema(request, obj)
         if eff_schema:
             obj.schema = eff_schema
+
+        payload = {}
+        if request.method == "POST":
+            try:
+                payload = json.loads(request.body.decode("utf-8") or "{}")
+            except Exception:
+                payload = {}
+
+        limit_raw = payload.get("limit") if "limit" in payload else request.GET.get("limit", "50")
         try:
-            limit = int(request.GET.get("limit", "50"))
+            limit = int(limit_raw)
         except Exception:
             limit = 50
-        q = (request.GET.get("q") or "").strip() or None
+
+        q = payload.get("q") if "q" in payload else request.GET.get("q")
+        q = (str(q) if q is not None else "").strip() or None
+
         filters = []
-        try:
-            _fj = json.loads(request.GET.get("filters") or "[]")
-            if isinstance(_fj, list):
-                filters = [f for f in _fj if isinstance(f, dict) and f.get("col")][:20]
-        except Exception:
-            filters = []
+        if "filters" in payload and isinstance(payload.get("filters"), list):
+            filters = [f for f in payload["filters"] if isinstance(f, dict) and f.get("col")][:20]
+        else:
+            try:
+                _fj = json.loads(request.GET.get("filters") or "[]")
+                if isinstance(_fj, list):
+                    filters = [f for f in _fj if isinstance(f, dict) and f.get("col")][:20]
+            except Exception:
+                filters = []
+
+        where_raw = payload.get("where") if "where" in payload else request.GET.get("where")
+        where = (str(where_raw) if where_raw is not None else "").strip()[:4000] or None
+
+        var_defaults = {}
+        if "var_defaults" in payload and isinstance(payload.get("var_defaults"), dict):
+            var_defaults = {str(_k).strip(): _d for _k, _d in list(payload["var_defaults"].items())[:50]
+                            if str(_k).strip() and isinstance(_d, dict)}
+        else:
+            try:
+                _vj = json.loads(request.GET.get("var_defaults") or "{}")
+                if isinstance(_vj, dict):
+                    var_defaults = {str(_k).strip(): _d for _k, _d in list(_vj.items())[:50]
+                                    if str(_k).strip() and isinstance(_d, dict)}
+            except Exception:
+                var_defaults = {}
+
+        view_sql = payload.get("view_sql") if "view_sql" in payload else request.GET.get("view_sql")
+        view_sql = str(view_sql).strip() if view_sql else None
+
+        view_cols = payload.get("view_cols") if "view_cols" in payload else None
+        if not view_cols and request.GET.get("view_cols"):
+            try:
+                view_cols = json.loads(request.GET.get("view_cols"))
+            except Exception:
+                view_cols = None
+
         if "." in table:
             _, tname = table.split(".", 1)
         else:
             tname = table
+
+        if not view_sql:
+            # Automatic fallback: if table is a logical View in the workspace/apps,
+            # compile its view_sql and discover its view_cols from the RML definition!
+            try:
+                from rml_python.compiler import RMLReportCompiler
+                from rml_python.engine import RMLReportEngine
+                _t_target = tname.lower()
+                for _rml_path in BASE_DIR.glob("**/apps/**/*.rml"):
+                    try:
+                        _comp = RMLReportCompiler.from_file(str(_rml_path))
+                        _v_obj = next((v for v in _comp.views() if str(v.get("name") or "").strip().lower() == _t_target), None)
+                        if _v_obj:
+                            _reng = RMLReportEngine(_comp, None)
+                            view_sql = _reng._compile_view_sql(_v_obj)
+                            if not view_cols:
+                                _cset = set(_reng._view_outputs(_v_obj))
+                                view_cols = [{"name": c, "type": "text", "db_type": "VARCHAR"} for c in _cset]
+                            break
+                    except Exception:
+                        pass
+            except Exception:
+                pass
         if _iot_is_conn(obj):
             from .models import IoTMirror
             from .iot_sync import mirror_schema
@@ -12587,28 +16842,47 @@ def api_connection_table_preview(request, conn_id, table):
                 sch = (mirror_schema(m.local_connection) or "").strip() or "public"
             except Exception:
                 sch = "public"
-            cols, rows = _table_preview_obj(m.local_connection, sch, m.table_name, limit, q, filters)
+            cols, rows = _table_preview_obj(m.local_connection, sch, m.table_name, limit, q, filters,
+                                                 where, var_defaults, str(conn_id),
+                                                 view_sql=view_sql, view_cols=view_cols)
             return JsonResponse({"table": f"{sch}.{m.table_name}", "columns": cols, "rows": rows,
                                  "total": len(rows), "limit": limit, "mirror": True,
+                                 "where_applied": bool(where),
                                  "local_connection_id": m.local_connection_id},
                                 json_dumps_params={"ensure_ascii": False})
         if str(getattr(obj, "engine", "") or "").lower() == "json":
             _t = (table or "").split(".")[-1]
             if not _valid_table_ref(_t):
                 return JsonResponse({"error": "invalid table name"}, status=400)
-            cols, rows = _table_preview_obj(obj, "", _t, limit, q, filters)
+            cols, rows = _table_preview_obj(obj, "", _t, limit, q, filters,
+                                                 where, var_defaults, str(conn_id),
+                                                 view_sql=view_sql, view_cols=view_cols)
             return JsonResponse({"table": _t, "columns": cols, "rows": rows,
-                                 "total": len(rows), "limit": limit},
+                                 "total": len(rows), "limit": limit,
+                                 "where_applied": bool(where)},
                                 json_dumps_params={"ensure_ascii": False})
+
+        if view_sql:
+            cols, rows = _table_preview_obj(obj, "", tname, limit, q, filters,
+                                                 where, var_defaults, str(conn_id),
+                                                 view_sql=view_sql, view_cols=view_cols)
+            return JsonResponse({"table": tname, "columns": cols, "rows": rows,
+                                 "total": len(rows), "limit": limit,
+                                 "where_applied": bool(where)},
+                                json_dumps_params={"ensure_ascii": False})
+
         if "." in table:
             schema, tname = table.split(".", 1)
         else:
             schema, tname = (eff_schema or _default_schema_for(obj)), table
         if not _valid_table_ref(schema) or not _valid_table_ref(tname):
             return JsonResponse({"error": "invalid table name"}, status=400)
-        cols, rows = _table_preview_obj(obj, schema, tname, limit, q, filters)
+        cols, rows = _table_preview_obj(obj, schema, tname, limit, q, filters,
+                                             where, var_defaults, str(conn_id),
+                                             view_sql=view_sql, view_cols=view_cols)
         return JsonResponse({"table": f"{schema}.{tname}" if schema else tname,
-                             "columns": cols, "rows": rows, "total": len(rows), "limit": limit},
+                             "columns": cols, "rows": rows, "total": len(rows), "limit": limit,
+                             "where_applied": bool(where)},
                             json_dumps_params={"ensure_ascii": False})
     except ValueError as e:
         return JsonResponse({"error": str(e)}, status=400)

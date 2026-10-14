@@ -200,7 +200,6 @@
             + '<button data-act="close" class="px-8 py-2 bg-white border border-slate-300 hover:bg-slate-100 text-slate-600 rounded-lg text-sm">إلغاء</button>'
             + '</div></div>';
 
-        overlay.addEventListener('mousedown', function (e) { if (e.target === overlay) close(); });
         overlay.addEventListener('click', function (e) {
             var b = e.target.closest ? e.target.closest('[data-act]') : null;
             if (!b) return;

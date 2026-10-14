@@ -76,9 +76,12 @@
                 if(meta.error) throw new Error(meta.error);
                 const charts = meta.charts || [];
                 const ch = charts[0];
-                if(!ch || !ch.x) throw new Error('بلا مخطط');
+                // توافق السكيما الجديدة: category/value/series أو x/y/y2 القديمة
+                const _cx = ch ? (ch.category || ch.x) : '';
+                const _cy = ch ? (ch.value || ch.y) : '';
+                if(!ch || !_cx) throw new Error('بلا مخطط');
                 const gres = await fetch('/api/rml/groups', {method:'POST', headers:{'Content-Type':'application/json'},
-                    body: JSON.stringify({rml: r.file, app: r.app, column: ch.x, limit: 10})});
+                    body: JSON.stringify({rml: r.file, app: r.app, column: _cx, limit: 10})});
                 const gdata = await gres.json();
                 if(gdata.error) throw new Error(gdata.error);
                 const groups = (gdata.groups || []).slice(0, 10);
@@ -89,7 +92,7 @@
                     data: {labels: groups.map(g=>String(g.value ?? '(فارغ)').slice(0, 18)),
                            datasets: [{data: groups.map(g=>g.count || 0), backgroundColor: PALETTE, borderRadius: 6}]},
                     options: {responsive: true, maintainAspectRatio: false,
-                        plugins: {legend: {display: false}, title: {display: true, text: (ch.title || ch.x || ''), font: {size: 11}},
+                        plugins: {legend: {display: false}, title: {display: true, text: (ch.title || _cx || ''), font: {size: 11}},
                                   tooltip: {callbacks: {label: (c)=>` ${Number(c.parsed.y).toLocaleString('en-US')}`}}},
                         scales: {x: {ticks: {font: {size: 9}}}, y: {beginAtZero: true, ticks: {font: {size: 9}}}}}});
             }catch(e){

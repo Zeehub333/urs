@@ -69,14 +69,14 @@
         .wb-src-direct { background: #dcfce7; color: #15803d; }
         .wb-src-linked { background: #e0e7ff; color: #4338ca; }
         .wb-src-nolink { background: #fee2e2; color: #b91c1c; }
-        .wb-dside { width: 210px; shrink: 0; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 6px; position: sticky; top: 0; }
+        .wb-dside { width: 220px; flex-shrink: 0; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 6px; overflow-y: auto; max-height: 100%; }
         .wb-dside-title { font-size: 10px; font-weight: 800; color: #94a3b8; margin-top: 4px; }
         .wb-dside-tbl { display: flex; align-items: center; justify-content: space-between; font-size: 11px; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 4px 8px; }
         .wb-dbox { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; min-width: 170px; flex: 0 1 auto; max-width: 260px; overflow: hidden; position: relative; z-index: 1; font-size: 10px; }
         .wb-dhead { display: flex; align-items: center; justify-content: space-between; gap: 6px; background: #eef2ff; padding: 4px 8px; font-size: 10px; }
         .wb-drow { display: flex; align-items: center; gap: 6px; padding: 2px 4px 2px 8px; border-top: 1px solid #f1f5f9; font-size: 10px; }
         .wb-drow:hover { background: #f8faff; }
-        .wb-diagwrap { position: relative; }
+        .wb-diagwrap { position: relative; min-width: 100%; min-height: 100%; }
         .wb-diagsvg { position: absolute; inset: 0; pointer-events: none; z-index: 0; overflow: visible; }
         .wb-linkchip { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 999px; padding: 3px 6px 3px 10px; }
         .wb-panel-title { font-size: 11px; font-weight: 800; color: #334155; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
@@ -129,6 +129,8 @@
                 </div>
             </div>
             <div class="flex items-center gap-2">
+                <label class="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-[11px] font-bold text-slate-600 cursor-pointer" title="حفظ تلقائي لمسودة التقرير في المتصفح"><input type="checkbox" id="autosaveToggle" checked onclick="try{wbAutosaveToggle()}catch(e){}" class="accent-emerald-600"> <i class="fa-solid fa-cloud-arrow-down text-emerald-600"></i> <span>تلقائي</span></label>
+                <span id="autosaveStatus" class="text-[10px] text-slate-400 font-bold hidden sm:inline">الحفظ التلقائي يعمل</span>
                 <button onclick="fxOpen()" class="inline-flex items-center gap-1.5 px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-xs font-bold"><i class="fa-solid fa-square-root-variable"></i> <span>ƒx دالة مخصصة</span></button>
                 <button onclick="submitAddRmlQuick()" class="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold"><i class="fa-solid fa-floppy-disk"></i> <span>حفظ</span></button>
                 <button onclick="submitAddRml()" class="inline-flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold"><i class="fa-solid fa-vial"></i> <span>حفظ واختبار</span></button>
@@ -146,6 +148,15 @@
 {% block scripts %}
     <script>
         const APP_NAME = "{{ app_name|escapejs }}";
+    </script>
+    <script>
+        {% if has_rml_wizard %}{% include "UniDBPicker.js" %}{% endif %}
+    </script>
+    <script>
+        {% if has_rml_wizard %}{% include "UniExpression.js" %}{% endif %}
+    </script>
+    <script>
+        {% if has_rml_wizard %}{% include "UniCondition.js" %}{% endif %}
     </script>
     <script>
         {% if has_rml_wizard %}{% include "rml_wizard_script.html" %}{% endif %}
@@ -174,8 +185,22 @@
             paintDesignerNav(1);
             const q = new URLSearchParams(location.search);
             const f = q.get('file');
-            if(f) openEditRmlModal(f);
-            else openAddRmlModal();
+            const targetSheet = q.get('sheet');
+            const targetAction = q.get('action');
+            const p = f ? openEditRmlModal(f) : Promise.resolve(openAddRmlModal());
+            if(targetSheet){
+                Promise.resolve(p).then(()=>{
+                    setTimeout(()=>{
+                        try{
+                            if(typeof wbGoSheet === 'function') wbGoSheet(targetSheet);
+                            if(targetAction === 'new_rule' && typeof addWizardRule === 'function'){
+                                addWizardRule();
+                                if(typeof wbRefreshRules === 'function') wbRefreshRules();
+                            }
+                        }catch(e){}
+                    }, 500);
+                });
+            }
         })();
         function closeAddRmlModal(){ designerBack(); }
         function designerBack(){
@@ -223,7 +248,6 @@
                 m = document.createElement('div');
                 m.id = 'fxModal';
                 m.className = 'fixed inset-0 z-[70] flex items-center justify-center p-4 bg-slate-900/50';
-                m.setAttribute('onclick', 'if(event.target===this)fxClose()');
                 m.innerHTML = `
                 <div class="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[88vh] flex flex-col overflow-hidden">
                     <div class="px-4 py-3 border-b border-slate-100 flex items-center gap-2">

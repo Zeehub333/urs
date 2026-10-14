@@ -64,7 +64,10 @@ class RMLMetadata:
 class RMLDocParam:
     """معلمة / مدخل مطلوب لتقرير المستند:
     <doc_params><doc_param id column label type op required default_value
-      src_conn src_table src_column searchable /></doc_params>
+      event src src_conn src_table src_column searchable>
+      <option .../>...<group_var n label table column/>...<var_source n label expr/>...
+    </doc_params>
+    event: filter (فلترة WHERE) | group (تجميع GROUP BY + PARTITION) | variable (عمود متغير CASE/DECODE)
     """
     id: str
     column: str
@@ -74,6 +77,8 @@ class RMLDocParam:
     required: bool = True
     default_value: str = ""
     param_refname: str = ""  # الاسم المرجعي للمدخل (param_refname / refname) للاستخدام في تعبيرات الأعمدة
+    event: str = "filter"  # حدث المدخل: filter | group | variable
+    src: str = ""  # مصدر القيمة للفلترة: input (حر) | static (ثابت) | dynamic (من جدول)
     src_conn: str = ""
     src_table: str = ""
     src_column: str = ""
@@ -81,6 +86,16 @@ class RMLDocParam:
     options: List[str] = field(default_factory=list)  # خيارات مخصصة لمدخل القائمة
     is_custom: bool = False  # مدخل مخصص حر (غير مقيد بعمود في الجدول)
     no_filter: bool = False  # لا يطبق شرط فلترة على SQL مباشرة، بل مخصص للتعبيرات فقط
+    group_expr: str = ""  # تعبير التجميع (دالة تجميعية واحدة تدعم PARTITION مثل SUM(...))
+    group_vars: List[Dict[str, str]] = field(default_factory=list)  # متغيرات التجميع [{n,label,table,column}]
+    target_column: str = ""  # العمود المتأثر (للعمود المتغير)
+    var_sources: List[Dict[str, str]] = field(default_factory=list)  # مصادر العمود [{n,label,expr}]
+    var: str = ""  # ربط بمتغير ديناميكي من خيارات إدخال جدول معروض (&VAR) — قيمة هذا المدخل تغذي المتغير
+    src_mode: str = ""  # نمط المصدر الديناميكي: table (اتصال/جدول/عمود) | expr (تعبيرا القيمة والتسمية)
+    src_value_expr: str = ""  # تعبير قيم الخيارات (وضع expr)
+    src_label_expr: str = ""  # تعبير تسميات الخيارات (وضع expr)
+    src_where: str = ""  # شرط مخصص لتصفية خيارات هذا المدخل
+    apply_general_where: bool = True  # التقيد بالشرط العام للتقرير والجدول
     raw_attrs: Dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -116,6 +131,27 @@ class RMLDocParam:
             "source": {"connection": self.src_conn or "", "table": self.src_table or "",
                        "column": self.src_column or ""},
             "searchable": bool(self.searchable),
+            "event": (self.event or "filter"),
+            "src": (self.src or ""),
+            "group_expr": self.group_expr or "",
+            "groupExpr": self.group_expr or "",
+            "group_vars": [dict(g) if isinstance(g, dict) else {"label": str(g)} for g in (self.group_vars or [])],
+            "groupVars": [dict(g) if isinstance(g, dict) else {"label": str(g)} for g in (self.group_vars or [])],
+            "target_column": self.target_column or "",
+            "targetColumn": self.target_column or "",
+            "var_sources": [dict(s) if isinstance(s, dict) else {"expr": str(s)} for s in (self.var_sources or [])],
+            "varSources": [dict(s) if isinstance(s, dict) else {"expr": str(s)} for s in (self.var_sources or [])],
+            "var": self.var or "",
+            "src_mode": self.src_mode or "",
+            "srcMode": self.src_mode or "",
+            "src_value_expr": self.src_value_expr or "",
+            "srcValueExpr": self.src_value_expr or "",
+            "src_label_expr": self.src_label_expr or "",
+            "srcLabelExpr": self.src_label_expr or "",
+            "src_where": self.src_where or "",
+            "srcWhere": self.src_where or "",
+            "apply_general_where": bool(self.apply_general_where),
+            "applyGeneralWhere": bool(self.apply_general_where),
         }
 
 
@@ -214,6 +250,8 @@ class RMLColumn:
     is_status: bool = False  # status column -> value mapped to label+color in player
     status_map: List[Dict[str, str]] = field(default_factory=list)  # [{value,label,color}]
     is_distinct: bool = False  # منع التكرار: DISTINCT ON (هذا العمود) — يُضبط من المصمم
+    hide_blank: bool = False  # إخفاء السجل عندما تكون قيمة العمود فارغة (NULL/فراغ) — تصفية صفوف
+    hide_zero: bool = False  # إخفاء السجل عندما تكون قيمة العمود صفراً — تصفية صفوف
     raw_attrs: Dict[str, str] = field(default_factory=dict)
     # Display formatting (set from the designer type modal, honored by the player)
     max_chars: Optional[int] = None  # text: max chars (truncate + tooltip)
@@ -224,14 +262,17 @@ class RMLColumn:
     width: Optional[int] = None  # display width in px (player honors, user-adjustable)
     color: Optional[str] = None  # text color #rrggbb (designer + player)
     bg: Optional[str] = None  # background color #rrggbb (designer + player)
-    weight: Optional[str] = None  # font weight: normal|bold (designer + player)
+    weight: Optional[str] = None  # font weight (normal|bold|bolder)
     frozen: bool = False  # frozen column: sticky, immune to horizontal scroll
+    label: Optional[str] = None  # optional display label (sub-header in groups)
 
     def to_dict(self) -> Dict[str, Any]:
         base = {
             "id": self.id,
             "name": self.name,
             "alias": self.alias,
+            "label": self.label,
+            "display": self.label,
             "dataType": self.data_type,
             "data_type": self.data_type,
             "expr": self.expr,
@@ -265,6 +306,10 @@ class RMLColumn:
             "statusMap": [dict(s) for s in self.status_map],
             "is_distinct": self.is_distinct,
             "isDistinct": self.is_distinct,
+            "hide_blank": self.hide_blank,
+            "hideBlank": self.hide_blank,
+            "hide_zero": self.hide_zero,
+            "hideZero": self.hide_zero,
             "max_chars": self.max_chars,
             "maxChars": self.max_chars,
             "wrap": self.wrap,
@@ -341,14 +386,33 @@ class RMLConnection:
 
 @dataclass
 class RMLChart:
-    """Chart definition inside RML — multiple charts per report"""
+    """Chart definition inside RML — multiple charts per report.
+
+    Superset slot model for 10 chart families (bar/hbar/line/pie/doughnut/
+    stacked/grouped/scatter/bubble/area/gauge/kpi/waterfall/treemap):
+    each type uses a subset (designer shows only its fields). Legacy x/y/y2
+    are kept and treated as category/value/series aliases on read.
+    """
 
     id: str
-    type: str = "bar"  # bar, line, pie, doughnut, area
-    x: Optional[str] = None  # field to compare on X (labels for pie)
-    y: Optional[str] = None  # field to compare on Y (values)
-    y2: Optional[str] = None  # optional second value column (compare mode)
+    type: str = "bar"  # bar, line, pie, doughnut, area (+ hbar, stacked, grouped, ...)
+    x: Optional[str] = None  # legacy: labels / X axis
+    y: Optional[str] = None  # legacy: values / Y axis
+    y2: Optional[str] = None  # legacy: second series
     title: Optional[str] = None
+    # named slots (new families)
+    category: Optional[str] = None  # bar/hbar/pie/doughnut/stacked/grouped/waterfall/treemap
+    value: Optional[str] = None  # bar/hbar/pie/doughnut/stacked/grouped/gauge/kpi/waterfall/treemap
+    series: Optional[str] = None  # bar/hbar/line/stacked/grouped/scatter/bubble/area (group)
+    size: Optional[str] = None  # bubble (Size)
+    color: Optional[str] = None  # scatter/bubble/treemap (Color/Group column)
+    parent: Optional[str] = None  # treemap (Parent)
+    min: Optional[str] = None  # gauge/kpi (Min)
+    max: Optional[str] = None  # gauge/kpi (Max)
+    target: Optional[str] = None  # gauge/kpi (Target column)
+    thresholds: Optional[str] = None  # gauge/kpi (comma list, e.g. 50,80)
+    stacking: Optional[str] = None  # stacked/grouped/area (stacked|grouped|percent|none)
+    totals: Optional[str] = None  # waterfall (last|first_last|none)
     raw_attrs: Dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -359,6 +423,18 @@ class RMLChart:
             "y": self.y,
             "y2": self.y2,
             "title": self.title,
+            "category": self.category,
+            "value": self.value,
+            "series": self.series,
+            "size": self.size,
+            "color": self.color,
+            "parent": self.parent,
+            "min": self.min,
+            "max": self.max,
+            "target": self.target,
+            "thresholds": self.thresholds,
+            "stacking": self.stacking,
+            "totals": self.totals,
         }
 
 
@@ -420,6 +496,7 @@ class RMLRule:
     display: str = ""
     icon: str = ""
     description: str = ""
+    entry_mode: str = "batch"  # batch (إدخال دفعة) | single (إدخال منفرد)
     sources: List[str] = field(default_factory=list)
     variables: List[RMLRuleVariable] = field(default_factory=list)
     policies: List[RMLRulePolicy] = field(default_factory=list)
@@ -437,12 +514,46 @@ class RMLRule:
             "display": self.display or self.name,
             "icon": self.icon or "",
             "description": self.description or "",
+            "entry_mode": getattr(self, "entry_mode", "batch") or "batch",
             "sources": list(self.sources or []),
             "variables": [v.to_dict() for v in (self.variables or [])],
             "policies": [p.to_dict() for p in (self.policies or [])],
         }
 
 # ── Compiler ─────────────────────────────────────────────────────────────────
+
+def _parse_view_vars(v_el) -> List[Dict[str, str]]:
+    """Extract <variables><var name type default/> — dynamic input variables of a view (&NAME)."""
+    out: List[Dict[str, str]] = []
+    try:
+        for ch in list(v_el):
+            if str(getattr(ch, "tag", "") or "").lower() != "variables":
+                continue
+            for vv in list(ch):
+                if str(getattr(vv, "tag", "") or "").lower() not in ("var", "variable", "input"):
+                    continue
+                attn = {str(k).lower(): v for k, v in ((vv.attrib or {}).items())}
+
+                def _g(*names, default=""):
+                    for _n in names:
+                        _v = attn.get(str(_n).lower(), "")
+                        if isinstance(_v, str) and _v.strip():
+                            return _v.strip()
+                    return default
+
+                _vn = _g("name", "var", "varname", "var_name")
+                if not _vn:
+                    continue
+                _tp = (_g("type", "data_type", "datatype", default="text") or "text").strip().lower()
+                if _tp not in ("number", "text", "date"):
+                    _tp = "text"
+                out.append({"name": _vn,
+                            "type": _tp,
+                            "default": _g("default", "default_value", "defaultvalue", "value")})
+    except Exception:
+        pass
+    return out
+
 
 class RMLReportCompiler:
     """
@@ -465,6 +576,9 @@ class RMLReportCompiler:
         self._charts: Optional[List[RMLChart]] = None
         self._rules: Optional[List[RMLRule]] = None
         self._groups: Optional[List[RMLGroup]] = None
+        self._group_bys: Optional[List[dict]] = None
+        self._views: Optional[List[dict]] = None
+        self._unions: Optional[List[dict]] = None
         self._detail: Optional[RMLDetail] = None
         self._doc_template: Optional[str] = None
         self._doc_params: Optional[List[RMLDocParam]] = None
@@ -520,8 +634,23 @@ class RMLReportCompiler:
     def _find_columns_container(self) -> Optional[ET.Element]:
         if self._root is None:
             return None
+        # Prefer the report-level <columns> (direct child) — views nest
+        # their own <columns> which must not shadow it.
+        for el in list(self._root):
+            if el.tag.lower() == "columns":
+                return el
         for el in self._root.iter():
             if el.tag.lower() == "columns":
+                return el
+        return None
+
+    def _find_root_child(self, tag: str) -> Optional[ET.Element]:
+        """Direct-child container lookup (immune to same-named nested tags)."""
+        if self._root is None:
+            return None
+        want = str(tag or "").lower()
+        for el in list(self._root):
+            if el.tag.lower() == want:
                 return el
         return None
 
@@ -612,6 +741,7 @@ class RMLReportCompiler:
         col_id = get("id", default=str(idx))
         name = get("name", default=col_id)
         alias = get("alias", default=name)
+        label = get("label", "display", "header", "header_alias", "sub_alias")
         data_type = get("dataType", "datatype", "data_type", "type")
         expr = get("expr", "expression", default=name)
         # Parse multiple ref tables for cross-table references
@@ -674,6 +804,8 @@ class RMLReportCompiler:
         currency_symbol = get("currency_symbol", "currencySymbol", "currency_sign", "currencySign")
         is_status = str(get("is_status", "isStatus", "is-status", default="") or "").strip().lower() in ("1", "true", "yes", "y")
         is_distinct = str(get("distinct", "is_distinct", "isDistinct", "is-distinct", default="") or "").strip().lower() in ("1", "true", "yes", "y")
+        hide_blank = str(get("hide_blank", "hideBlank", "hide-blank", "hide_empty", "hideEmpty", default="") or "").strip().lower() in ("1", "true", "yes", "y")
+        hide_zero = str(get("hide_zero", "hideZero", "hide-zero", default="") or "").strip().lower() in ("1", "true", "yes", "y")
         # Status map children: <status value="0" label="نشط" color="#16a34a"/>
         status_map: List[Dict[str, str]] = []
         try:
@@ -783,6 +915,8 @@ class RMLReportCompiler:
             is_status=is_status,
             status_map=status_map,
             is_distinct=is_distinct,
+            hide_blank=hide_blank,
+            hide_zero=hide_zero,
             max_chars=max_chars,
             wrap=wrap,
             decimals=decimals,
@@ -791,6 +925,7 @@ class RMLReportCompiler:
             bg=bg,
             weight=weight,
             frozen=frozen,
+            label=str(label) if label else None,
             raw_attrs=dict(el.attrib),
         )
 
@@ -923,6 +1058,53 @@ class RMLReportCompiler:
                         else:
                             no_flt = is_cust
 
+                        ev = get(el, "event", "حدث", default="filter").strip().lower()
+                        if ev not in ("filter", "group", "grouping", "variable", "var", "varcol"):
+                            ev = "filter"
+                        if ev == "grouping":
+                            ev = "group"
+                        if ev in ("var", "varcol"):
+                            ev = "variable"
+                        _src_kind = get(el, "src", "source_kind", "value_src", default="").strip().lower()
+                        if _src_kind not in ("input", "static", "dynamic", "free", ""):
+                            _src_kind = ""
+                        if _src_kind == "free":
+                            _src_kind = "input"
+                        _gexpr = get(el, "group_expr", "groupExpr", "groupexpr", default="")
+                        _tcol = get(el, "target_column", "targetColumn", "targetcolumn", default="")
+                        _varlink = get(el, "var", "var_name", "varname", "dyn_var", "dynvar", default="")
+                        _srcmode = get(el, "src_mode", "srcMode", "srcmode", default="").strip().lower()
+                        if _srcmode not in ("table", "expr"):
+                            _srcmode = ""
+                        _svexpr = get(el, "src_value_expr", "srcValueExpr", "srcvalueexpr", "value_expr", default="")
+                        _slexpr = get(el, "src_label_expr", "srcLabelExpr", "srclabelexpr", "label_expr", default="")
+                        _gvars: List[Dict[str, str]] = []
+                        _vsrcs: List[Dict[str, str]] = []
+                        for ch in list(el):
+                            _ct = ch.tag.lower() if isinstance(ch.tag, str) else ""
+                            if _ct in ("group_var", "groupvar", "gvar"):
+                                _gd = {str(k).lower(): (v.strip() if isinstance(v, str) else v)
+                                       for k, v in (ch.attrib or {}).items()}
+                                _n = _gd.get("n", _gd.get("no", _gd.get("num", "")))
+                                if not _n:
+                                    _n = str(len(_gvars) + 1)
+                                _gvars.append({"n": str(_n),
+                                               "label": str(_gd.get("label", _gd.get("display", _gd.get("name", ""))) or ""),
+                                               "table": str(_gd.get("table", _gd.get("table_name", "")) or ""),
+                                               "column": str(_gd.get("column", _gd.get("col", "")) or "")})
+                            elif _ct in ("var_source", "varsource", "vsource", "source"):
+                                _sd = {str(k).lower(): (v.strip() if isinstance(v, str) else v)
+                                       for k, v in (ch.attrib or {}).items()}
+                                _sn = _sd.get("n", _sd.get("no", _sd.get("num", "")))
+                                if not _sn:
+                                    _sn = str(len(_vsrcs) + 1)
+                                _sx = str(_sd.get("expr", _sd.get("expression", "")) or "")
+                                if not _sx and ch.text and ch.text.strip():
+                                    _sx = ch.text.strip()
+                                _vsrcs.append({"n": str(_sn),
+                                               "label": str(_sd.get("label", _sd.get("display", _sd.get("name", ""))) or ""),
+                                               "expr": _sx})
+
                         result.append(RMLDocParam(
                             id=pid,
                             column=col,
@@ -932,6 +1114,8 @@ class RMLReportCompiler:
                             required=req,
                             default_value=def_val,
                             param_refname=param_refname,
+                            event=ev,
+                            src=_src_kind,
                             src_conn=_src("src_conn", "srcconn", "source_connection", "connection"),
                             src_table=_src("src_table", "srctable", "source_table", "table"),
                             src_column=_src("src_column", "srccolumn", "source_column", "column_name"),
@@ -939,6 +1123,16 @@ class RMLReportCompiler:
                             options=opts,
                             is_custom=is_cust,
                             no_filter=no_flt,
+                            group_expr=_gexpr,
+                            group_vars=_gvars,
+                            target_column=_tcol,
+                            var_sources=_vsrcs,
+                            var=_varlink,
+                            src_mode=_srcmode,
+                            src_value_expr=_svexpr,
+                            src_label_expr=_slexpr,
+                            src_where=get(el, "src_where", "srcWhere", "where", default=""),
+                            apply_general_where=get(el, "apply_general_where", "applyGeneralWhere", default="1").lower() not in ("0", "false", "no", "off"),
                             raw_attrs=dict(el.attrib or {})
                         ))
                 break
@@ -1008,12 +1202,39 @@ class RMLReportCompiler:
             name = get(el, "name", "table")
             if not name:
                 continue
+            rows = []
+            try:
+                import json as _json
+                raw_rows = get(el, "where_rows", "whereRows", "filter_rows", "filterRows", default="")
+                if raw_rows:
+                    parsed = _json.loads(raw_rows)
+                    if isinstance(parsed, list):
+                        for r in parsed[:200]:
+                            if not isinstance(r, dict):
+                                continue
+                            col = str(r.get("col") or r.get("column") or r.get("field") or "").strip()[:128]
+                            op = str(r.get("op") or "=").strip().lower()[:16]
+                            if op not in ("=", "!=", ">", ">=", "<", "<=", "between", "contains",
+                                          "startswith", "endswith", "is_null", "not_null"):
+                                continue
+                            if not col:
+                                continue
+                            rows.append({"col": col, "op": op,
+                                         "val": str(r.get("val", "") or "")[:500],
+                                         "val2": str(r.get("val2", "") or "")[:500]})
+            except Exception:
+                rows = []
+            mm = str(get(el, "where_match", "whereMatch", "match_mode", "matchMode", default="") or "").strip().lower()
             result.append({
                 "name": name,
                 "conn": get(el, "conn", "conn_id", "connection_id"),
                 "is_default": flag(get(el, "is_default", "isDefault", "default")),
                 "is_sub": flag(get(el, "is_sub", "isSub", "sub")),
                 "where": get(el, "where", "where_clause", default=""),
+                "where_rows": rows,
+                "where_match": "any" if mm in ("any", "or") else "all",
+                "display": get(el, "display", "display_name", "displayName", default=""),
+                "source": get(el, "source", "from_source", "fromSource", default=""),
             })
         return result
 
@@ -1248,7 +1469,15 @@ class RMLReportCompiler:
             y = get("y", "y_field", "yField")
             y2 = get("y2", "y_field2", "yField2", "second", "series2")
             title = get("title", "name", default=f"مخطط {cid}")
-            result.append(RMLChart(id=str(cid), type=str(ctype).lower(), x=str(x) if x else None, y=str(y) if y else None, y2=str(y2) if y2 else None, title=str(title) if title else None, raw_attrs=dict(el.attrib)))
+
+            def _slot(*names):
+                v = get(*names)
+                return str(v).strip() if v is not None and str(v).strip() else None
+
+            category = _slot("category", "cat", "label", "labels") or (str(x).strip() or None if x else None)
+            value = _slot("value", "val", "measure") or (str(y).strip() or None if y else None)
+            series = _slot("series", "group", "groupby", "group_by", "color_group") or (str(y2).strip() or None if y2 else None)
+            result.append(RMLChart(id=str(cid), type=str(ctype).lower(), x=str(x) if x else None, y=str(y) if y else None, y2=str(y2) if y2 else None, title=str(title) if title else None, category=category, value=value, series=series, size=_slot("size", "bubble_size", "bubbleSize", "z"), color=_slot("color", "colour"), parent=_slot("parent"), min=_slot("min", "minimum", "minValue", "min_value"), max=_slot("max", "maximum", "maxValue", "max_value"), target=_slot("target"), thresholds=_slot("thresholds", "levels"), stacking=_slot("stacking", "stack", "stackMode", "stack_mode"), totals=_slot("totals", "showTotal", "show_total"), raw_attrs=dict(el.attrib)))
         self._charts = result
         return result
 
@@ -1298,6 +1527,8 @@ class RMLReportCompiler:
             display = get("display", "displayName", "title") or ""
             icon = get("icon") or ""
             description = get("description", "desc") or ""
+            raw_em = str(get("entry_mode", "entryMode", "input_mode", "inputMode", "mode", default="batch") or "batch").strip().lower()
+            entry_mode = "single" if raw_em in ("single", "individual", "1", "منفرد") else "batch"
             # <sources><source field="emp_no"/></sources>
             sources: List[str] = []
             for ch in list(el):
@@ -1391,6 +1622,7 @@ class RMLReportCompiler:
                 value=str(value) if value is not None else None,
                 display=str(display or ""), icon=str(icon or ""),
                 description=str(description or ""),
+                entry_mode=entry_mode,
                 sources=sources, variables=variables, policies=policies,
                 raw_attrs=dict(el.attrib),
             ))
@@ -1414,8 +1646,8 @@ class RMLReportCompiler:
         if self._groups is not None:
             return self._groups
         result: List[RMLGroup] = []
-        container = None
-        if self._root is not None:
+        container = self._find_root_child("groups")
+        if container is None and self._root is not None:
             for el in self._root.iter():
                 if el.tag.lower() == "groups":
                     container = el
@@ -1443,15 +1675,18 @@ class RMLReportCompiler:
             for ch in list(el):
                 if ch.tag.lower() not in ("column", "col", "member"):
                     continue
-                alias = None
-                for k, v in ch.attrib.items():
-                    if k.lower() in ("alias", "name", "column", "col", "field"):
-                        alias = v.strip() if isinstance(v, str) else v
-                        break
-                if alias is None and ch.text and ch.text.strip():
-                    alias = ch.text.strip()
-                if alias and alias not in members:
-                    members.append(alias)
+                found = False
+                for k in ("name", "alias", "column", "col", "field", "id"):
+                    for attr_k, attr_v in ch.attrib.items():
+                        if attr_k.lower() == k and attr_v and str(attr_v).strip():
+                            val = str(attr_v).strip()
+                            if val not in members:
+                                members.append(val)
+                            found = True
+                if not found and ch.text and ch.text.strip():
+                    txt = ch.text.strip()
+                    if txt not in members:
+                        members.append(txt)
             import re as _re_ghex
 
             def _ghex(_v):
@@ -1469,6 +1704,257 @@ class RMLReportCompiler:
                                    frozen=str(get("frozen", "freeze", "sticky", default="") or "").strip().lower() in ("1", "true", "yes", "y")))
         result.sort(key=lambda g: (g.order, g.id))
         self._groups = result
+        return result
+
+    def group_bys(self) -> List[dict]:
+        """Extract <group_bys><gb field [order]/>...] — SQL GROUP BY keys (multi)."""
+        if self._group_bys is not None:
+            return self._group_bys
+        result: List[dict] = []
+        container = None
+        if self._root is not None:
+            for el in self._root.iter():
+                if el.tag.lower() == "group_bys":
+                    container = el
+                    break
+        items = []
+        if container is not None:
+            items = [e for e in container if e.tag.lower() in ("gb", "group_by", "groupby", "key")]
+        for idx, el in enumerate(items, start=1):
+            field = None
+            for k, v in el.attrib.items():
+                if k.lower() in ("field", "alias", "column", "col", "name"):
+                    field = v.strip() if isinstance(v, str) else v
+                    break
+            if (not field) and el.text and el.text.strip():
+                field = el.text.strip()
+            if not field:
+                continue
+            if field not in [g["field"] for g in result]:
+                _cond = None
+                try:
+                    _wf = "".join([v for k, v in el.attrib.items() if k.lower() == "when_field"]).strip()
+                    _tf = "".join([v for k, v in el.attrib.items() if k.lower() == "then_field"]).strip()
+                    _brs = []
+                    for _cc in list(el):
+                        if _cc.tag.lower() != "conditions":
+                            continue
+                        for _gi in list(_cc):
+                            if _gi.tag.lower() not in ("g_if", "gif", "branch", "when"):
+                                continue
+                            def _gg(*names, default=""):
+                                for _k, _vv in (_gi.attrib or {}).items():
+                                    if _k.lower() in [n.lower() for n in names]:
+                                        return _vv.strip() if isinstance(_vv, str) else _vv
+                                return default
+                            _brs.append({"when_field": _gg("when_field", "if", "group_by", "groupby"),
+                                         "op": _gg("op", default="=") or "=",
+                                         "value": _gg("value"),
+                                         "then_field": _gg("then", "then_field")})
+                    _brs = [_b for _b in _brs if _b["when_field"] and _b["then_field"]]
+                    if _brs:
+                        _cond = {"when_field": _brs[0]["when_field"], "op": _brs[0]["op"],
+                                 "value": _brs[0]["value"], "then_field": _brs[0]["then_field"],
+                                 "else_field": "".join([v for k, v in el.attrib.items() if k.lower() == "else_field"]).strip(),
+                                 "branches": _brs}
+                    elif _wf and _tf:
+                        _cond = {"when_field": _wf,
+                                 "op": "".join([v for k, v in el.attrib.items() if k.lower() == "op"]).strip() or "=",
+                                 "value": "".join([v for k, v in el.attrib.items() if k.lower() == "value"]).strip(),
+                                 "then_field": _tf,
+                                 "else_field": "".join([v for k, v in el.attrib.items() if k.lower() == "else_field"]).strip()}
+                except Exception:
+                    _cond = None
+                _item = {"field": field, "order": idx}
+                if _cond:
+                    _item["cond"] = _cond
+                result.append(_item)
+        self._group_bys = result
+        return result
+
+    def views(self) -> List[dict]:
+        """Extract <views><view name display><sources><source id table_name conn/>...<merges><merge type source_1_id source_2_id join_type key_1 key_2/>...<columns><column name alias expr type/>...<groups><group name group_by expr/><group source_column expression type agg agg_col><conditions><g_if if value op then expression/>...</conditions></group>...</groups>."""
+        if self._views is not None:
+            return self._views
+        result: List[dict] = []
+        if self._root is not None:
+            # Scope walk: <union><view name/> members are REFERENCES, not defs —
+            # only <view> under <views> counts (never inside <union>/<unions>).
+            _stack = [(self._root, False)]
+            while _stack:
+                _el, _in_union = _stack.pop()
+                try:
+                    _children = list(_el)
+                except Exception:
+                    continue
+                for _ch in _children:
+                    try:
+                        _tag = str(_ch.tag or "").lower()
+                    except Exception:
+                        continue
+                    _u = _in_union or _tag in ("union", "unions")
+                    if _tag == "view" and not _u:
+                        _v = self._parse_view_el(_ch)
+                        if _v:
+                            result.append(_v)
+                    else:
+                        _stack.append((_ch, _u))
+        self._views = result
+        return result
+
+    def _parse_view_el(self, v_el) -> Optional[dict]:
+        def _ga(el, *names, default=""):
+            for k, val in (el.attrib or {}).items():
+                if k.lower() in [n.lower() for n in names]:
+                    return val.strip() if isinstance(val, str) else val
+            return default
+        nm = _ga(v_el, "name")
+        if not nm:
+            return None
+        sources, merges, columns, groups = [], [], [], []
+        for ch in list(v_el):
+            tag = ch.tag.lower()
+            if tag == "sources":
+                for s in list(ch):
+                    if s.tag.lower() != "source":
+                        continue
+                    tn = _ga(s, "table_name", "table", "name")
+                    if tn:
+                        sources.append({"id": _ga(s, "id") or ("s%d" % (len(sources) + 1)),
+                                        "table_name": tn, "conn": _ga(s, "conn", "conn_id"),
+                                        "filter": _ga(s, "filter", "where", "condition")})
+            elif tag == "merges":
+                for m in list(ch):
+                    if m.tag.lower() != "merge":
+                        continue
+                    merges.append({"type": _ga(m, "type", default="join"),
+                                   "s1": _ga(m, "source_1_id", "s1"),
+                                   "s2": _ga(m, "source_2_id", "s2"),
+                                   "join_type": _ga(m, "join_type", "joinType", default="LEFT"),
+                                   "key_1": _ga(m, "key_1", "key1"),
+                                   "key_2": _ga(m, "key_2", "key2")})
+            elif tag == "columns":
+                for c in list(ch):
+                    if c.tag.lower() != "column":
+                        continue
+                    columns.append({"name": _ga(c, "name", "alias"),
+                                    "alias": _ga(c, "alias", "name"),
+                                    "expr": _ga(c, "expr"),
+                                    "type": _ga(c, "type")})
+            elif tag == "groups":
+                for gp in list(ch):
+                    if gp.tag.lower() != "group":
+                        continue
+                    conds = []
+                    for cc in list(gp):
+                        if cc.tag.lower() != "conditions":
+                            continue
+                        for gi in list(cc):
+                            if gi.tag.lower() not in ("g_if", "gif", "branch", "when"):
+                                continue
+                            conds.append({"group_by": _ga(gi, "if", "group_by", "groupby"),
+                                          "value": _ga(gi, "value"),
+                                          "op": _ga(gi, "op", default="="),
+                                          "then": _ga(gi, "then"),
+                                          "expression": _ga(gi, "expression")})
+                    _gd: dict = {"source_column": _ga(gp, "source_column", "sourceColumn"),
+                                   "expression": _ga(gp, "expression"),
+                                   "type": ("conditional" if _ga(gp, "type").lower().startswith("cond") else "normal"),
+                                   "agg": _ga(gp, "agg").upper(),
+                                   "agg_col": _ga(gp, "agg_col", "aggCol"),
+                                   "conditions": conds}
+                    # New named-group shape: <group name group_by expr/> —
+                    # kept alongside legacy keys (engine prefers name when present).
+                    _gn = _ga(gp, "name", "group_name", "groupName")
+                    if _gn:
+                        _gd["name"] = _gn
+                        _gb = _ga(gp, "group_by", "groupBy", "key", "column")
+                        if _gb:
+                            _gd["group_by"] = _gb
+                        _ge = _ga(gp, "expr", "group_expr", "groupExpr", "formula")
+                        if _ge:
+                            _gd["expr"] = _ge
+                    groups.append(_gd)
+        _imp = _ga(v_el, "imported", "import")
+        _d = {"name": nm, "display": _ga(v_el, "display"),
+              "sources": sources, "merges": merges,
+              "columns": columns, "groups": groups,
+              "variables": _parse_view_vars(v_el)}
+        if str(_imp).strip().lower() in ("1", "true", "yes"):
+            _d["imported"] = True
+        return _d
+
+    def unions(self) -> List[dict]:
+        """Extract <unions><union name display><view name/>... — UNION ALL merges of whole views.
+
+        Members are REFERENCES (view names); each member must resolve to a
+        known view at compile time. Returns [{name, display, views:[...], imported}].
+        """
+        if self._unions is not None:
+            return self._unions
+        result: List[dict] = []
+        if self._root is not None:
+            for el in self._root.iter():
+                if str(el.tag or "").lower() != "unions":
+                    continue
+                for u_el in list(el):
+                    if str(u_el.tag or "").lower() != "union":
+                        continue
+                    nm = ""
+                    for k, val in (u_el.attrib or {}).items():
+                        if str(k).lower() == "name":
+                            nm = val.strip() if isinstance(val, str) else val
+                    if not nm:
+                        continue
+                    disp = ""
+                    _imp = False
+                    for k, val in (u_el.attrib or {}).items():
+                        kl = str(k).lower()
+                        if kl == "display" and isinstance(val, str):
+                            disp = val.strip()
+                        elif kl in ("imported", "import"):
+                            _imp = str(val).strip().lower() in ("1", "true", "yes")
+                    members: List[str] = []
+                    for ch in list(u_el):
+                        if str(ch.tag or "").lower() not in ("view", "member", "ref"):
+                            continue
+                        _mn = ""
+                        for k, val in (ch.attrib or {}).items():
+                            if str(k).lower() in ("name", "view", "view_name", "viewname"):
+                                _mn = val.strip() if isinstance(val, str) else val
+                        if not _mn and ch.text and ch.text.strip():
+                            _mn = ch.text.strip()
+                        if _mn and _mn not in members:
+                            members.append(_mn)
+                    _u = {"name": nm, "display": disp or nm, "views": members}
+                    if _imp:
+                        _u["imported"] = True
+                    result.append(_u)
+        self._unions = result
+        return result
+
+    def view_refs(self) -> List[dict]:
+        """Extract <view_refs><ref namespace name/> — calls to shared library views (namespace.view_name)."""
+        result: List[dict] = []
+        if self._root is not None:
+            for el in self._root.iter():
+                if el.tag.lower() != "view_refs":
+                    continue
+                for r in list(el):
+                    if r.tag.lower() not in ("ref", "view_ref", "viewref"):
+                        continue
+                    ns, nm = "", ""
+                    for k, val in (r.attrib or {}).items():
+                        kl = k.lower()
+                        if kl in ("namespace", "ns", "lib", "library"):
+                            ns = val.strip() if isinstance(val, str) else val
+                        elif kl in ("name", "view", "view_name", "viewname"):
+                            nm = val.strip() if isinstance(val, str) else val
+                    if not nm and r.text and r.text.strip():
+                        nm = r.text.strip()
+                    if nm and not any(x["name"].lower() == nm.lower()
+                                      and x["namespace"].lower() == ns.lower() for x in result):
+                        result.append({"namespace": ns or "", "name": nm})
         return result
 
     def __repr__(self) -> str:

@@ -11,3 +11,5 @@ psycopg2-binary>=2.9.0
 Django>=4.1,<5.0
 python-dotenv>=1.0
 djangorestframework>=3.14
+# NLP
+spacy>=3.7.0

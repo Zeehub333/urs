@@ -1,0 +1,15 @@
+# Odex / URS Requirements
+-r odex/requirements.txt
+-r rml_python/requirements.txt
+-r fmlk_engine/requirements.txt
+-r permissions_engine/requirements.txt
+
+# Additional dependencies
+cryptography
+openpyxl
+reportlab
+arabic-reshaper
+python-bidi
+
+# NLP
+spacy>=3.7.0

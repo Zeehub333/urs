@@ -32,7 +32,13 @@
                     <input id="liPass" type="password" autocomplete="current-password" maxlength="256" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 font-mono" dir="ltr">
                 </div>
                 <p id="liMsg" class="text-[11px] text-rose-600 font-bold min-h-[18px]"></p>
+                <div id="liUnlock" class="hidden bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-2">
+                    <p class="text-[11px] font-bold text-amber-800">مقفل مؤقتاً — فك القفل بكلمة مرور الماستر ثم أعد المحاولة</p>
+                    <input id="liMaster" type="password" autocomplete="off" maxlength="256" placeholder="كلمة مرور الماستر" class="w-full bg-white border border-amber-200 rounded-xl px-3 py-2 font-mono" dir="ltr">
+                    <button onclick="wsLoginUnlock()" class="w-full py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold">فك القفل</button>
+                </div>
                 <button onclick="wsLoginSubmit()" class="w-full py-2.5 text-white rounded-xl text-sm font-bold hover:opacity-90" style="background: {{ workspace.brand_colors.primary|default:'#4f46e5' }}">دخول ←</button>
+                {% if has_external_auth %}<p class="text-[10px] text-slate-400 text-center font-bold">يتم التحقق من مصدر التخويل الخارجي ثم المحلي</p>{% endif %}
                 <a href="/" class="block text-center text-[11px] text-slate-400 hover:text-slate-600 font-bold">← مساحات العمل</a>
             </div>
         </div>
@@ -74,11 +80,38 @@ async function wsLoginSubmit(){
     const password = document.getElementById('liPass').value;
     if(!schema || !username || !password){ if(msg) msg.textContent = 'السنة المالية واسم المستخدم وكلمة المرور مطلوبة'; return; }
     if(msg) msg.textContent = 'جارٍ التحقق...';
+    if(msg){ msg.classList.remove('text-emerald-600'); msg.classList.add('text-rose-600'); }
     try{
         const res = await fetch('/api/workspaces/' + encodeURIComponent(WS_LOGIN_ID) + '/login/', {method:'POST', headers:{'Content-Type':'application/json', 'X-CSRFToken': wsCsrfToken()}, body: JSON.stringify({schema, username, password, mode: WS_LOGIN_MODE})});
         const d = await res.json().catch(()=>({}));
+        if(d && d.locked){
+            if(msg) msg.textContent = String(d.error || 'مقفل مؤقتاً');
+            const ub = document.getElementById('liUnlock');
+            if(ub) ub.classList.remove('hidden');
+            return;
+        }
         if(!res.ok) throw new Error(d.error || 'فشل الدخول');
         location.href = (d.redirect || '/apps/');
+    }catch(e){ if(msg) msg.textContent = String((e && e.message) || e).slice(0, 200); }
+}
+async function wsLoginUnlock(){
+    const msg = document.getElementById('liMsg');
+    const username = document.getElementById('liUser').value.trim().slice(0, 100);
+    const master = document.getElementById('liMaster').value;
+    if(!master){ if(msg) msg.textContent = 'أدخل كلمة مرور الماستر أولاً'; return; }
+    if(msg) msg.textContent = 'جارٍ فك القفل...';
+    try{
+        const mres = await fetch('/api/master/auth/', {method:'POST', headers:{'Content-Type':'application/json', 'X-CSRFToken': wsCsrfToken()}, body: JSON.stringify({password: master})});
+        const md = await mres.json().catch(()=>({}));
+        if(!mres.ok) throw new Error((md && md.error) || 'كلمة الماستر غير صحيحة');
+        const ures = await fetch('/api/workspaces/' + encodeURIComponent(WS_LOGIN_ID) + '/login/unlock/', {method:'POST', headers:{'Content-Type':'application/json', 'X-CSRFToken': wsCsrfToken()}, body: JSON.stringify({username})});
+        const ud = await ures.json().catch(()=>({}));
+        if(!ures.ok) throw new Error((ud && ud.error) || 'تعذر فك القفل');
+        const ub = document.getElementById('liUnlock');
+        if(ub) ub.classList.add('hidden');
+        document.getElementById('liPass').value = '';
+        document.getElementById('liMaster').value = '';
+        if(msg){ msg.textContent = 'تم فك القفل — أعد إدخال كلمة المرور ثم دخول'; msg.classList.remove('text-rose-600'); msg.classList.add('text-emerald-600'); }
     }catch(e){ if(msg) msg.textContent = String((e && e.message) || e).slice(0, 200); }
 }
 document.addEventListener('keydown', (e)=>{ if(e.key === 'Enter' && document.getElementById('liPass')) wsLoginSubmit(); });

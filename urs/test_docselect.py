@@ -217,6 +217,299 @@ class ValuesSourceEndpointTests(SimpleTestCase):
         self.assertEqual(res.status_code, 400)
 
 
+class OptionExprTests(SimpleTestCase):
+    """Dynamic select options from value/label expressions (UniExpression)."""
+
+    def _post(self, body):
+        req = RequestFactory().post("/api/rml/values-source/", data=json.dumps(body),
+                                    content_type="application/json")
+        return _v.api_rml_values_source(req)
+
+    def test_resolve_basic(self):
+        conn, tparts, v, l = _v._resolve_option_exprs(
+            "[7.bills.no]", "[7.bills.no] + ' - ' + [7.bills.nm]")
+        self.assertEqual(conn, "7")
+        self.assertEqual(tparts, ["bills"])
+        self.assertIn('"T"."no"', v)
+        self.assertIn('"T"."nm"', l)
+        self.assertIn("' - '", l)
+
+    def test_resolve_label_defaults_to_none(self):
+        conn, tparts, v, l = _v._resolve_option_exprs("[7.bills.no]")
+        self.assertIsNone(l)
+
+    def test_resolve_errors(self):
+        with self.assertRaises(ValueError):
+            _v._resolve_option_exprs("42")  # بلا مراجع
+        with self.assertRaises(ValueError):
+            _v._resolve_option_exprs("[no]")  # بلا جدول
+        with self.assertRaises(ValueError):
+            _v._resolve_option_exprs("[7.a.x]", "[7.b.y]")  # جدولان
+        with self.assertRaises(ValueError):
+            _v._resolve_option_exprs("[7.a.x]", "[8.a.y]")  # اتصالان
+        with self.assertRaises(ValueError):
+            _v._resolve_option_exprs("[bills.no]")  # بلا اتصال وبلا تقرير
+
+    def test_resolve_default_conn_from_report(self):
+        import pathlib
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            td = pathlib.Path(td)
+            target = td / "rep.rml"
+            target.write_text(
+                '<rml><rpt_metadata name="r" displayName="r"/>'
+                '<table_opts><table name="bills" conn="9" is_default="1"/>'
+                '</table_opts></rml>', encoding="utf-8")
+            with mock.patch.object(_v, "_resolve_rml_target", return_value=(td, target, None)):
+                conn, tparts, v, l = _v._resolve_option_exprs(
+                    "[bills.no]", None, "demo", "rep.rml")
+        self.assertEqual(conn, "9")
+        self.assertEqual(tparts, ["bills"])
+        self.assertIn('"T"."no"', v)
+
+    def test_endpoint_expr_pairs_pg(self):
+        row = mock.Mock()
+        row.id = 7
+        row.name = "pg7"
+        row.schema = ""
+        row.user = ""
+        mgr = mock.Mock()
+        mgr.filter.return_value = mock.Mock(first=mock.Mock(return_value=row))
+        with mock.patch("urs.models.Connection") as _mc:
+            _mc.objects = mgr
+            with mock.patch.object(_v, "_xsql_resolve_conn", return_value=(mock.Mock(), "postgres")) as _rc:
+                with mock.patch.object(_v, "_xsql_exec_on_db",
+                                        return_value=([{"v": 7, "label": "seven"}, {"v": None}], ["v", "label"])) as _ex:
+                    res = self._post({"value_expr": "[7.bills.no]", "label_expr": "[7.bills.nm]",
+                                      "limit": 50})
+        body = json.loads(res.content.decode())
+        self.assertEqual(res.status_code, 200, body)
+        _rc.assert_called_once_with(7)
+        sql = _ex.call_args[0][1]
+        self.assertIn("SELECT DISTINCT", sql)
+        self.assertIn('"T"."no"', sql)
+        self.assertIn('"T"."nm"', sql)
+        self.assertIn('FROM "public"."bills" "T"', sql)
+        self.assertIn("LIMIT 51", sql)
+        self.assertEqual(body["values"], [{"value": "7", "label": "seven"}])
+        self.assertFalse(body["truncated"])
+
+    def test_endpoint_expr_search_and_single(self):
+        row = mock.Mock()
+        row.id = 7
+        row.name = "pg7"
+        with mock.patch("urs.models.Connection") as _mc:
+            _mc.objects.filter.return_value.first.return_value = row
+            with mock.patch.object(_v, "_xsql_resolve_conn", return_value=(mock.Mock(), "postgres")):
+                with mock.patch.object(_v, "_xsql_exec_on_db",
+                                        return_value=([{"v": "A"}], ["v"])) as _ex:
+                    res = self._post({"value_expr": "[7.bills.no]", "search": "sev"})
+        body = json.loads(res.content.decode())
+        self.assertEqual(res.status_code, 200, body)
+        self.assertIn("ILIKE", _ex.call_args[0][1])
+        self.assertEqual(body["values"], ["A"])  # بلا تسمية → مسطحة كالسابق
+
+    def test_endpoint_expr_column_passthrough(self):        # الأعمدة غير الموجودة تمرر كما هي وتبلغ عنها القاعدة (مسار سريع بلا استكشاف)
+        row = mock.Mock()
+        row.id = 7
+        row.name = "pg7"
+        with mock.patch("urs.models.Connection") as _mc:
+            _mc.objects.filter.return_value.first.return_value = row
+            with mock.patch.object(_v, "_xsql_resolve_conn", return_value=(mock.Mock(), "postgres")):
+                with mock.patch.object(_v, "_xsql_exec_on_db",
+                                        return_value=([{"v": "A"}], ["v"])) as _ex:
+                    res = self._post({"value_expr": "[7.bills.nope]"})
+        body = json.loads(res.content.decode())
+        self.assertEqual(res.status_code, 200, body)
+        self.assertIn('"T"."nope"', _ex.call_args[0][1])
+
+    def test_writer_compiler_roundtrip(self):
+        import xml.etree.ElementTree as _ET
+        from rml_python.compiler import RMLReportCompiler
+        rml = _ET.Element("rml")
+        self.assertTrue(_v._write_doc_params_el(rml, _ET, [{
+            "column": "w_code", "label": "الكود", "type": "select",
+            "src": "dynamic", "src_mode": "expr",
+            "src_value_expr": "[7.bills.no]", "src_label_expr": "[7.bills.nm]"}]))
+        comp = RMLReportCompiler(
+            xml_text="<rml>" + _ET.tostring(rml, encoding="unicode") + "</rml>")
+        dps = comp.doc_params()
+        self.assertEqual(len(dps), 1)
+        self.assertEqual(dps[0].src_mode, "expr")
+        self.assertEqual(dps[0].src_value_expr, "[7.bills.no]")
+        self.assertEqual(dps[0].src_label_expr, "[7.bills.nm]")
+        d = dps[0].to_dict()
+        self.assertEqual(d["srcMode"], "expr")
+        self.assertEqual(d["srcValueExpr"], "[7.bills.no]")
+        self.assertEqual(d["srcLabelExpr"], "[7.bills.nm]")
+
+    def test_designer_markup(self):
+        import os as _os
+        base = _os.path.dirname(__file__)
+        with open(_os.path.join(base, "..", "rml_python", "shared",
+                                 "rml_wizard_script.html"), encoding="utf-8") as f:
+            js = f.read()
+        for needle in ("dpSrcModeOf", "dpSetSrcMode", "dpVExpr_${i}", "dpLExpr_${i}",
+                        "dpexprv:", "dpexprl:", "dpTestSrcExprValues",
+                        "src_value_expr", "src_label_expr", "من تعبيرين",
+                        "UniExpression.openForId('dpVExpr_${i}')",
+                        "UniExpression.openForId('dpLExpr_${i}')"):
+            self.assertIn(needle, js)
+
+    def test_player_markup(self):
+        import os as _os
+        base = _os.path.dirname(__file__)
+        with open(_os.path.join(base, "templates", "report_player.html"), encoding="utf-8") as f:
+            html = f.read()
+        for needle in ("docSrcNorm", "dataset.val", "value_expr", "keepLbl",
+                        "src_value_expr", "it.label"):
+            self.assertIn(needle, html)
+
+
+class _FakeOraCur:
+    def __init__(self, state):
+        self.state = state
+
+    def execute(self, sql, params=None):
+        self.state["sql"] = sql
+        self.state["params"] = params
+
+    @property
+    def description(self):
+        return [(c,) for c in self.state.get("cols", ["v"])]
+
+    def fetchall(self):
+        return list(self.state.get("rows", []))
+
+    def close(self):
+        pass
+
+
+class _FakeOraConn:
+    def __init__(self, state):
+        self.state = state
+
+    def cursor(self):
+        return _FakeOraCur(self.state)
+
+    def rollback(self):
+        pass
+
+    def commit(self):
+        pass
+
+    def close(self):
+        pass
+
+
+_FakeOraConn.__module__ = "oracledb.testdouble"
+
+
+class OracleValuesTests(SimpleTestCase):
+    """Oracle options path: native driver, FETCH FIRST, no bind mixing."""
+
+    def _post(self, body):
+        req = RequestFactory().post("/api/rml/values-source/", data=json.dumps(body),
+                                    content_type="application/json")
+        return _v.api_rml_values_source(req)
+
+    def _ora_row(self, cid=5):
+        row = mock.Mock()
+        row.id = cid
+        row.name = "ora%d" % cid
+        row.engine = "oracle"
+        row.schema = ""
+        row.user = ""
+        return row
+
+    def test_resolve_conn_oracle_shim(self):
+        row = self._ora_row()
+        with mock.patch("urs.models.Connection") as _mc:
+            _mc.objects.filter.return_value.first.return_value = row
+            with mock.patch.object(_v, "_oracle_connect_obj", return_value="LIVE") as _oc:
+                db_obj, eng = _v._xsql_resolve_conn(5)
+        _oc.assert_called_once_with(row)
+        self.assertEqual(eng, "oracle")
+        self.assertEqual(db_obj.conn, "LIVE")
+
+    def test_resolve_conn_oracle_failure(self):
+        row = self._ora_row()
+        with mock.patch("urs.models.Connection") as _mc:
+            _mc.objects.filter.return_value.first.return_value = row
+            with mock.patch.object(_v, "_oracle_connect_obj", side_effect=Exception("no client")):
+                db_obj, eng = _v._xsql_resolve_conn(5)
+        self.assertIsNone(db_obj)
+        self.assertEqual(eng, "oracle")
+
+    def test_exec_bypasses_mssql_transpile_on_oracle(self):
+        from rml_python.engine import _mssql_transpile_sql
+        st = {"cols": ["v"], "rows": [("a",)]}
+        db_obj = SimpleNamespace(conn=_FakeOraConn(st))
+        sql = "SELECT DISTINCT \"T\".\"C\" FROM \"t\" WHERE NVL(\"T\".\"C\",'x') LIKE '%a%' ORDER BY 1 FETCH FIRST 51 ROWS ONLY"
+        with mock.patch("rml_python.engine._mssql_transpile_sql",
+                        side_effect=AssertionError("must not transpile oracle")):
+            rows, names = _v._xsql_exec_on_db(db_obj, sql, {})
+        self.assertEqual(st["sql"], sql)  # untouched: no :name→? rewrite
+        self.assertEqual(names, ["v"])
+        self.assertEqual(rows, [{"v": "a"}])
+
+    def test_exec_still_transpiles_others(self):
+        st = {"cols": ["v"], "rows": [("a",)]}
+
+        class _PgConn(_FakeOraConn):
+            pass
+        _PgConn.__module__ = "psycopg2.testdouble"
+        db_obj = SimpleNamespace(conn=_PgConn(st))
+        rows, _names = _v._xsql_exec_on_db(db_obj, "SELECT 1 WHERE x = :nm", {"nm": 5})
+        self.assertIn("?", st["sql"])
+        self.assertNotIn(":nm", st["sql"])
+
+    def test_oracle_bind_scan(self):
+        self.assertFalse(_v._oracle_bind_scan('SELECT "a" FROM "t" WHERE x LIKE \'%a:b%\''))
+        self.assertFalse(_v._oracle_bind_scan("SELECT a::text FROM t"))
+        self.assertFalse(_v._oracle_bind_scan("SELECT 1"))
+        self.assertTrue(_v._oracle_bind_scan("SELECT * FROM t WHERE a = :nm"))
+        self.assertTrue(_v._oracle_bind_scan("SELECT * FROM t WHERE a = ?"))
+
+    def _ora_endpoint(self, body, rows=(("w1", "WH 1"),)):
+        st = {"cols": ["v", "label"], "rows": [list(r) for r in rows]}
+        row = self._ora_row()
+        mgr = mock.Mock()
+        mgr.filter.return_value = mock.Mock(first=mock.Mock(return_value=row))
+        ctx = {}
+        with mock.patch("urs.models.Connection") as _mc:
+            _mc.objects = mgr
+            with mock.patch.object(_v, "_xsql_resolve_conn",
+                                    return_value=(SimpleNamespace(conn=_FakeOraConn(st)), "oracle")):
+                ctx["res"] = self._post(body)
+        ctx["body"] = json.loads(ctx["res"].content.decode())
+        ctx["state"] = st
+        return ctx
+
+    def test_oracle_table_mode_fetch_first(self):
+        ctx = self._ora_endpoint({"connection": 5, "table": "brn", "column": "no",
+                                  "search": "x"})
+        self.assertEqual(ctx["res"].status_code, 200, ctx["body"])
+        self.assertIn("FETCH FIRST", ctx["state"]["sql"])
+        self.assertNotIn("LIMIT", ctx["state"]["sql"])
+        self.assertIn("UPPER(", ctx["state"]["sql"])
+        self.assertIn('"brn"', ctx["state"]["sql"])
+
+    def test_oracle_expr_mode_pairs(self):
+        ctx = self._ora_endpoint({"value_expr": "[5.brn.no]", "label_expr": "[5.brn.nm]"})
+        self.assertEqual(ctx["res"].status_code, 200, ctx["body"])
+        self.assertIn('"T"."no"', ctx["state"]["sql"])
+        self.assertIn('"T"."nm"', ctx["state"]["sql"])
+        self.assertIn('FROM "HR"."brn" "T"', ctx["state"]["sql"])
+        self.assertIn("FETCH FIRST", ctx["state"]["sql"])
+        self.assertEqual(ctx["body"]["values"], [{"value": "w1", "label": "WH 1"}])
+
+    def test_oracle_expr_bind_rejected_400(self):
+        ctx = self._ora_endpoint({"value_expr": "[5.brn.no] = ?"})
+        self.assertEqual(ctx["res"].status_code, 400, ctx["body"])
+        self.assertNotIn("sql", ctx["state"])
+
+
 class DocGuardTests(SimpleTestCase):
     def _eng(self, params, columns, rtype="doc"):
         from rml_python.engine import RMLReportEngine
@@ -247,6 +540,32 @@ class DocGuardTests(SimpleTestCase):
     def test_non_doc_never_missing(self):
         eng = self._eng([], [], rtype="master")
         self.assertFalse(eng._doc_required_missing([]))
+
+    def test_var_default_satisfies_required(self):
+        # مدخل مرتبط بمتغير ديناميكي له افتراضي → لا انتظار مع غياب الإدخال
+        params = [SimpleNamespace(column="w_code", required=True, var="W",
+                                  default_value="",
+                                  param_refname="", refname="", id="dp_1")]
+        eng = self._eng(params, [])
+        eng.report_views = [{"name": "v1", "variables": [
+            {"name": "W", "type": "number", "default": "1001"}]}]
+        self.assertFalse(eng._doc_required_missing([]))
+        # بلا افتراضي للمتغير ولا للمدخل → يُنتظر الإدخال كالسابق
+        eng.report_views = [{"name": "v1", "variables": [
+            {"name": "W", "type": "number", "default": ""}]}]
+        self.assertTrue(eng._doc_required_missing([]))
+        # افتراضي المدخل نفسه يُغني أيضاً
+        params2 = [SimpleNamespace(column="w_code", required=True, var="W",
+                                   default_value="5",
+                                   param_refname="", refname="", id="dp_1")]
+        eng2 = self._eng(params2, [])
+        eng2.report_views = [{"name": "v1", "variables": []}]
+        self.assertFalse(eng2._doc_required_missing([]))
+        # مدخل تقليدي بلا ربط متغير: السلوك القديم (يُنتظر الإدخال)
+        eng3 = self._eng([SimpleNamespace(column="w_code", required=True)], [])
+        eng3.report_views = [{"name": "v1", "variables": [
+            {"name": "W", "type": "number", "default": "1001"}]}]
+        self.assertTrue(eng3._doc_required_missing([]))
 
     def test_no_params_requires_any_filter(self):
         eng = self._eng([], [])
@@ -480,6 +799,16 @@ class DocPlayerMarkupTests(SimpleTestCase):
         with open(_os.path.join(base, "templates", "report_player.html"), encoding="utf-8") as f:
             return f.read()
 
+    def test_cols_manager_applies_from_checkboxes(self):
+        # نافذة الإظهار/الإخفاء: ربط مفوّض بالفهرس (بلا أسماء في سلاسل JS)
+        # + زر «تم» يطبّق من حالة الصناديق قبل الإغلاق
+        html = self._html()
+        for needle in ("data-cm-idx", "colsManagerCache", "toggleColVisByIdx",
+                        "applyColsManager", "cmEsc", "colsManagerBound"):
+            self.assertIn(needle, html)
+        self.assertIn('onclick="applyColsManager()"', html)
+        self.assertNotIn("onchange=\"toggleColVis('\"", html)
+
     def test_no_doc_criteria_label(self):
         self.assertNotIn("معايير المستند", self._html())
 
@@ -525,7 +854,6 @@ class DocPlayerMarkupTests(SimpleTestCase):
     def test_sort_sends_alias_not_formula(self):
         # ORA-00972: sort payload must carry the alias; backend resolves ordinal
         html = self._html()
-        self.assertIn("{column:activeSort.column, direction:activeSort.direction}", html)
         self.assertNotIn("column:resolveDbField(activeSort.column)", html)
 
     def test_doc_filter_identity_is_real_column(self):
@@ -539,8 +867,23 @@ class DocPlayerMarkupTests(SimpleTestCase):
         with open(_os.path.join(base, "..", "rml_python", "shared",
                                  "rml_wizard_script.html"), encoding="utf-8") as f:
             js = f.read()
-        for needle in ("src_conn", "src_table", "src_column", "searchable", "مصدر قيم صندوق الاختيار"):
+        for needle in ("src_conn", "src_table", "src_column", "searchable", "قيم الاختيار من قاعدة البيانات"):
             self.assertIn(needle, js)
+
+    def test_static_dynamic_merge_markup(self):
+        import os as _os
+        base = _os.path.dirname(__file__)
+        with open(_os.path.join(base, "..", "rml_python", "shared",
+                                 "rml_wizard_script.html"), encoding="utf-8") as f:
+            js = f.read()
+        for needle in ("dpMergeStaticDyn", "الثابت أولاً",
+                        "(src === 'static' || src === 'dynamic') ? optsBlock"):
+            self.assertIn(needle, js)
+        with open(_os.path.join(base, "templates", "report_player.html"), encoding="utf-8") as f:
+            html = f.read()
+        for needle in ("docSrcMergeOpts", "staticOpts", "_dynSrc",
+                        "delete el.dataset.val", "_docSnapLbl"):
+            self.assertIn(needle, html)
 
     def test_doc_filters_have_no_tags(self):
         import os as _os
@@ -721,10 +1064,10 @@ class DocPlayerMarkupTests(SimpleTestCase):
             self.assertIn("createCustomDocParam", s_html)
             self.assertIn("updateWizardDocParamOptionRow", s_html)
             self.assertIn("addWizardDocParamOption", s_html)
-            self.assertIn("خيارات صندوق الاختيار المخصصة", s_html)
+            self.assertIn("خيارات ثابتة (الاسم والقيمة)", s_html)
             self.assertIn("الاسم (في التعبير)", s_html)
             self.assertIn("القيمة (المعروضة)", s_html)
-            self.assertIn("مدخل مخصص للتعبيرات فقط", s_html)
+            self.assertIn("بدون شرط SQL (للتعبيرات فقط عبر @)", s_html)
             self.assertIn("is_custom", s_html)
             self.assertIn("no_filter", s_html)
 

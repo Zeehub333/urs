@@ -71,12 +71,46 @@ def reset_active_fiscal_schema(token):
         pass
 
 
-def active_fiscal_schema():
-    """Currently pinned fiscal schema or None."""
+def resolve_ws_fiscal_schema(ws_id, candidate_schema=""):
+    """Return a valid local PostgreSQL fiscal schema for ws_id.
+
+    Never returns the external AUTH_CONN / USERS_TABLE schema (e.g. IAS20264)
+    when the workspace has a local SCHEMA configured (e.g. taafi_main_2026).
+    """
+    cand = str(candidate_schema or "").strip()
+    ws_id = str(ws_id or "").strip()
+    if not ws_id:
+        return cand
     try:
-        return _active_fiscal_schema.get()
+        ws = next((w for w in workspace_dirs() if w.name == ws_id), None)
+        if ws is None:
+            return cand
+        conf = read_conf(ws / "workspace.conf")
+        ws_sch = (conf.get("SCHEMA") or "").strip()
+        if not cand:
+            return ws_sch
+        ut = (conf.get("USERS_TABLE") or "").strip()
+        ext_sch = ut.partition(".")[0].strip() if "." in ut else ""
+        if ext_sch and ws_sch and cand.lower() == ext_sch.lower() and ws_sch.lower() != ext_sch.lower():
+            return ws_sch
+        return cand
+    except Exception:
+        return cand
+
+
+def active_fiscal_schema():
+    """Currently pinned fiscal schema or None (sanitized against external auth schema)."""
+    try:
+        val = _active_fiscal_schema.get()
+        if not val:
+            return None
+        ws_id = active_ws_id()
+        if ws_id:
+            return resolve_ws_fiscal_schema(ws_id, val) or val
+        return val
     except Exception:
         return None
+
 
 try:
     from django.conf import settings as _dj
@@ -359,6 +393,20 @@ def load_workspace_settings(ws_path):
     return data
 
 
+def get_conf_val(conf, *keys, default=""):
+    """Case-insensitive conf reader."""
+    if not isinstance(conf, dict):
+        return default
+    for k in keys:
+        if k in conf and conf[k]:
+            return str(conf[k]).strip()
+        kl = k.lower()
+        for ck, cv in conf.items():
+            if ck.lower() == kl and cv:
+                return str(cv).strip()
+    return default
+
+
 def workspace_info(ws_path):
     """One workspace summary for manager/API (never raises)."""
     ws = Path(ws_path)
@@ -398,12 +446,34 @@ def workspace_info(ws_path):
         "currency": cfg.get("currency") or "",
         "brand_colors": cfg.get("brand_colors") or DEFAULT_WORKSPACE["brand_colors"],
         "fiscal_year": cfg.get("fiscal_year") or "",
-        "status": (conf.get("STATUS") or "active").strip().lower() or "active",
-        "primary_connection": conf.get("PRIMARY_CONNECTION") or "",
-        "schema": conf.get("SCHEMA") or "",
-        "users_table": conf.get("USERS_TABLE") or "",
-        "users_user_column": conf.get("USERS_USER_COLUMN") or "",
-        "users_password_column": conf.get("USERS_PASSWORD_COLUMN") or "",
+        "status": (get_conf_val(conf, "STATUS", default="active")).strip().lower() or "active",
+        "primary_connection": get_conf_val(conf, "PRIMARY_CONNECTION", "LOCAL_USER_CONNECTION", default=""),
+        "schema": get_conf_val(conf, "SCHEMA", default=""),
+        # Local user bindings
+        "local_user_table": get_conf_val(conf, "LOCAL_USER_TABLE", "USERS_TABLE", default=""),
+        "local_user_username": get_conf_val(conf, "LOCAL_USER_USERNAME", "USERS_USER_COLUMN", default=""),
+        "local_user_password": get_conf_val(conf, "LOCAL_USER_PASSWORD", "USERS_PASSWORD_COLUMN", default=""),
+        "local_user_enctype": (get_conf_val(conf, "LOCAL_USER_ENCTYPE", "LOCAL_USER_HASH", default="auto")).strip().lower() or "auto",
+        "local_user_fullname": get_conf_val(conf, "LOCAL_USER_FULLNAME", default=""),
+        "local_user_connection": get_conf_val(conf, "LOCAL_USER_CONNECTION", "PRIMARY_CONNECTION", default=""),
+        # External user bindings
+        "external_user_table": get_conf_val(conf, "EXTERNAL_USER_TABLE", default=""),
+        "external_user_username": get_conf_val(conf, "EXTERNAL_USER_USERNAME", "AUTH_USER_COLUMN", default=""),
+        "external_user_password": get_conf_val(conf, "EXTERNAL_USER_PASSWORD", "AUTH_PASSWORD_COLUMN", default=""),
+        "external_user_fullname": get_conf_val(conf, "EXTERNAL_USER_FULLNAME", "AUTH_FULL_COLUMN", default=""),
+        "external_user_enctype": (get_conf_val(conf, "EXTERNAL_USER_ENCTYPE", "EXTERNAL_USER_HASH", "AUTH_HASH", default="auto")).strip().lower() or "auto",
+        "external_user_connection": get_conf_val(conf, "EXTERNAL_USER_CONNECTION", "AUTH_CONN", default=""),
+        "external_user_shift": get_conf_val(conf, "EXTERNAL_USER_SHIFT", "AUTH_SHIFT", default=""),
+        # Legacy aliases
+        "users_table": get_conf_val(conf, "LOCAL_USER_TABLE", "USERS_TABLE", default=""),
+        "users_user_column": get_conf_val(conf, "LOCAL_USER_USERNAME", "USERS_USER_COLUMN", default=""),
+        "users_password_column": get_conf_val(conf, "LOCAL_USER_PASSWORD", "USERS_PASSWORD_COLUMN", default=""),
+        "auth_conn": get_conf_val(conf, "EXTERNAL_USER_CONNECTION", "AUTH_CONN", default=""),
+        "auth_user_column": get_conf_val(conf, "EXTERNAL_USER_USERNAME", "AUTH_USER_COLUMN", default=""),
+        "auth_password_column": get_conf_val(conf, "EXTERNAL_USER_PASSWORD", "AUTH_PASSWORD_COLUMN", default=""),
+        "auth_full_column": get_conf_val(conf, "EXTERNAL_USER_FULLNAME", "AUTH_FULL_COLUMN", default=""),
+        "auth_hash": (get_conf_val(conf, "EXTERNAL_USER_ENCTYPE", "EXTERNAL_USER_HASH", "AUTH_HASH", default="auto")).strip().lower() or "auto",
+        "auth_shift": (get_conf_val(conf, "EXTERNAL_USER_SHIFT", "AUTH_SHIFT", default="")).strip(),
         "counts": {"apps": apps, "forms": forms, "reports": reports},
     }
 
@@ -451,6 +521,7 @@ def primary_users_table():
         ws = primary_workspace()
         if ws is None:
             return ""
-        return read_conf(ws / "workspace.conf").get("USERS_TABLE", "").strip()
+        conf = read_conf(ws / "workspace.conf")
+        return get_conf_val(conf, "LOCAL_USER_TABLE", "USERS_TABLE", default="")
     except Exception:
         return ""
